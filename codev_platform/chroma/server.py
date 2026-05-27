@@ -157,10 +157,63 @@ class _ProjectState:
     last_stamp_mtime: float = 0.0
     init_error: str | None = None
     active_collection_name: str | None = None  # 实际使用的 collection 名 (prefixed 或 legacy)
+    last_request_at: float | None = None  # tool 调用时间戳 (epoch sec), widget 三态点用
 
 
 # project_id -> state. 用 dict, 不上锁 — asyncio 单线程, dict 操作原子。
 _projects: dict[str, _ProjectState] = {}
+
+
+# 全局 stats 累加器 (跨 project 共享 GPU model, 全部 project 调用一起统计)
+_stats: dict[str, dict[str, float]] = {
+    "embedding": {"calls": 0, "ms_total": 0.0},
+    "reranker": {"calls": 0, "ms_total": 0.0},
+}
+
+
+def _record_stat(kind: str, elapsed_ms: float) -> None:
+    """累加调用次数 + 总耗时。 kind: embedding / reranker"""
+    s = _stats.get(kind)
+    if s is None:
+        return
+    s["calls"] += 1
+    s["ms_total"] += elapsed_ms
+
+
+def _gpu_memory_mb() -> float | None:
+    """返回 CUDA 当前已分配显存 (MB), 不可用 / 非 CUDA 返回 None。"""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return None
+        return round(torch.cuda.memory_allocated() / (1024 * 1024), 1)
+    except Exception:
+        return None
+
+
+def _project_last_indexed_iso(project_id: str) -> str | None:
+    """读 chroma .last_build.json mtime, 转 ISO8601 字符串。无则 None。"""
+    # chroma 当前是单 DB 多 collection, 共享一份 .last_build.json
+    # 后续若每 project 独立 stamp, 这里按 project_id 找子目录
+    p = _STAMP_PATH
+    if not p.exists():
+        return None
+    try:
+        from datetime import datetime, timezone
+        ts = p.stat().st_mtime
+        return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+    except Exception:
+        return None
+
+
+def _to_iso(epoch_sec: float | None) -> str | None:
+    if epoch_sec is None:
+        return None
+    try:
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(epoch_sec, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+    except Exception:
+        return None
 
 # contextvar 把 SSE session 跟 project_id 绑定; tool handler 通过它路由
 _current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextVar(
@@ -321,7 +374,10 @@ def _encode_query(query: str):
     kwargs: dict[str, Any] = {"normalize_embeddings": True, "convert_to_numpy": True}
     if _use_query_prompt:
         kwargs["prompt_name"] = "query"
+    import time as _t
+    _t0 = _t.perf_counter()
     vec = _model.encode([query], **kwargs)[0]
+    _record_stat("embedding", (_t.perf_counter() - _t0) * 1000)
     return vec.tolist()
 
 
@@ -398,6 +454,7 @@ def _rerank_scores(query: str, docs: list[str]) -> list[float] | None:
         return None
     tok, model, yes_id, no_id = pack
     try:
+        import time as _t
         import torch
         # 防御:截断对齐 CHUNK_HARD_MAX=1500(index_docs.py),避免 30 pair padded
         # sequence 拉满推理时延 +30~50%(2026-05-23 验证发现:>2000 字符 chunk 让
@@ -409,9 +466,11 @@ def _rerank_scores(query: str, docs: list[str]) -> list[float] | None:
         inputs = tok(prompts, padding=True, truncation=True, return_tensors="pt", max_length=4096)
         if RERANKER_DEVICE == "cuda":
             inputs = {k: v.cuda() for k, v in inputs.items()}
+        _t0 = _t.perf_counter()
         with torch.no_grad():
             logits = model(**inputs).logits[:, -1, :]
             scores = torch.softmax(logits[:, [no_id, yes_id]], dim=-1)[:, 1].cpu().tolist()
+        _record_stat("reranker", (_t.perf_counter() - _t0) * 1000)
         return scores
     except Exception as exc:  # noqa: BLE001
         _flog(f"[reranker] score FAIL: {type(exc).__name__}: {exc}")
@@ -527,6 +586,8 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
     import time as _t
     _t0 = _t.perf_counter()
+    # 记录 project last_request_at (widget 三态点用)
+    state.last_request_at = _t.time()
     try:
         if name == "search_docs":
             query = args.get("query", "").strip()
@@ -829,6 +890,8 @@ async def _run_http(port: int) -> None:
                     "collection_name": p.active_collection_name,
                     "bm25": (p.bm25_index.ready() if p.bm25_index is not None else False),
                     "init_error": init_error,
+                    "last_request_at": _to_iso(p.last_request_at),
+                    "last_indexed_at": _project_last_indexed_iso(p.project_id),
                 }
             )
         for pid in stale_pids:
@@ -836,6 +899,20 @@ async def _run_http(port: int) -> None:
         any_collection_ready = any(p.collection is not None for p in _projects.values())
         reranker_ready = _reranker_model is not None
         all_ready = model_ready and any_collection_ready
+        # stats avg = ms_total / calls (None when calls=0)
+        emb = _stats["embedding"]
+        rer = _stats["reranker"]
+        stats_payload = {
+            "embedding": {
+                "calls": int(emb["calls"]),
+                "ms_avg": round(emb["ms_total"] / emb["calls"], 2) if emb["calls"] else None,
+            },
+            "reranker": {
+                "calls": int(rer["calls"]),
+                "ms_avg": round(rer["ms_total"] / rer["calls"], 2) if rer["calls"] else None,
+            },
+            "gpu_memory_mb": _gpu_memory_mb(),
+        }
         return JSONResponse(
             {
                 "status": "ok" if all_ready else "starting",
@@ -846,6 +923,7 @@ async def _run_http(port: int) -> None:
                 "project_id": PROJECT_ID,  # backward-compat: 启动默认 project_id
                 "tenant_mode": "multi",
                 "loaded_projects": loaded,
+                "stats": stats_payload,
             },
             status_code=200 if all_ready else 503,
         )
