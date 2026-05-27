@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -321,13 +322,12 @@ def _load_project_state(project_id: str, reason: str) -> _ProjectState:
     bm25 = None
     if BM25_ENABLED and _BM25_IMPORT_OK:
         try:
-            import time as _t
-            _t0 = _t.perf_counter()
+            _t0 = time.perf_counter()
             bm25 = BM25Index()
             n = bm25.build(col)
             _flog(
                 f"[{reason}] bm25 built for {project_id}: {n} chunks, "
-                f"took={(_t.perf_counter()-_t0)*1000:.0f}ms"
+                f"took={(time.perf_counter()-_t0)*1000:.0f}ms"
             )
         except Exception as exc:  # noqa: BLE001
             _flog(f"[{reason}] bm25 build FAILED for {project_id}: {exc!s} (fallback vector-only)")
@@ -395,10 +395,9 @@ def _encode_query(query: str):
     kwargs: dict[str, Any] = {"normalize_embeddings": True, "convert_to_numpy": True}
     if _use_query_prompt:
         kwargs["prompt_name"] = "query"
-    import time as _t
-    _t0 = _t.perf_counter()
+    _t0 = time.perf_counter()
     vec = _model.encode([query], **kwargs)[0]
-    _record_stat("embedding", (_t.perf_counter() - _t0) * 1000)
+    _record_stat("embedding", (time.perf_counter() - _t0) * 1000)
     return vec.tolist()
 
 
@@ -475,7 +474,6 @@ def _rerank_scores(query: str, docs: list[str]) -> list[float] | None:
         return None
     tok, model, yes_id, no_id = pack
     try:
-        import time as _t
         import torch
         # 防御:截断对齐 CHUNK_HARD_MAX=1500(index_docs.py),避免 30 pair padded
         # sequence 拉满推理时延 +30~50%(2026-05-23 验证发现:>2000 字符 chunk 让
@@ -487,11 +485,11 @@ def _rerank_scores(query: str, docs: list[str]) -> list[float] | None:
         inputs = tok(prompts, padding=True, truncation=True, return_tensors="pt", max_length=4096)
         if RERANKER_DEVICE == "cuda":
             inputs = {k: v.cuda() for k, v in inputs.items()}
-        _t0 = _t.perf_counter()
+        _t0 = time.perf_counter()
         with torch.no_grad():
             logits = model(**inputs).logits[:, -1, :]
             scores = torch.softmax(logits[:, [no_id, yes_id]], dim=-1)[:, 1].cpu().tolist()
-        _record_stat("reranker", (_t.perf_counter() - _t0) * 1000)
+        _record_stat("reranker", (time.perf_counter() - _t0) * 1000)
         return scores
     except Exception as exc:  # noqa: BLE001
         _flog(f"[reranker] score FAIL: {type(exc).__name__}: {exc}")
@@ -605,10 +603,10 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     col = state.collection
     _bm25 = state.bm25_index
 
-    import time as _t
-    _t0 = _t.perf_counter()
-    # 记录 project last_request_at (widget 三态点用)
-    state.last_request_at = _t.time()
+    _t0 = time.perf_counter()
+    # 记录 project last_request_at (widget 三态点用).
+    # init_error 路径已 _err 早返回, 不进此处 — 失败请求视为静默 (widget 显 init_error + ts=null)
+    state.last_request_at = time.time()
     try:
         if name == "search_docs":
             query = args.get("query", "").strip()
@@ -644,7 +642,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             bm25_hits_n = 0
             if _bm25 is not None and _bm25.ready():
                 try:
-                    _tb = _t.perf_counter()
+                    _tb = time.perf_counter()
                     bm25_hits = _bm25.search(query, n=BM25_TOP_K, where=where)
                     bm25_hits_n = len(bm25_hits)
                     if bm25_hits:
@@ -678,7 +676,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                         bm25_used = True
                         _flog(
                             f"[bm25] vec={len(vector_ids)} bm25={bm25_hits_n} "
-                            f"fused={len(fused)} -> top {n_candidates}, took={(_t.perf_counter()-_tb)*1000:.1f}ms"
+                            f"fused={len(fused)} -> top {n_candidates}, took={(time.perf_counter()-_tb)*1000:.1f}ms"
                         )
                 except Exception as exc:  # noqa: BLE001
                     _flog(f"[bm25] search FAILED, fallback to vector-only: {exc!s}")
@@ -687,7 +685,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             rerank_scores_arr: list[float] | None = None
             rerank_used = False
             if use_rerank and docs:
-                _tr = _t.perf_counter()
+                _tr = time.perf_counter()
                 # GPU 串行 (reranker 同享 GPU 与 embed model)
                 async with _get_gpu_sem():
                     scores = _rerank_scores(query, docs)
@@ -701,7 +699,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                     metas = [metas[i] for i in order]
                     dists = [dists[i] for i in order]
                     rerank_scores_arr = [scores[i] for i in order]
-                    _flog(f"[rerank] {len(scores)} pairs, top_score={rerank_scores_arr[0]:.4f}, took={(_t.perf_counter()-_tr)*1000:.1f}ms")
+                    _flog(f"[rerank] {len(scores)} pairs, top_score={rerank_scores_arr[0]:.4f}, took={(time.perf_counter()-_tr)*1000:.1f}ms")
 
             # 取 top-k 返回
             ids = ids[:k]
@@ -726,7 +724,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                     item["rerank_score"] = rerank_scores_arr[idx]
                 out.append(item)
 
-            _ms = (_t.perf_counter() - _t0) * 1000
+            _ms = (time.perf_counter() - _t0) * 1000
             top1 = (metas[0] or {}).get("file") if metas else None
             top1_d = dists[0] if dists else None
             top1_rs = rerank_scores_arr[0] if rerank_scores_arr else None
