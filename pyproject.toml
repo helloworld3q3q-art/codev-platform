@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codev-platform"
+version = "0.1.0"
+description = "Multi-project AI 协作工具栈基础设施 (project_id resolver + paths + CLI)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "helloworld3q3q-art" }]
+license = { text = "Proprietary" }
+dependencies = []
+
+[project.scripts]
+codev-platform = "codev_platform.cli:main"
+
+[project.urls]
+repository = "https://github.com/helloworld3q3q-art/codev-platform"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codev_platform*"]
+exclude = ["platform_meta*", "docs*", "tests*"]

@@ -1,0 +1,8 @@
+{
+  "project_id": "openclaw-stock",
+  "display_name": "OpenClaw 量化平台",
+  "repo_path": ".",
+  "rules_path": ".claude/rules",
+  "memory_path": "memory",
+  "notes": "原型阶段: 单仓自托管, repo_path 相对 platform-meta/ 上级。未来 server 化后改为绝对 git url。"
+}

@@ -1,0 +1,9 @@
+{
+  "project_id": "codev-platform-widget",
+  "display_name": "CoDev Platform Widget",
+  "repo_url": "https://github.com/helloworld3q3q-art/codev-platform-widget.git",
+  "repo_path": null,
+  "rules_path": ".claude/rules",
+  "memory_path": "memory",
+  "notes": "未本地 clone 时 repo_path=null;clone 后跑 `claude-platform init codev-platform-widget` 写本地 .claude/project.json。单租户 daemon 下与 openclaw-stock 不可同时跑,需 kill daemon 或换端口。"
+}
