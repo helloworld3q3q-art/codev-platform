@@ -557,9 +557,10 @@ def index(force: bool = False) -> tuple[int, int]:
 
 
 def _write_build_stamp(files_count: int, chunks: int, dim: int, model_name: str) -> None:
-    """写 data/chroma/.last_build.json - server 探测 mtime 变化即重连 collection"""
+    """写 build stamp: 全局 .last_build.json (server reload 探测) + per-project .last_build.<pid>.json
+    (multi-tenant /health 上报 per-project last_indexed_at, 多 project 各自显示真实索引时间)。
+    """
     import json
-    stamp_path = PERSIST_DIR / ".last_build.json"
     payload = {
         "built_at": time.time(),
         "built_at_iso": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -567,9 +568,14 @@ def _write_build_stamp(files_count: int, chunks: int, dim: int, model_name: str)
         "chunks": chunks,
         "embed_dim": dim,
         "embed_model": model_name,
+        "project_id": PROJECT_ID,
     }
-    stamp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("写入构建戳 %s (chunks=%d)", stamp_path.name, chunks)
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+    # 全局 stamp (向后兼容, daemon hot-reload 探测)
+    (PERSIST_DIR / ".last_build.json").write_text(serialized, encoding="utf-8")
+    # per-project stamp (widget 每行真实时间戳)
+    (PERSIST_DIR / f".last_build.{PROJECT_ID}.json").write_text(serialized, encoding="utf-8")
+    logger.info("写入构建戳 .last_build.json + .last_build.%s.json (chunks=%d)", PROJECT_ID, chunks)
 
 
 def dry_run() -> tuple[int, int]:

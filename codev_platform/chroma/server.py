@@ -192,16 +192,26 @@ def _gpu_memory_mb() -> float | None:
 
 
 def _project_last_indexed_iso(project_id: str) -> str | None:
-    """读 chroma .last_build.json mtime, 转 ISO8601 字符串。无则 None。"""
-    # chroma 当前是单 DB 多 collection, 共享一份 .last_build.json
-    # 后续若每 project 独立 stamp, 这里按 project_id 找子目录
-    p = _STAMP_PATH
-    if not p.exists():
+    """读 chroma per-project .last_build.<pid>.json mtime, 转 ISO8601 字符串。
+
+    优先 per-project stamp (indexer 2026-05-28 起写入),
+    回退全局 .last_build.json (老索引未升级时,仅当 project_id == daemon 启动默认时有效)。
+    """
+    from datetime import datetime, timezone
+    # per-project stamp (新, 推荐)
+    pp = _STAMP_PATH.parent / f".last_build.{project_id}.json"
+    if pp.exists():
+        try:
+            return datetime.fromtimestamp(pp.stat().st_mtime, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+        except Exception:
+            pass
+    # fallback: 全局 stamp 仅对启动默认 project 准确, 其它返 None (避免误导)
+    if project_id != PROJECT_ID:
+        return None
+    if not _STAMP_PATH.exists():
         return None
     try:
-        from datetime import datetime, timezone
-        ts = p.stat().st_mtime
-        return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+        return datetime.fromtimestamp(_STAMP_PATH.stat().st_mtime, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
     except Exception:
         return None
 
