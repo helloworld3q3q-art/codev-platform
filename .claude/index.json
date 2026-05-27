@@ -1,0 +1,14 @@
+{
+  "_comment": "codev-platform 仓的 doc_patterns, 给 index_docs.py 用 (覆盖 platform 默认 DOC_PATTERNS).",
+  "doc_patterns": [
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "rules/*.md",
+    "skills/**/*.md",
+    "docs/**/*.md",
+    "platform_meta/README.md",
+    "platform_meta/projects/**/*.md",
+    "codev_platform/**/*.md"
+  ]
+}
