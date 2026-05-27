@@ -1,17 +1,17 @@
 # CLAUDE.md — codev-platform
 
-> AI 协作工具栈本体仓。和量化业务仓 `platform` 平行,通过 `pip install -e .` 被各业务仓引用。
+> AI 协作工具栈本体仓。通过 `pip install -e .` 被各业务仓引用。
 
 ---
 
 ## 0. 核心协议(不可漂移)
 
-1. **改文件前**:任务分级 + MCP 选型见 `.claude/rules/workflow.md`(从 platform 同步过来,跨项目通用)
+1. **改文件前**:任务分级 + MCP 选型见 `.claude/rules/workflow.md`
 2. **门禁声明**:首次修改前一句话说明 — 触及层 / 适用规则 / 关键约束 / 验证方式
 3. **commit 不带 AI 痕迹**:禁 `Co-Authored-By: Claude` / `Generated with`(详见 `.claude/rules/commit-pr-conventions.md`)
 4. **PowerShell 脚本**:`.ps1` 禁含非 ASCII;读中文 MD/JSON 必须 `-Encoding UTF8`
-5. **MCP 优先 grep+Read**:找代码 / 文档 / 业务链路按 `.claude/rules/workflow.md §3.2` 任务映射
-6. **本仓改完务必同步 platform 仓的 shim**:platform/tools/_platform/、tools/chroma/{mcp_server,bm25_index}.py、tools/cross_link/{schema,mcp_server}.py 是本仓的薄壳 re-export,新增 symbol 要在 shim 加导出
+5. **MCP 优先 grep+Read**:按 `.claude/rules/workflow.md §3.2` 任务映射
+6. **改完同步业务仓 shim**:业务仓内有 thin shim re-export 自本仓,新增 symbol 要在 shim 加导出
 
 ---
 
