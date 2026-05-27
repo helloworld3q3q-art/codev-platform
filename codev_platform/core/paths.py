@@ -42,10 +42,22 @@ def _business_repo_root() -> Path:
 
 
 def data_root() -> Path:
-    """基目录, 可由 PLATFORM_DATA_DIR 覆盖, 否则 <business-repo>/data/。"""
+    """基目录解析优先级:
+    1. env PLATFORM_DATA_DIR (launcher .cmd / 显式覆盖)
+    2. ~/.codev-platform/config.json data.platform_data_dir (用户级全局默认)
+    3. <business-repo>/data/ (cwd 向上找 .claude/project.json 推导)
+    """
     env = os.environ.get(_DATA_DIR_ENV)
     if env:
         return Path(env).expanduser().resolve()
+    # 走 config 文件 (避免每次都设 env)
+    try:
+        from codev_platform.core.config import load_config, get
+        cfg_val = get(load_config(), "data.platform_data_dir")
+        if cfg_val:
+            return Path(cfg_val).expanduser().resolve()
+    except Exception:
+        pass
     return _business_repo_root() / "data"
 
 

@@ -199,6 +199,32 @@ def cmd_sync_skills(args: argparse.Namespace) -> int:
     return 0 if n >= 0 else 1
 
 
+def cmd_config(args: argparse.Namespace) -> int:
+    """show / init / path: ~/.codev-platform/config.json 管理."""
+    from codev_platform.core.config import (
+        DEFAULTS, config_path, load_config, save_config,
+    )
+    p = config_path()
+    if args.action == "path":
+        _print(str(p))
+        return 0
+    if args.action == "show":
+        cfg = load_config()
+        _print(f"# config file: {p}  (exists={p.is_file()})")
+        _print(json.dumps(cfg, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "init":
+        if p.is_file() and not args.force:
+            _eprint(f"已存在: {p} (加 --force 覆盖)")
+            return 1
+        save_config(DEFAULTS, p)
+        _print(f"OK: 写入默认 config 到 {p}")
+        _print("编辑后修改本机路径 (D:/models/... / data_dir 等), 或 env 临时覆盖。")
+        return 0
+    _eprint(f"unknown action: {args.action}")
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="claude-platform", description="多项目 AI 工具栈 CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -226,6 +252,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp_ss = sub.add_parser("sync-skills", help="把 codev-platform/skills/ 拷到 <cwd>/.claude/skills/")
     sp_ss.add_argument("--dry-run", action="store_true", help="只列不写")
     sp_ss.set_defaults(func=cmd_sync_skills)
+
+    sp_cfg = sub.add_parser("config", help="~/.codev-platform/config.json 管理")
+    sp_cfg.add_argument("action", choices=["show", "init", "path"], help="show=打印当前 / init=写默认 / path=只打印文件位置")
+    sp_cfg.add_argument("--force", action="store_true", help="init 时覆盖已有文件")
+    sp_cfg.set_defaults(func=cmd_config)
 
     return p
 

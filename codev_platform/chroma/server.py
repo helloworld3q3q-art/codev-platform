@@ -63,39 +63,38 @@ COLLECTION_NAME = chroma_collection_name(PROJECT_ID, COLLECTION_BASE)
 # backward compat: 旧索引存在 unprefixed `platform_docs`, daemon 启动时若新命名 collection
 # 不存在, 自动 fallback 到旧名 + 警告 (_load_project_state 内处理)
 LEGACY_COLLECTION_NAME = "platform_docs"  # 字面量明示, 与历史不带 project_id 前缀的 collection 名一致
-# 默认走机器共享路径 D:\models\Qwen3-Embedding-0.6B(跨项目复用),仓库内 models/ 是 fallback
-_QWEN3_SHARED = Path(r"D:\models\Qwen3-Embedding-0.6B")
-_MINILM_INREPO = DATA_DIR.parents[1] / "models" / "paraphrase-multilingual-MiniLM-L12-v2"
-DEFAULT_EMBED_MODEL = _QWEN3_SHARED if _QWEN3_SHARED.exists() else _MINILM_INREPO
-EMBED_MODEL = str(Path(os.getenv("PLATFORM_EMBED_MODEL_PATH", str(DEFAULT_EMBED_MODEL))).expanduser().resolve())
-EMBED_DEVICE = os.getenv("PLATFORM_EMBED_DEVICE", "cuda")
+# 优先级: env var > ~/.codev-platform/config.json > 代码默认.
+# 不再 hardcode D:\models\... 路径 — 用户跑 `codev-platform config init` 生成 config 文件.
+from codev_platform.core.config import load_config, env_or_config  # noqa: E402
 
-# ---------- Reranker config (Qwen3-Reranker-0.6B) ----------
-# 走 chat-template + yes/no token logits 模式(非 sentence-transformers CrossEncoder),
-# Claude / Codex 共用同一 MCP server,配置统一走环境变量.
-_RERANKER_SHARED = Path(r"D:\models\Qwen3-Reranker-0.6B")
-_RERANKER_DEFAULT = _RERANKER_SHARED if _RERANKER_SHARED.exists() else None
-RERANKER_MODEL = os.getenv("PLATFORM_RERANKER_MODEL_PATH", str(_RERANKER_DEFAULT) if _RERANKER_DEFAULT else "")
-RERANKER_DEVICE = os.getenv("PLATFORM_RERANKER_DEVICE", "cuda")
-RERANKER_ENABLED = os.getenv("PLATFORM_RERANKER_ENABLED", "true").lower() in ("true", "1", "yes")
-# 重排前从 Chroma 取多少候选(rerank 后取 k 返回)
-# 优先读统一命名 PLATFORM_SEARCH_RECALL_K,兼容旧名 PLATFORM_RERANKER_TOP_K
-RERANKER_TOP_K = int(
-    os.getenv("PLATFORM_SEARCH_RECALL_K") or os.getenv("PLATFORM_RERANKER_TOP_K") or "30"
+_CFG = load_config()
+EMBED_MODEL = str(Path(env_or_config("PLATFORM_EMBED_MODEL_PATH", _CFG, "models.embed_path")).expanduser().resolve())
+EMBED_DEVICE = env_or_config("PLATFORM_EMBED_DEVICE", _CFG, "models.embed_device", "cuda")
+
+# ---------- Reranker config (Qwen3-Reranker-0.6B chat-template + yes/no logits) ----------
+RERANKER_MODEL = env_or_config("PLATFORM_RERANKER_MODEL_PATH", _CFG, "models.reranker_path", "")
+RERANKER_DEVICE = env_or_config("PLATFORM_RERANKER_DEVICE", _CFG, "models.reranker_device", "cuda")
+_rer_enabled_raw = env_or_config("PLATFORM_RERANKER_ENABLED", _CFG, "models.reranker_enabled", True)
+RERANKER_ENABLED = (
+    _rer_enabled_raw.lower() in ("true", "1", "yes")
+    if isinstance(_rer_enabled_raw, str) else bool(_rer_enabled_raw)
 )
-# 默认返回 k(可被 search_docs args["k"] 覆盖)
-DEFAULT_RETURN_K = int(os.getenv("PLATFORM_SEARCH_RETURN_K", "5"))
+
+# 重排前从 Chroma 取多少候选(rerank 后取 k 返回); 兼容旧 env 名 PLATFORM_RERANKER_TOP_K
+RERANKER_TOP_K = int(
+    os.getenv("PLATFORM_SEARCH_RECALL_K") or os.getenv("PLATFORM_RERANKER_TOP_K")
+    or env_or_config("", _CFG, "search.recall_k", 30)
+)
+DEFAULT_RETURN_K = int(env_or_config("PLATFORM_SEARCH_RETURN_K", _CFG, "search.return_k", 5))
 
 # ---------- BM25 hybrid config ----------
-# BM25 路径召回数:与向量路径独立,各 top N,送 RRF 融合
 BM25_TOP_K = int(os.getenv("PLATFORM_BM25_TOP_K", str(RERANKER_TOP_K)))
-# 总开关:env 关 / 库缺失 / 索引未 build 都自动降级为纯向量
+_bm25_enabled_raw = env_or_config("PLATFORM_BM25_ENABLED", _CFG, "search.bm25_enabled", True)
 BM25_ENABLED = (
     _BM25_IMPORT_OK
-    and os.getenv("PLATFORM_BM25_ENABLED", "true").lower() in ("true", "1", "yes")
+    and ((_bm25_enabled_raw.lower() in ("true", "1", "yes")) if isinstance(_bm25_enabled_raw, str) else bool(_bm25_enabled_raw))
 )
-# RRF k_const(论文默认 60,大值对低 rank 更宽容,小值偏好 top rank)
-RRF_K_CONST = int(os.getenv("PLATFORM_RRF_K_CONST", "60"))
+RRF_K_CONST = int(env_or_config("PLATFORM_RRF_K_CONST", _CFG, "search.rrf_k_const", 60))
 
 # 额外把启动 / 每次 query 日志写到固定文件，便于"观察模型起作用"
 _LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
