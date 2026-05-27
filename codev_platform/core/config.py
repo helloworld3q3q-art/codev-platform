@@ -62,6 +62,9 @@ DEFAULTS: dict[str, Any] = {
         "rrf_k_const": 60,
         "gpu_concurrency": 1,
     },
+    "runtime": {
+        "chroma_venv": None,  # chroma daemon 用的 venv 目录 (含 python.exe + mcp-proxy.exe). 必填.
+    },
 }
 
 

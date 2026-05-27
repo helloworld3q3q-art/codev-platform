@@ -25,3 +25,8 @@ data/
 
 # Logs
 *.log
+
+# daemon log (machine-local)
+mcp_server.log
+*.log
+search_recall.jsonl
