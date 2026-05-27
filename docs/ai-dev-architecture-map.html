@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 开发架构图</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --ink: #172033;
+      --muted: #64748b;
+      --panel: #ffffff;
+      --line: #d7e0ea;
+      --blue: #2563eb;
+      --cyan: #0891b2;
+      --green: #059669;
+      --amber: #b45309;
+      --red: #dc2626;
+      --violet: #7c3aed;
+      --nav: #172033;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.58;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 28px 20px;
+      color: #e7eef8;
+      background: var(--nav);
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    nav h1 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    nav p {
+      margin: 0 0 22px;
+      color: #aab7c9;
+      font-size: 12px;
+    }
+
+    nav a {
+      display: block;
+      padding: 9px 10px;
+      border-radius: 6px;
+      color: #d8e3f0;
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    nav a:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    main { padding: 38px; }
+    .shell { max-width: 1320px; margin: 0 auto; }
+
+    .hero {
+      min-height: 260px;
+      display: grid;
+      align-content: end;
+      padding: 36px;
+      border-radius: 8px;
+      color: #f8fafc;
+      background:
+        linear-gradient(120deg, rgba(23, 32, 51, 0.94), rgba(8, 145, 178, 0.68)),
+        linear-gradient(45deg, #111827, #0f766e);
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+
+    .hero h2 {
+      margin: 0 0 10px;
+      font-size: clamp(30px, 4vw, 56px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 860px;
+      margin: 0;
+      color: #e0f2fe;
+      font-size: 16px;
+    }
+
+    section {
+      margin-top: 28px;
+      padding: 28px;
+      background: var(--panel);
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      color: #334155;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    p { margin: 0 0 14px; color: #475569; }
+    code {
+      padding: 2px 6px;
+      color: #0f172a;
+      background: #e2e8f0;
+      border-radius: 4px;
+      font-family: Consolas, "JetBrains Mono", monospace;
+      font-size: 12px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 16px 0 12px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #eef3f8;
+      color: #475569;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--blue); }
+    .dot.cyan { background: var(--cyan); }
+    .dot.green { background: var(--green); }
+    .dot.amber { background: var(--amber); }
+    .dot.red { background: var(--red); }
+    .dot.violet { background: var(--violet); }
+
+    .map-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin: 10px 0 12px;
+    }
+
+    .fullscreen-btn {
+      min-height: 34px;
+      padding: 7px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      color: #0f172a;
+      background: #ffffff;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .fullscreen-btn:hover {
+      border-color: var(--blue);
+      color: var(--blue);
+      background: #eff6ff;
+    }
+
+    .map-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
+    }
+
+    .map {
+      display: block;
+      min-width: 1380px;
+      width: 100%;
+      height: auto;
+    }
+
+    .map-wrap:fullscreen {
+      display: grid;
+      align-items: center;
+      width: 100vw;
+      height: 100vh;
+      padding: 18px;
+      overflow: auto;
+      border: 0;
+      border-radius: 0;
+      background: #f8fafc;
+    }
+
+    .map-wrap:fullscreen .map {
+      min-width: 1480px;
+      width: 100%;
+      max-height: calc(100vh - 36px);
+    }
+
+    .lane-title {
+      font-size: 13px;
+      font-weight: 800;
+      fill: #334155;
+    }
+
+    .node-title {
+      font-size: 12.5px;
+      font-weight: 800;
+      fill: #0f172a;
+    }
+
+    .node-sub {
+      font-size: 10.4px;
+      fill: #475569;
+    }
+
+    .tag-text {
+      font-size: 9.6px;
+      font-weight: 700;
+      fill: #0f172a;
+    }
+
+    .edge {
+      fill: none;
+      stroke: #64748b;
+      stroke-width: 1.5;
+      marker-end: url(#arrow);
+    }
+
+    .edge-blue {
+      fill: none;
+      stroke: var(--blue);
+      stroke-width: 2;
+      marker-end: url(#arrow-blue);
+    }
+
+    .edge-green {
+      fill: none;
+      stroke: var(--green);
+      stroke-width: 1.8;
+      marker-end: url(#arrow-green);
+    }
+
+    .edge-dashed {
+      fill: none;
+      stroke: #94a3b8;
+      stroke-width: 1.35;
+      stroke-dasharray: 5 4;
+      marker-end: url(#arrow-soft);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .item {
+      padding: 16px;
+      border: 1px solid #dbe3ed;
+      border-radius: 8px;
+      background: #fbfdff;
+    }
+
+    .item h3 { margin-top: 0; color: var(--ink); }
+    .item ul { margin: 8px 0 0; padding-left: 18px; color: #475569; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid #dbe3ed;
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th { background: #eef3f8; color: #334155; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .step {
+      min-height: 126px;
+      padding: 16px;
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+    }
+
+    .warning {
+      padding: 14px 16px;
+      color: #713f12;
+      background: #fffbeb;
+      border-left: 4px solid var(--amber);
+      border-radius: 0 8px 8px 0;
+    }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; }
+      main { padding: 20px; }
+      .grid, .flow { grid-template-columns: 1fr; }
+      .hero { padding: 26px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav>
+      <h1>AI 开发架构图</h1>
+      <p>抽象版,不含项目领域内容</p>
+      <a href="#map">一图总览</a>
+      <a href="#layers">分层职责</a>
+      <a href="#dev-config">开发配置入口</a>
+      <a href="#mcp">MCP 与索引</a>
+      <a href="#concurrency">并发治理</a>
+      <a href="#workflow">开发工作流</a>
+      <a href="#metrics">效率与准确率</a>
+      <a href="#boundaries">边界与验证</a>
+    </nav>
+
+    <main>
+      <div class="shell">
+        <header class="hero">
+          <h2>AI 辅助开发架构</h2>
+          <p>这是一张面向开发协作的架构图:从源码、规则、Skills、文档,到三套 MCP、三类本地索引、GPU 模型、daemon/proxy、多会话并发、验证和 token 节省路径。</p>
+        </header>
+
+        <section id="map">
+          <h2>一图总览</h2>
+          <p>主流程按 `ai-toolchain-guide.html` 对齐:源码、规则、文档和迁移先作为数据源进入触发器与索引器,再写入本地存储,由 MCP 服务进程按需读取,最后被多个 AI 会话消费。共享 daemon、dirty gate、写侧锁和验证闭环保留为治理节点。</p>
+          <div class="legend">
+            <span class="pill"><span class="dot"></span>数据源</span>
+            <span class="pill"><span class="dot amber"></span>触发与门禁</span>
+            <span class="pill"><span class="dot violet"></span>索引器与模型</span>
+            <span class="pill"><span class="dot green"></span>本地存储</span>
+            <span class="pill"><span class="dot cyan"></span>MCP 服务</span>
+            <span class="pill"><span class="dot red"></span>防错与验证</span>
+          </div>
+          <div class="map-actions">
+            <button class="fullscreen-btn" type="button" data-fullscreen-target="architecture-map">全屏查看</button>
+          </div>
+
+          <div class="map-wrap" id="architecture-map">
+            <svg class="map" viewBox="0 0 1480 860" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI 开发架构节点图">
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+                </marker>
+                <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"/>
+                </marker>
+                <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 L10 5 L0 10 Z" fill="#059669"/>
+                </marker>
+                <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 L10 5 L0 10 Z" fill="#94a3b8"/>
+                </marker>
+                <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+                  <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.08"/>
+                </filter>
+              </defs>
+
+              <rect x="18" y="20" width="1444" height="820" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
+
+              <rect x="40" y="58" width="210" height="662" rx="10" fill="#eff6ff" stroke="#dbeafe"/>
+              <rect x="275" y="58" width="210" height="662" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+              <rect x="510" y="58" width="225" height="662" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+              <rect x="760" y="58" width="225" height="662" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
+              <rect x="1010" y="58" width="205" height="662" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
+              <rect x="1240" y="58" width="200" height="662" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+
+              <text class="lane-title" x="145" y="88" text-anchor="middle">1. 数据源</text>
+              <text class="lane-title" x="380" y="88" text-anchor="middle">2. 触发与门禁</text>
+              <text class="lane-title" x="622" y="88" text-anchor="middle">3. 索引器与模型</text>
+              <text class="lane-title" x="872" y="88" text-anchor="middle">4. 本地存储</text>
+              <text class="lane-title" x="1112" y="88" text-anchor="middle">5. MCP 服务</text>
+              <text class="lane-title" x="1340" y="88" text-anchor="middle">6. 会话与闭环</text>
+
+              <g filter="url(#shadow)">
+                <rect x="65" y="120" width="160" height="64" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="145" y="145" text-anchor="middle">Python 代码</text>
+                <text class="node-sub" x="145" y="164" text-anchor="middle">任务 / 仓储</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="65" y="210" width="160" height="64" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="145" y="235" text-anchor="middle">Java 代码</text>
+                <text class="node-sub" x="145" y="254" text-anchor="middle">控制器 / Mapper</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="65" y="300" width="160" height="64" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="145" y="325" text-anchor="middle">前端代码</text>
+                <text class="node-sub" x="145" y="344" text-anchor="middle">页面 / API 客户端</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="65" y="390" width="160" height="64" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="145" y="415" text-anchor="middle">规则 / Memory / 演化</text>
+                <text class="node-sub" x="145" y="434" text-anchor="middle">.claude · docs · dev-evolution</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="65" y="515" width="160" height="72" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="145" y="542" text-anchor="middle">Flyway / SQL</text>
+                <text class="node-sub" x="145" y="562" text-anchor="middle">表结构 / 查询契约</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="65" y="625" width="160" height="72" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="145" y="652" text-anchor="middle">工作树</text>
+                <text class="node-sub" x="145" y="672" text-anchor="middle">未提交文件 / 归属</text>
+              </g>
+
+              <g filter="url(#shadow)">
+                <rect x="300" y="120" width="160" height="64" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="380" y="145" text-anchor="middle">提交触发</text>
+                <text class="node-sub" x="380" y="164" text-anchor="middle">post-commit hook</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="300" y="210" width="160" height="64" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="380" y="235" text-anchor="middle">兜底刷新</text>
+                <text class="node-sub" x="380" y="254" text-anchor="middle">update-local-ai 可选</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="300" y="300" width="160" height="64" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="380" y="325" text-anchor="middle">dirty-index</text>
+                <text class="node-sub" x="380" y="344" text-anchor="middle">MCP 可信门禁</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="300" y="420" width="160" height="72" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="380" y="447" text-anchor="middle">工作流 L1-L4</text>
+                <text class="node-sub" x="380" y="465" text-anchor="middle">§0.13 自报 trigger</text>
+                <text class="node-sub" x="380" y="482" text-anchor="middle">工具强度门禁</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="300" y="540" width="160" height="72" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="380" y="567" text-anchor="middle">ai-health</text>
+                <text class="node-sub" x="380" y="587" text-anchor="middle">新鲜度 / daemon</text>
+              </g>
+
+              <g filter="url(#shadow)">
+                <rect x="540" y="120" width="165" height="76" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="622" y="147" text-anchor="middle">文档索引器</text>
+                <text class="node-sub" x="622" y="166" text-anchor="middle">三级切分 + 词法 倒排</text>
+                <text class="node-sub" x="622" y="183" text-anchor="middle">重建锁 + DOC_PATTERNS</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="540" y="230" width="165" height="76" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="622" y="257" text-anchor="middle">代码图谱同步</text>
+                <text class="node-sub" x="622" y="276" text-anchor="middle">符号 / 调用 / 影响面</text>
+                <text class="node-sub" x="622" y="293" text-anchor="middle">重建锁</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="540" y="340" width="165" height="76" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="622" y="367" text-anchor="middle">跨层链路构建</text>
+                <text class="node-sub" x="622" y="386" text-anchor="middle">API / SQL / 文件链路</text>
+                <text class="node-sub" x="622" y="403" text-anchor="middle">临时库发布</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="540" y="470" width="165" height="76" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="622" y="497" text-anchor="middle">Embedding 模型</text>
+                <text class="node-sub" x="622" y="516" text-anchor="middle">查询向量化</text>
+                <text class="node-sub" x="622" y="533" text-anchor="middle">GPU 常驻</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="540" y="580" width="165" height="76" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="622" y="607" text-anchor="middle">Reranker 模型</text>
+                <text class="node-sub" x="622" y="626" text-anchor="middle">Top-K 精排</text>
+                <text class="node-sub" x="622" y="643" text-anchor="middle">可降级</text>
+              </g>
+
+              <g filter="url(#shadow)">
+                <rect x="790" y="120" width="165" height="76" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="872" y="147" text-anchor="middle">向量库</text>
+                <text class="node-sub" x="872" y="166" text-anchor="middle">语义分块</text>
+                <text class="node-sub" x="872" y="183" text-anchor="middle">元数据过滤</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="790" y="230" width="165" height="76" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="872" y="257" text-anchor="middle">代码图谱库</text>
+                <text class="node-sub" x="872" y="276" text-anchor="middle">节点 / 边</text>
+                <text class="node-sub" x="872" y="293" text-anchor="middle">WAL mode</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="790" y="340" width="165" height="76" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="872" y="367" text-anchor="middle">跨层链路库</text>
+                <text class="node-sub" x="872" y="386" text-anchor="middle">链路图</text>
+                <text class="node-sub" x="872" y="403" text-anchor="middle">备份发布</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="790" y="485" width="165" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="872" y="512" text-anchor="middle">新鲜度状态</text>
+                <text class="node-sub" x="872" y="531" text-anchor="middle">最近构建 / dirty 范围</text>
+                <text class="node-sub" x="872" y="548" text-anchor="middle">过期检测</text>
+              </g>
+
+              <g filter="url(#shadow)">
+                <rect x="1030" y="110" width="165" height="84" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1112" y="137" text-anchor="middle">文档检索服务</text>
+                <text class="node-sub" x="1112" y="157" text-anchor="middle">platform-docs · Hybrid</text>
+                <text class="node-sub" x="1112" y="175" text-anchor="middle">向量+词法 RRF · :18083</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1030" y="230" width="165" height="84" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1112" y="257" text-anchor="middle">代码图谱服务</text>
+                <text class="node-sub" x="1112" y="277" text-anchor="middle">每会话 stdio</text>
+                <text class="node-sub" x="1112" y="295" text-anchor="middle">多读 / 重建锁</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1030" y="350" width="165" height="84" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1112" y="377" text-anchor="middle">跨层链路服务</text>
+                <text class="node-sub" x="1112" y="397" text-anchor="middle">每会话 stdio</text>
+                <text class="node-sub" x="1112" y="415" text-anchor="middle">多读 / 临时发布</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1030" y="495" width="165" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1112" y="522" text-anchor="middle">ai-health</text>
+                <text class="node-sub" x="1112" y="541" text-anchor="middle">daemon / 库 / 使用率</text>
+                <text class="node-sub" x="1112" y="558" text-anchor="middle">只对真实风险告警</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1030" y="610" width="165" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1112" y="637" text-anchor="middle">dirty-index</text>
+                <text class="node-sub" x="1112" y="656" text-anchor="middle">MCP 可信门禁</text>
+                <text class="node-sub" x="1112" y="673" text-anchor="middle">回读真实文件</text>
+              </g>
+
+              <g filter="url(#shadow)">
+                <rect x="1260" y="110" width="155" height="76" rx="8" fill="#e0f2fe" stroke="#0891b2"/>
+                <text class="node-title" x="1338" y="137" text-anchor="middle">Codex 会话</text>
+                <text class="node-sub" x="1338" y="156" text-anchor="middle">codex-platform.cmd</text>
+                <text class="node-sub" x="1338" y="173" text-anchor="middle">-c mcp_servers</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1260" y="220" width="155" height="76" rx="8" fill="#e0f2fe" stroke="#0891b2"/>
+                <text class="node-title" x="1338" y="247" text-anchor="middle">Claude 会话</text>
+                <text class="node-sub" x="1338" y="266" text-anchor="middle">项目 .mcp.json</text>
+                <text class="node-sub" x="1338" y="283" text-anchor="middle">同一工作区</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1260" y="350" width="155" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1338" y="377" text-anchor="middle">重复实例风险</text>
+                <text class="node-sub" x="1338" y="396" text-anchor="middle">.mcp + -c 注入</text>
+                <text class="node-sub" x="1338" y="413" text-anchor="middle">两套 stdio 链</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1260" y="495" width="155" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1338" y="522" text-anchor="middle">验证闭环</text>
+                <text class="node-sub" x="1338" y="541" text-anchor="middle">定向检查</text>
+                <text class="node-sub" x="1338" y="558" text-anchor="middle">报告缺口</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1260" y="625" width="155" height="76" rx="8" fill="#f3e8ff" stroke="#7c3aed"/>
+                <text class="node-title" x="1338" y="652" text-anchor="middle">开发收益</text>
+                <text class="node-sub" x="1338" y="671" text-anchor="middle">准确率 / token</text>
+                <text class="node-sub" x="1338" y="688" text-anchor="middle">GPU 复用</text>
+              </g>
+
+              <path class="edge" d="M225 152 C260 152 265 152 300 152"/>
+              <path class="edge" d="M225 242 C260 220 265 170 300 152"/>
+              <path class="edge" d="M225 332 C260 300 265 180 300 152"/>
+              <path class="edge" d="M225 422 C260 360 265 190 300 152"/>
+              <path class="edge" d="M225 551 C260 500 265 205 300 152"/>
+              <path class="edge-dashed" d="M225 661 C260 625 270 575 300 576"/>
+              <path class="edge-dashed" d="M225 551 C260 500 270 345 300 332"/>
+
+              <path class="edge-green" d="M460 152 C500 145 505 150 540 158"/>
+              <path class="edge-green" d="M460 152 C500 185 505 245 540 268"/>
+              <path class="edge-green" d="M460 152 C500 235 505 345 540 378"/>
+              <path class="edge-dashed" d="M460 242 C500 242 505 258 540 268"/>
+              <path class="edge-dashed" d="M460 242 C500 275 505 355 540 378"/>
+              <path class="edge-dashed" d="M460 332 C500 332 505 360 540 378"/>
+              <path class="edge-dashed" d="M460 456 C500 456 505 508 540 508"/>
+              <path class="edge-dashed" d="M460 576 C505 576 515 620 540 620"/>
+
+              <path class="edge-green" d="M705 158 L790 158"/>
+              <path class="edge-green" d="M705 268 L790 268"/>
+              <path class="edge-green" d="M705 378 L790 378"/>
+              <path class="edge-blue" d="M705 508 C740 460 750 210 790 158"/>
+              <path class="edge-blue" d="M705 620 C745 575 750 230 790 158"/>
+
+              <path class="edge-blue" d="M955 158 L1030 152"/>
+              <path class="edge-blue" d="M955 268 L1030 272"/>
+              <path class="edge-blue" d="M955 378 L1030 392"/>
+              <path class="edge-dashed" d="M955 523 L1030 533"/>
+              <path class="edge-dashed" d="M955 523 C1000 575 1010 632 1030 648"/>
+
+              <path class="edge-blue" d="M1260 148 C1230 148 1220 152 1195 152"/>
+              <path class="edge-blue" d="M1260 258 C1228 258 1218 236 1195 152"/>
+              <path class="edge-blue" d="M1260 258 C1230 260 1220 272 1195 272"/>
+              <path class="edge-blue" d="M1260 258 C1230 285 1220 370 1195 392"/>
+              <path class="edge-dashed" d="M1338 186 L1338 220"/>
+              <path class="edge-dashed" d="M1195 533 L1260 533"/>
+              <path class="edge-dashed" d="M1195 648 C1228 648 1238 663 1260 663"/>
+              <path class="edge-dashed" d="M1338 426 L1338 495"/>
+
+              <path class="edge-dashed" d="M225 661 C520 718 1030 718 1260 663"/>
+              <path class="edge-dashed" d="M1112 686 C1160 705 1225 700 1260 663"/>
+              <path class="edge-dashed" d="M380 612 C560 718 1030 718 1260 663"/>
+
+              <rect x="66" y="760" width="1368" height="58" rx="10" fill="#ffffff" stroke="#dbe3ed"/>
+              <text class="node-title" x="95" y="786">正确流程:</text>
+              <text class="node-sub" x="185" y="786">数据源 → 触发/门禁 → 按文件类型刷新文档索引 / 代码图谱 / 跨层链路 → 本地存储 → MCP 服务 → AI 会话。</text>
+              <text class="node-title" x="95" y="809">当前策略:</text>
+              <text class="node-sub" x="185" y="809">读侧多会话并发,写侧重建串行;GPU 模型 worker 单例;dirty 文件降低 MCP 可信;词法+向量 RRF hybrid + pre-push 6 gates 兜底。</text>
+            </svg>
+          </div>
+        </section>
+
+        <section id="layers">
+          <h2>分层职责</h2>
+          <div class="grid">
+            <div class="item">
+              <h3>1. 数据源层</h3>
+              <p>Python、Java、前端、SQL、Rules、Skills、Docs 都是索引输入。业务代码和规则文档不是上下游关系,它们共同作为 AI 可检索的数据源。</p>
+            </div>
+            <div class="item">
+              <h3>2. 触发与门禁层</h3>
+              <p>主路径是 commit hook 自动按命中文件刷新索引;`update-local-ai` 只作为兜底 / 全量刷新入口。dirty-index 和 L1-L4 workflow 决定是否信任 MCP、是否升级到跨层验证。</p>
+            </div>
+            <div class="item">
+              <h3>3. 索引器与模型层</h3>
+              <p>Chroma indexer 三级 chunk 切分(heading → paragraph → hard split,target 1000 / max 1500 字符),调用 Qwen3-Embedding-0.6B 向量化 + Qwen3-Reranker-0.6B 精排;同时 词法 倒排索引在 daemon 启动 / chroma 重建时同步构建(中英混合 tokenizer:jieba + ASCII 正则识别代码符号 / 版本号 / 规则编号)。CodeGraph sync 解析代码符号和调用;cross-link build 抽取 API-SQL-文件链路。独立 Flyway SQL 经过 commit/dirty 门禁后进入 cross-link;承载 SQL 的 Java/Python 代码文件会作为代码进入 CodeGraph,其中 SQL 变量/方法名可被搜到,但表/字段语义仍以 cross-link 为准。</p>
+            </div>
+            <div class="item">
+              <h3>4. 本地存储层</h3>
+              <p>Chroma、codegraph.db、cross_layer.sqlite 和 memory 保存可查询上下文。它们是读多写少资源,重建必须串行,读取允许多会话并发。</p>
+            </div>
+            <div class="item">
+              <h3>5. MCP 服务层</h3>
+              <p>platform-docs、codegraph、cross-link 把本地存储包装成 AI 可调用工具。platform-docs 走共享 daemon,codegraph/cross-link 当前是每会话 stdio。</p>
+            </div>
+            <div class="item">
+              <h3>6. 消费与闭环层</h3>
+              <p>AI 会话根据任务等级选择 MCP 和本地文件兜底。核心输出应是“合并影响面 + 修改边界 + 验证清单”,前端页面只负责把同一份结果可视化。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="dev-config">
+          <h2>开发配置入口</h2>
+          <p>这层决定 MCP 实例为什么会出现多份。当前项目不是单一路径启动:Claude Code 和 Codex 入口不同,但都指向同一组三个 MCP。</p>
+          <table>
+            <tr>
+              <th>入口</th>
+              <th>真实配置</th>
+              <th>作用</th>
+              <th>需要注意</th>
+            </tr>
+            <tr>
+              <td>Claude Code</td>
+              <td>项目根 `.mcp.json`</td>
+              <td>声明 `codegraph`、`platform-docs`、`cross-link` 三个 stdio MCP。</td>
+              <td>不能随便改,否则 Claude Code 项目 MCP 会受影响。</td>
+            </tr>
+            <tr>
+              <td>Codex</td>
+              <td>`scripts/codex-platform.cmd` → `codex-platform.ps1` → `-c mcp_servers...`</td>
+              <td>强制把同一组三个 MCP 注入 Codex,并设置项目根目录。</td>
+              <td>如果 Codex 同时读取项目 `.mcp.json`,会启动两套 stdio MCP。</td>
+            </tr>
+            <tr>
+              <td>Claude hook</td>
+              <td>`.claude/settings.json` SessionStart</td>
+              <td>会话开始时跑 `dirty-index-check.ps1 -Json`,提醒索引是否可能滞后。</td>
+              <td>这是 Claude Code 配置;Codex 侧仍要靠 workflow 自检。</td>
+            </tr>
+            <tr>
+              <td>Git hook</td>
+              <td>`.git/hooks/post-commit` → `tools/dev/post-commit.ps1`</td>
+              <td>提交后按命中文件自动触发 Chroma / codegraph / cross-link 的后台刷新。</td>
+              <td>文档变更主要刷新 Chroma;代码图谱和 cross-link 只在命中对应路径时刷新。</td>
+            </tr>
+            <tr>
+              <td>兜底刷新</td>
+              <td>`tools/dev/update-local-ai.ps1`</td>
+              <td>hook 漏触发、索引疑似过期、周末全量维护时手动运行。</td>
+              <td>不是日常主路径;多会话时应避免并发运行。</td>
+            </tr>
+            <tr>
+              <td>platform-docs</td>
+              <td>`tools/chroma/platform-docs-mcp.cmd` → `platform_docs_launcher.py`</td>
+              <td>每个会话先启动轻量 stdio proxy,再共享一个 HTTP/SSE daemon 和 GPU 模型。</td>
+              <td>多 proxy 正常;多 daemon 才是问题。</td>
+            </tr>
+            <tr>
+              <td>codegraph</td>
+              <td>`codegraph serve --mcp`</td>
+              <td>每个会话一个 stdio server,读取 `.codegraph/codegraph.db`。</td>
+              <td>读侧可多份;重建时会被 lock / MCP 持有检测保护。</td>
+            </tr>
+            <tr>
+              <td>cross-link</td>
+              <td>`tools/cross_link/cross-link-mcp.cmd`</td>
+              <td>每个会话一个 stdio server,读取 `data/codegraph_ext/cross_layer.sqlite`。</td>
+              <td>读侧可多份;构建走临时库和 SQLite backup 发布。</td>
+            </tr>
+          </table>
+          <div class="warning">
+            当前核对结论:如果只打开一个 Codex 窗口仍看到两组 `codegraph / platform-docs proxy / cross-link`,优先怀疑是 `.mcp.json` 与 `codex-platform.ps1` 的 `-c mcp_servers...` 双路径同时生效,不是业务数据库数据错乱。
+          </div>
+        </section>
+
+        <section id="mcp">
+          <h2>MCP 与索引</h2>
+          <table>
+            <tr>
+              <th>组件</th>
+              <th>当前形态</th>
+              <th>主要用途</th>
+              <th>防错机制</th>
+            </tr>
+            <tr>
+              <td>platform-docs</td>
+              <td>stdio proxy → shared HTTP daemon;Hybrid 检索:Qwen3-Embedding 向量 + 词法 倒排,RRF 融合后 Qwen3-Reranker 精排</td>
+              <td>查 Rules、Skills、Docs、Memory、决策日志(dev_log)、工具栈事故(tooling_incident)和历史决策。中英混合分词(jieba + ASCII 正则)对代码符号 / 版本号 / 规则编号召回精确,词法 命中向量漏掉的精确 token,reranker 给最终相关性。</td>
+              <td>spawn lock、health endpoint、listener PID + GPU PID 检查、Chroma reindex lock、DOC_PATTERNS 子目录覆盖 audit(pre-push gate 6/6)、jieba / rank_词法 缺失自动降级纯向量。</td>
+            </tr>
+            <tr>
+              <td>codegraph</td>
+              <td>每会话 stdio server</td>
+              <td>查符号、定义、调用方、被调用方和影响范围。</td>
+              <td>rebuild lock、DB integrity 检查、WAL 检查、多会话只提示 INFO。</td>
+            </tr>
+            <tr>
+              <td>cross-link</td>
+              <td>每会话 stdio server</td>
+              <td>查跨层链路,确认接口、SQL、文件引用关系。</td>
+              <td>临时库构建、SQLite backup 发布、freshness 检查、多会话链路观测。</td>
+            </tr>
+            <tr>
+              <td>dirty-index</td>
+              <td>本地检查脚本</td>
+              <td>判断未提交改动是否命中索引范围。</td>
+              <td>命中时 MCP 只能作参考,关键判断读真实文件。</td>
+            </tr>
+          </table>
+        </section>
+
+        <section id="concurrency">
+          <h2>并发治理</h2>
+          <p>多会话是正常工作方式。当前策略不是禁止多进程,而是按资源类型区分:读可以并发,写必须串行,重资源必须单例。</p>
+          <table>
+            <tr>
+              <th>资源</th>
+              <th>允许并发</th>
+              <th>当前保护</th>
+            </tr>
+            <tr>
+              <td>AI 会话 / proxy</td>
+              <td>允许多个。</td>
+              <td>每个会话声明文件范围;不得同时改同一文件;修改前后看 `git status`。</td>
+            </tr>
+            <tr>
+              <td>MCP 查询</td>
+              <td>允许多个读请求。</td>
+              <td>dirty-index 决定索引可信度;命中 dirty 后读真实文件兜底。</td>
+            </tr>
+            <tr>
+              <td>GPU 模型</td>
+              <td>不允许多份重模型 worker。</td>
+              <td>platform-docs shared daemon + spawn lock + health 检查。</td>
+            </tr>
+            <tr>
+              <td>索引重建</td>
+              <td>不允许并发写。</td>
+              <td>Chroma reindex lock、CodeGraph rebuild lock、cross-link 临时库发布。</td>
+            </tr>
+            <tr>
+              <td>源码文件</td>
+              <td>不同文件可并行。</td>
+              <td>发现他人改动先读最新内容,不回滚未知改动。</td>
+            </tr>
+          </table>
+        </section>
+
+        <section id="workflow">
+          <h2>开发工作流</h2>
+          <p class="lead">
+            这部分对应 `.claude/rules/workflow.md` §3.0c 和 `AGENTS.md` 的改前门禁:AI 做 L2/L3/L4 时,先产出合并影响面,再决定文件范围、生成边界和验证命令。
+          </p>
+          <div class="flow">
+            <div class="step">
+              <strong>0. 自报 trigger</strong>
+              <p>会话内首次 Bash(非 ls/git status 等只读)/ Edit / Write 之前必须输出 <code>[L1|L2|L3] 任务: ... → MCP 计划: ...</code>。CLAUDE.md §0.13 硬门禁,把"知道映射表存在"转成"动手前真查"。</p>
+            </div>
+            <div class="step">
+              <strong>1. 判级</strong>
+              <p>L1 小改轻流程。L2 单层任务查规则和代码影响面。L3 跨层查三套 MCP。L4 高风险先确认边界。</p>
+            </div>
+            <div class="step">
+              <strong>2. 查证</strong>
+              <p>先产出合并影响面:规则靠 platform-docs,代码结构靠 codegraph,数据契约和 SQL 链路靠 cross-link。dirty 命中时读真实文件。</p>
+            </div>
+            <div class="step">
+              <strong>3. 定边界</strong>
+              <p>把合并影响面压成文件归属、禁改项、生成项、验证命令。这里是提效核心,不是前端展示。</p>
+            </div>
+            <div class="step">
+              <strong>4. 修改</strong>
+              <p>只改本次范围。生成物、历史迁移、索引产物和缓存默认不手改。</p>
+            </div>
+            <div class="step">
+              <strong>5. 验证</strong>
+              <p>优先定向验证。前端、Java、Python、SQL、AI 工具链分别跑对应最小检查。</p>
+            </div>
+          </div>
+
+          <table>
+            <tr>
+              <th>合并影响面</th>
+              <th>来源</th>
+              <th>开发流程里的用途</th>
+            </tr>
+            <tr>
+              <td>规则 / 红线 / skill 步骤</td>
+              <td>platform-docs</td>
+              <td>决定能不能改、必须怎么改、哪些命令禁止自动跑。</td>
+            </tr>
+            <tr>
+              <td>函数 / 类 / 调用方 / 影响面</td>
+              <td>CodeGraph</td>
+              <td>决定改哪些代码文件、哪些调用方需要同步、哪里需要补测试。</td>
+            </tr>
+            <tr>
+              <td>SQL / 表 / 字段 / endpoint / Python writer-reader</td>
+              <td>cross-link</td>
+              <td>决定跨层契约、DB 写入、Mapper、前端 API 类型和数据一致性风险。</td>
+            </tr>
+            <tr>
+              <td>真实工作树</td>
+              <td>dirty-index + 本地文件</td>
+              <td>发现索引滞后时兜底,防止多个会话同时改同一文件。</td>
+            </tr>
+          </table>
+
+          <table>
+            <tr>
+              <th>等级</th>
+              <th>典型范围</th>
+              <th>工具强度</th>
+            </tr>
+            <tr>
+              <td>L1</td>
+              <td>文案、注释、局部样式、单文件小修。</td>
+              <td>git status + 定向读文件 + 最小验证。</td>
+            </tr>
+            <tr>
+              <td>L2</td>
+              <td>单模块或同层多模块联动,不改 API / DB / DTO / enum / 跨语言字段契约。</td>
+              <td>模块 rules + codegraph 调用方和影响面;追问数据来源/去向时加 cross-link。</td>
+            </tr>
+            <tr>
+              <td>L3</td>
+              <td>DTO、API、SQL、写库字段、migration、enum、跨层契约。</td>
+              <td>platform-docs + codegraph + cross-link + 验证闭环。</td>
+            </tr>
+            <tr>
+              <td>L4</td>
+              <td>生成文件、依赖、全局 runtime、AI 工具链、历史数据边界。</td>
+              <td>先说明影响范围;禁改项拒绝或走正确生成流程。</td>
+            </tr>
+          </table>
+        </section>
+
+        <section id="metrics">
+          <h2>效率与准确率</h2>
+          <table>
+            <tr>
+              <th>目标</th>
+              <th>来源</th>
+              <th>表现</th>
+            </tr>
+            <tr>
+              <td>准确率</td>
+              <td>Rules/Skills 语义检索 + 词法 精确符号召回 + RRF 融合 + reranker + codegraph 影响面 + cross-link 跨层链路。</td>
+              <td>减少凭记忆改代码,先查约束和影响面再编辑。词法 hybrid 补救向量漏掉的精确 token(版本号 / 规则编号 / 罕见术语)。</td>
+            </tr>
+            <tr>
+              <td>效率</td>
+              <td>GPU 模型常驻 daemon + 多会话共享 + 定向 MCP 查询。</td>
+              <td>减少冷启动、重复模型占用和全仓搜索。</td>
+            </tr>
+            <tr>
+              <td>Token</td>
+              <td>文档、规则、Skills 留在索引库,按 query 返回 top-k chunk。</td>
+              <td>避免每次把大量 Markdown 全塞进上下文。词法 路径 0 API token(纯本地)。</td>
+            </tr>
+            <tr>
+              <td>可观测性</td>
+              <td>ai-health、dirty-index、reindex log、search recall log(JSONL 记 词法_used / rerank_score)。</td>
+              <td>发现 daemon、索引、新鲜度、dirty、词法 命中率和使用率问题。</td>
+            </tr>
+            <tr>
+              <td>使用率判读</td>
+              <td>search_recall 看检索质量;mcp usage 7d 看 platform-docs 痕迹;mcp adoption 看 L2/L3 候选提交。</td>
+              <td>低 commit 比率不直接等于低价值;L2/L3 候选多但 search_docs 少,才说明执行纪律不足。</td>
+            </tr>
+          </table>
+
+          <h3>当前实测基线</h3>
+          <table>
+            <tr>
+              <th>指标</th>
+              <th>当前值</th>
+              <th>说明</th>
+            </tr>
+            <tr>
+              <td>chroma chunks</td>
+              <td>4334</td>
+              <td>覆盖 Rules / Skills / Memory / Docs / dev-evolution / Operations / Architecture / CLAUDE.md;241 个 markdown 文件三级切分。</td>
+            </tr>
+            <tr>
+              <td>chunk 策略</td>
+              <td>target 1000 / max 1500 字符,三级(heading → paragraph → hard)</td>
+              <td>90-130 行规则文件可整段进 chunk,reranker 上下文完整;事故复盘已搬到 incident category 不再稀释 rule chunk。</td>
+            </tr>
+            <tr>
+              <td>词法 倒排</td>
+              <td>4334 chunks,build ~2.1s</td>
+              <td>daemon 启动 + chroma 重建时同步构建,中英混合分词,搜索延迟 6-13ms(可忽略)。</td>
+            </tr>
+            <tr>
+              <td>search_recall hit_rate@5(7d)</td>
+              <td>94.1%</td>
+              <td>纯向量基线;词法 hybrid 上线后 query 样本累积中,预期 2-4 周后看到 +1-3% 漂移。</td>
+            </tr>
+            <tr>
+              <td>median top1 distance(7d)</td>
+              <td>0.31-0.37</td>
+              <td>Qwen3 embedding 距离;<0.4 算强相关,reranker 给最终 0-1 相关性分。</td>
+            </tr>
+            <tr>
+              <td>MCP adoption(per commit, 7d)</td>
+              <td>0.24</td>
+              <td>低于期望 ≥0.5。CLAUDE.md §0.13 trigger 落地后预期 2 周内涨到 0.5+。</td>
+            </tr>
+            <tr>
+              <td>category 数(过滤精度)</td>
+              <td>11 种</td>
+              <td>rule / incident / tooling_incident / design / operations / claude_md / skill / doc / tool_doc / memory / dev_log。<code>category</code> 过滤可精确召回某类文档。</td>
+            </tr>
+            <tr>
+              <td>pre-push audit gates</td>
+              <td>6 项</td>
+              <td>parity / null cast / sanity test / fetcher registry / frontend grep / DOC_PATTERNS coverage。silent failure 转 loud failure。</td>
+            </tr>
+          </table>
+        </section>
+
+        <section id="boundaries">
+          <h2>边界与验证</h2>
+          <div class="warning">
+            本文档刻意不展示任何项目领域内容。它只描述开发框架、工具链、规则治理和 AI 辅助开发路径。
+          </div>
+
+          <h3>最小验证闭环</h3>
+          <table>
+            <tr>
+              <th>改动类型</th>
+              <th>验证方向</th>
+            </tr>
+            <tr>
+              <td>前端</td>
+              <td>单文件 lint、类型检查、必要时浏览器验证。</td>
+            </tr>
+            <tr>
+              <td>Java</td>
+              <td>编译、目标单测、接口契约核对。</td>
+            </tr>
+            <tr>
+              <td>Python</td>
+              <td>目标 pytest、配置校验、幂等和重跑检查。</td>
+            </tr>
+            <tr>
+              <td>SQL</td>
+              <td>新增 forward migration、跨层索引核对、写入保护检查。</td>
+            </tr>
+            <tr>
+              <td>AI 工具链</td>
+              <td>health、dirty check、索引新鲜度、daemon 状态和日志。</td>
+            </tr>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script>
+    (() => {
+      const button = document.querySelector('[data-fullscreen-target="architecture-map"]');
+      const target = document.getElementById('architecture-map');
+      if (!button || !target || !target.requestFullscreen) {
+        if (button) button.style.display = 'none';
+        return;
+      }
+      button.addEventListener('click', async () => {
+        try {
+          if (document.fullscreenElement) {
+            await document.exitFullscreen();
+          } else {
+            await target.requestFullscreen();
+          }
+        } catch (error) {
+          console.warn('Fullscreen request failed', error);
+        }
+      });
+      document.addEventListener('fullscreenchange', () => {
+        button.textContent = document.fullscreenElement ? '退出全屏' : '全屏查看';
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -802,16 +802,37 @@ async def _run_http(port: int) -> None:
         # daemon ready 判定: launcher 用此判定是否需要等模型加载完
         # multi-tenant: 报告所有 loaded projects + 默认 project_id (向后兼容字段保留)
         model_ready = _model is not None
-        loaded = [
-            {
-                "project_id": p.project_id,
-                "chunks": (p.collection.count() if p.collection is not None else 0),
-                "collection_name": p.active_collection_name,
-                "bm25": (p.bm25_index.ready() if p.bm25_index is not None else False),
-                "init_error": p.init_error,
-            }
-            for p in _projects.values()
-        ]
+        loaded = []
+        stale_pids: list[str] = []
+        for p in _projects.values():
+            chunks: int | None
+            init_error = p.init_error
+            if p.collection is None:
+                chunks = 0
+            else:
+                try:
+                    chunks = p.collection.count()
+                except Exception as exc:  # noqa: BLE001
+                    # 常见: chromadb.errors.NotFoundError 来自 reindex 期间底层 collection 被重建
+                    # daemon 仍持有 stale handle。退化为 None + 标错 + 排队 evict, 下次 ensure 重新加载。
+                    chunks = None
+                    if not init_error:
+                        init_error = f"count failed: {type(exc).__name__}: {exc}"
+                    stale_pids.append(p.project_id)
+                    _flog(
+                        f"[health] stale collection for {p.project_id}: {type(exc).__name__}: {exc}"
+                    )
+            loaded.append(
+                {
+                    "project_id": p.project_id,
+                    "chunks": chunks,
+                    "collection_name": p.active_collection_name,
+                    "bm25": (p.bm25_index.ready() if p.bm25_index is not None else False),
+                    "init_error": init_error,
+                }
+            )
+        for pid in stale_pids:
+            _projects.pop(pid, None)
         any_collection_ready = any(p.collection is not None for p in _projects.values())
         reranker_ready = _reranker_model is not None
         all_ready = model_ready and any_collection_ready

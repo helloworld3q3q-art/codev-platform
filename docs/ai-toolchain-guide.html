@@ -1,0 +1,1432 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>本地 AI 开发工具栈 完整说明</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a1f2e;
+    --border: #2a3142;
+    --text: #d8dee9;
+    --muted: #8b94a8;
+    --accent: #5e9eff;
+    --green: #7ec699;
+    --yellow: #e5c07b;
+    --red: #e06c75;
+    --purple: #c678dd;
+    --code-bg: #0a0d13;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 15px;
+  }
+  .layout { display: flex; min-height: 100vh; }
+  nav {
+    width: 260px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  nav h2 {
+    font-size: 14px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 16px 8px 8px;
+  }
+  nav h2:first-child { margin-top: 0; }
+  nav a {
+    display: block;
+    padding: 6px 10px;
+    color: var(--text);
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 13.5px;
+  }
+  nav a:hover { background: var(--border); color: var(--accent); }
+  main { flex: 1; padding: 40px 56px; max-width: 1000px; }
+  h1 {
+    font-size: 32px;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 12px;
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 24px;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: 12px;
+    margin-top: 48px;
+  }
+  h3 { font-size: 19px; color: var(--purple); margin-top: 32px; }
+  h4 { font-size: 16px; color: var(--yellow); margin-top: 24px; }
+  p, li { color: var(--text); }
+  code {
+    background: var(--code-bg);
+    color: var(--yellow);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 13px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { background: none; color: var(--text); padding: 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+  }
+  th { background: var(--panel); color: var(--accent); }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--panel);
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .callout.warn { border-color: var(--yellow); }
+  .callout.danger { border-color: var(--red); }
+  .callout.good { border-color: var(--green); }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .tag.green { background: rgba(126,198,153,0.15); color: var(--green); }
+  .tag.yellow { background: rgba(229,192,123,0.15); color: var(--yellow); }
+  .tag.red { background: rgba(224,108,117,0.15); color: var(--red); }
+  .tag.blue { background: rgba(94,158,255,0.15); color: var(--accent); }
+  .tag.purple { background: rgba(198,120,221,0.15); color: var(--purple); }
+  .diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 12.5px;
+    white-space: pre;
+    line-height: 1.4;
+    overflow-x: auto;
+  }
+  hr { border: none; border-top: 1px dashed var(--border); margin: 32px 0; }
+  .meta {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+  ul.compact li { margin: 4px 0; }
+  .kbd {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 12px;
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <h2>导读</h2>
+  <a href="#intro">0. 为什么需要这套工具</a>
+  <a href="#concepts">1. 三个基础概念</a>
+
+  <a href="#pipeline">1.5 完整链路节点图 ⭐</a>
+
+  <h2>三大 MCP 工具</h2>
+  <a href="#codegraph">2. CodeGraph 代码图谱</a>
+  <a href="#chroma">3. platform-docs 文档检索</a>
+  <a href="#crosslink">4. cross-link 业务链路</a>
+  <a href="#compare">5. 三者边界对比</a>
+
+  <h2>两阶段重排</h2>
+  <a href="#reranker">3.5 Qwen3-Reranker 精排 ⭐ 新</a>
+  <a href="#hot-reload">3.6 MCP server 热重载</a>
+  <a href="#recall-log">3.7 JSONL 召回日志</a>
+
+  <h2>辅助系统</h2>
+  <a href="#memory">6. MEMORY 自动记忆</a>
+  <a href="#embedding">7. Embedding 模型 (Qwen3)</a>
+
+  <h2>本地工具脚本</h2>
+  <a href="#ai-health">8. ai-health.ps1</a>
+  <a href="#update-local-ai">9. update-local-ai.ps1</a>
+  <a href="#clean">10. clean-local-artifacts.ps1</a>
+  <a href="#dirty-check">10.5 dirty-index-check.ps1 ⭐ 新</a>
+  <a href="#git-hook">11. Git post-commit hook</a>
+  <a href="#ab-test">12. embed_ab_test.py</a>
+  <a href="#skills">12.5 三个 Skill 入口 ⭐ 新</a>
+
+  <h2>实战</h2>
+  <a href="#workflows">13. 标准工作流</a>
+  <a href="#troubleshoot">14. 故障排查</a>
+  <a href="#roadmap">15. 升级路线</a>
+</nav>
+
+<main>
+
+<h1>本地 AI 开发工具栈 完整说明</h1>
+<p class="meta">最后更新:2026-05-23 凌晨 · 适用项目:&lt;repo-root&gt; · 受众:从 0 开始理解这套工具的协作者</p>
+
+<div class="callout good">
+<strong>2026-05-23 凌晨新增 (本次大改)</strong>:
+<ul class="compact" style="margin: 8px 0 0;">
+  <li><strong>Qwen3-Reranker-0.6B 两阶段重排</strong> — Chroma 召回 top-30,Reranker 精排取 top-5,语义匹配再上一个台阶(§3.5)</li>
+  <li><strong>MCP server 热重载</strong> — 索引完成写戳,server 自动 reload Chroma 句柄,模型常驻 GPU(§3.6)</li>
+  <li><strong>JSONL 召回日志</strong> — 每次 query 落盘,1 周后可分析召回质量(§3.7)</li>
+  <li><strong>CodeGraph 增量 sync</strong> — 79s → 1.6s(~50× 提速),改一文件场景默认走增量(§2.4)</li>
+  <li><strong>chunk 加大 + env vars 统一</strong> — 500/1000/1500 给 reranker 更完整上下文(§3.1)</li>
+  <li><strong>post-commit hook missed-fire 检测</strong> — errno 1 没根治,加检测器 + 补救命令(§11)</li>
+  <li><strong>dirty-index-check.ps1</strong> — 调 MCP 前先查工作树脏文件是否命中索引范围(§10.5)</li>
+  <li><strong>三个 Skill 入口</strong> — <code>/ai-health</code> / <code>/update-local-ai</code> / <code>/verify-pipeline-run</code> (§12.5)</li>
+  <li><strong>措辞修正</strong> — "禁止 grep+Read" → "优先 MCP,允许 grep+Read 兜底" + 4 种允许场景(§13/§15)</li>
+</ul>
+</div>
+
+<!-- =============================================== -->
+<h2 id="intro">0. 为什么需要这套工具</h2>
+
+<p>大语言模型(LLM,如 Claude)有一个根本限制:<strong>上下文窗口</strong>。它一次能"看"的内容有限(大约几十万 token,折合几百个文件)。但一个真实项目可能有<strong>几千个文件、几十万行代码、上百份设计文档</strong>。LLM 不可能把整个仓库塞进脑子。</p>
+
+<p>所以问题变成:<strong>怎么让 LLM 在需要时,精准捞到正确的代码片段或文档?</strong></p>
+
+<h3>朴素做法的成本</h3>
+<table>
+<tr><th>朴素做法</th><th>问题</th></tr>
+<tr><td><code>Grep "shadow_mode"</code> 命中 50 个文件 → 全部 <code>Read</code></td><td>消耗 50× 的上下文 token,大部分无关</td></tr>
+<tr><td>问 LLM "影子规则怎么实现的?" 它瞎猜</td><td>幻觉,代码版本不对</td></tr>
+<tr><td>每次会话开始让 LLM 读所有 .md</td><td>30 万 token 全用完,没空写代码</td></tr>
+</table>
+
+<h3>这套工具栈的核心思想</h3>
+<p>把仓库<strong>预先索引</strong>到本地数据库,LLM 通过<strong>精确查询</strong>按需取回,而不是把整个仓库塞进上下文。三个维度对应三套索引:</p>
+
+<div class="diagram">
+              ┌─────────────────────────────┐
+              │   你的项目仓库 (~几千文件)   │
+              └──────────────┬──────────────┘
+                             │ 预先索引
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+       ┌──────────┐   ┌──────────┐   ┌──────────┐
+       │ 代码图谱 │   │ 文档语义 │   │ 业务链路 │
+       │CodeGraph │   │  Chroma  │   │cross-link│
+       └────┬─────┘   └────┬─────┘   └────┬─────┘
+            │              │              │
+            └──────────────┼──────────────┘
+                           │ MCP 协议
+                           ▼
+                  ┌─────────────────┐
+                  │  Claude / LLM   │
+                  │  (按需查询)     │
+                  └─────────────────┘
+</div>
+
+<div class="callout good">
+<strong>关键收益</strong>:把"AI 帮你写代码"从 30% 准确率提升到 90%+,因为 AI 不再凭印象瞎写,而是基于<strong>当前仓库的真实状态</strong>。
+</div>
+
+<!-- =============================================== -->
+<h2 id="concepts">1. 三个基础概念</h2>
+
+<h3>1.1 MCP (Model Context Protocol)</h3>
+<p>Anthropic 制定的开放协议,允许 LLM 与外部"工具服务器"对话。本项目的 3 套工具都是<strong>独立运行的本地 MCP server 进程</strong>:</p>
+<ul class="compact">
+  <li>Claude Code 启动时 → 自动 spawn 这些 server 进程</li>
+  <li>你问问题 → Claude 把请求转发给对应 MCP server</li>
+  <li>server 查本地数据库 → 返回结果 → Claude 用它回答你</li>
+</ul>
+
+<h3>1.2 Embedding (向量化)</h3>
+<p>把一段文字转换成一个<strong>定长数字向量</strong>(比如 1024 维浮点数)。语义相近的文本,向量距离也近。</p>
+<pre><code>"影子规则数据隔离"   →  [0.12, -0.45, 0.78, ...]  (1024 维)
+"shadow_mode 过滤"  →  [0.15, -0.43, 0.81, ...]  (距离很近 = 语义相似)
+"涨跌停"             →  [0.91,  0.32, -0.10, ...]  (距离很远 = 无关)</code></pre>
+<p>用于<strong>文档语义检索</strong>(Chroma):用户问"shadow 规则在哪",即使文档里只写了"影子规则",也能召回。</p>
+
+<h3>1.3 知识图谱 (代码层面)</h3>
+<p>把代码解析成<strong>节点 (Node) + 边 (Edge)</strong>:</p>
+<ul class="compact">
+  <li>节点:函数、类、文件、SQL 表、API endpoint</li>
+  <li>边:调用、引用、JOIN、HTTP 路由</li>
+</ul>
+<p>用于<strong>精确的"谁调用谁"查询</strong>。和 embedding 互补 —— embedding 模糊但能跨语言,图谱精确但只看代码。</p>
+
+<!-- =============================================== -->
+<h2 id="pipeline">1.5 完整链路节点图</h2>
+
+<p>一张图看清从<strong>源文件</strong>到<strong>你提问得到答案</strong>的所有节点。颜色编码:<span class="tag yellow">数据源</span> <span class="tag purple">索引器</span> <span class="tag green">存储</span> <span class="tag blue">MCP 服务</span> <span class="tag red">触发器</span></p>
+
+<style>
+  .pipeline-svg { width: 100%; height: auto; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; margin: 16px 0; }
+  .pipeline-svg .node { font-family: -apple-system, "Segoe UI", "PingFang SC", sans-serif; font-size: 12px; }
+  .pipeline-svg .node-title { font-weight: 600; font-size: 12.5px; }
+  .pipeline-svg .node-sub { font-size: 10.5px; opacity: 0.75; }
+  .pipeline-svg .edge { stroke: #5e9eff; stroke-width: 1.5; fill: none; opacity: 0.55; marker-end: url(#arrow); }
+  .pipeline-svg .edge-trigger { stroke: #e06c75; stroke-width: 1.5; stroke-dasharray: 4 3; fill: none; opacity: 0.7; marker-end: url(#arrow-red); }
+  .pipeline-svg .edge-query { stroke: #7ec699; stroke-width: 1.8; fill: none; opacity: 0.8; marker-end: url(#arrow-green); }
+  .pipeline-svg .lane-label { font-size: 11px; fill: #8b94a8; text-transform: uppercase; letter-spacing: 0.1em; }
+  .pipeline-svg .lane-bg { fill: rgba(255,255,255,0.018); }
+</style>
+
+<svg class="pipeline-svg" viewBox="0 0 1180 760" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5e9eff"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#e06c75"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7ec699"/>
+    </marker>
+  </defs>
+
+  <!-- 5 lane background -->
+  <rect class="lane-bg" x="10"   y="50" width="220" height="600" rx="6"/>
+  <rect class="lane-bg" x="240"  y="50" width="220" height="600" rx="6"/>
+  <rect class="lane-bg" x="470"  y="50" width="220" height="600" rx="6"/>
+  <rect class="lane-bg" x="700"  y="50" width="220" height="600" rx="6"/>
+  <rect class="lane-bg" x="930"  y="50" width="240" height="600" rx="6"/>
+
+  <text class="lane-label" x="120"  y="35" text-anchor="middle">① 数据源</text>
+  <text class="lane-label" x="350"  y="35" text-anchor="middle">② 触发与索引器</text>
+  <text class="lane-label" x="580"  y="35" text-anchor="middle">③ 本地存储</text>
+  <text class="lane-label" x="810"  y="35" text-anchor="middle">④ MCP 服务进程</text>
+  <text class="lane-label" x="1050" y="35" text-anchor="middle">⑤ 消费方</text>
+
+  <!-- ① 数据源 (lane 1: x=10-230) -->
+  <g class="node">
+    <rect x="30" y="80" width="180" height="58" rx="6" fill="#3a2e1a" stroke="#e5c07b" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="102" text-anchor="middle" fill="#e5c07b">Python 代码</text>
+    <text class="node-sub" x="120" y="120" text-anchor="middle" fill="#d8dee9">python/stock-pipeline/</text>
+    <text class="node-sub" x="120" y="133" text-anchor="middle" fill="#d8dee9">*.py</text>
+  </g>
+  <g class="node">
+    <rect x="30" y="155" width="180" height="58" rx="6" fill="#3a2e1a" stroke="#e5c07b" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="177" text-anchor="middle" fill="#e5c07b">Java 代码</text>
+    <text class="node-sub" x="120" y="195" text-anchor="middle" fill="#d8dee9">apps/stock-admin-api/</text>
+    <text class="node-sub" x="120" y="208" text-anchor="middle" fill="#d8dee9">*.java + Mapper SQL</text>
+  </g>
+  <g class="node">
+    <rect x="30" y="230" width="180" height="58" rx="6" fill="#3a2e1a" stroke="#e5c07b" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="252" text-anchor="middle" fill="#e5c07b">前端代码</text>
+    <text class="node-sub" x="120" y="270" text-anchor="middle" fill="#d8dee9">apps/stock-admin-web/</text>
+    <text class="node-sub" x="120" y="283" text-anchor="middle" fill="#d8dee9">*.tsx + services/apis</text>
+  </g>
+  <g class="node">
+    <rect x="30" y="305" width="180" height="58" rx="6" fill="#3a2e1a" stroke="#e5c07b" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="327" text-anchor="middle" fill="#e5c07b">规则与文档</text>
+    <text class="node-sub" x="120" y="345" text-anchor="middle" fill="#d8dee9">.claude/rules/ + docs/</text>
+    <text class="node-sub" x="120" y="358" text-anchor="middle" fill="#d8dee9">CLAUDE.md (*.md)</text>
+  </g>
+  <g class="node">
+    <rect x="30" y="380" width="180" height="58" rx="6" fill="#3a2e1a" stroke="#e5c07b" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="402" text-anchor="middle" fill="#e5c07b">Flyway 迁移</text>
+    <text class="node-sub" x="120" y="420" text-anchor="middle" fill="#d8dee9">db/migration/V*.sql</text>
+    <text class="node-sub" x="120" y="433" text-anchor="middle" fill="#d8dee9">90 迁移 / 52 表</text>
+  </g>
+
+  <!-- 触发器（红色） -->
+  <g class="node">
+    <rect x="30" y="475" width="180" height="50" rx="6" fill="#3a1f22" stroke="#e06c75" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="495" text-anchor="middle" fill="#e06c75">git commit</text>
+    <text class="node-sub" x="120" y="512" text-anchor="middle" fill="#d8dee9">触发 post-commit hook</text>
+  </g>
+  <g class="node">
+    <rect x="30" y="540" width="180" height="50" rx="6" fill="#3a1f22" stroke="#e06c75" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="560" text-anchor="middle" fill="#e06c75">手工命令</text>
+    <text class="node-sub" x="120" y="577" text-anchor="middle" fill="#d8dee9">update-local-ai.ps1</text>
+  </g>
+  <g class="node">
+    <rect x="30" y="605" width="180" height="40" rx="6" fill="#3a1f22" stroke="#e06c75" stroke-width="1.5"/>
+    <text class="node-title" x="120" y="630" text-anchor="middle" fill="#e06c75">ai-health.ps1 体检</text>
+  </g>
+
+  <!-- ② 索引器 (lane 2: x=240-460) -->
+  <g class="node">
+    <rect x="260" y="100" width="180" height="65" rx="6" fill="#2a1e3a" stroke="#c678dd" stroke-width="1.5"/>
+    <text class="node-title" x="350" y="122" text-anchor="middle" fill="#c678dd">CodeGraph 扫描器</text>
+    <text class="node-sub" x="350" y="139" text-anchor="middle" fill="#d8dee9">Java 静态分析</text>
+    <text class="node-sub" x="350" y="153" text-anchor="middle" fill="#d8dee9">解析符号 + 调用 + import</text>
+  </g>
+  <g class="node">
+    <rect x="260" y="200" width="180" height="80" rx="6" fill="#2a1e3a" stroke="#c678dd" stroke-width="1.5"/>
+    <text class="node-title" x="350" y="222" text-anchor="middle" fill="#c678dd">Chroma 索引器</text>
+    <text class="node-sub" x="350" y="239" text-anchor="middle" fill="#d8dee9">三级 chunk 切分</text>
+    <text class="node-sub" x="350" y="253" text-anchor="middle" fill="#d8dee9">→ Qwen3 encode (GPU)</text>
+    <text class="node-sub" x="350" y="267" text-anchor="middle" fill="#d8dee9">index_docs.py</text>
+  </g>
+  <g class="node">
+    <rect x="260" y="315" width="180" height="80" rx="6" fill="#2a1e3a" stroke="#c678dd" stroke-width="1.5"/>
+    <text class="node-title" x="350" y="337" text-anchor="middle" fill="#c678dd">cross-link 构建器</text>
+    <text class="node-sub" x="350" y="354" text-anchor="middle" fill="#d8dee9">Controller→Facade→Mapper</text>
+    <text class="node-sub" x="350" y="368" text-anchor="middle" fill="#d8dee9">→Table 链路抽取</text>
+    <text class="node-sub" x="350" y="382" text-anchor="middle" fill="#d8dee9">tools/cross_link/</text>
+  </g>
+
+  <!-- Qwen3 Embedding 模型节点 (副) -->
+  <g class="node">
+    <rect x="260" y="400" width="180" height="55" rx="6" fill="#1a2e3a" stroke="#5e9eff" stroke-width="1.5"/>
+    <text class="node-title" x="350" y="420" text-anchor="middle" fill="#5e9eff">Qwen3-Embedding-0.6B</text>
+    <text class="node-sub" x="350" y="436" text-anchor="middle" fill="#d8dee9">D:\models\ (1.2GB)</text>
+    <text class="node-sub" x="350" y="449" text-anchor="middle" fill="#d8dee9">dim=1024, GPU fp16</text>
+  </g>
+
+  <!-- Qwen3 Reranker 模型节点 (新) -->
+  <g class="node">
+    <rect x="260" y="463" width="180" height="55" rx="6" fill="#3a1e2a" stroke="#c678dd" stroke-width="1.5"/>
+    <text class="node-title" x="350" y="483" text-anchor="middle" fill="#c678dd">Qwen3-Reranker-0.6B ⭐</text>
+    <text class="node-sub" x="350" y="499" text-anchor="middle" fill="#d8dee9">D:\models\ (1.1GB)</text>
+    <text class="node-sub" x="350" y="512" text-anchor="middle" fill="#d8dee9">yes/no token logits</text>
+  </g>
+
+  <!-- post-commit hook -->
+  <g class="node">
+    <rect x="260" y="560" width="180" height="50" rx="6" fill="#3a1f22" stroke="#e06c75" stroke-width="1.5"/>
+    <text class="node-title" x="350" y="580" text-anchor="middle" fill="#e06c75">post-commit hook</text>
+    <text class="node-sub" x="350" y="597" text-anchor="middle" fill="#d8dee9">命中 .md → spawn 索引</text>
+  </g>
+
+  <!-- ③ 存储 (lane 3: x=470-690) -->
+  <g class="node">
+    <rect x="490" y="110" width="180" height="60" rx="6" fill="#1f3a26" stroke="#7ec699" stroke-width="1.5"/>
+    <text class="node-title" x="580" y="132" text-anchor="middle" fill="#7ec699">codegraph.db</text>
+    <text class="node-sub" x="580" y="149" text-anchor="middle" fill="#d8dee9">SQLite 43.8 MB</text>
+    <text class="node-sub" x="580" y="162" text-anchor="middle" fill="#d8dee9">18,982 节点 / 37,922 边</text>
+  </g>
+  <g class="node">
+    <rect x="490" y="220" width="180" height="60" rx="6" fill="#1f3a26" stroke="#7ec699" stroke-width="1.5"/>
+    <text class="node-title" x="580" y="242" text-anchor="middle" fill="#7ec699">Chroma 向量库</text>
+    <text class="node-sub" x="580" y="259" text-anchor="middle" fill="#d8dee9">data/chroma/ (6 segments)</text>
+    <text class="node-sub" x="580" y="272" text-anchor="middle" fill="#d8dee9">4,597 chunks × 1024 dim</text>
+  </g>
+  <g class="node">
+    <rect x="490" y="330" width="180" height="60" rx="6" fill="#1f3a26" stroke="#7ec699" stroke-width="1.5"/>
+    <text class="node-title" x="580" y="352" text-anchor="middle" fill="#7ec699">cross_layer.sqlite</text>
+    <text class="node-sub" x="580" y="369" text-anchor="middle" fill="#d8dee9">128 endpoint × 5 层</text>
+    <text class="node-sub" x="580" y="382" text-anchor="middle" fill="#d8dee9">5,235 节点 / 8,794 边</text>
+  </g>
+  <g class="node">
+    <rect x="490" y="440" width="180" height="55" rx="6" fill="#1f3a26" stroke="#7ec699" stroke-width="1.5"/>
+    <text class="node-title" x="580" y="462" text-anchor="middle" fill="#7ec699">MEMORY.md</text>
+    <text class="node-sub" x="580" y="479" text-anchor="middle" fill="#d8dee9">~/.claude/.../memory/</text>
+  </g>
+
+  <!-- ④ MCP 服务 (lane 4: x=700-920) -->
+  <g class="node">
+    <rect x="720" y="110" width="180" height="60" rx="6" fill="#1a2e3a" stroke="#5e9eff" stroke-width="1.5"/>
+    <text class="node-title" x="810" y="132" text-anchor="middle" fill="#5e9eff">codegraph MCP</text>
+    <text class="node-sub" x="810" y="149" text-anchor="middle" fill="#d8dee9">9 工具:context / impact</text>
+    <text class="node-sub" x="810" y="162" text-anchor="middle" fill="#d8dee9">callers / callees / explore</text>
+  </g>
+  <g class="node">
+    <rect x="720" y="220" width="180" height="60" rx="6" fill="#1a2e3a" stroke="#5e9eff" stroke-width="1.5"/>
+    <text class="node-title" x="810" y="242" text-anchor="middle" fill="#5e9eff">platform-docs MCP</text>
+    <text class="node-sub" x="810" y="259" text-anchor="middle" fill="#d8dee9">4 工具:search_docs</text>
+    <text class="node-sub" x="810" y="272" text-anchor="middle" fill="#d8dee9">get_by_file / list_collections</text>
+  </g>
+  <g class="node">
+    <rect x="720" y="330" width="180" height="60" rx="6" fill="#1a2e3a" stroke="#5e9eff" stroke-width="1.5"/>
+    <text class="node-title" x="810" y="352" text-anchor="middle" fill="#5e9eff">cross-link MCP</text>
+    <text class="node-sub" x="810" y="369" text-anchor="middle" fill="#d8dee9">4 工具:find_endpoint_link</text>
+    <text class="node-sub" x="810" y="382" text-anchor="middle" fill="#d8dee9">find_table_refs / stats</text>
+  </g>
+  <g class="node">
+    <rect x="720" y="440" width="180" height="55" rx="6" fill="#1a2e3a" stroke="#5e9eff" stroke-width="1.5"/>
+    <text class="node-title" x="810" y="462" text-anchor="middle" fill="#5e9eff">系统注入</text>
+    <text class="node-sub" x="810" y="479" text-anchor="middle" fill="#d8dee9">会话启动时 → system prompt</text>
+  </g>
+
+  <!-- ⑤ 消费方 (lane 5: x=930-1170) -->
+  <g class="node">
+    <rect x="950" y="200" width="200" height="100" rx="8" fill="#2a1e3a" stroke="#c678dd" stroke-width="2"/>
+    <text class="node-title" x="1050" y="228" text-anchor="middle" fill="#c678dd" style="font-size: 14px;">Claude / LLM</text>
+    <text class="node-sub" x="1050" y="248" text-anchor="middle" fill="#d8dee9">收到查询请求</text>
+    <text class="node-sub" x="1050" y="263" text-anchor="middle" fill="#d8dee9">选择合适 MCP 工具</text>
+    <text class="node-sub" x="1050" y="278" text-anchor="middle" fill="#d8dee9">组合结果回答</text>
+  </g>
+  <g class="node">
+    <rect x="950" y="360" width="200" height="60" rx="6" fill="#3a2e1a" stroke="#e5c07b" stroke-width="1.5"/>
+    <text class="node-title" x="1050" y="382" text-anchor="middle" fill="#e5c07b">你 (开发者)</text>
+    <text class="node-sub" x="1050" y="399" text-anchor="middle" fill="#d8dee9">提问 / 看回答 / 改代码</text>
+    <text class="node-sub" x="1050" y="412" text-anchor="middle" fill="#d8dee9">→ 触发新一轮 commit</text>
+  </g>
+
+  <!-- 数据流 edges:数据源 → 索引器 -->
+  <path class="edge" d="M 210,109 C 235,109 235,130 258,130"/>
+  <path class="edge" d="M 210,184 C 235,184 235,135 258,135"/>
+  <path class="edge" d="M 210,259 C 235,259 235,140 258,140"/>
+  <path class="edge" d="M 210,334 C 235,334 235,240 258,240"/>
+  <path class="edge" d="M 210,334 C 235,334 235,355 258,355"/>
+  <path class="edge" d="M 210,409 C 235,409 235,360 258,360"/>
+
+  <!-- Qwen3 → Chroma 索引器(共享模型) -->
+  <path class="edge" d="M 350,465 L 350,285"/>
+
+  <!-- 触发器 → 索引器(红色虚线) -->
+  <path class="edge-trigger" d="M 210,500 C 230,500 230,585 258,585"/>
+  <path class="edge-trigger" d="M 210,565 C 235,565 235,395 258,395"/>
+  <path class="edge-trigger" d="M 210,565 C 235,565 235,265 258,265"/>
+  <path class="edge-trigger" d="M 210,565 C 235,565 235,135 258,135"/>
+  <path class="edge-trigger" d="M 350,560 C 350,540 350,400 350,400"/>
+
+  <!-- ai-health 探针(双向虚线 to 各存储) -->
+  <path class="edge-trigger" d="M 210,625 C 400,625 400,170 488,170"/>
+  <path class="edge-trigger" d="M 210,625 C 400,625 400,280 488,280"/>
+  <path class="edge-trigger" d="M 210,625 C 400,625 400,390 488,390"/>
+
+  <!-- 索引器 → 存储 -->
+  <path class="edge" d="M 440,135 L 488,140"/>
+  <path class="edge" d="M 440,240 L 488,250"/>
+  <path class="edge" d="M 440,355 L 488,360"/>
+
+  <!-- 存储 → MCP -->
+  <path class="edge" d="M 670,140 L 718,140"/>
+  <path class="edge" d="M 670,250 L 718,250"/>
+  <path class="edge" d="M 670,360 L 718,360"/>
+  <path class="edge" d="M 670,468 L 718,468"/>
+
+  <!-- MCP → Claude (绿色查询流) -->
+  <path class="edge-query" d="M 900,140 C 930,140 930,230 948,230"/>
+  <path class="edge-query" d="M 900,250 C 930,250 930,250 948,250"/>
+  <path class="edge-query" d="M 900,360 C 930,360 930,275 948,275"/>
+  <path class="edge-query" d="M 900,468 C 930,468 930,295 948,295"/>
+
+  <!-- Claude ↔ 用户(双向) -->
+  <path class="edge-query" d="M 1050,300 L 1050,358"/>
+  <path class="edge-query" d="M 1045,360 L 1045,302" stroke="#e5c07b" marker-end="url(#arrow)"/>
+
+  <!-- 用户 → git commit(循环回路) -->
+  <path class="edge-trigger" d="M 950,390 C 600,720 600,720 210,505" stroke-dasharray="6 4"/>
+  <text class="lane-label" x="570" y="710" fill="#e06c75" style="font-size: 11.5px;">闭环:改代码 → commit → 新 hook 触发 → 索引更新</text>
+
+  <!-- 图例 -->
+  <g transform="translate(40, 670)">
+    <text class="lane-label" x="0" y="0" fill="#8b94a8">图例:</text>
+    <line x1="50" y1="-4" x2="80" y2="-4" stroke="#5e9eff" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text class="node-sub" x="85" y="0" fill="#d8dee9">数据流(同步写)</text>
+    <line x1="220" y1="-4" x2="250" y2="-4" stroke="#7ec699" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+    <text class="node-sub" x="255" y="0" fill="#d8dee9">查询流(实时)</text>
+    <line x1="370" y1="-4" x2="400" y2="-4" stroke="#e06c75" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-red)"/>
+    <text class="node-sub" x="405" y="0" fill="#d8dee9">触发流(事件驱动)</text>
+  </g>
+</svg>
+
+<h3>1.5.1 阅读这张图的 3 个角度</h3>
+
+<table>
+<tr><th>角度</th><th>跟着哪条流?</th><th>看到什么</th></tr>
+<tr><td><strong>"我的代码怎么变成 AI 知识"</strong></td><td>蓝色实线<br>① → ② → ③ → ④</td><td>源文件 → 索引器扫描 → 写入本地存储 → MCP server 暴露给 LLM</td></tr>
+<tr><td><strong>"我问问题怎么得到答案"</strong></td><td>绿色实线<br>⑤ → ④ → ③ → ④ → ⑤</td><td>你提问 → Claude 选工具 → MCP 查存储 → 返回 chunk → Claude 综合回答你</td></tr>
+<tr><td><strong>"索引怎么保持新鲜"</strong></td><td>红色虚线<br>git commit / 手工 / 探针</td><td>commit 触发 hook → 自动 spawn 索引器;ai-health 周期性体检存储新鲜度</td></tr>
+</table>
+
+<h3>1.5.2 五个泳道的职责</h3>
+
+<table>
+<tr><th>泳道</th><th>类比</th><th>变化频率</th></tr>
+<tr><td>① 数据源</td><td>原材料(铁矿石)</td><td>每次 commit</td></tr>
+<tr><td>② 索引器</td><td>加工厂(熔炼)</td><td>触发时运行</td></tr>
+<tr><td>③ 本地存储</td><td>仓库(钢锭)</td><td>每次索引覆盖</td></tr>
+<tr><td>④ MCP 服务</td><td>柜台店员(取货)</td><td>会话期间常驻进程</td></tr>
+<tr><td>⑤ 消费方</td><td>顾客(LLM + 你)</td><td>实时交互</td></tr>
+</table>
+
+<div class="callout good">
+<strong>关键洞察</strong>:这是一个<strong>闭环</strong>。你写代码 → commit → hook 自动重建文档索引 → 下次提问时 LLM 拿到的就是最新状态。<strong>不需要手工维护"AI 的脑子"</strong>,工具链已经把它做成基础设施了。
+</div>
+
+<h3>1.5.3 故障定位:哪一段坏了?</h3>
+
+<table>
+<tr><th>现象</th><th>查哪个节点</th></tr>
+<tr><td>LLM 不知道新写的规则</td><td>③ Chroma 库 chunks 数;② post-commit hook 是否触发</td></tr>
+<tr><td>LLM 召回结果不准</td><td>② Qwen3 模型;③ 索引是否用旧维度(384 vs 1024)</td></tr>
+<tr><td>LLM 找不到新加的函数</td><td>③ codegraph.db nodes 数;② 用户是否跑过 <code>-SkipChroma</code></td></tr>
+<tr><td>新加 API 但 cross-link 没反映</td><td>③ cross_layer.sqlite last_build_at;手工跑 update-local-ai</td></tr>
+<tr><td>三套 MCP 全部连不上</td><td>④ MCP server 进程;<code>~/.claude.json</code> 配置</td></tr>
+</table>
+
+<!-- =============================================== -->
+<h2 id="codegraph">2. CodeGraph — 通用代码图谱</h2>
+
+<p><span class="tag blue">用途</span> 找代码定义、函数源码、调用关系、改动影响范围</p>
+
+<h3>2.1 它是什么</h3>
+<p>用 Java 写的<strong>静态代码分析器</strong>,扫描整个仓库的 <code>.py / .java / .tsx</code> 文件,把每个符号(函数/类/变量)、每条调用、每个 import 都记入一个 SQLite 数据库。</p>
+
+<table>
+<tr><th>组件</th><th>位置</th><th>大小 / 数量</th></tr>
+<tr><td>数据库</td><td><code>.codegraph/codegraph.db</code></td><td>44 MB</td></tr>
+<tr><td>节点数</td><td>函数 / 类 / 文件</td><td>19,044</td></tr>
+<tr><td>边数</td><td>调用 / 引用</td><td>38,048</td></tr>
+<tr><td>API jar</td><td><code>apps/codegraph-api/target/*.jar</code></td><td>43.7 MB</td></tr>
+</table>
+
+<h3 id="codegraph-sync">2.4 增量 sync 命令(2026-05-23 新)</h3>
+
+<div class="callout good">
+<strong>关键发现</strong>:codegraph CLI 自带 <code>codegraph sync</code> 增量命令,只扫描自上次索引后变化的文件。<strong>~50× 提速</strong>:79 秒 → 1.6 秒(改一个文件场景)。
+</div>
+
+<table>
+<tr><th>命令</th><th>模式</th><th>耗时</th></tr>
+<tr><td><code>rebuild_index.ps1</code>(默认)</td><td>增量 <code>codegraph sync</code></td><td>~1.6 秒</td></tr>
+<tr><td><code>rebuild_index.ps1 -Full</code></td><td>全量 <code>--force</code></td><td>~79 秒</td></tr>
+</table>
+
+<h4>Race condition 防护:rebuild lock</h4>
+<p>重建期间在 <code>.codegraph/.rebuild.lock</code> 写一个文件。<code>ai-health.ps1</code> 看到 lock 存在 → 显式输出"rebuild in progress",不误读半完成的 SQLite。重建完成后自动删除 lock。</p>
+
+<pre><code># 默认增量(日常用)
+scripts\codegraph\rebuild_index.ps1
+# → 1.6s,只扫 dirty 文件
+
+# 全量重建(模型升级 / schema 变更 / 怀疑索引损坏)
+scripts\codegraph\rebuild_index.ps1 -Full
+# → 79s,扫全仓库</code></pre>
+
+<h3>2.2 9 个查询工具</h3>
+<table>
+<tr><th>工具</th><th>问什么时候用</th></tr>
+<tr><td><code>codegraph_search</code></td><td>"符号 X 是什么?"(精确名称查找)</td></tr>
+<tr><td><code>codegraph_context</code> ⭐</td><td>"这块功能怎么运作的?"(最常用,组合 search + node + callers + callees)</td></tr>
+<tr><td><code>codegraph_callers</code></td><td>"X 被谁调用?"</td></tr>
+<tr><td><code>codegraph_callees</code></td><td>"X 调了谁?"</td></tr>
+<tr><td><code>codegraph_impact</code></td><td>"改 X 会影响什么?"(blast radius)</td></tr>
+<tr><td><code>codegraph_node</code></td><td>"看 X 的源码 / signature / docstring"</td></tr>
+<tr><td><code>codegraph_explore</code></td><td>"探索一组相关符号"(一次性返回多个,优于多次 node)</td></tr>
+<tr><td><code>codegraph_files</code></td><td>"目录 X 里有什么?"</td></tr>
+<tr><td><code>codegraph_status</code></td><td>"索引是否就绪?"</td></tr>
+</table>
+
+<div class="callout warn">
+<strong>常见坑</strong>:数据库被锁(<code>database is locked</code>)。处理:看 <code>.codegraph/codegraph.db.lock</code> 是否 stale(0 字节 + 数小时未变),删之即可。
+</div>
+
+<!-- =============================================== -->
+<h2 id="chroma">3. platform-docs / Chroma — 文档语义检索</h2>
+
+<p><span class="tag purple">用途</span> 找规则、设计文档、事故复盘、操作手册</p>
+
+<h3>3.1 它是什么</h3>
+<p>基于 <a href="https://www.trychroma.com">Chroma</a> 向量数据库 + 本地嵌入模型,把所有 markdown 文档切成"块 (chunk)" → 向量化 → 存到本地 SQLite。</p>
+
+<table>
+<tr><th>属性</th><th>值</th></tr>
+<tr><td>嵌入模型</td><td><code>Qwen3-Embedding-0.6B</code> (2026-05-22 升级)</td></tr>
+<tr><td>精排模型 ⭐</td><td><code>Qwen3-Reranker-0.6B</code> (2026-05-23 新增,详见 §3.5)</td></tr>
+<tr><td>向量维度</td><td>1024</td></tr>
+<tr><td>chunks 数</td><td><strong>3693</strong>(2026-05-23 chunk 加大后,原 4625)</td></tr>
+<tr><td>chunk 参数</td><td>500 / 1000 / 1500(min / target / hard max)</td></tr>
+<tr><td>覆盖文件</td><td>188 个 markdown (platform / web / api / pipeline)</td></tr>
+<tr><td>分类</td><td>design / operations / rule / incident / claude_md / skill / tool_doc / doc</td></tr>
+<tr><td>数据库</td><td><code>data/chroma/</code> (6 segments)</td></tr>
+<tr><td>嵌入运行</td><td>本地 GPU (RTX 5060 Laptop, fp16, ~86s reindex 全量)</td></tr>
+</table>
+
+<h4>chunk 加大的理由(2026-05-23)</h4>
+<p>原 chunk 参数 300 / 500 / 800 把规则文件切得过碎。引入 Reranker 后,精排阶段需要给模型更完整的上下文(段落级语义),所以把 chunk 加大到 500 / 1000 / 1500。chunks 实测从 4625 → 3693(-20%),reindex 时间不变(~86s GPU)。</p>
+
+<h4>统一 env vars 命名(2026-05-23)</h4>
+<pre><code>PLATFORM_RERANKER_MODEL_PATH=D:\models\Qwen3-Reranker-0.6B
+PLATFORM_RERANKER_DEVICE=cuda
+PLATFORM_RERANKER_ENABLED=true
+PLATFORM_SEARCH_RECALL_K=30      # Chroma 召回数(粗排)
+PLATFORM_SEARCH_RETURN_K=5       # Reranker 精排后返回数</code></pre>
+<p>兼容旧名 <code>PLATFORM_RERANKER_TOP_K</code>。</p>
+
+<h3>3.2 4 个查询工具</h3>
+<table>
+<tr><th>工具</th><th>用途</th></tr>
+<tr><td><code>search_docs</code></td><td>语义搜索文档,可按 <code>category</code> / <code>module</code> 过滤</td></tr>
+<tr><td><code>list_collections</code></td><td>看文档库统计(各类数量)</td></tr>
+<tr><td><code>get_by_file</code></td><td>拿某 .md 文件全文</td></tr>
+<tr><td><code>search_nodes</code></td><td>低层接口,直接查向量库</td></tr>
+</table>
+
+<h3>3.3 工作原理</h3>
+<div class="diagram">
+索引时:
+  .claude/rules/*.md  ─┐
+  docs/**/*.md        ─┼─→  分块(三级 chunk)
+  **/CLAUDE.md        ─┘         ↓
+                                Qwen3 模型 encode(每块 → 1024 维向量)
+                                 ↓
+                                存入 Chroma (SQLite)
+
+查询时:
+  用户问 "影子规则怎么过滤"
+    ↓
+  Qwen3 encode(query) → 1024 维向量
+    ↓
+  Chroma 计算余弦距离 → 找最近的 K 个 chunk
+    ↓
+  返回原始 markdown 片段
+</div>
+
+<h3>3.4 instruction-aware (Qwen3 特性)</h3>
+<p>Qwen3 模型支持<strong>区分查询和文档</strong>。索引时直接 encode 文档;查询时给 prompt:</p>
+<pre><code>"Instruct: Given a web search query, retrieve relevant passages.
+Query: 影子规则数据隔离"</code></pre>
+<p>这让 retrieval 准确率提升 5-15%。本项目已在 <code>tools/chroma/index_docs.py</code> 和 <code>mcp_server.py</code> 接入。</p>
+
+<div class="callout">
+<strong>典型场景</strong>:你问"5-15 北向 deprecated 是什么事故",chroma 直接召回 <code>docs/operations/incident-2026-05-15-north-bound-deprecated.md</code>,不用你记文件名。
+</div>
+
+<!-- =============================================== -->
+<h2 id="reranker">3.5 Qwen3-Reranker-0.6B — 两阶段精排 ⭐ 新</h2>
+
+<p><span class="tag purple">新增</span> 2026-05-23 上线 · 召回 top-30 → 精排 top-5</p>
+
+<h3>3.5.1 为什么需要 Reranker</h3>
+
+<p>纯 embedding 检索(粗排)有个根本短板:把<strong>整个 query 和整个 chunk</strong>各自压成一个向量,丢失细粒度匹配信息。Reranker 是<strong>cross-encoder</strong>,把 <code>(query, chunk)</code> 拼成一个序列直接进 transformer,可以做<strong>token 级语义对齐</strong>。</p>
+
+<table>
+<tr><th>对比项</th><th>Embedding (粗排)</th><th>Reranker (精排)</th></tr>
+<tr><td>架构</td><td>bi-encoder,query 和 doc 分开 encode</td><td>cross-encoder,query+doc 拼接</td></tr>
+<tr><td>计算</td><td>1 次 encode + 余弦距离</td><td>N 次 cross attention(慢但准)</td></tr>
+<tr><td>规模</td><td>百万级语料</td><td>几十~几百 candidate</td></tr>
+<tr><td>排序质量</td><td>~70 分</td><td>~85-90 分</td></tr>
+</table>
+
+<h3>3.5.2 两阶段流程</h3>
+
+<div class="diagram">
+用户 query → "shadow_mode 影子规则 SQL 联动审计 9 处"
+                        │
+                        ▼
+        ┌────────────────────────────────────┐
+        │  ① 粗排 (Chroma + Qwen3-Embedding) │
+        │  - encode query → 1024 维          │
+        │  - 余弦距离 vs 3693 chunks         │
+        │  - 返回 top-30 candidates          │
+        └─────────────────┬──────────────────┘
+                          │
+                          ▼
+        ┌────────────────────────────────────┐
+        │  ② 精排 (Qwen3-Reranker)            │
+        │  - 把 (query, candidate) 30 对     │
+        │    拼成 chat template              │
+        │  - 取 yes / no token logits 差     │
+        │  - 用 softmax 归一化为 score       │
+        │  - 按 score 重排,取 top-5         │
+        └─────────────────┬──────────────────┘
+                          │
+                          ▼
+                  返回给 LLM
+</div>
+
+<h3>3.5.3 关键技术细节:不是 sentence-transformers CrossEncoder</h3>
+
+<div class="callout warn">
+<strong>正确接法</strong>:Qwen3-Reranker 是基于 chat-template + yes/no token logits 的特殊实现,不能直接用 sentence-transformers 的 <code>CrossEncoder</code> 类(那是另一种架构,会跑通但分数错)。
+</div>
+
+<pre><code># 错误(返回的 score 是垃圾)
+from sentence_transformers import CrossEncoder
+model = CrossEncoder("D:/models/Qwen3-Reranker-0.6B")
+scores = model.predict([(query, doc) for doc in candidates])
+
+# 正确(本项目实现 — yes/no token logits)
+inputs = tokenizer.apply_chat_template(
+    [{"role": "user", "content": f"Query: {query}\nDocument: {doc}\nAnswer yes if relevant."}],
+    return_tensors="pt"
+).to("cuda")
+with torch.no_grad():
+    logits = model(inputs).logits[0, -1]            # 最后一个位置的 logits
+score = (logits[YES_TOKEN_ID] - logits[NO_TOKEN_ID]).item()</code></pre>
+
+<h3>3.5.4 性能基线(实测)</h3>
+
+<table>
+<tr><th>指标</th><th>值</th></tr>
+<tr><td>模型路径</td><td><code>D:\models\Qwen3-Reranker-0.6B</code></td></tr>
+<tr><td>文件数</td><td>9 个(safetensors 分片)</td></tr>
+<tr><td>磁盘大小</td><td>1.1 GB</td></tr>
+<tr><td>加载时间</td><td>~3 秒(首次 GPU)</td></tr>
+<tr><td>VRAM 占用</td><td>~1.2 GB(常驻 GPU)</td></tr>
+<tr><td>20 pairs 推理</td><td>1.6s 首次 / 300-500ms warm</td></tr>
+<tr><td>默认 RECALL_K / RETURN_K</td><td>30 / 5</td></tr>
+</table>
+
+<h3>3.5.5 端到端验证</h3>
+
+<div class="callout good">
+<strong>实测样例</strong>(2026-05-23 验证):
+<p>Query: <code>"shadow_mode 影子规则 SQL 联动审计 9 处"</code></p>
+<ul class="compact">
+  <li>粗排(Chroma 单跑):<code>CLAUDE.md</code> 排在第 4 位,前 3 都是 daily summary 碎片</li>
+  <li>精排后:<code>CLAUDE.md</code> 拉到第 1 位 ✅(命中"9 处"这个精确数字 + "shadow-isolation.md"硬约束章节)</li>
+</ul>
+</div>
+
+<h3>3.5.6 失败降级</h3>
+
+<p>Reranker 是<strong>加分项,不是关键路径</strong>。任何环节挂掉时主动降级:</p>
+<ul class="compact">
+  <li>模型加载失败 → 走纯 embedding 顺序,记一条 WARN 日志</li>
+  <li>评分异常(空 logits / NaN)→ 跳过该 candidate,不阻塞</li>
+  <li><code>PLATFORM_RERANKER_ENABLED=false</code> → 显式关掉,只用粗排</li>
+</ul>
+
+<!-- =============================================== -->
+<h2 id="hot-reload">3.6 MCP server 热重载机制</h2>
+
+<p><span class="tag purple">新增</span> 2026-05-23 上线</p>
+
+<h3>3.6.1 问题</h3>
+
+<p><strong>原</strong>:每次重建 Chroma 索引后,要手工重启 Claude Code 才能让 MCP server 拿到新数据。否则 server 还在用旧的 Chroma 句柄,新增的 chunk 查不到。</p>
+
+<h3>3.6.2 解法:索引完成写戳 + server 自动 reload</h3>
+
+<table>
+<tr><th>组件</th><th>行为</th></tr>
+<tr><td><code>index_docs.py</code></td><td>索引完成时写 <code>data/chroma/.last_build.json</code>(mtime + chunks + dim + model)</td></tr>
+<tr><td><code>mcp_server.py</code></td><td>每次 query 前 <code>stat</code> 戳文件,mtime 变新 → drop Chroma collection 句柄重连</td></tr>
+<tr><td>关键点</td><td><strong>只 reload Chroma client,模型常驻 GPU 不重载</strong>(避免 3s 加载抖动)</td></tr>
+</table>
+
+<h3>3.6.3 内部分层:模型 vs 句柄</h3>
+
+<pre><code># 伪代码
+_model = None              # SentenceTransformer,常驻进程
+_reranker = None           # Qwen3-Reranker,常驻 GPU
+_collection = None         # Chroma collection 句柄,变化时重连
+_last_build_mtime = 0      # 戳文件 mtime 缓存
+_init_error = None         # 自愈用
+
+def _maybe_reload_collection():
+    cur_mtime = stat(".last_build.json").st_mtime
+    if cur_mtime &gt; _last_build_mtime:
+        _collection = None       # drop 句柄
+        _init_error = None       # 同时清错误(重建瞬间不卡查询)
+        _last_build_mtime = cur_mtime
+
+def _ensure_model():
+    if _model is None: _model = SentenceTransformer(EMBED_PATH)
+    if _reranker is None and RERANK_ENABLED: _reranker = load_reranker()</code></pre>
+
+<h3>3.6.4 自愈细节</h3>
+
+<p><code>_init_error</code> 在戳变新时同时清空。<strong>原因</strong>:重建索引的瞬间,server 可能查到一半的 SQLite 报错,把错误缓存住。戳更新时同时清错误,下一次 query 就能正常工作,无需手动干预。</p>
+
+<!-- =============================================== -->
+<h2 id="recall-log">3.7 JSONL 召回日志</h2>
+
+<p><span class="tag purple">新增</span> 2026-05-23 上线 · 收集 1 周后做召回质量分析</p>
+
+<h3>3.7.1 位置</h3>
+
+<pre><code>tools\chroma\search_recall.jsonl
+# 每行一个 JSON,append-only</code></pre>
+
+<h3>3.7.2 字段</h3>
+
+<table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td><code>ts</code></td><td>查询时间戳(ISO)</td></tr>
+<tr><td><code>query</code></td><td>用户原始 query 字符串</td></tr>
+<tr><td><code>k</code></td><td>请求返回数</td></tr>
+<tr><td><code>category</code> / <code>module</code></td><td>过滤参数(可空)</td></tr>
+<tr><td><code>hit</code></td><td>实际返回数</td></tr>
+<tr><td><code>rerank_used</code></td><td>true / false(是否走精排)</td></tr>
+<tr><td><code>n_candidates</code></td><td>粗排 candidate 数(走精排时)</td></tr>
+<tr><td><code>elapsed_ms</code></td><td>端到端耗时</td></tr>
+<tr><td><code>top5[].file</code></td><td>top-5 命中文件路径</td></tr>
+<tr><td><code>top5[].distance</code></td><td>粗排余弦距离</td></tr>
+<tr><td><code>top5[].rerank_score</code></td><td>精排分数(可空,关掉精排时)</td></tr>
+</table>
+
+<h3>3.7.3 用途</h3>
+
+<ul class="compact">
+  <li>积累 1 周后,扫"top-1 distance &gt; 0.5"的样本 → 这些是召回质量差的 query,可能需要 reindex 或调 chunk</li>
+  <li>对比 <code>rerank_score</code> vs <code>distance</code> 的 ranking,看精排实际收益</li>
+  <li>查 <code>elapsed_ms</code> P95 / P99,看是不是真有性能瓶颈</li>
+</ul>
+
+<!-- =============================================== -->
+<h2 id="crosslink">4. cross-link — 跨层业务链路</h2>
+
+<p><span class="tag yellow">用途</span> 找前端 API ↔ Java endpoint ↔ Table 的完整业务链</p>
+
+<h3>4.1 它是什么</h3>
+<p>专门为<strong>本项目的三层架构</strong>(前端 → Java → DB / Python)定制的链路索引。CodeGraph 是通用图,cross-link 知道"Controller / Facade / Service / Mapper / Table"这些业务层级语义。</p>
+
+<table>
+<tr><th>索引内容</th><th>数量</th></tr>
+<tr><td>Java endpoint = 前端 API</td><td>128 / 128 (0 mismatch)</td></tr>
+<tr><td>Controller → Facade 边</td><td>280</td></tr>
+<tr><td>Facade → Service 边</td><td>124</td></tr>
+<tr><td>Service → Mapper 边</td><td>133</td></tr>
+<tr><td>Mapper → Table 边</td><td>168</td></tr>
+<tr><td>Python method ↔ 表读/写/更新</td><td>70 / 39 / 42 / 13</td></tr>
+<tr><td>Flyway 迁移</td><td>90</td></tr>
+<tr><td>表 / 列</td><td>52 / 723</td></tr>
+</table>
+
+<h3>4.2 4 个查询工具</h3>
+<table>
+<tr><th>工具</th><th>用途</th></tr>
+<tr><td><code>find_endpoint_link</code></td><td>给定 endpoint,返回完整链:前端 API → Java endpoint → Facade → Service → Mapper → Table</td></tr>
+<tr><td><code>find_table_refs</code></td><td>给定表名,返回所有读/写它的 Java Mapper + Python 仓储</td></tr>
+<tr><td><code>search_nodes</code></td><td>跨层搜符号</td></tr>
+<tr><td><code>cross_link_stats</code></td><td>看库统计 + 索引时间</td></tr>
+</table>
+
+<div class="callout">
+<strong>典型场景</strong>:"我要改 <code>stock_recommend_result.shadow_mode</code> 字段语义,会影响哪些代码?" → <code>find_table_refs("stock_recommend_result")</code> 一次性返回 9 处 SQL + 2 处 Python 仓储,不会漏。
+</div>
+
+<!-- =============================================== -->
+<h2 id="compare">5. 三者边界对比</h2>
+
+<table>
+<tr><th>问题类型</th><th>用谁</th><th>为什么</th></tr>
+<tr><td>"<code>save_recommendations</code> 函数源码"</td><td><strong>CodeGraph</strong></td><td>精确符号查找</td></tr>
+<tr><td>"<code>save_recommendations</code> 被谁调用"</td><td><strong>CodeGraph</strong></td><td>callers</td></tr>
+<tr><td>"改这个函数会影响什么"</td><td><strong>CodeGraph</strong></td><td>impact / blast radius</td></tr>
+<tr><td>"shadow 规则相关的设计文档"</td><td><strong>Chroma</strong></td><td>语义检索 .md</td></tr>
+<tr><td>"5-18 那次跑批失败的复盘"</td><td><strong>Chroma</strong></td><td>事故归档语义匹配</td></tr>
+<tr><td>"PIT 红线有几条规则"</td><td><strong>Chroma</strong></td><td>规则文档搜索</td></tr>
+<tr><td>"<code>/v1/stocks/detail-full</code> 完整调用链"</td><td><strong>cross-link</strong></td><td>endpoint 链路图</td></tr>
+<tr><td>"<code>stock_alert_event</code> 表被谁读"</td><td><strong>cross-link</strong></td><td>表引用专表</td></tr>
+<tr><td>"前端 API 与后端 endpoint 是否一致"</td><td><strong>cross-link</strong></td><td>双源对账</td></tr>
+</table>
+
+<div class="callout danger">
+<strong>反例</strong>:不要用 <code>Grep</code> + <code>Read</code> 循环找代码或文档。MCP 索引已经预先做了这工作,grep 50 文件 + 全 Read = 上下文消耗 10×,且不如索引精确。
+</div>
+
+<!-- =============================================== -->
+<h2 id="memory">6. MEMORY — 自动加载的用户记忆</h2>
+
+<p><span class="tag green">用途</span> 跨会话保留用户偏好 / 反馈 / 项目状态</p>
+
+<h3>6.1 它在哪</h3>
+<pre><code>C:\Users\G1706256\.claude\projects\D--WorkSpace-platform\memory\
+├── MEMORY.md                  ← 总索引(每次会话自动注入 LLM)
+├── feedback_dev_order.md       ← 一个偏好
+├── feedback_stock_display.md   ← 一个偏好
+├── reference_mcp_tools.md      ← 一个参考
+└── ...</code></pre>
+
+<h3>6.2 工作方式</h3>
+<ul class="compact">
+  <li>每次会话开始,系统自动把 <code>MEMORY.md</code> 注入 LLM 的 system prompt</li>
+  <li>LLM 看到"用户偏好 X" → 自动应用,不需要每次重复说</li>
+  <li>需要的时候,LLM 会 <code>Read</code> 具体子文件拿详细内容</li>
+</ul>
+
+<h3>6.3 4 类记忆</h3>
+<table>
+<tr><th>类型</th><th>例子</th></tr>
+<tr><td><code>user</code></td><td>用户角色、目标、知识背景</td></tr>
+<tr><td><code>feedback</code></td><td>"开发顺序 Python → Java → Web,前端最后"</td></tr>
+<tr><td><code>project</code></td><td>"5-18 这次 commit 的真实原因是 X"</td></tr>
+<tr><td><code>reference</code></td><td>"Linear 的 INGEST 项目跟踪 pipeline bug"</td></tr>
+</table>
+
+<div class="callout good">
+<strong>关键区别</strong>:MEMORY 是 LLM 自己维护的,你跟它说"以后记住 X" 它会自己写入;而上面三套 MCP 是<strong>预先索引的代码 / 文档客观事实</strong>,不会被一句话改变。
+</div>
+
+<!-- =============================================== -->
+<h2 id="embedding">7. Embedding 模型 (Qwen3-Embedding-0.6B)</h2>
+
+<h3>7.1 升级历程</h3>
+<table>
+<tr><th>阶段</th><th>模型</th><th>维度</th><th>中文 retrieval</th></tr>
+<tr><td>起步</td><td>paraphrase-multilingual-MiniLM-L12-v2</td><td>384</td><td>~60</td></tr>
+<tr><td>2026-05-22</td><td><strong>Qwen3-Embedding-0.6B</strong></td><td><strong>1024</strong></td><td><strong>71+</strong></td></tr>
+</table>
+
+<h3>7.2 为什么选 0.6B 不选 4B / 8B</h3>
+<ul class="compact">
+  <li>本地 chroma 是<strong>冷工具</strong>(每周 1-2 次查询),投入 VRAM 性价比下降</li>
+  <li>0.6B 已经覆盖 95% 的中文 retrieval 收益</li>
+  <li>4B / 8B 显存占用 4-8GB,挤压其他模型 / 游戏空间</li>
+</ul>
+
+<h3>7.3 部署位置</h3>
+<pre><code>D:\models\Qwen3-Embedding-0.6B   (~1.2 GB,仓库外,跨项目共享)</code></pre>
+
+<h3>7.4 关键技术细节</h3>
+<div class="callout warn">
+<strong>正确接法</strong>:绕开 Chroma 内置的 <code>SentenceTransformerEmbeddingFunction</code>,索引侧 + 查询侧<strong>自己拿模型 encode</strong> → 直接传 <code>embeddings=</code> 给 Chroma。否则 instruction-aware 静默失效,Qwen3 的优势白瞎。
+</div>
+
+<pre><code># 错误(EF 路径无法区分 query / doc prompt)
+col = chroma.get_or_create_collection(
+    embedding_function=SentenceTransformerEmbeddingFunction(...)
+)
+col.add(documents=docs)  # 模糊匹配,没用 prompt
+
+# 正确(本项目当前实现)
+model = SentenceTransformer("D:/models/Qwen3-Embedding-0.6B")
+doc_embeds = model.encode(docs)                              # 索引侧无 prompt
+q_embeds = model.encode([q], prompt_name="query")           # 查询侧加 instruction
+col.add(embeddings=doc_embeds, documents=docs)
+col.query(query_embeddings=q_embeds)</code></pre>
+
+<h3>7.5 性能基线</h3>
+<table>
+<tr><th>指标</th><th>MiniLM</th><th>Qwen3-0.6B</th></tr>
+<tr><td>磁盘</td><td>480 MB</td><td>1136 MB</td></tr>
+<tr><td>VRAM (fp16)</td><td>~80 MB</td><td>~600 MB</td></tr>
+<tr><td>reindex 3693 chunks</td><td>20s</td><td>86s</td></tr>
+<tr><td>query 单次 encode</td><td>&lt;50ms</td><td>~150ms</td></tr>
+<tr><td>最大上下文</td><td>512 tokens</td><td>32768 tokens</td></tr>
+</table>
+
+<h3>7.6 硬件资源全景</h3>
+<table>
+<tr><th>项</th><th>占用</th></tr>
+<tr><td>GPU</td><td>RTX 5060 Laptop 8GB GDDR7</td></tr>
+<tr><td>CPU</td><td>Intel Core Ultra 7 255H</td></tr>
+<tr><td>系统 RAM</td><td>32 GB(项目 ~20 GB,余量 ~7 GB)</td></tr>
+<tr><td>Embedding VRAM</td><td>~600 MB(常驻)</td></tr>
+<tr><td>Reranker VRAM</td><td>~1200 MB(常驻,2026-05-23 起)</td></tr>
+<tr><td>总 VRAM 占用</td><td>~1.8 GB / 8 GB(留 6.2 GB 给游戏 / 其他模型)</td></tr>
+</table>
+
+<!-- =============================================== -->
+<h2 id="ai-health">8. <code>ai-health.ps1</code> — 健康体检</h2>
+
+<p><span class="tag blue">位置</span> <code>tools/dev/ai-health.ps1</code></p>
+
+<h3>8.1 一句话</h3>
+<p>跑一次脚本,2 秒内告诉你 <strong>12 项关键指标</strong>是否健康。重启会话 / 升级模型 / 出现可疑现象时第一站。</p>
+
+<h3>8.2 完整检查项</h3>
+<table>
+<tr><th>类别</th><th>项</th><th>验证内容</th></tr>
+<tr><td rowspan="4">Chroma 嵌入</td><td><code>chroma venv</code></td><td>Python 虚拟环境存在</td></tr>
+<tr><td><code>embed model</code></td><td>模型文件齐全(11 个文件)</td></tr>
+<tr><td><code>embed load</code></td><td>sentence-transformers 能加载 + 维度正确 + prompt 已配</td></tr>
+<tr><td><code>torch cuda</code></td><td>GPU 可用(<code>cuda=True</code>)</td></tr>
+<tr><td rowspan="3">Chroma 索引</td><td><code>data dir</code></td><td>数据目录 + segments 数</td></tr>
+<tr><td><code>collection</code></td><td>chunks 数+维度+模型名匹配</td></tr>
+<tr><td><code>freshness</code></td><td>索引比 <code>.md</code> 最新 mtime 新(不落后于文档)</td></tr>
+<tr><td>规则一致性</td><td><code>rules vs incident</code></td><td>规则覆盖最新事故(防规则滞后)</td></tr>
+<tr><td rowspan="2">CodeGraph</td><td><code>cross_layer freshness</code></td><td>跨层图节点/边数 + 时间</td></tr>
+<tr><td><code>codegraph db</code></td><td>sqlite 大小 + 节点/边数</td></tr>
+<tr><td>API 服务</td><td><code>codegraph-api</code></td><td>Java jar 存在</td></tr>
+<tr><td>清洁度</td><td><code>git tools/</code></td><td><code>tools/</code> 无未提交污染</td></tr>
+</table>
+
+<h3>8.3 退出码</h3>
+<ul class="compact">
+  <li>全 OK → <code>exit 0</code> + 输出 <code>SUMMARY: all green</code></li>
+  <li>任一 WARN → <code>exit 2</code>(非阻塞,提醒)</li>
+  <li>任一 FAIL → <code>exit 1</code>(关键栈坏)</li>
+</ul>
+
+<h3>8.4 实测输出(2026-05-23 当前)</h3>
+<pre><code>[OK ] chroma venv          .venv/Scripts/python.exe
+[OK ] embed model          D:\models\Qwen3-Embedding-0.6B (11 files)
+[OK ] embed load           dim=1024 max_seq=32768 query_prompt=True
+[OK ] reranker model       D:\models\Qwen3-Reranker-0.6B (9 files)  ← 新
+[OK ] torch cuda           torch=2.11.0+cu128 cuda=True gpu=RTX 5060 Laptop
+[OK ] chroma collection    chunks=3693 dim=1024 model=Qwen3-Embedding-0.6B
+[OK ] chroma freshness     index newer than latest doc
+[OK ] hook missed?         no recent missed-fire (HEAD matches reindex.log) ← 新
+[OK ] codegraph db         44 MB, nodes=19044 edges=38048
+[OK ] codegraph-api        codegraph-api-0.1.0-SNAPSHOT.jar
+[OK ] git tools/           clean
+SUMMARY: all green</code></pre>
+
+<h3>8.5 hook missed-fire 检测(2026-05-23 新)</h3>
+<p>Git for Windows 的 post-commit hook 偶发 errno 1 不执行(详见 §11)。<code>ai-health</code> 新加一项:</p>
+<ul class="compact">
+  <li>读 <code>git log -1 --format=%H</code>(HEAD SHA)</li>
+  <li>读 <code>tools/chroma/reindex.log</code> 最近一行的 SHA</li>
+  <li>两者不一致 → 显式 WARN + 给补救命令 <code>powershell -File tools/dev/post-commit.ps1</code></li>
+</ul>
+
+<!-- =============================================== -->
+<h2 id="update-local-ai">9. <code>update-local-ai.ps1</code> — 重建索引</h2>
+
+<p><span class="tag blue">位置</span> <code>tools/dev/update-local-ai.ps1</code></p>
+
+<h3>9.1 用途</h3>
+<p>一键重建本地 AI 索引。两个开关控制要重建哪部分:</p>
+<table>
+<tr><th>命令</th><th>做什么</th><th>耗时</th></tr>
+<tr><td><code>update-local-ai.ps1</code></td><td>全量(Chroma + CodeGraph + cross-link)</td><td>~3 分钟</td></tr>
+<tr><td><code>update-local-ai.ps1 -SkipCodeGraph</code></td><td>只重建 Chroma + cross-link(文档改动时)</td><td>~80 秒</td></tr>
+<tr><td><code>update-local-ai.ps1 -SkipChroma</code></td><td>只重建 CodeGraph + cross-link(代码改动时)</td><td>~2 分钟</td></tr>
+</table>
+
+<h3>9.2 何时手工跑</h3>
+<table>
+<tr><th>场景</th><th>动作</th></tr>
+<tr><td>日常代码改动 commit</td><td>不需要(hook 跳过)</td></tr>
+<tr><td>文档 / 规则 / 日报改动 commit</td><td>不需要(hook 自动跑 <code>-SkipCodeGraph</code>)</td></tr>
+<tr><td>代码大改后,要查影响面</td><td>手工 <code>-SkipChroma</code> 同步 codegraph</td></tr>
+<tr><td>两边都动 / 周末维护</td><td>手工跑全量</td></tr>
+</table>
+
+<!-- =============================================== -->
+<h2 id="clean">10. <code>clean-local-artifacts.ps1</code> — 工作区清理</h2>
+
+<p><span class="tag blue">位置</span> <code>tools/dev/clean-local-artifacts.ps1</code></p>
+
+<h3>10.1 设计哲学</h3>
+<p><strong>保守优先</strong>。默认只清最确定的垃圾,递归删需要显式开关。永不触碰 <code>.claude/rules/</code> / <code>docs/</code> / <code>models/</code> / <code>data/chroma/</code> / <code>.codegraph/codegraph.db</code> / <code>archive/incidents/</code>。</p>
+
+<h3>10.2 三档模式</h3>
+<table>
+<tr><th>命令</th><th>清什么</th><th>实测占用</th></tr>
+<tr><td>默认</td><td>9 个已知运行时 dump(<code>.tmp_*.log</code> / <code>bat_*.txt</code> 等)</td><td>~1.4 MB</td></tr>
+<tr><td><code>-DeepClean</code></td><td>递归 <code>__pycache__/</code> + <code>.pytest_cache/</code>(避开 <code>.venv</code> / <code>node_modules</code>)</td><td>视情况</td></tr>
+<tr><td><code>-KeepLogs N</code></td><td>轮替 <code>python/stock-pipeline/archive/logs/</code> 保留最近 N 个</td><td>默认保留全部</td></tr>
+<tr><td><code>-DryRun</code></td><td>只列要删的,不真删</td><td>0</td></tr>
+</table>
+
+<!-- =============================================== -->
+<h2 id="dirty-check">10.5 <code>dirty-index-check.ps1</code> — MCP 兜底前置检查 ⭐ 新</h2>
+
+<p><span class="tag blue">位置</span> <code>tools/dev/dirty-index-check.ps1</code> · 2026-05-23 新增</p>
+
+<h3>10.5.1 用途</h3>
+
+<p>调 CodeGraph / cross-link / Chroma 之前先查工作树是否有 dirty 文件命中索引范围。命中 → 提示"索引可能滞后,建议 grep+Read 兜底"。</p>
+
+<h3>10.5.2 三种使用模式</h3>
+
+<table>
+<tr><th>命令</th><th>用途</th><th>输出</th></tr>
+<tr><td><code>dirty-index-check.ps1</code></td><td>人工查看</td><td>列表 + 兜底建议</td></tr>
+<tr><td><code>dirty-index-check.ps1 -Json</code></td><td>给 AI 用</td><td>JSON 结构,LLM 可解析</td></tr>
+<tr><td><code>dirty-index-check.ps1 -Quiet</code></td><td>脚本调用</td><td>只看 exit code</td></tr>
+</table>
+
+<h3>10.5.3 退出码</h3>
+
+<ul class="compact">
+  <li><code>exit 0</code> — 工作树干净 / dirty 不命中索引范围,MCP 结果可信</li>
+  <li><code>exit 1</code> — dirty 命中(*.py / *.java / *.tsx / *.md),输出受影响文件 + 兜底建议</li>
+  <li><code>exit 2</code> — 不在 git 仓库</li>
+</ul>
+
+<h3>10.5.4 接入 SOP</h3>
+
+<p>已写入 <code>.claude/rules/ai-tools-mcp.md</code> §2.1。LLM 在调 MCP 工具前先跑这个脚本,有 dirty 命中时:</p>
+<ul class="compact">
+  <li>把 MCP 结果加注脚 "工作树有未提交改动,索引可能滞后"</li>
+  <li>关键决策(写代码 / 改 SQL / 改合规字段)前用 grep+Read 在工作树<strong>真实文件</strong>上做最后核对</li>
+</ul>
+
+<!-- =============================================== -->
+<h2 id="git-hook">11. Git post-commit hook — 自动重建</h2>
+
+<h3>11.1 怎么装</h3>
+<pre><code>tools\dev\install-git-hooks.ps1</code></pre>
+<p>把 <code>tools/dev/git-hooks/post-commit</code> 复制到 <code>.git/hooks/post-commit</code>(后者不入版本控制,需要装一次)。</p>
+
+<h3>11.2 触发逻辑</h3>
+<div class="diagram">
+git commit  ─→  hook 被触发
+                 │
+                 ▼
+            git diff-tree HEAD 看改了哪些文件
+                 │
+        ┌────────┴────────┐
+        ▼                 ▼
+  命中文档路径?      未命中(纯代码)
+    │                     │
+    ▼                     ▼
+  后台 detached 启动     静默 no-op
+  update-local-ai.ps1
+  -SkipCodeGraph         (代码改动 hook 不管,
+        │                 codegraph 用户手工同步)
+        ▼
+  ~80s 后索引刷新完
+  日志 tools/chroma/reindex.log
+</div>
+
+<h3>11.3 命中规则(文档变更才触发)</h3>
+<ul class="compact">
+  <li><code>docs/</code></li>
+  <li><code>.claude/rules/</code> / <code>.claude/skills/</code></li>
+  <li><code>**/CLAUDE.md</code> / <code>**/AGENTS.md</code></li>
+  <li><code>tools/**/*.md</code></li>
+</ul>
+
+<div class="callout good">
+<strong>设计原则</strong>:reindex 跟着<strong>内容</strong>变,不跟着<strong>时间</strong>变。代码 commit 不触发(避免噪音),文档 commit 自动触发(保索引新鲜)。
+</div>
+
+<h3>11.4 sh stub 极简化(2026-05-23)</h3>
+
+<p>Git 在 Windows 下用 sh.exe 执行 hook,但 Git Bash 子 shell 偶发 errno 1。改造:</p>
+<ul class="compact">
+  <li>删除 <code>$(git rev-parse --show-toplevel)</code> 子 shell(errno 1 真凶之一)</li>
+  <li>用<strong>绝对路径</strong> <code>/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe</code></li>
+  <li>整个 stub 极简化到 5 行,只做 spawn,不做任何条件判断 / 计算</li>
+</ul>
+
+<h3>11.5 errno 1 没被根治 → missed-fire 检测器兜底</h3>
+
+<div class="callout danger">
+<strong>诚实结论</strong>:Git for Windows 2.54 升级也没修(测试 5 次 commit 仍 2 次中招)。我们不再追求"100% hook 触发",而是<strong>建检测器</strong>:
+</div>
+
+<table>
+<tr><th>层</th><th>动作</th></tr>
+<tr><td>第一道:hook 本身</td><td>sh stub 尽可能简单,降低失败率(但不为 0)</td></tr>
+<tr><td>第二道:<code>ai-health</code> 体检</td><td>对比 HEAD SHA 与 <code>reindex.log</code>,漏跑显式 WARN</td></tr>
+<tr><td>第三道:手工补救</td><td><code>powershell -File tools/dev/post-commit.ps1</code> 一行命令补触发</td></tr>
+</table>
+
+<p>核心思想:<strong>容忍不完美自动化,加可观测性 + 一行补救</strong>,比死磕"hook 100% 不漏跑"更务实。</p>
+
+<!-- =============================================== -->
+<h2 id="ab-test">12. <code>embed_ab_test.py</code> — 升级前后对比</h2>
+
+<p><span class="tag blue">位置</span> <code>tools/dev/embed_ab_test.py</code></p>
+
+<h3>12.1 用途</h3>
+<p>未来换 embedding 模型时(比如 Qwen3-1B / BGE-M3 / 上 reranker),用这个脚本跑 A/B 对照,防 cherry-pick。</p>
+
+<h3>12.2 工作方式</h3>
+<ol>
+  <li>预定 5 个"真实查询"(故意挑 vague 中文 + 代码符号混合 + 跨档案)</li>
+  <li>用<strong>旧模型</strong>跑一遍,top-5 结果存 <code>_ab_baseline_*.json</code></li>
+  <li>换<strong>新模型</strong>重建索引</li>
+  <li>跑相同 5 个查询,top-5 结果存 <code>_ab_candidate_*.json</code></li>
+  <li><code>_ab_diff.py</code> 输出对比表(每个 query 哪个胜)</li>
+</ol>
+
+<h3>12.3 2026-05-22 升级实测(MiniLM → Qwen3-0.6B)</h3>
+<table>
+<tr><th>Query</th><th>MiniLM 结果</th><th>Qwen3 结果</th><th>裁决</th></tr>
+<tr><td>影子规则 SQL 联动审计</td><td>shadow-isolation #2 #3</td><td>shadow-isolation 掉到 #4</td><td>❌ MiniLM</td></tr>
+<tr><td>5-20 Chain C bug 定位</td><td>5-20 daily 标题(#0)</td><td>5-20 daily 实质章节(#2)</td><td>🟡 Qwen3 略优</td></tr>
+<tr><td>policy_version incident</td><td>dist=0.34</td><td>dist=0.27(更紧)</td><td>🟡 平</td></tr>
+<tr><td>Qwen3 接入 Chroma</td><td>引入无关 codegraph-viewer</td><td>4 chunks 无插入</td><td>✅ Qwen3</td></tr>
+<tr><td>sys_user capital 真值源</td><td>multi-user-design(沾边)</td><td>5-18 决策实际地</td><td>✅ Qwen3</td></tr>
+</table>
+<p><strong>比分:Qwen3 赢 2 / 平 2 / 输 1</strong>。结论:数据驱动接受升级。</p>
+
+<!-- =============================================== -->
+<h2 id="skills">12.5 三个 Skill 入口 ⭐ 新</h2>
+
+<p><span class="tag purple">新增</span> 2026-05-23 上线 · 把工具栈封装成 Claude Code 的 slash command</p>
+
+<h3>12.5.1 设计</h3>
+
+<p>本工具栈的核心脚本都是 PowerShell,直接调用记不住参数。封装成 Skill 后:</p>
+<ul class="compact">
+  <li>用户输入 <code>/ai-health</code> / <code>/update-local-ai</code> / <code>/verify-pipeline-run</code></li>
+  <li>Claude Code 读对应 <code>.claude/skills/&lt;name&gt;/SKILL.md</code> → 知道该跑哪个脚本 / 传什么参数</li>
+  <li>支持 multiSelect:用户选择子项,Skill 根据选择拼参数</li>
+</ul>
+
+<h3>12.5.2 三个 Skill</h3>
+
+<table>
+<tr><th>Skill</th><th>包装的脚本</th><th>multiSelect</th></tr>
+<tr><td><code>/ai-health</code></td><td><code>ai-health.ps1</code> + <code>dirty-index-check.ps1</code></td><td>3 档:health / dirty / both</td></tr>
+<tr><td><code>/update-local-ai</code></td><td><code>update-local-ai.ps1</code></td><td>4 档:all / Chroma / CodeGraph / cross-link</td></tr>
+<tr><td><code>/verify-pipeline-run</code></td><td>业务侧验证(不在本工具栈范围)</td><td>3 档:morning / eod / all</td></tr>
+</table>
+
+<h3>12.5.3 位置</h3>
+
+<pre><code>.claude/skills/ai-health/SKILL.md
+.claude/skills/update-local-ai/SKILL.md
+.claude/skills/verify-pipeline-run/SKILL.md</code></pre>
+
+<h3>12.5.4 使用示例</h3>
+
+<pre><code># 在 Claude Code 里
+> /ai-health both
+# → 跑 ai-health.ps1 + dirty-index-check.ps1,两个都看
+
+> /update-local-ai Chroma
+# → 只重建 Chroma(等价于 update-local-ai.ps1 -SkipCodeGraph)
+
+> /update-local-ai all
+# → 全量重建(Chroma + CodeGraph + cross-link)</code></pre>
+
+<!-- =============================================== -->
+<h2 id="workflows">13. 标准工作流</h2>
+
+<h3>13.1 修 bug 的标准链</h3>
+<ol>
+  <li><code>codegraph_search "BugSymbol"</code> — 定位代码</li>
+  <li><code>codegraph_callers "BugSymbol"</code> — 找所有调用方</li>
+  <li><code>codegraph_impact "BugSymbol"</code> — blast radius</li>
+  <li><code>search_docs "BugSymbol 相关规则"</code> — 查约束</li>
+  <li><code>find_table_refs "相关表"</code> — 跨层引用</li>
+  <li>动手 <code>Edit</code> / <code>Write</code></li>
+</ol>
+
+<h3>13.2 写新功能的标准链</h3>
+<ol>
+  <li><code>search_docs "类似功能 设计"</code> — 找设计文档参考</li>
+  <li><code>codegraph_context "现有类似实现"</code> — 找参照</li>
+  <li><code>find_endpoint_link "类似 endpoint"</code> — 看完整链路</li>
+  <li>动手实现</li>
+  <li><code>pytest tests/</code> + <code>mvn test</code> 验证</li>
+</ol>
+
+<h3>13.3 跨层改动(Python ↔ Java ↔ 前端)</h3>
+<ol>
+  <li><code>find_endpoint_link "目标 endpoint"</code></li>
+  <li><code>find_table_refs "涉及表"</code></li>
+  <li>按 <strong>Python → Java → 前端</strong> 顺序改</li>
+  <li><code>pnpm run api</code> — 前端类型重生成</li>
+  <li><code>cross_link_stats</code> — 看新 endpoint 是否被索引</li>
+</ol>
+
+<h3>13.4 平时的 hook 自动化</h3>
+<div class="diagram">
+你写代码          → commit  → 代码 hook 跳过(不动索引)
+你写文档/规则     → commit  → 后台自动 reindex Chroma(86 秒,不阻塞)
+                            → 戳更新,MCP server 热重载(§3.6)
+你周末扩展功能     → 手工跑 /update-local-ai all(3 分钟)
+                            → 跑 /ai-health both 验栈
+</div>
+
+<h3>13.5 措辞修正:优先 MCP,允许 grep+Read 兜底(2026-05-23)</h3>
+
+<p>原 <code>ai-tools-mcp.md</code> 写"<strong>禁止</strong>用 grep+Read 循环",过于绝对。修正为"<strong>优先</strong> MCP,允许 grep+Read 兜底",并列出 4 种允许场景:</p>
+
+<table>
+<tr><th>允许兜底的场景</th><th>为什么</th></tr>
+<tr><td>未提交改动命中查询范围</td><td>索引最新到 HEAD,工作树新改的代码 MCP 看不到</td></tr>
+<tr><td>怀疑索引滞后</td><td>hook 漏跑 / <code>ai-health</code> 报 stale</td></tr>
+<tr><td>MCP 工具不可用</td><td>server 进程崩 / db locked / 网络问题</td></tr>
+<tr><td>确认最新源码</td><td>MCP 返回片段后要确认实际行号、与最近编辑后的真实状态</td></tr>
+</table>
+
+<p><strong>SOP</strong>:调 MCP 前先 <code>git status -s</code> 或 <code>dirty-index-check.ps1</code>,dirty 命中提示"索引可能滞后"。</p>
+
+<!-- =============================================== -->
+<h2 id="troubleshoot">14. 故障排查</h2>
+
+<table>
+<tr><th>现象</th><th>处理</th></tr>
+<tr><td><code>codegraph database is locked</code></td><td>检查 <code>.codegraph/codegraph.db.lock</code>,stale(0 字节 + 数小时未变 + 无活进程)即删</td></tr>
+<tr><td>platform-docs 召回质量差</td><td>看 <code>ai-health</code> 的 <code>chroma freshness</code>;文档大改后跑 <code>update-local-ai.ps1 -SkipCodeGraph</code></td></tr>
+<tr><td>cross-link 数据陈旧</td><td>看 <code>cross_link_stats.build_meta.last_build_at</code>;跑 <code>update-local-ai.ps1</code></td></tr>
+<tr><td>MCP server 完全连不上</td><td>检查 <code>~/.claude.json</code> 配置;重启 Claude Code(<strong>不是 /clear</strong>)</td></tr>
+<tr><td>Qwen3 升级后查询没改善</td><td>确认绕开 EF 路径,索引侧 + 查询侧都自己 encode(详见 §7.4)</td></tr>
+<tr><td><code>ai-health</code> WARN <code>codegraph-api no jar</code></td><td><code>mvn -f apps/codegraph-api/pom.xml package -DskipTests</code></td></tr>
+<tr><td><code>git status</code> 总是脏</td><td>检查 <code>.gitignore</code>;运行 <code>clean-local-artifacts.ps1 -DryRun</code> 看冗余文件</td></tr>
+</table>
+
+<!-- =============================================== -->
+<h2 id="roadmap">15. 升级路线</h2>
+
+<h3>已完成</h3>
+<ul class="compact">
+  <li>✅ 三套 MCP server 全部联通(CodeGraph / Chroma / cross-link)</li>
+  <li>✅ Qwen3-Embedding-0.6B 上线 + instruction-aware</li>
+  <li>✅ <strong>Qwen3-Reranker-0.6B 两阶段精排</strong>(2026-05-23) — top-30 召回 → top-5 精排</li>
+  <li>✅ <strong>MCP server 热重载</strong>(2026-05-23) — 戳文件触发 client 重连,模型常驻 GPU</li>
+  <li>✅ <strong>JSONL 召回日志</strong>(2026-05-23) — search_recall.jsonl 收集召回质量数据</li>
+  <li>✅ <strong>CodeGraph 增量 sync</strong>(2026-05-23) — 79s → 1.6s,50× 提速 + rebuild lock</li>
+  <li>✅ <strong>chunk 加大 500/1000/1500</strong>(2026-05-23) — 给 Reranker 更完整上下文</li>
+  <li>✅ <strong>dirty-index-check.ps1</strong>(2026-05-23) — MCP 兜底前置检查</li>
+  <li>✅ <strong>三个 Skill 入口</strong>(2026-05-23) — <code>/ai-health</code> / <code>/update-local-ai</code> / <code>/verify-pipeline-run</code></li>
+  <li>✅ <strong>post-commit hook missed-fire 检测</strong>(2026-05-23) — errno 1 不根治,加可观测性兜底</li>
+  <li>✅ Git post-commit hook 自动 reindex 文档</li>
+  <li>✅ ai-health 12 项体检 + 索引新鲜度检测</li>
+  <li>✅ A/B test 工具链(防 cherry-pick)</li>
+  <li>✅ .gitignore 治根 + 工作区清理</li>
+</ul>
+
+<h3>潜在未来项(按价值排序)</h3>
+<ol>
+  <li>⚪ <strong>定时 codegraph 重建</strong> — 把"代码改动手工跑 codegraph"也 hook 化(增量 sync 已 1.6s,接入 hook 成本降低)</li>
+  <li>⚪ <strong>召回日志分析脚本</strong> — 1 周后扫 search_recall.jsonl,跑 top-1 distance 分布 / 精排收益对比</li>
+  <li>⚪ <strong>Embedding 模型 4B 升级</strong> — 中文 retrieval 再 +3-5 分,但 VRAM 翻 4 倍,收益曲线递减</li>
+  <li>⚪ <strong>MCP 调用次数统计</strong> — 看是不是真的避开了 grep+Read 循环</li>
+  <li>⚪ <strong>hook errno 1 根因排查</strong> — 长期看能否定位到 Git for Windows / sh.exe 的具体 bug</li>
+</ol>
+
+<hr>
+
+<h2>附录:文件清单速查</h2>
+
+<table>
+<tr><th>类别</th><th>路径</th><th>用途</th></tr>
+<tr><td rowspan="2">CodeGraph</td><td><code>.codegraph/codegraph.db</code></td><td>SQLite 索引(.gitignore)</td></tr>
+<tr><td><code>apps/codegraph-api/target/*.jar</code></td><td>Java API 服务(可选)</td></tr>
+<tr><td rowspan="9">Chroma</td><td><code>data/chroma/</code></td><td>向量数据库</td></tr>
+<tr><td><code>data/chroma/.last_build.json</code></td><td>戳文件 ⭐(热重载用,2026-05-23)</td></tr>
+<tr><td><code>tools/chroma/index_docs.py</code></td><td>三级 chunk 索引器</td></tr>
+<tr><td><code>tools/chroma/mcp_server.py</code></td><td>MCP server 实现(含热重载 + JSONL 日志)</td></tr>
+<tr><td><code>tools/chroma/search_recall.jsonl</code></td><td>召回日志 ⭐(2026-05-23)</td></tr>
+<tr><td><code>tools/chroma/platform-docs-mcp.cmd</code></td><td>启动入口(Claude Code 调用)</td></tr>
+<tr><td><code>tools/chroma/README.md</code></td><td>完整文档</td></tr>
+<tr><td><code>D:\models\Qwen3-Embedding-0.6B</code></td><td>嵌入模型(仓库外,1.2GB)</td></tr>
+<tr><td><code>D:\models\Qwen3-Reranker-0.6B</code></td><td>精排模型 ⭐(仓库外,1.1GB,2026-05-23)</td></tr>
+<tr><td rowspan="3">cross-link</td><td><code>data/codegraph_ext/cross_layer.sqlite</code></td><td>跨层数据库</td></tr>
+<tr><td><code>tools/cross_link/</code></td><td>构建脚本(Python)</td></tr>
+<tr><td><code>.codegraph/.rebuild.lock</code></td><td>rebuild lock ⭐(防 race,2026-05-23)</td></tr>
+<tr><td rowspan="8">脚本</td><td><code>tools/dev/ai-health.ps1</code></td><td>体检(含 hook missed-fire + reranker 检测)</td></tr>
+<tr><td><code>tools/dev/update-local-ai.ps1</code></td><td>重建索引</td></tr>
+<tr><td><code>tools/dev/clean-local-artifacts.ps1</code></td><td>清理工作区</td></tr>
+<tr><td><code>tools/dev/dirty-index-check.ps1</code></td><td>MCP 兜底前置检查 ⭐(2026-05-23)</td></tr>
+<tr><td><code>tools/dev/install-git-hooks.ps1</code></td><td>装 git hook</td></tr>
+<tr><td><code>tools/dev/post-commit.ps1</code></td><td>hook 实体</td></tr>
+<tr><td><code>tools/dev/embed_ab_test.py</code></td><td>A/B 测试</td></tr>
+<tr><td><code>scripts/codegraph/rebuild_index.ps1</code></td><td>CodeGraph 增量 sync ⭐(2026-05-23)</td></tr>
+<tr><td rowspan="3">Skill</td><td><code>.claude/skills/ai-health/SKILL.md</code></td><td>/ai-health 入口 ⭐(2026-05-23)</td></tr>
+<tr><td><code>.claude/skills/update-local-ai/SKILL.md</code></td><td>/update-local-ai 入口 ⭐(2026-05-23)</td></tr>
+<tr><td><code>.claude/skills/verify-pipeline-run/SKILL.md</code></td><td>/verify-pipeline-run 入口</td></tr>
+<tr><td>MEMORY</td><td><code>C:\Users\G1706256\.claude\projects\D--WorkSpace-platform\memory\</code></td><td>跨会话用户记忆</td></tr>
+<tr><td>核心规则</td><td><code>.claude/rules/ai-tools-mcp.md</code></td><td>本工具栈的使用约束</td></tr>
+</table>
+
+<p style="margin-top: 64px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); padding-top: 16px;">
+文档生成于 2026-05-23 凌晨大改 · 项目仓库 <code>&lt;repo-root&gt;</code> · 如需更新,直接改本文件即可
+</p>
+
+</main>
+</div>
+</body>
+</html>
