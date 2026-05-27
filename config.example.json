@@ -1,0 +1,32 @@
+{
+  "_comment_top": "codev-platform 用户级配置样板。复制到 ~/.codev-platform/config.json (或跑 `codev-platform config init`) 后按本机环境编辑。优先级:env var > 本配置文件 > 代码默认 hardcode。",
+
+  "models": {
+    "_comment": "GPU 模型路径 (Qwen3-Embedding-0.6B / Qwen3-Reranker-0.6B). 跨项目共享单实例避免 8GB VRAM OOM。",
+    "embed_path": "D:/models/Qwen3-Embedding-0.6B",
+    "embed_device": "cuda",
+    "reranker_path": "D:/models/Qwen3-Reranker-0.6B",
+    "reranker_device": "cuda",
+    "reranker_enabled": true
+  },
+
+  "data": {
+    "_comment": "chroma + cross_link 共享基目录 (multi-tenant 设计核心)。null = 走业务项目 cwd 推导 (兼容旧行为)。生产推荐显式设, 让所有 project 写到同一个 data/。",
+    "platform_data_dir": "D:/WorkSpace/platform/data"
+  },
+
+  "daemon": {
+    "_comment": "chroma daemon HTTP 端口 + 模式。mode=true 启 daemon (多 session 共享 GPU 模型, 默认), false 每会话独立 mcp_server (>=24GB VRAM 才安全)。prewarm=true 启动期加载模型避免首次 query 60s 超时。",
+    "port": 18083,
+    "mode": true,
+    "prewarm": true
+  },
+
+  "search": {
+    "_comment": "RAG 检索参数。recall_k = embedding 召回候选数 (送 reranker); return_k = rerank 后返回数 (search_docs args.k 可覆盖); bm25_enabled = 走 BM25 hybrid + RRF 融合; rrf_k_const = RRF 公式常量 (论文 60)。",
+    "recall_k": 30,
+    "return_k": 5,
+    "bm25_enabled": true,
+    "rrf_k_const": 60
+  }
+}

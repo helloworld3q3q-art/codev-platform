@@ -20,6 +20,20 @@ Multi-project AI 协作工具栈基础设施。从 `helloworld3q3q-art/platform`
 pip install -e D:\WorkSpace\codev-platform
 ```
 
+### 一次性配置(用户级,跨项目共享)
+
+机器级路径(GPU 模型 / 数据目录 / daemon 端口等)走 **`~/.codev-platform/config.json`**:
+
+```powershell
+codev-platform config init    # 写默认到 ~/.codev-platform/config.json
+codev-platform config show    # 看当前生效配置
+codev-platform config path    # 只打印文件位置
+```
+
+样板字段全集见仓根 [`config.example.json`](config.example.json)(每个字段含 `_comment` 说明)。**优先级:env var > config 文件 > 代码默认 hardcode**。
+
+换机器场景:复制 codev-platform 仓后 → `pip install -e .` → `codev-platform config init` → 改 `~/.codev-platform/config.json` 里 model/data 路径。不再到处改 .cmd / mcp_server.py 里的 hardcode。
+
 ### 业务项目接入
 
 ```powershell
