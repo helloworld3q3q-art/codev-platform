@@ -30,3 +30,11 @@ data/
 mcp_server.log
 *.log
 search_recall.jsonl
+
+# maven build artifacts (cross_link_asm)
+target/
+*.class
+
+# node modules (cross_link_ts)
+node_modules/
+dist/
