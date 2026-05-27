@@ -7,6 +7,7 @@
     "rules/*.md",
     "skills/**/*.md",
     "docs/**/*.md",
+    "memory/*.md",
     "platform_meta/README.md",
     "platform_meta/projects/**/*.md",
     "codev_platform/**/*.md"
