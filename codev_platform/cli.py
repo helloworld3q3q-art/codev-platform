@@ -147,6 +147,55 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+# codev-platform 仓内的 rules / skills 源
+_CODEV_PKG_ROOT = Path(__file__).resolve().parent.parent  # codev-platform/
+_RULES_SRC = _CODEV_PKG_ROOT / "rules"
+_SKILLS_SRC = _CODEV_PKG_ROOT / "skills"
+
+
+def _sync_dir(src: Path, dst: Path, kind: str, dry_run: bool) -> int:
+    """复制 src 下所有文件到 dst (含 README.md), 返回处理文件数。"""
+    if not src.is_dir():
+        _eprint(f"FATAL: {kind} 源目录不存在: {src}")
+        return -1
+    dst.mkdir(parents=True, exist_ok=True)
+    import shutil
+    n_copied = 0
+    n_skipped = 0
+    for item in src.rglob("*"):
+        if item.is_dir():
+            continue
+        rel = item.relative_to(src)
+        target = dst / rel
+        if target.exists() and target.read_bytes() == item.read_bytes():
+            n_skipped += 1
+            continue
+        if dry_run:
+            _print(f"  [dry-run] {rel}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, target)
+        n_copied += 1
+    _print(f"  {kind}: {n_copied} files synced, {n_skipped} unchanged")
+    return n_copied
+
+
+def cmd_sync_rules(args: argparse.Namespace) -> int:
+    """复制 codev-platform/rules/ 到 <cwd>/.claude/rules/ (业务仓内)."""
+    dst = Path.cwd() / ".claude" / "rules"
+    _print(f"sync rules: {_RULES_SRC} -> {dst}")
+    n = _sync_dir(_RULES_SRC, dst, "rules", args.dry_run)
+    return 0 if n >= 0 else 1
+
+
+def cmd_sync_skills(args: argparse.Namespace) -> int:
+    """复制 codev-platform/skills/ 到 <cwd>/.claude/skills/ (业务仓内)."""
+    dst = Path.cwd() / ".claude" / "skills"
+    _print(f"sync skills: {_SKILLS_SRC} -> {dst}")
+    n = _sync_dir(_SKILLS_SRC, dst, "skills", args.dry_run)
+    return 0 if n >= 0 else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="claude-platform", description="多项目 AI 工具栈 CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -166,6 +215,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp_val = sub.add_parser("validate", help="校验 project_id 格式")
     sp_val.add_argument("project_id")
     sp_val.set_defaults(func=cmd_validate)
+
+    sp_sr = sub.add_parser("sync-rules", help="把 codev-platform/rules/ 拷到 <cwd>/.claude/rules/")
+    sp_sr.add_argument("--dry-run", action="store_true", help="只列不写")
+    sp_sr.set_defaults(func=cmd_sync_rules)
+
+    sp_ss = sub.add_parser("sync-skills", help="把 codev-platform/skills/ 拷到 <cwd>/.claude/skills/")
+    sp_ss.add_argument("--dry-run", action="store_true", help="只列不写")
+    sp_ss.set_defaults(func=cmd_sync_skills)
 
     return p
 
