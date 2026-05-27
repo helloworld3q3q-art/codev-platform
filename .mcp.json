@@ -1,0 +1,22 @@
+{
+  "_comment": "codev-platform 复用 platform 仓的 daemon launcher (.cmd) — multi-tenant daemon 按 project_id 路由到正确 collection / DB. 模型 + GPU 配置在 .cmd 内, 三仓共享同一 daemon 节省 GPU 显存.",
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": ["serve", "--mcp"]
+    },
+    "platform-docs": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "D:\\WorkSpace\\platform\\tools\\chroma\\platform-docs-mcp.cmd"],
+      "timeout": 90000
+    },
+    "cross-link": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "D:\\WorkSpace\\platform\\tools\\cross_link\\cross-link-mcp.cmd"],
+      "timeout": 30000
+    }
+  }
+}
