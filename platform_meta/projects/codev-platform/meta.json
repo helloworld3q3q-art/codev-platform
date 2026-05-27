@@ -1,0 +1,9 @@
+{
+  "project_id": "codev-platform",
+  "display_name": "CoDev Platform Toolkit",
+  "repo_url": "https://github.com/helloworld3q3q-art/codev-platform.git",
+  "repo_path": "D:/WorkSpace/codev-platform",
+  "rules_path": "rules",
+  "memory_path": null,
+  "notes": "工具栈本体仓 — 既是 codev-platform pip 包来源, 也是一个可被 multi-tenant daemon 服务的 Claude Code workspace (.claude/project.json + .mcp.json 已配)。"
+}
