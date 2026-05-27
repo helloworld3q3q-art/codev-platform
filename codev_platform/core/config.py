@@ -60,6 +60,7 @@ DEFAULTS: dict[str, Any] = {
         "return_k": 5,
         "bm25_enabled": True,
         "rrf_k_const": 60,
+        "gpu_concurrency": 1,
     },
 }
 

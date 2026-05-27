@@ -96,6 +96,11 @@ BM25_ENABLED = (
 )
 RRF_K_CONST = int(env_or_config("PLATFORM_RRF_K_CONST", _CFG, "search.rrf_k_const", 60))
 
+# GPU concurrency: 多 session 同时 search_docs 时, encode / rerank 串行化的最大并发.
+# 默认 1 = 完全串行 (8GB GPU 安全), 调高仅在 >= 24GB VRAM 时考虑.
+GPU_CONCURRENCY = int(env_or_config("PLATFORM_GPU_CONCURRENCY", _CFG, "search.gpu_concurrency", 1))
+_gpu_sem: "asyncio.Semaphore | None" = None  # lazy init in event loop
+
 # 额外把启动 / 每次 query 日志写到固定文件，便于"观察模型起作用"
 _LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
 # 召回质量分析日志:每次 search_docs 一行 JSON,后续可 jq 分析 top-5 distance 漂移
@@ -320,6 +325,14 @@ def _encode_query(query: str):
     return vec.tolist()
 
 
+def _get_gpu_sem() -> "asyncio.Semaphore":
+    """Lazy init GPU semaphore (must be inside event loop)."""
+    global _gpu_sem
+    if _gpu_sem is None:
+        _gpu_sem = asyncio.Semaphore(GPU_CONCURRENCY)
+    return _gpu_sem
+
+
 # ---------- Reranker (Qwen3-Reranker-0.6B) ----------
 # 走 yes/no token logits, 不是 sentence-transformers CrossEncoder
 _reranker_tok = None
@@ -530,7 +543,9 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             use_rerank = RERANKER_ENABLED and Path(RERANKER_MODEL or "").exists() and _reranker_load_err is None
             n_candidates = max(k, RERANKER_TOP_K) if use_rerank else k
 
-            qvec = _encode_query(query)
+            # GPU 串行: 多 session 并发 search_docs 时 encode 排队 (防 8GB VRAM 抖动)
+            async with _get_gpu_sem():
+                qvec = _encode_query(query)
             kwargs: dict[str, Any] = {"query_embeddings": [qvec], "n_results": n_candidates}
             if where is not None:
                 kwargs["where"] = where
@@ -591,7 +606,9 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             rerank_used = False
             if use_rerank and docs:
                 _tr = _t.perf_counter()
-                scores = _rerank_scores(query, docs)
+                # GPU 串行 (reranker 同享 GPU 与 embed model)
+                async with _get_gpu_sem():
+                    scores = _rerank_scores(query, docs)
                 if scores is not None:
                     rerank_scores_arr = scores
                     rerank_used = True
