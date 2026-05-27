@@ -172,7 +172,13 @@ _stats: dict[str, dict[str, float]] = {
 
 
 def _record_stat(kind: str, elapsed_ms: float) -> None:
-    """累加调用次数 + 总耗时。 kind: embedding / reranker"""
+    """累加调用次数 + 总耗时。 kind: embedding / reranker.
+
+    Notes:
+    - _stats 是 in-memory, daemon 重启归零 (不持久化, widget 仅做实时观测用)
+    - 线程安全: 仅在 asyncio event loop 单线程操作 (encode/rerank 都在 coroutine 内直调).
+      若未来改 asyncio.to_thread 把 GPU 跑后台线程, 必须加 threading.Lock 保护
+    """
     s = _stats.get(kind)
     if s is None:
         return
@@ -181,7 +187,12 @@ def _record_stat(kind: str, elapsed_ms: float) -> None:
 
 
 def _gpu_memory_mb() -> float | None:
-    """返回 CUDA 当前已分配显存 (MB), 不可用 / 非 CUDA 返回 None。"""
+    """返回 CUDA 当前已分配显存 (MiB), 不可用 / 非 CUDA 返回 None。
+
+    口径限制: 仅统计 daemon 当前 Python 进程 — 不含其它进程 (cross-link MCP / 别的占用).
+    用于 widget 观测 daemon 自身负载, 不等同整卡占用. 整卡 free/used 走
+    torch.cuda.mem_get_info(), 后续 Phase 2 可暴露。
+    """
     try:
         import torch
         if not torch.cuda.is_available():
