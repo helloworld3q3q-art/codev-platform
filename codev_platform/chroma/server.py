@@ -845,7 +845,7 @@ async def _run_http(port: int) -> None:
             _flog(f"[sse] no ?project_id= in query, fallback to default {pid}")
         else:
             try:
-                from _platform.project_id import validate as _pid_validate
+                from codev_platform.core.project_id import validate as _pid_validate
                 pid = _pid_validate(pid_raw)
             except Exception as exc:  # noqa: BLE001
                 _flog(f"[sse] reject: invalid project_id {pid_raw!r}: {exc!s}")
