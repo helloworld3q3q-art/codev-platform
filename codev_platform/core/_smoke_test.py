@@ -27,16 +27,8 @@ def main() -> int:
     print(f"cross-link legacy:   {legacy} (exists={legacy.exists()})")
     print(f"codegraph db:        {codegraph_db_path(pid)} (per-repo via 3rd-party MCP server)")
     print()
-
-    # cross_link.schema 集成
-    from cross_link.schema import DB_PATH, LEGACY_DB_PATH, PROJECT_ID as PID2
-    print(f"cross_link.schema.PROJECT_ID: {PID2}")
-    print(f"cross_link.schema.DB_PATH:    {DB_PATH}")
-    print(f"  - exists: {DB_PATH.exists()}")
-    print(f"cross_link.schema.LEGACY:     {LEGACY_DB_PATH}")
-    print(f"  - exists: {LEGACY_DB_PATH.exists()}")
-    print()
-    print("OK - all imports + resolution work")
+    print("OK - codev_platform core resolves correctly")
+    print("(cross_link / chroma daemon 集成验证仍在 platform 仓 tools/_platform/_smoke_test.py)")
     return 0
 
 

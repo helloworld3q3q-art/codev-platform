@@ -28,17 +28,25 @@ _DATA_DIR_ENV = "PLATFORM_DATA_DIR"
 COLLECTION_SEP = "__"  # chroma collection 前缀分隔符
 
 
-def _repo_root() -> Path:
-    """tools/_platform/paths.py -> 仓库根。"""
-    return Path(__file__).resolve().parents[2]
+def _business_repo_root() -> Path:
+    """业务项目仓根 = 从 cwd 向上找到含 .claude/project.json 的目录。
+
+    codev-platform 作为 pip 包安装后, 不能用 __file__ 推导仓根 (那是 package
+    自身的位置)。必须以业务项目 cwd 为锚点, 与 project_id resolver 同源。
+    """
+    cwd = Path.cwd().resolve()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / ".claude" / "project.json").is_file():
+            return parent
+    return cwd  # fallback: 无 .claude/project.json 时退回 cwd (resolver 会硬失败 + 提示)
 
 
 def data_root() -> Path:
-    """基目录, 可由 PLATFORM_DATA_DIR 覆盖。"""
+    """基目录, 可由 PLATFORM_DATA_DIR 覆盖, 否则 <business-repo>/data/。"""
     env = os.environ.get(_DATA_DIR_ENV)
     if env:
         return Path(env).expanduser().resolve()
-    return _repo_root() / "data"
+    return _business_repo_root() / "data"
 
 
 def chroma_dir() -> Path:
