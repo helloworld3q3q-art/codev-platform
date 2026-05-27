@@ -1,0 +1,7 @@
+#!/bin/sh
+# Minimal sh stub - calls PowerShell to run pre-push audits.
+# Same pattern as post-commit hook (avoids sh.exe add_item errno 1).
+#
+# Source of truth: tools/dev/pre-push-audit.ps1 (version-controlled).
+# Install:         tools/dev/install-git-hooks.ps1
+exec /c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "tools/dev/pre-push-audit.ps1"

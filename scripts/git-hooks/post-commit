@@ -1,0 +1,13 @@
+#!/bin/sh
+# Minimal sh stub - reduces sh.exe errno 1 (add_item) surface area.
+#
+# Changes vs previous version:
+#   - No $(git rev-parse ...) subshell. Hooks run from repo root, relative
+#     path "tools/dev/post-commit.ps1" works directly. Subshell was the
+#     main errno 1 trigger.
+#   - Direct absolute path to powershell.exe instead of PATH lookup
+#     (avoids MSYS PATH munging that also triggers add_item).
+#
+# Source of truth: tools/dev/post-commit.ps1 (version-controlled).
+# Install:         tools/dev/install-git-hooks.ps1
+exec /c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "tools/dev/post-commit.ps1"

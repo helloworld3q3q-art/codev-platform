@@ -1,0 +1,19 @@
+{
+  "name": "cross-link-ts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scan frontend .tsx/.ts business files for calls into services/apis/* (M5 cross_link).",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "scan": "node dist/scan_frontend_calls.js",
+    "scan:ts": "tsx src/scan_frontend_calls.ts"
+  },
+  "dependencies": {
+    "ts-morph": "^22.0.0",
+    "typescript": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0"
+  }
+}
