@@ -165,6 +165,9 @@ def _sync_dir(src: Path, dst: Path, kind: str, dry_run: bool) -> int:
     for item in src.rglob("*"):
         if item.is_dir():
             continue
+        # 排除 README.md (codev-platform 仓自身 doc, 不是业务仓需要的规则/skill)
+        if item.name == "README.md":
+            continue
         rel = item.relative_to(src)
         target = dst / rel
         if target.exists() and target.read_bytes() == item.read_bytes():
