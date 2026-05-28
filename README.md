@@ -1,24 +1,47 @@
 # codev-platform
 
-Multi-project AI 协作工具栈基础设施。从 `helloworld3q3q-art/platform` 仓内嵌的 `tools/_platform/` + `tools/claude-platform/` + `platform-meta/` 抽出独立化,**目标**:让多个业务项目(量化 / Widget UI / 未来项目)共享同一套 project_id 命名空间 + chroma / cross-link 多租户索引,而不必各自重复造轮子。
+Multi-project AI 协作工具栈基础设施。让多个业务项目共享 project_id 命名空间 + chroma / cross-link 多租户索引 + GPU 模型 daemon,跨机器 portable。
 
-## 状态:本地原型
-
-- ✅ project_id resolver(env / `.claude/project.json` / 硬失败)
-- ✅ paths 约定(chroma collection 前缀 / per-project DB 子目录)
-- ✅ CLI:`init` / `current` / `list-projects` / `validate`
-- ✅ platform_meta 跨项目登记表骨架
-- ⏸️ chroma daemon multi-tenant(代码在 platform 仓 `tools/chroma/`,渐进抽出中)
-- ⏸️ cross-link / codegraph 多租户(同上)
-- ⏸️ pip 包发布(暂用 `pip install -e .` 本地装)
-
-## 用法
-
-### 安装
+## 新机器接入(零冷启 SOP)
 
 ```powershell
-pip install -e D:\WorkSpace\codev-platform
+# 1. clone 三仓到同一父目录 (路径任选, e.g. ~/Code/ 或 D:/WorkSpace/)
+cd D:/WorkSpace      # 或 cd ~/Code
+git clone https://github.com/helloworld3q3q-art/platform.git
+git clone https://github.com/helloworld3q3q-art/codev-platform.git
+git clone https://github.com/helloworld3q3q-art/codev-platform-widget.git   # 可选, 仅 tray UI
+
+# 2. 装 codev-platform CLI
+pip install -e ./codev-platform
+
+# 3. 一键探测三仓 / chroma .venv / 模型, 写 ~/.codev-platform/config.json
+codev-platform setup
+
+# 4. 按 setup 输出提示装 chroma .venv (~10 分钟, 含 torch + chromadb + sentence-transformers)
+cd platform/tools/chroma
+uv venv && uv sync         # 或 python -m venv .venv && pip install -r requirements.txt
+cd ../../..
+
+# 5. 下载 Qwen3 模型 (可选, 不下默认走仓内 MiniLM fallback)
+huggingface-cli download Qwen/Qwen3-Embedding-0.6B --local-dir ~/models/Qwen3-Embedding-0.6B
+huggingface-cli download Qwen/Qwen3-Reranker-0.6B --local-dir ~/models/Qwen3-Reranker-0.6B
+
+# 6. 再跑一次 setup 确认全 OK
+codev-platform setup     # 应输出 "READY"
+
+# 7. 任一仓开 Claude Code, daemon 自动 spawn
 ```
+
+## 状态
+
+- ✅ project_id resolver + paths + config
+- ✅ chroma daemon multi-tenant (本仓 codev_platform/chroma/)
+- ✅ cross-link engine + linker
+- ✅ CLI 7 子命令: init / current / list-projects / validate / sync-rules / sync-skills / setup / config
+- ✅ 三仓 .mcp.json 全用相对路径, 跨机 portable
+- ✅ platform_meta 跨项目登记表
+
+## 用法
 
 ### 一次性配置(用户级,跨项目共享)
 

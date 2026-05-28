@@ -199,6 +199,110 @@ def cmd_sync_skills(args: argparse.Namespace) -> int:
     return 0 if n >= 0 else 1
 
 
+def cmd_setup(args: argparse.Namespace) -> int:
+    """一键新机器接入: 探测三仓位置 + chroma venv + 模型 + 写 config.
+
+    新机器流程:
+      git clone <three repos> 到同一父目录
+      cd codev-platform && pip install -e .
+      codev-platform setup
+      (按提示装 .venv + 下载模型)
+      Claude Code 在任一仓打开即可
+    """
+    from codev_platform.core.config import (
+        DEFAULTS, config_path, load_config, save_config,
+    )
+    codev_root = Path(__file__).resolve().parents[1]  # codev-platform 仓根
+    parent = codev_root.parent
+    _print(f"codev-platform repo: {codev_root}")
+    _print(f"parent dir:          {parent}")
+    _print()
+
+    # 1. 探测兄弟仓
+    platform_repo = parent / "platform"
+    widget_repo = parent / "codev-platform-widget"
+    _print("=== 兄弟仓探测 ===")
+    _print(f"  platform:                {'OK' if platform_repo.is_dir() else 'MISSING -- git clone <platform>.git ' + str(parent)}")
+    _print(f"  codev-platform-widget:   {'OK' if widget_repo.is_dir() else 'MISSING (optional, 仅 UI)'}")
+    _print()
+
+    # 2. 探测 chroma venv
+    venv_candidates = [
+        platform_repo / "tools" / "chroma" / ".venv",
+        codev_root / "tools" / "chroma" / ".venv",
+    ]
+    chroma_venv = next((str(v) for v in venv_candidates if (v / "Scripts" / "python.exe").is_file() or (v / "bin" / "python").is_file()), None)
+    _print("=== chroma .venv 探测 ===")
+    if chroma_venv:
+        _print(f"  found: {chroma_venv}")
+    else:
+        _print("  MISSING — 跑以下命令装 (~10 分钟, 含 torch + chromadb + sentence-transformers):")
+        _print(f"    cd {platform_repo}/tools/chroma")
+        _print("    uv venv && uv sync   (或 python -m venv .venv && pip install -r requirements.txt)")
+    _print()
+
+    # 3. 探测模型
+    model_candidates = [
+        Path(r"D:\models\Qwen3-Embedding-0.6B"),
+        Path.home() / "models" / "Qwen3-Embedding-0.6B",
+        platform_repo / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
+    ]
+    embed_path = next((str(m) for m in model_candidates if m.is_dir()), None)
+    rer_candidates = [
+        Path(r"D:\models\Qwen3-Reranker-0.6B"),
+        Path.home() / "models" / "Qwen3-Reranker-0.6B",
+    ]
+    reranker_path = next((str(r) for r in rer_candidates if r.is_dir()), "")
+    _print("=== 模型探测 ===")
+    if embed_path:
+        _print(f"  embed:    {embed_path}")
+    else:
+        _print("  MISSING embed 模型 — 下载 (~1GB):")
+        _print("    huggingface-cli download Qwen/Qwen3-Embedding-0.6B --local-dir D:/models/Qwen3-Embedding-0.6B")
+    if reranker_path:
+        _print(f"  reranker: {reranker_path}")
+    else:
+        _print("  MISSING reranker (可选, daemon 会降级纯向量):")
+        _print("    huggingface-cli download Qwen/Qwen3-Reranker-0.6B --local-dir D:/models/Qwen3-Reranker-0.6B")
+    _print()
+
+    # 4. 写 config
+    cfg = load_config()
+    changed = False
+    if chroma_venv and cfg.get("runtime", {}).get("chroma_venv") != chroma_venv:
+        cfg.setdefault("runtime", {})["chroma_venv"] = chroma_venv
+        changed = True
+    if platform_repo.is_dir():
+        data_dir = str(platform_repo / "data")
+        if cfg.get("data", {}).get("platform_data_dir") != data_dir:
+            cfg.setdefault("data", {})["platform_data_dir"] = data_dir
+            changed = True
+    if embed_path and cfg.get("models", {}).get("embed_path") != embed_path:
+        cfg.setdefault("models", {})["embed_path"] = embed_path
+        changed = True
+    if reranker_path and cfg.get("models", {}).get("reranker_path") != reranker_path:
+        cfg.setdefault("models", {})["reranker_path"] = reranker_path
+        changed = True
+
+    if changed and not args.dry_run:
+        p = save_config(cfg)
+        _print(f"=== 写入 config: {p} ===")
+        _print("  runtime.chroma_venv / data.platform_data_dir / models.* 已更新")
+    elif changed:
+        _print("=== [dry-run] 会更新的字段 ===")
+        _print(json.dumps({"runtime": cfg.get("runtime"), "data": cfg.get("data"), "models": cfg.get("models")}, indent=2, ensure_ascii=False))
+    else:
+        _print("=== config 无需更新 (探测值已 match) ===")
+
+    _print()
+    if chroma_venv and embed_path:
+        _print("READY: 三仓 + venv + 模型齐备, 任一仓打开 Claude Code 即可")
+        return 0
+    else:
+        _print("INCOMPLETE: 装 .venv / 下载模型后再跑一次 setup")
+        return 1
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     """show / init / path: ~/.codev-platform/config.json 管理."""
     from codev_platform.core.config import (
@@ -252,6 +356,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp_ss = sub.add_parser("sync-skills", help="把 codev-platform/skills/ 拷到 <cwd>/.claude/skills/")
     sp_ss.add_argument("--dry-run", action="store_true", help="只列不写")
     sp_ss.set_defaults(func=cmd_sync_skills)
+
+    sp_setup = sub.add_parser("setup", help="新机器一键接入: 探测三仓 / venv / 模型 + 写 config")
+    sp_setup.add_argument("--dry-run", action="store_true", help="只探测不写 config")
+    sp_setup.set_defaults(func=cmd_setup)
 
     sp_cfg = sub.add_parser("config", help="~/.codev-platform/config.json 管理")
     sp_cfg.add_argument("action", choices=["show", "init", "path"], help="show=打印当前 / init=写默认 / path=只打印文件位置")
