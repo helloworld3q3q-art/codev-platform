@@ -108,12 +108,31 @@ _LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
 _RECALL_LOG = Path(__file__).resolve().parent / "search_recall.jsonl"
 
 
+_LOG_MAX_BYTES = int(os.getenv("PLATFORM_LOG_MAX_BYTES", str(5 * 1024 * 1024)))  # 5 MiB
+
+
+def _maybe_rotate_log() -> None:
+    """日志超过 _LOG_MAX_BYTES 时滚动到 .1 (单备份, 防长跑 daemon 撑爆磁盘)。失败静默。"""
+    try:
+        if _LOG_FILE.exists() and _LOG_FILE.stat().st_size > _LOG_MAX_BYTES:
+            bak = _LOG_FILE.with_suffix(_LOG_FILE.suffix + ".1")
+            try:
+                if bak.exists():
+                    bak.unlink()
+            except Exception:
+                pass
+            _LOG_FILE.replace(bak)
+    except Exception:
+        pass
+
+
 def _flog(msg: str) -> None:
     """同时写文件 + stderr。文件路径：tools/chroma/mcp_server.log"""
     import datetime
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     try:
+        _maybe_rotate_log()
         with _LOG_FILE.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
@@ -166,10 +185,14 @@ _projects: dict[str, _ProjectState] = {}
 
 
 # 全局 stats 累加器 (跨 project 共享 GPU model, 全部 project 调用一起统计)
-_stats: dict[str, dict[str, float]] = {
-    "embedding": {"calls": 0, "ms_total": 0.0},
-    "reranker": {"calls": 0, "ms_total": 0.0},
+_stats: dict[str, dict[str, Any]] = {
+    "embedding": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None},
+    "reranker": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None},
 }
+
+# daemon 进程启动时刻 (uptime 计算) + 当前活跃 SSE session 数 (widget 观测连接泄漏)
+_DAEMON_START = time.time()
+_sse_sessions = 0
 
 
 def _record_stat(kind: str, elapsed_ms: float) -> None:
@@ -185,6 +208,60 @@ def _record_stat(kind: str, elapsed_ms: float) -> None:
         return
     s["calls"] += 1
     s["ms_total"] += elapsed_ms
+
+
+def _record_stat_error(kind: str, exc: BaseException) -> None:
+    """记录一次 GPU 推理失败 (embedding / reranker), widget 显错误率 + last_error。"""
+    s = _stats.get(kind)
+    if s is None:
+        return
+    s["errors"] = int(s.get("errors", 0)) + 1
+    s["last_error"] = f"{type(exc).__name__}: {exc}"[:200]
+
+
+def _process_info() -> dict[str, Any]:
+    """daemon 进程 RSS / uptime / pid。psutil 缺失时 rss_mb=None (uptime/pid 仍可)。"""
+    rss_mb: float | None = None
+    try:
+        import psutil  # type: ignore
+        rss_mb = round(psutil.Process().memory_info().rss / (1024 * 1024), 1)
+    except Exception:
+        pass
+    return {
+        "pid": os.getpid(),
+        "uptime_sec": int(time.time() - _DAEMON_START),
+        "rss_mb": rss_mb,
+    }
+
+
+def _is_gpu_error(exc: BaseException) -> bool:
+    """粗判异常是否 CUDA 显存 / 设备类错误 (用于 CPU 降级决策)。"""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        kw in text
+        for kw in ("cuda", "out of memory", "oom", "device-side", "no kernel image", "nvml")
+    )
+
+
+def _gpu_free_info() -> dict[str, Any] | None:
+    """整卡 free / 本进程外占用 (MiB)。非 CUDA / 不可用返回 None。
+
+    free_mb = 整卡空闲; allocated_other_mb = 整卡已用 - 本进程已分配 (粗估其它进程占用)。
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return None
+        free_b, total_b = torch.cuda.mem_get_info()
+        free_mb = round(free_b / (1024 * 1024), 1)
+        used_total_mb = round((total_b - free_b) / (1024 * 1024), 1)
+        self_mb = round(torch.cuda.memory_allocated() / (1024 * 1024), 1)
+        return {
+            "free_mb": free_mb,
+            "allocated_other_mb": round(max(0.0, used_total_mb - self_mb), 1),
+        }
+    except Exception:
+        return None
 
 
 def _gpu_memory_mb() -> float | None:
@@ -262,7 +339,16 @@ def _ensure_model():
             _flog(f"[init] torch import failed: {e}")
 
         from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer(EMBED_MODEL, device=EMBED_DEVICE)
+        try:
+            _model = SentenceTransformer(EMBED_MODEL, device=EMBED_DEVICE)
+        except Exception as gpu_exc:  # noqa: BLE001
+            # F5: GPU 被其它进程抢占 (OOM / device busy) → 降级 CPU 重试一次, 不硬挂 daemon。
+            # CPU 推理慢但可用, 避免整卡满时检索功能完全不可用。
+            if EMBED_DEVICE != "cpu" and _is_gpu_error(gpu_exc):
+                _flog(f"[init] WARN: GPU load failed ({gpu_exc!s}), fallback to CPU (slower)")
+                _model = SentenceTransformer(EMBED_MODEL, device="cpu")
+            else:
+                raise
         prompts = getattr(_model, "prompts", None) or {}
         _use_query_prompt = "query" in prompts and bool(prompts.get("query"))
         get_dim = _model.get_embedding_dimension if hasattr(_model, "get_embedding_dimension") else _model.get_sentence_embedding_dimension
@@ -396,7 +482,11 @@ def _encode_query(query: str):
     if _use_query_prompt:
         kwargs["prompt_name"] = "query"
     _t0 = time.perf_counter()
-    vec = _model.encode([query], **kwargs)[0]
+    try:
+        vec = _model.encode([query], **kwargs)[0]
+    except Exception as exc:
+        _record_stat_error("embedding", exc)
+        raise
     _record_stat("embedding", (time.perf_counter() - _t0) * 1000)
     return vec.tolist()
 
@@ -492,6 +582,7 @@ def _rerank_scores(query: str, docs: list[str]) -> list[float] | None:
         _record_stat("reranker", (time.perf_counter() - _t0) * 1000)
         return scores
     except Exception as exc:  # noqa: BLE001
+        _record_stat_error("reranker", exc)
         _flog(f"[reranker] score FAIL: {type(exc).__name__}: {exc}")
         return None
 
@@ -629,7 +720,19 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             kwargs: dict[str, Any] = {"query_embeddings": [qvec], "n_results": n_candidates}
             if where is not None:
                 kwargs["where"] = where
-            res = col.query(**kwargs)
+            try:
+                res = col.query(**kwargs)
+            except Exception as q_exc:  # noqa: BLE001
+                # F9: reindex 期间底层 collection 被重建, daemon 持 stale handle → NotFoundError。
+                # evict 该 project 重新 ensure 一次, 拿到新 handle 后重试 (一次, 仍失败则上抛)。
+                _flog(f"[search_docs] query failed ({type(q_exc).__name__}: {q_exc}), evict+retry once")
+                _projects.pop(pid, None)
+                state = _ensure_project(pid)
+                if state is None or state.collection is None:
+                    raise
+                col = state.collection
+                _bm25 = state.bm25_index
+                res = col.query(**kwargs)
 
             ids = (res.get("ids") or [[]])[0]
             docs = (res.get("documents") or [[]])[0]
@@ -867,8 +970,10 @@ async def _run_http(port: int) -> None:
             _flog(f"[sse] reject: cannot load project {pid}: {err}")
             return
 
+        global _sse_sessions
         token = _current_project_id.set(pid)
-        _flog(f"[sse] session start project_id={pid}")
+        _sse_sessions += 1
+        _flog(f"[sse] session start project_id={pid} (active={_sse_sessions})")
         try:
             async with sse_transport.connect_sse(
                 request.scope, request.receive, request._send
@@ -876,7 +981,8 @@ async def _run_http(port: int) -> None:
                 await server.run(read_stream, write_stream, server.create_initialization_options())
         finally:
             _current_project_id.reset(token)
-            _flog(f"[sse] session end project_id={pid}")
+            _sse_sessions = max(0, _sse_sessions - 1)
+            _flog(f"[sse] session end project_id={pid} (active={_sse_sessions})")
 
     async def health(_request):
         # daemon ready 判定: launcher 用此判定是否需要等模型加载完
@@ -925,10 +1031,14 @@ async def _run_http(port: int) -> None:
             "embedding": {
                 "calls": int(emb["calls"]),
                 "ms_avg": round(emb["ms_total"] / emb["calls"], 2) if emb["calls"] else None,
+                "errors": int(emb.get("errors", 0)),
+                "last_error": emb.get("last_error"),
             },
             "reranker": {
                 "calls": int(rer["calls"]),
                 "ms_avg": round(rer["ms_total"] / rer["calls"], 2) if rer["calls"] else None,
+                "errors": int(rer.get("errors", 0)),
+                "last_error": rer.get("last_error"),
             },
             "gpu_memory_mb": _gpu_memory_mb(),
         }
@@ -943,6 +1053,9 @@ async def _run_http(port: int) -> None:
                 "tenant_mode": "multi",
                 "loaded_projects": loaded,
                 "stats": stats_payload,
+                "process": _process_info(),
+                "gpu": _gpu_free_info(),
+                "sse_sessions": _sse_sessions,
             },
             status_code=200 if all_ready else 503,
         )

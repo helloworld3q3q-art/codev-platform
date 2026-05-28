@@ -539,6 +539,22 @@ def index(force: bool = False) -> tuple[int, int]:
     # 写构建戳:总文件 / 总 chunks 从 manifest 算(不只是本次变更的)
     total_files = len(manifest["files"])
     total_chunks = sum(v.get("chunk_count", 0) for v in manifest["files"].values())
+
+    # F2 完整性探针: manifest 期望 chunk 数 vs collection 实际 count。
+    # 偏差常见于 upsert 部分失败 / 残留孤儿 chunk / delete 未对齐。只告警不阻塞 (索引仍可用)。
+    try:
+        actual = col.count()
+        if actual != total_chunks:
+            logger.warning(
+                "[integrity] collection count=%d != manifest chunks=%d (差 %+d)。"
+                "可能 upsert 部分失败或残留孤儿, 建议 --force 重建确认。",
+                actual, total_chunks, actual - total_chunks,
+            )
+        else:
+            logger.info("[integrity] collection count=%d == manifest, OK", actual)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[integrity] count 探针失败(忽略): %s", exc)
+
     _write_build_stamp(files_count=total_files, chunks=total_chunks,
                        dim=dim, model_name=model_name)
 
