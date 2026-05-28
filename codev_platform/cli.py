@@ -184,6 +184,46 @@ def cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_daemon(args: argparse.Namespace) -> int:
+    """chroma daemon 生命周期: status (查 /health) / stop (按 pid 杀)。
+
+    spawn 由业务项目首次 Claude session 经 launcher 自动完成, 不在此处 start —
+    避免脱离 project_id 上下文起一个无主 daemon。stop 后下次 session 会重新拉起。
+    """
+    from codev_platform.chroma import launcher  # 复用 health/port 逻辑
+    health = launcher._fetch_daemon_health()
+    if args.action == "status":
+        if health is None:
+            _print(f"daemon: DOWN ({launcher.DAEMON_URL})")
+            _print("提示: 打开业务项目任一 Claude Code 会话会自动拉起 daemon。")
+            return 1
+        proc = health.get("process") or {}
+        _print(f"daemon: {health.get('status', '?').upper()} pid={proc.get('pid')} "
+               f"uptime={proc.get('uptime_sec')}s rss={proc.get('rss_mb')}MiB")
+        _print(f"  model={health.get('model')} reranker={health.get('reranker')} "
+               f"sse_sessions={health.get('sse_sessions')}")
+        for p in health.get("loaded_projects", []):
+            _print(f"  [{p.get('project_id')}] chunks={p.get('chunks')} "
+                   f"bm25={p.get('bm25')} last_indexed={p.get('last_indexed_at')}")
+        return 0
+    if args.action == "stop":
+        if health is None:
+            _print("daemon 未运行, 无需 stop。")
+            return 0
+        pid = (health.get("process") or {}).get("pid")
+        if not pid:
+            _eprint("daemon /health 未返回 pid (旧版 daemon?), 无法自动 stop。请手动结束进程。")
+            return 1
+        import subprocess
+        if sys.platform == "win32":
+            rc = subprocess.call(["taskkill", "/PID", str(pid), "/F"])
+        else:
+            rc = subprocess.call(["kill", str(pid)])
+        _print(f"stop pid={pid} rc={rc}。下次 Claude session 会重新拉起。")
+        return rc
+    return 1
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from codev_platform import __version__
     _print(f"codev-platform {__version__}")
@@ -494,6 +534,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp_ver = sub.add_parser("version", help="打印版本号")
     sp_ver.set_defaults(func=cmd_version)
+
+    sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")
+    sp_dae.add_argument("action", choices=["status", "stop"], help="status=查 /health / stop=按 pid 结束")
+    sp_dae.set_defaults(func=cmd_daemon)
 
     return p
 
