@@ -41,6 +41,14 @@ def _business_repo_root() -> Path:
     return cwd  # fallback: 无 .claude/project.json 时退回 cwd (resolver 会硬失败 + 提示)
 
 
+def business_repo_root() -> Path:
+    """业务项目仓根的公开 API (见 _business_repo_root)。
+
+    外部 (cli / 工具脚本 / shim) 应调本函数, 不要直接引私有 `_business_repo_root`。
+    """
+    return _business_repo_root()
+
+
 def data_root() -> Path:
     """基目录解析优先级:
     1. env PLATFORM_DATA_DIR (launcher .cmd / 显式覆盖)

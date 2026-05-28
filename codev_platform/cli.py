@@ -127,6 +127,7 @@ def cmd_list_projects(args: argparse.Namespace) -> int:
             rows.append((entry.name, f"(meta.json invalid: {exc!s})", ""))
     if not rows:
         _print("(无已注册项目)")
+        _print("提示: 在项目仓根跑 `codev-platform register` 注册当前项目。")
         return 0
     width_id = max(len(r[0]) for r in rows)
     width_name = max(len(r[1]) for r in rows)
@@ -134,6 +135,58 @@ def cmd_list_projects(args: argparse.Namespace) -> int:
     _print("-" * (width_id + width_name + 20))
     for pid, name, path in rows:
         _print(f"{pid.ljust(width_id)}  {name.ljust(width_name)}  {path}")
+    return 0
+
+
+def cmd_register(args: argparse.Namespace) -> int:
+    """把当前项目注册到 platform_meta/projects/<pid>/meta.json (list-projects 可见)。
+
+    project_id 来源: 显式参数 > 当前 cwd 的 .claude/project.json。
+    """
+    cwd = Path.cwd()
+    pid = args.project_id
+    display_name = args.display_name
+    # 无显式 pid 时从 cwd 的 project.json 读
+    proj_json = cwd / CONFIG_RELPATH
+    if (pid is None or display_name is None) and proj_json.is_file():
+        try:
+            data = json.loads(proj_json.read_text(encoding="utf-8"))
+            pid = pid or data.get("project_id")
+            display_name = display_name or data.get("display_name")
+        except json.JSONDecodeError as exc:
+            _eprint(f"FATAL: {proj_json} 解析失败: {exc!s}")
+            return 1
+    if not pid:
+        _eprint(f"FATAL: 未指定 project_id 且 {proj_json} 不存在。先 `codev-platform init` 或显式传 project_id。")
+        return 1
+    try:
+        pid = validate(pid)
+    except ProjectIdError as exc:
+        _eprint(f"FATAL: {exc!s}")
+        return 1
+    display_name = display_name or pid
+
+    target = PLATFORM_META_PROJECTS / pid / "meta.json"
+    if target.is_file() and not args.force:
+        _eprint(f"已注册: {target}。加 --force 覆盖。")
+        return 1
+    target.parent.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "project_id": pid,
+        "display_name": display_name,
+        "repo_path": args.repo_path,
+        "rules_path": ".claude/rules",
+        "memory_path": "memory",
+    }
+    target.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _print(f"OK: 注册 {target}")
+    _print(f"     project_id={pid}  display_name={display_name}  repo_path={args.repo_path}")
+    return 0
+
+
+def cmd_version(args: argparse.Namespace) -> int:
+    from codev_platform import __version__
+    _print(f"codev-platform {__version__}")
     return 0
 
 
@@ -393,7 +446,9 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from codev_platform import __version__
     p = argparse.ArgumentParser(prog="codev-platform", description="多项目 AI 工具栈 CLI")
+    p.add_argument("--version", "-V", action="version", version=f"codev-platform {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp_init = sub.add_parser("init", help="创建 <cwd>/.claude/project.json")
@@ -405,8 +460,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp_cur = sub.add_parser("current", help="打印当前 project_id + 来源")
     sp_cur.set_defaults(func=cmd_current)
 
-    sp_ls = sub.add_parser("list-projects", help="列出 platform-meta/projects/ 已注册项目")
+    sp_ls = sub.add_parser("list-projects", aliases=["ls"], help="列出 platform-meta/projects/ 已注册项目")
     sp_ls.set_defaults(func=cmd_list_projects)
+
+    sp_reg = sub.add_parser("register", aliases=["reg"], help="注册当前项目到 platform_meta (list-projects 可见)")
+    sp_reg.add_argument("project_id", nargs="?", default=None, help="不给则读 cwd 的 .claude/project.json")
+    sp_reg.add_argument("--display-name", default=None)
+    sp_reg.add_argument("--repo-path", default=".", help="meta.json repo_path 字段 (默认 '.')")
+    sp_reg.add_argument("--force", action="store_true", help="覆盖已有 meta.json")
+    sp_reg.set_defaults(func=cmd_register)
 
     sp_val = sub.add_parser("validate", help="校验 project_id 格式")
     sp_val.add_argument("project_id")
@@ -422,13 +484,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp_setup = sub.add_parser("setup", help="新机器一键接入: 探测三仓 / venv / 模型 + 写 config")
     sp_setup.add_argument("--dry-run", action="store_true", help="只探测不写 config")
-    sp_setup.add_argument("--auto", action="store_true", help="缺 venv 自动 uv sync, 缺模型自动 huggingface-cli download")
+    sp_setup.add_argument("--auto", action="store_true", help="缺 venv 自动 uv sync (模型不自动下载, 需自备或走 MiniLM fallback)")
     sp_setup.set_defaults(func=cmd_setup)
 
     sp_cfg = sub.add_parser("config", help="~/.codev-platform/config.json 管理")
     sp_cfg.add_argument("action", choices=["show", "init", "path"], help="show=打印当前 / init=写默认 / path=只打印文件位置")
     sp_cfg.add_argument("--force", action="store_true", help="init 时覆盖已有文件")
     sp_cfg.set_defaults(func=cmd_config)
+
+    sp_ver = sub.add_parser("version", help="打印版本号")
+    sp_ver.set_defaults(func=cmd_version)
 
     return p
 
