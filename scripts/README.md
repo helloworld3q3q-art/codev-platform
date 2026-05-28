@@ -6,7 +6,7 @@
 
 | 脚本 | 用途 | 参数化状态 |
 |---|---|---|
-| `ai-health.ps1` | 工具栈体检(12 项含 daemon /health + chroma chunks + cross-link nodes + codegraph + Qwen3 + GPU) | ⚠️ 含 RepoRoot 推导 + 业务进程探测;新项目用前抽 BizConfig section |
+| `ai-health.ps1` | 工具栈体检(12 项含 daemon /health + chroma chunks + cross-link nodes + codegraph + Qwen3 + GPU) | ✅ **已参数化 `-Repo`,本目录是真值源**;业务仓只留瘦 wrapper 转发 |
 | `update-local-ai.ps1` | 三件套刷新(codegraph + chroma + cross-link) | ⚠️ 同上 |
 | `wait-for-reindex.ps1` | polling reindex.log 等就绪 | ✅ 通用 |
 | `dirty-index-check.ps1` | git status × AI 索引范围交叉 | ✅ 通用 |
@@ -29,6 +29,8 @@
 - DOC_PATTERN / CODE_PATTERN 走业务仓 `.claude/index.json`
 - 提供 `codev-platform ai-health` / `update-local-ai` 子命令直接调
 
-## 当前状态
+## 当前状态(归属分两类,逐脚本翻转中)
 
-platform 仓 `tools/dev/` 是真值源,本目录是 snapshot + 模板。改动先在 platform 测,稳定后回同步本目录。
+- **`ai-health.ps1`**:✅ **已翻转** —— 本目录是真值源(参数化 `-Repo`),业务仓 `tools/dev/ai-health.ps1` 是瘦 wrapper,转发到这里并带 `-Repo <本仓>`。widget 的"重新体检"也直接调本目录 canonical。
+- **`post-commit.ps1` / `update-local-ai.ps1`**:⏳ **仍是 snapshot** —— 业务仓 `tools/dev/` 为真值源,本目录是滞后快照。含业务专属 DOC/CODE 正则(post-commit 内联,非读 `.claude/index.json`),未参数化,翻转前需先把正则抽到业务仓 `.claude/index.json`。**别盲目同步覆盖**,先参数化再翻。
+- **通用脚本**(wait-for-reindex / dirty-index-check / clean-local-artifacts / sync-memory / install-git-hooks):两处保持一致,改动同步即可。

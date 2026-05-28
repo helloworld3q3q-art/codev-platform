@@ -18,13 +18,25 @@ param(
     # Light: 跳过模型加载 / torch / Chroma collection 加载,只查文件 mtime/sqlite 行数,~1-2s
     #        用于 post-commit 后台 reindex 后兜底校验,避免重复加载 Qwen3 模型
     [ValidateSet('Full', 'Light')]
-    [string]$Mode = 'Full'
+    [string]$Mode = 'Full',
+    # Optional: write structured JSON to this path for programmatic consumers (e.g. Electron widget).
+    # Default empty = no JSON written; existing text output and exit code are unaffected.
+    [string]$JsonOut = '',
+    # Which repo's tool-stack to inspect. Default empty = derive from this script's
+    # own location ($PSScriptRoot\..\..), preserving the original in-place behavior.
+    # Pass an explicit path so a copy living OUTSIDE the target repo (e.g. the
+    # canonical copy in codev-platform/scripts) can health-check any business repo.
+    [string]$Repo = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $IsLight = ($Mode -eq 'Light')
 
-$RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if ($Repo) {
+    $RepoRoot = (Resolve-Path $Repo).Path
+} else {
+    $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
 $ChromaDir  = Join-Path $RepoRoot 'tools\chroma'
 $ChromaPy   = Join-Path $ChromaDir '.venv\Scripts\python.exe'
 $ChromaData = Join-Path $RepoRoot 'data\chroma'
@@ -53,6 +65,11 @@ $CgApiJar   = Join-Path $RepoRoot 'apps\codegraph-api\target'
 $red   = 0
 $amber = 0
 
+# Buffer all check output so we can print a one-line health overview at the TOP
+# (P6 UX: user sees READY/ATTENTION/BROKEN at a glance without reading the full
+# log). Checks still run first; their output is flushed after the banner.
+$script:report = New-Object System.Collections.ArrayList
+
 function Line {
     param([string]$tag, [string]$status, [string]$msg)
     $color = 'Gray'
@@ -62,18 +79,34 @@ function Line {
         'FAIL' { $color = 'Red';    $script:red++ }
     }
     $pad = $tag.PadRight(20)
-    Write-Host ('[' + $status.PadRight(4) + '] ' + $pad + ' ' + $msg) -ForegroundColor $color
+    [void]$script:report.Add([pscustomobject]@{
+        Text   = '[' + $status.PadRight(4) + '] ' + $pad + ' ' + $msg
+        Color  = $color
+        Tag    = $tag
+        Status = $status
+        Msg    = $msg
+    })
+}
+
+# Buffer a free-form section line (e.g. the usage-stats sub-header) so it stays
+# in order with the buffered Line output when flushed below the banner.
+function Section {
+    param([string]$text, [string]$color = 'Cyan')
+    [void]$script:report.Add([pscustomobject]@{ Text = $text; Color = $color })
 }
 
 Write-Host ('=== ai-health check (mode=' + $Mode + ') ===') -ForegroundColor Cyan
 Write-Host ('repo: ' + $RepoRoot)
 
 # Resolve project_id (multi-project namespace, 2026-05-27)
+# $script:projectId is also consumed by the -JsonOut serialiser below.
+$script:projectId = 'unknown'
 $projectIdFile = Join-Path $RepoRoot '.claude\project.json'
 if (Test-Path $projectIdFile) {
     try {
         $pjData = Get-Content $projectIdFile -Encoding UTF8 -Raw | ConvertFrom-Json
         if ($pjData.project_id) {
+            $script:projectId = $pjData.project_id
             Write-Host ('project_id: ' + $pjData.project_id + ' (from .claude/project.json)')
         } else {
             Write-Host 'project_id: <missing field in .claude/project.json>' -ForegroundColor Yellow
@@ -666,8 +699,8 @@ try {
 }
 
 # 9. Usage stats (Chroma hit rate / reindex frequency / MCP usage proxy)
-Write-Host ''
-Write-Host '--- usage stats (last 7 days) ---' -ForegroundColor Cyan
+Section ''
+Section '--- usage stats (last 7 days) ---' 'Cyan'
 
 # 9.1 search_recall hit rate + top1 distance
 $recallFile = Join-Path $ChromaDir 'search_recall.jsonl'
@@ -871,6 +904,71 @@ try {
 }
 
 Line 'codegraph usage' 'INFO' 'not logged by project scripts yet; ai-health reports process/db health only'
+
+# --- Top overview banner (P6) ---
+# All checks have run; $red / $amber now reflect the whole run. Print a single
+# one-line verdict ABOVE the detailed report so the user knows overall health
+# at a glance:
+#   >>> READY <<<      all critical OK, no warnings
+#   >>> ATTENTION <<<  critical OK but >=1 WARN (degraded, usable)
+#   >>> BROKEN <<<     >=1 FAIL (daemon down / venv missing / model missing)
+if ($red -gt 0) {
+    $overview = '>>> BROKEN <<<    ' + $red + ' FAIL / ' + $amber + ' WARN (fix critical items below)'
+    $overviewColor = 'Red'
+} elseif ($amber -gt 0) {
+    $overview = '>>> ATTENTION <<< all critical OK, ' + $amber + ' WARN (degraded, still usable)'
+    $overviewColor = 'Yellow'
+} else {
+    $overview = '>>> READY <<<     all checks green'
+    $overviewColor = 'Green'
+}
+Write-Host $overview -ForegroundColor $overviewColor
+Write-Host ''
+
+# Flush buffered check output below the banner
+foreach ($row in $script:report) {
+    Write-Host $row.Text -ForegroundColor $row.Color
+}
+
+# --- Optional JSON output (-JsonOut) ---
+# Serialise buffered check results to a structured JSON file for programmatic
+# consumers (e.g. Electron widget).  This block runs AFTER the verdict is known
+# so $red/$amber are final.  Any failure here is non-fatal: we catch, warn, and
+# let the normal exit-code path proceed unchanged.
+if ($JsonOut) {
+    try {
+        $verdict = if ($red -gt 0) { 'BROKEN' } elseif ($amber -gt 0) { 'ATTENTION' } else { 'READY' }
+        # Filter to rows that have a Status field (Line calls); Section rows lack it.
+        $checks = @($script:report |
+            Where-Object { $_.PSObject.Properties.Name -contains 'Status' } |
+            ForEach-Object {
+                @{ tag = $_.Tag; status = $_.Status; msg = $_.Msg }
+            })
+        $okCount = @($checks | Where-Object { $_['status'] -eq 'OK' }).Count
+        $payload = [ordered]@{
+            schema_version = 1
+            project_id     = $script:projectId
+            mode           = $Mode
+            generated_at   = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
+            verdict        = $verdict
+            fail_count     = $red
+            warn_count     = $amber
+            ok_count       = $okCount
+            checks         = $checks
+        }
+        $jsonText = $payload | ConvertTo-Json -Depth 5
+        $outDir = Split-Path $JsonOut -Parent
+        if ($outDir -and -not (Test-Path $outDir)) {
+            New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+        }
+        # Write UTF-8 WITHOUT BOM. PS5.1 Out-File -Encoding UTF8 prepends a BOM
+        # (EF BB BF) that breaks Node's JSON.parse on the consuming widget side.
+        [System.IO.File]::WriteAllText($JsonOut, $jsonText, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host ('[json] wrote ' + $JsonOut)
+    } catch {
+        Write-Warning ('[json] failed to write ' + $JsonOut + ': ' + $_.Exception.Message)
+    }
+}
 
 Write-Host ''
 if ($red -gt 0) {
