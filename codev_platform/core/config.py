@@ -38,12 +38,14 @@ CONFIG_FILE_NAME = "config.json"
 DEFAULT_CONFIG_PATH = Path.home() / CONFIG_DIR_NAME / CONFIG_FILE_NAME
 
 
-# 全字段默认 — config 文件 / env 未给时兜底 (machine-agnostic 跨开发机可改)
+# 全字段默认 — config 文件 / env 未给时兜底。machine-agnostic: 模型路径默认 ~/models
+# (Path.home() 各平台自解析: Win C:\Users\x\models / Mac /Users/x/models / Linux /home/x/models)。
+# 换机器实际路径写进 ~/.codev-platform/config.json 覆盖, 代码里不留盘符字面量。
 DEFAULTS: dict[str, Any] = {
     "models": {
-        "embed_path": r"D:\models\Qwen3-Embedding-0.6B",
+        "embed_path": str(Path.home() / "models" / "Qwen3-Embedding-0.6B"),
         "embed_device": "cuda",
-        "reranker_path": r"D:\models\Qwen3-Reranker-0.6B",
+        "reranker_path": str(Path.home() / "models" / "Qwen3-Reranker-0.6B"),
         "reranker_device": "cuda",
         "reranker_enabled": True,
     },

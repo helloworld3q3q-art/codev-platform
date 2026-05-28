@@ -44,12 +44,16 @@ except ProjectIdError as _pid_exc:
 # 因此 PLATFORM_DATA_DIR env 必须设, 让 data_root() 直接吃 env, 跳过 cwd 推导.
 PERSIST_DIR = chroma_dir()
 COLLECTION_NAME = chroma_collection_name(PROJECT_ID, "platform_docs")
-# 默认走机器共享路径 D:\models\Qwen3-Embedding-0.6B(跨项目复用),仓库内 models/ 是 fallback
-_QWEN3_SHARED = Path(r"D:\models\Qwen3-Embedding-0.6B")
+# 模型路径优先级: env > config(models.embed_path) > ~/models 共享 > 仓内 MiniLM fallback.
+# 不 hardcode 盘符: 实际路径写 ~/.codev-platform/config.json (跨平台/跨机器)。
+from codev_platform.core.config import load_config as _load_cfg, get as _cfg_get
+_cfg = _load_cfg()
+_cfg_embed = _cfg_get(_cfg, "models.embed_path")
+_shared = Path(_cfg_embed).expanduser() if _cfg_embed else (Path.home() / "models" / "Qwen3-Embedding-0.6B")
 _MINILM_INREPO = PLATFORM_ROOT / "models" / "paraphrase-multilingual-MiniLM-L12-v2"
-DEFAULT_EMBEDDING_MODEL = _QWEN3_SHARED if _QWEN3_SHARED.exists() else _MINILM_INREPO
+DEFAULT_EMBEDDING_MODEL = _shared if _shared.exists() else _MINILM_INREPO
 EMBEDDING_MODEL = str(Path(os.getenv("PLATFORM_EMBED_MODEL_PATH", str(DEFAULT_EMBEDDING_MODEL))).expanduser().resolve())
-EMBEDDING_DEVICE = os.getenv("PLATFORM_EMBED_DEVICE", "cuda")
+EMBEDDING_DEVICE = os.getenv("PLATFORM_EMBED_DEVICE", _cfg_get(_cfg, "models.embed_device", "cuda"))
 # 索引侧批大小 — Qwen3-0.6B 在 RTX 5060 上 batch=16 较稳;MiniLM 可以更大
 EMBEDDING_BATCH_SIZE = int(os.getenv("PLATFORM_EMBED_BATCH_SIZE", "16"))
 
