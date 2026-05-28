@@ -41,9 +41,12 @@ if ($Repo) {
 # so its parent is the codev-platform root. MCP recall/usage logs are written next
 # to their Python modules in the codev-platform package dir (not the audited -Repo).
 $CodevRoot  = Split-Path -Parent $PSScriptRoot
-$ChromaDir  = Join-Path $RepoRoot 'tools\chroma'
-$ChromaPy   = Join-Path $ChromaDir '.venv\Scripts\python.exe'
-$ChromaData = Join-Path $RepoRoot 'data\chroma'
+# Shared AI infra now lives in codev-platform (platform ownership inversion 2026-05-28),
+# NOT in the audited -Repo: venv at codev-platform root .venv; chroma persist data in
+# codev-platform\data\chroma; module logs (reindex/recall) in the package dir.
+$ChromaDir  = Join-Path $CodevRoot 'codev_platform\chroma'
+$ChromaPy   = Join-Path $CodevRoot '.venv\Scripts\python.exe'
+$ChromaData = Join-Path $CodevRoot 'data\chroma'
 $Qwen3Shared = 'D:\models\Qwen3-Embedding-0.6B'
 $MiniLmRepo  = Join-Path $RepoRoot 'models\paraphrase-multilingual-MiniLM-L12-v2'
 if ($env:PLATFORM_EMBED_MODEL_PATH) {
@@ -427,13 +430,13 @@ try {
 # 4b4. mcp-proxy availability (required by daemon-mode launcher)
 # Without mcp-proxy.exe, platform_docs_launcher.py exits 1 -> Claude Code MCP
 # connection error. Disabled only if PLATFORM_DOCS_DAEMON_MODE=false.
-$McpProxyExe = Join-Path $RepoRoot 'tools\chroma\.venv\Scripts\mcp-proxy.exe'
+$McpProxyExe = Join-Path $CodevRoot '.venv\Scripts\mcp-proxy.exe'
 if (Test-Path $McpProxyExe) {
     Line 'mcp-proxy' 'OK' ($McpProxyExe + ' (' + [int]((Get-Item $McpProxyExe).Length / 1KB) + ' KB)')
 } elseif ($env:PLATFORM_DOCS_DAEMON_MODE -eq 'false') {
     Line 'mcp-proxy' 'OK' 'not needed (PLATFORM_DOCS_DAEMON_MODE=false, daemon mode disabled)'
 } else {
-    Line 'mcp-proxy' 'WARN' ('missing: ' + $McpProxyExe + ' -- daemon mode launcher will fail; install: uv pip install --python tools\chroma\.venv\Scripts\python.exe mcp-proxy')
+    Line 'mcp-proxy' 'WARN' ('missing: ' + $McpProxyExe + ' -- daemon mode launcher will fail; install: uv pip install --python ' + (Join-Path $CodevRoot '.venv\Scripts\python.exe') + ' mcp-proxy')
 }
 
 # 4c. Incident vs rules sync freshness (knowledge debt signal)
