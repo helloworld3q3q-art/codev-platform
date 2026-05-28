@@ -26,7 +26,11 @@ param(
     # own location ($PSScriptRoot\..\..), preserving the original in-place behavior.
     # Pass an explicit path so a copy living OUTSIDE the target repo (e.g. the
     # canonical copy in codev-platform/scripts) can health-check any business repo.
-    [string]$Repo = ''
+    [string]$Repo = '',
+    # Optional: override which project's shared index is audited (chroma collection /
+    # cross_layer), independent of -Repo. Default empty = resolve from -Repo's
+    # .claude/project.json. Lets codev-platform inspect any project's index from one place.
+    [string]$Project = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -123,6 +127,16 @@ if (Test-Path $projectIdFile) {
     }
 } else {
     Write-Host 'project_id: <none, .claude/project.json missing>' -ForegroundColor Yellow
+}
+# -Project override: audit a specific project's shared index regardless of -Repo.
+if ($Project) {
+    $projReg = Join-Path $CodevRoot ('platform_meta\projects\' + $Project)
+    if (-not (Test-Path $projReg)) {
+        Write-Host ('project override: ' + $Project + ' <WARNING: not registered in platform_meta/projects; auditing anyway>') -ForegroundColor Yellow
+    } else {
+        Write-Host ('project override: ' + $Project + ' (was ' + $script:projectId + ', via -Project)') -ForegroundColor Cyan
+    }
+    $script:projectId = $Project
 }
 Write-Host ''
 
