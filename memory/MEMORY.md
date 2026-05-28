@@ -17,6 +17,7 @@
 - [cross-link 重建 Windows lock](reference_cross_link_lock_fix.md) — 必须用 SQLite backup API 而非 os.replace
 - [禁止绝对路径](feedback_no_absolute_paths.md) — 文档/SKILL/rule/命令例子用相对路径或 `<repo-root>`;Scheduler / runtime .py / archive 例外
 - [派 agent 切 collection 路由](feedback_agent_mcp_collection_routing.md) — 派跨仓 agent 工作必须 prompt 含 cd + 目标 collection + codegraph init 要求,否则 MCP 跳空
+- [禁止主动 push](feedback_no_autonomous_push.md) — commit 可以,但 push 远程前必须先问;三仓都适用,同会话推过也不等于授权
 
 ## 业务专属 memory 在哪
 
