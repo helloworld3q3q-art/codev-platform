@@ -54,7 +54,13 @@ if ($ChromaVenv) {
 } else {
     $ChromaPy = Join-Path $RepoRoot 'tools\chroma\.venv\Scripts\python.exe'
 }
-$CrossPy    = 'D:\ProgramFiles\Python314\python.exe'    # cross_link uses system python (has sqlglot + javalang)
+# cross_link build needs a python with sqlglot + javalang. Resolve from config
+# (runtime.cross_link_python) or PATH 'python'; never hardcode a machine path (portability).
+$CrossPy = $null
+if (Test-Path $cfgPath) {
+    try { $CrossPy = (Get-Content $cfgPath -Encoding UTF8 -Raw | ConvertFrom-Json).runtime.cross_link_python } catch { }
+}
+if (-not $CrossPy) { $CrossPy = 'python' }
 $CrossDir   = Join-Path $RepoRoot 'tools'
 $HealthPs1  = Join-Path $PSScriptRoot 'ai-health.ps1'
 
