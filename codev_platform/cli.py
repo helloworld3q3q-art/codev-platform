@@ -320,8 +320,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
       Claude Code 在任一仓打开即可
 
     模型: 自备放 ~/models/Qwen3-* (或仓内 MiniLM fallback), 本命令不下载。
+
+    跨平台: 路径全走 pathlib + config.json, 零 Windows 盘符字面量。venv 在本仓 .venv
+    (平台所有权翻正后 venv / data 归 codev-platform 仓自有)。
     """
-    from codev_platform.core.config import load_config, save_config
+    from codev_platform.core.config import load_config, save_config, get
     codev_root = Path(__file__).resolve().parents[1]
     parent = codev_root.parent
     missing: list[str] = []
@@ -355,59 +358,61 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 1
     _print()
 
-    # step 2: chroma venv
-    venv_dir = platform_repo / "tools" / "chroma" / ".venv"
+    # step 2: codev-platform 本仓 .venv (平台所有权翻正后 venv 归本仓自有)
+    venv_dir = codev_root / ".venv"
     venv_py = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    _print("=== step 2/5: chroma .venv ===")
+    _print("=== step 2/5: codev-platform .venv ===")
     chroma_venv = None
     if venv_py.is_file():
         _print(f"  found: {venv_dir}")
         chroma_venv = str(venv_dir)
     elif args.auto and _which("uv"):
-        _print(f"  MISSING, auto-installing (uv) ...")
-        cd = venv_dir.parent
-        _run_subprocess(["uv", "venv"], cwd=cd, label="uv venv")
-        if (cd / "pyproject.toml").is_file():
-            _run_subprocess(["uv", "sync"], cwd=cd, label="uv sync")
-        elif (cd / "requirements.txt").is_file():
-            _run_subprocess(["uv", "pip", "install", "-r", "requirements.txt", "--python", str(venv_py)], cwd=cd, label="uv pip install -r")
+        _print("  MISSING, auto-installing (uv) ...")
+        _run_subprocess(["uv", "venv"], cwd=codev_root, label="uv venv")
+        req = codev_root / "requirements-runtime.txt"
+        if req.is_file():
+            _run_subprocess(["uv", "pip", "install", "-r", str(req), "--python", str(venv_py)], cwd=codev_root, label="uv pip install -r requirements-runtime.txt")
         chroma_venv = str(venv_dir) if venv_py.is_file() else None
     else:
-        _print(f"  MISSING — setup --auto 自动装, 或手动: cd {venv_dir.parent} && uv venv && uv sync")
+        _print(f"  MISSING — setup --auto 自动装, 或手动: cd {codev_root} && uv venv && uv pip install -r requirements-runtime.txt")
+        _print("    (torch CUDA 版需先单独装, 见 requirements-runtime.txt 顶部注释)")
     if not chroma_venv:
-        missing.append("chroma-venv")
+        missing.append("codev-venv")
     _print()
 
-    # step 2.5: pip install -e codev-platform 进 chroma venv (新人 P5 BLOCKER)
+    # step 2.5: pip install -e codev-platform 进本仓 .venv (editable, 改源码即生效)
     if chroma_venv and venv_py.is_file():
-        _print("=== step 2.5/5: codev-platform 装进 chroma .venv ===")
+        _print("=== step 2.5/5: codev-platform editable 装进 .venv ===")
         check = _run_subprocess([str(venv_py), "-c", "import codev_platform"], label="check codev_platform in venv")
         if check != 0:
             if args.auto and _which("uv"):
-                _run_subprocess(["uv", "pip", "install", "-e", str(codev_root), "--python", str(venv_py)], label=f"uv pip install -e codev-platform")
+                _run_subprocess(["uv", "pip", "install", "-e", str(codev_root), "--python", str(venv_py)], label="uv pip install -e codev-platform")
             else:
-                _print(f"  codev_platform 未装进 chroma venv — 跑: uv pip install -e {codev_root} --python {venv_py}")
+                _print(f"  codev_platform 未装进 .venv — 跑: uv pip install -e {codev_root} --python {venv_py}")
                 missing.append("codev_platform-in-venv")
         else:
-            _print("  OK: codev_platform 已可在 chroma venv import")
+            _print("  OK: codev_platform 已可在 .venv import")
         _print()
 
-    # step 3: 模型 detect (自备, 不下载)
+    # step 3: 模型 detect (自备, 不下载) — 零字面量, 优先 config, 再 ~/models, 再仓内 fallback
+    cfg_pre = load_config()
     model_root = Path.home() / "models"
+    cfg_embed = get(cfg_pre, "models.embed_path")
+    cfg_reranker = get(cfg_pre, "models.reranker_path")
     embed_path = next((str(m) for m in [
-        Path(r"D:\models\Qwen3-Embedding-0.6B"),
+        Path(cfg_embed).expanduser() if cfg_embed else None,
         model_root / "Qwen3-Embedding-0.6B",
-        platform_repo / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
-    ] if m.is_dir()), None)
+        codev_root / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
+    ] if m and m.is_dir()), None)
     reranker_path = next((str(r) for r in [
-        Path(r"D:\models\Qwen3-Reranker-0.6B"),
+        Path(cfg_reranker).expanduser() if cfg_reranker else None,
         model_root / "Qwen3-Reranker-0.6B",
-    ] if r.is_dir()), "")
+    ] if r and r.is_dir()), "")
     _print("=== step 3/5: 模型 (自备, 本命令不下载) ===")
     if embed_path:
         _print(f"  embed:    {embed_path}")
     else:
-        _print(f"  MISSING embed — 放模型到 {model_root}/Qwen3-Embedding-0.6B (或仓内 MiniLM fallback 自动用)")
+        _print(f"  MISSING embed — 放模型到 {model_root / 'Qwen3-Embedding-0.6B'} (或仓内 MiniLM fallback 自动用)")
         missing.append("embed-model")
     _print(f"  reranker: {reranker_path or 'MISSING (可选, daemon 降级纯向量)'}")
     _print()
@@ -422,7 +427,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
             cfg.setdefault(section, {})[key] = val
             changed = True
     _set("runtime", "chroma_venv", chroma_venv)
-    _set("data", "platform_data_dir", str(platform_repo / "data"))
+    _set("data", "platform_data_dir", str(codev_root / "data"))
     _set("models", "embed_path", embed_path)
     _set("models", "reranker_path", reranker_path)
     if changed and not args.dry_run:
