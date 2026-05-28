@@ -221,11 +221,18 @@ def cmd_post_commit(args: argparse.Namespace) -> int:
         if "codegraph" in scopes:
             reindex_cmd.append("--codegraph")
 
+        # After reindex, refresh the widget health snapshot so "commit -> see
+        # fresh data" holds without depending on the widget's own poll timer.
+        # Light mode (~1-2s), --json-out bare => canonical platform_meta/health/<pid>.json.
+        health_cmd = [py, "-m", "codev_platform.cli", "health",
+                      "--mode", "light", "--repo", str(repo), "--json-out"]
+
         if args.foreground:
             self_rc = _run_logged_foreground(reindex_cmd, log_file)
             _finish_log(log_file, self_rc)
+            _run_health_refresh(health_cmd, log_file)
         else:
-            _spawn_background(reindex_cmd, log_file)
+            _spawn_background(reindex_cmd, log_file, health_cmd)
 
         return 0
     except Exception as exc:  # never fail the commit
@@ -253,17 +260,29 @@ def _run_logged_foreground(cmd: list[str], log_file: Path) -> int:
     return cp.returncode
 
 
-def _spawn_background(cmd: list[str], log_file: Path) -> None:
+def _run_health_refresh(cmd: list[str], log_file: Path) -> None:
+    """Refresh the widget health snapshot, best-effort (never raises)."""
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as fh:
+            subprocess.run(C.resolve_argv(cmd), stdout=fh, stderr=subprocess.STDOUT)
+    except Exception as exc:  # noqa: BLE001 - snapshot refresh must never fail the hook
+        _append_log(log_file, f"health snapshot refresh exception: {exc}\n")
+
+
+def _spawn_background(cmd: list[str], log_file: Path, post_cmd: list[str] | None = None) -> None:
     """Spawn reindex detached, redirecting output to the log + writing the
     finish marker afterwards. Uses a tiny Python wrapper so the finish status
     is recorded cross-platform (replaces the .ps1 temp-wrapper trick)."""
     log_file.parent.mkdir(parents=True, exist_ok=True)
     py = sys.executable or "python"
     inner = repr(C.resolve_argv(cmd))
+    post = repr(C.resolve_argv(post_cmd) if post_cmd else None)
     logf = repr(str(log_file))
     wrapper = (
         "import subprocess,sys\n"
         f"_cmd={inner}\n"
+        f"_post={post}\n"
         f"_log={logf}\n"
         "import datetime\n"
         "def _stamp(): return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')\n"
@@ -277,6 +296,13 @@ def _spawn_background(cmd: list[str], log_file: Path) -> None:
         "lbl='ok' if rc==0 else ('warn exit=2' if rc==2 else 'failed exit='+str(rc))\n"
         "with open(_log,'a',encoding='utf-8') as fh:\n"
         "    fh.write('===== reindex finished at '+_stamp()+' ['+lbl+'] ====='+chr(10))\n"
+        "if _post:\n"
+        "    try:\n"
+        "        with open(_log,'a',encoding='utf-8') as fh:\n"
+        "            subprocess.run(_post,stdout=fh,stderr=subprocess.STDOUT)\n"
+        "    except Exception as e:\n"
+        "        with open(_log,'a',encoding='utf-8') as fh:\n"
+        "            fh.write('health snapshot refresh exception: '+str(e)+chr(10))\n"
     )
     kwargs: dict = {}
     if os.name == "nt":

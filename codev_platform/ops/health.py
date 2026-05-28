@@ -924,6 +924,20 @@ def cmd_health(args: argparse.Namespace) -> int:
 
     r.flush()
 
+    # Optional widget snapshot (parity with ai-health.ps1 -JsonOut). Runs after
+    # all checks so red/amber are final; never affects the exit code below.
+    if getattr(args, "json_out", None) is not None:
+        if args.json_out == "":
+            if project_id:
+                snap = cdv_root / "platform_meta" / "health" / f"{project_id}.json"
+            else:
+                out("[json] WARN no project_id resolved; pass --json-out <path> explicitly")
+                snap = None
+        else:
+            snap = Path(args.json_out).expanduser()
+        if snap is not None:
+            _write_json_snapshot(r, snap, project_id, args.mode)
+
     out("")
     if r.red > 0:
         out(f"SUMMARY: {r.red} FAIL / {r.amber} WARN")
@@ -935,9 +949,51 @@ def cmd_health(args: argparse.Namespace) -> int:
     return 0
 
 
+def _verdict(red: int, amber: int) -> str:
+    if red > 0:
+        return "BROKEN"
+    if amber > 0:
+        return "ATTENTION"
+    return "READY"
+
+
+def _write_json_snapshot(r: Report, path: Path, project_id: str | None, mode: str) -> None:
+    """Serialise the report to a widget-readable JSON snapshot (parity with
+    ai-health.ps1 -JsonOut). Non-fatal: any failure is logged, never raised."""
+    try:
+        checks = [
+            {"tag": row["tag"], "status": row["status"], "msg": row["msg"]}
+            for row in r.rows
+            if "status" in row
+        ]
+        payload = {
+            "schema_version": 1,
+            "project_id": project_id,
+            "mode": mode.capitalize(),
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "verdict": _verdict(r.red, r.amber),
+            "fail_count": r.red,
+            "warn_count": r.amber,
+            "ok_count": sum(1 for c in checks if c["status"] == "OK"),
+            "checks": checks,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # UTF-8 WITHOUT BOM -- Node's JSON.parse on the widget side chokes on a BOM.
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        out(f"[json] wrote {path}")
+    except Exception as exc:  # noqa: BLE001 - snapshot write must never fail health
+        out(f"[json] WARN failed to write {path}: {exc}")
+
+
 def register(subparsers) -> None:
     sp = subparsers.add_parser("health", help="工具栈体检")
     sp.add_argument("--repo")
     sp.add_argument("--project")
     sp.add_argument("--mode", choices=["light", "full"], default="full")
+    # --json-out: write a widget-readable snapshot. Bare flag => canonical path
+    # platform_meta/health/<project_id>.json; explicit path => that file.
+    sp.add_argument(
+        "--json-out", nargs="?", const="", default=None, dest="json_out",
+        help="写健康快照 JSON (widget 读); 省略路径=写规范位置 platform_meta/health/<pid>.json",
+    )
     sp.set_defaults(func=cmd_health)

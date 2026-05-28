@@ -28,9 +28,13 @@ codev-platform health                 # full 模式，体检当前仓
 codev-platform health --mode light    # 跳过重探针（embed load / torch / collection 实查）
 codev-platform health --project openclaw-stock   # 审计任意已登记项目
 codev-platform health --repo <path>   # 指定仓路径
+codev-platform health --json-out      # 额外写 widget 快照到规范位置 platform_meta/health/<pid>.json
+codev-platform health --json-out <path>   # 写到指定文件
 ```
 
 顶部 banner：`>>> READY <<<` 全绿 / `>>> ATTENTION <<<` 仅 WARN / `>>> BROKEN <<<` 有 FAIL。
+
+> `--json-out` 产出 Tray widget 读的结构化快照（schema_version / verdict / checks[]），跨平台与 Windows 完全一致。post-commit 后台 reindex 跑完会自动带 `--json-out` 刷新它，所以**提交代码即见新数据**，无需依赖 widget 自身轮询。
 
 ### `reindex` — 刷新本地 AI 索引
 
