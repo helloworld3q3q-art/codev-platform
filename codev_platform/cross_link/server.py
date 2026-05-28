@@ -36,10 +36,7 @@ from mcp.types import TextContent, Tool
 #   data/codegraph_ext/cross_layer.sqlite             (legacy fallback)
 # CROSS_LINK_DB 环境变量可显式覆盖, 否则按 project_id 解析。
 from codev_platform.core.project_id import ProjectIdError, resolve_local
-from codev_platform.core.paths import (
-    cross_link_db_path,
-    cross_link_legacy_db_path,
-)
+from codev_platform.core.paths import cross_link_db_path
 
 _explicit_db = os.getenv("CROSS_LINK_DB")
 if _explicit_db:
@@ -56,20 +53,11 @@ else:
     except ProjectIdError as _pid_exc:
         print(f"[cross_link.mcp_server] FATAL: {_pid_exc!s}", file=sys.stderr, flush=True)
         sys.exit(1)
-    _new_path = cross_link_db_path(PROJECT_ID)
-    _legacy_path = cross_link_legacy_db_path()
-    if _new_path.exists():
-        DB_PATH = _new_path
-    elif _legacy_path.exists():
-        DB_PATH = _legacy_path
-        print(
-            f"[cross_link.mcp_server] WARN: 使用 legacy DB {_legacy_path}, "
-            f"重跑 build_index.py 后迁移到 {_new_path}。",
-            file=sys.stderr,
-            flush=True,
-        )
-    else:
-        DB_PATH = _new_path  # 不存在, _ensure_conn 会报"先跑 build_index"
+    # Per-project DB only. NO legacy unprefixed fallback: the unprefixed
+    # cross_layer.sqlite is openclaw's historical data, so falling back would make
+    # every OTHER project serve openclaw's chains (cross-project data bleed, found
+    # 2026-05-28). Missing per-project DB => _ensure_conn reports "run build_index".
+    DB_PATH = cross_link_db_path(PROJECT_ID)
 
 _LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
 # 使用率埋点:每次 tool 调用一行 JSON,与 chroma/search_recall.jsonl 对齐,供 ai-health 统计
