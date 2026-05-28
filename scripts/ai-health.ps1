@@ -243,18 +243,23 @@ if (Test-Path $ChromaData) {
     $sub = (Get-ChildItem -Path $ChromaData -Directory -ErrorAction SilentlyContinue | Measure-Object).Count
     Line 'chroma data dir'  'OK'   ($ChromaData + ' (' + $sub + ' segments)')
 
-    # Light 模式跳过 collection probe(要加载 chromadb 模块,~1-2s)— 用 .last_build.json 替代
+    # Collection is project-namespaced: <project_id>__platform_docs (multi-tenant daemon).
+    # Audit THIS repo's project, not the legacy unprefixed or last-built collection.
+    $collName = if ($script:projectId) { $script:projectId + '__platform_docs' } else { 'platform_docs' }
+
+    # Light 模式跳过 collection probe(要加载 chromadb 模块,~1-2s)— 用 per-project .last_build 替代
     if ($IsLight) {
-        $stampJson = Join-Path $ChromaData '.last_build.json'
+        $stampJson = Join-Path $ChromaData ('.last_build.' + $script:projectId + '.json')
+        if (-not (Test-Path $stampJson)) { $stampJson = Join-Path $ChromaData '.last_build.json' }
         if (Test-Path $stampJson) {
             try {
                 $stamp = Get-Content $stampJson -Raw -Encoding UTF8 | ConvertFrom-Json
-                Line 'chroma collection' 'OK' ('chunks=' + $stamp.chunks + ' dim=' + $stamp.embed_dim + ' model=' + $stamp.embed_model + ' (from .last_build.json)')
+                Line 'chroma collection' 'OK' ('chunks=' + $stamp.chunks + ' dim=' + $stamp.embed_dim + ' model=' + $stamp.embed_model + ' [' + $collName + ']')
             } catch {
-                Line 'chroma collection' 'WARN' 'cannot parse .last_build.json'
+                Line 'chroma collection' 'WARN' 'cannot parse .last_build stamp'
             }
         } else {
-            Line 'chroma collection' 'WARN' '.last_build.json missing (run update-local-ai.ps1)'
+            Line 'chroma collection' 'WARN' ('.last_build.' + $script:projectId + '.json missing (run update-local-ai.ps1)')
         }
     }
     if ((-not $IsLight) -and (Test-Path $ChromaPy)) {
@@ -265,7 +270,7 @@ os.environ.setdefault("PLATFORM_EMBED_DEVICE", "cpu")
 try:
     import chromadb
     c = chromadb.PersistentClient(path=r"__DATA__")
-    col = c.get_collection("platform_docs")
+    col = c.get_collection("__COLLECTION__")
     total = col.count()
     meta = col.metadata or {}
     dim = "empty"
@@ -287,7 +292,7 @@ except Exception as e:
     print("ERR " + repr(e))
     sys.exit(2)
 '@
-        $probe2 = $probe2.Replace('__CHROMA__', $ChromaDir).Replace('__DATA__', $ChromaData)
+        $probe2 = $probe2.Replace('__CHROMA__', $ChromaDir).Replace('__DATA__', $ChromaData).Replace('__COLLECTION__', $collName)
         $tmp2 = Join-Path $env:TEMP ('ai_health_chroma_' + [guid]::NewGuid().ToString('N') + '.py')
         Set-Content -Path $tmp2 -Value $probe2 -Encoding ASCII
         try {
