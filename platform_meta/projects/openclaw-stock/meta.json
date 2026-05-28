@@ -19,9 +19,18 @@
       "^apps/stock-admin-web/src/(pages|services|models|typings\\.d\\.ts|app\\.tsx)",
       "^python/stock-pipeline/stock_pipeline/(repositories|jobs|models|core|writers|pipelines)/"
     ],
-    "indexable_patterns": [
-      "^python/stock-pipeline/.*\\.py$",
+    "reindex_doc_patterns": [
       "^python/stock-pipeline/\\.claude/rules/.*\\.md$"
+    ],
+    "reindex_cross_link_patterns": [
+      "^apps/stock-admin-api/src/main/resources/db/migration/V.*\\.sql$",
+      "^apps/stock-admin-api/src/main/java/.*Mapper\\.java$",
+      "^apps/stock-admin-api/src/main/java/.*/controller/.*\\.java$",
+      "^apps/stock-admin-web/src/services/apis/.*\\.ts$",
+      "^python/stock-pipeline/stock_pipeline/repositories/.*\\.py$"
+    ],
+    "reindex_codegraph_patterns": [
+      "^python/stock-pipeline/.*\\.py$"
     ]
   },
   "notes": "原型阶段: 单仓自托管, repo_path 相对 platform-meta/ 上级。未来 server 化后改为绝对 git url。health.cross_layer_source_dirs 声明哪些源喂 cross_layer (供 ai-health 算索引新鲜度), 路径相对 repo 根。"

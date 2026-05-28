@@ -43,14 +43,37 @@ foreach ($line in $status -split "`n") {
     if ($path) { $dirtyPaths += $path }
 }
 
-# Index scope patterns (same as post-commit.ps1)
-$codegraphPat = '^(apps/stock-admin-api/src/main/java/.*\.java$|apps/stock-admin-web/src/.*\.(ts|tsx)$|python/stock-pipeline/.*\.py$)'
-$crossLinkPat = '^(apps/stock-admin-api/src/main/resources/db/migration/V.*\.sql$|apps/stock-admin-api/src/main/java/.*Mapper\.java$|apps/stock-admin-api/src/main/java/.*/controller/.*\.java$|apps/stock-admin-web/src/services/apis/.*\.ts$|python/stock-pipeline/stock_pipeline/repositories/.*\.py$)'
-$chromaPat    = '^(docs/.*\.md$|\.claude/rules/.*\.md$|\.claude/skills/.*\.md$|apps/[^/]+/\.claude/rules/.*\.md$|python/stock-pipeline/\.claude/rules/.*\.md$|tools/.*\.md$|.*CLAUDE\.md$|.*AGENTS\.md$|README\.md$)'
+# Index scope patterns: same per-project source of truth as post-commit.ps1 /
+# ai-health (meta.json health.reindex_*_patterns). Project-name-free generic
+# defaults in code; each project EXTENDS via meta. No code edit to add a project.
+$codevRoot = Split-Path -Parent $PSScriptRoot
+$projectId = $null
+$pjFile = Join-Path $repoRoot '.claude\project.json'
+if (Test-Path $pjFile) {
+    try { $projectId = (Get-Content $pjFile -Encoding UTF8 -Raw | ConvertFrom-Json).project_id } catch { }
+}
+$healthCfg = $null
+if ($projectId) {
+    $metaFile = Join-Path $codevRoot ('platform_meta\projects\' + $projectId + '\meta.json')
+    if (Test-Path $metaFile) {
+        try { $mj = Get-Content $metaFile -Encoding UTF8 -Raw | ConvertFrom-Json; if ($mj.health) { $healthCfg = $mj.health } } catch { }
+    }
+}
+function Get-MetaPatterns($key) {
+    if ($healthCfg -and $healthCfg.$key) { return @($healthCfg.$key) }
+    return @()
+}
+function Test-AnyPattern($text, $patterns) {
+    foreach ($pat in $patterns) { if ($text -match $pat) { return $true } }
+    return $false
+}
+$codegraphPats = @('^apps/[^/]+/src/.*\.(java|ts|tsx)$') + (Get-MetaPatterns 'reindex_codegraph_patterns')
+$crossLinkPats = @() + (Get-MetaPatterns 'reindex_cross_link_patterns')
+$chromaPats    = @('^docs/.*\.md$', '^\.claude/(rules|skills)/.*\.md$', '^apps/[^/]+/\.claude/rules/.*\.md$', '^tools/.*\.md$', '.*CLAUDE\.md$', '.*AGENTS\.md$', '^README\.md$') + (Get-MetaPatterns 'reindex_doc_patterns')
 
-$affectedCg  = @($dirtyPaths | Where-Object { $_ -match $codegraphPat })
-$affectedCl  = @($dirtyPaths | Where-Object { $_ -match $crossLinkPat })
-$affectedCh  = @($dirtyPaths | Where-Object { $_ -match $chromaPat })
+$affectedCg  = @($dirtyPaths | Where-Object { Test-AnyPattern $_ $codegraphPats })
+$affectedCl  = @($dirtyPaths | Where-Object { Test-AnyPattern $_ $crossLinkPats })
+$affectedCh  = @($dirtyPaths | Where-Object { Test-AnyPattern $_ $chromaPats })
 
 $totalAffected = @($affectedCg + $affectedCl + $affectedCh) | Sort-Object -Unique
 $dirty = $totalAffected.Count -gt 0

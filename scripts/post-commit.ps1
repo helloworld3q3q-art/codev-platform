@@ -8,18 +8,13 @@
 # on PATH conflicts; sh stub exec's PowerShell immediately so we never run
 # real logic in sh.
 #
-# Two trigger categories, dispatched separately:
-#   DOC paths (-> chroma reindex, usually incremental):
-#     docs/**/*.md, .claude/rules/*.md, .claude/skills/**/*.md,
-#     submodule .claude/rules/*.md, tools/**/*.md,
-#     **/CLAUDE.md, **/AGENTS.md, root README.md
-#
-#   CODE paths (-> cross_link rebuild, ~2s background):
-#     apps/stock-admin-api/src/main/resources/db/migration/V*.sql
-#     apps/stock-admin-api/src/main/java/**/*Mapper.java
-#     apps/stock-admin-api/src/main/java/**/controller/*.java
-#     apps/stock-admin-web/src/services/apis/*.ts
-#     python/stock-pipeline/stock_pipeline/repositories/*.py
+# Trigger categories (-> chroma / cross_link / codegraph reindex), dispatched
+# separately. Match patterns are PROJECT-DECLARED in meta.json health.* (project-
+# name-free generic defaults live in code; each project EXTENDS via its meta):
+#   DOC      -> chroma     : generic doc globs + health.reindex_doc_patterns
+#   CROSS_LINK -> cross_link: health.reindex_cross_link_patterns (no generic default)
+#   CODEGRAPH  -> codegraph : generic source glob + health.reindex_codegraph_patterns
+# Adding a project needs no code edit here -- declare its paths in meta.json.
 #
 # When both match: spawn one bg job calling update-local-ai -SkipCodeGraph (both)
 # When only doc:   spawn chroma reindex only (skip cross_link save 2s)
@@ -41,48 +36,47 @@ try {
     $changed = & git diff-tree --no-commit-id --name-only -r HEAD 2>$null
     if (-not $changed -or $LASTEXITCODE -ne 0) { exit 0 }
 
-    # DOC pattern: 必须严格对应 index_docs.py 的 DOC_PATTERNS,避免触发 reindex
-    # 但 index_docs.py 实际不收的路径(如 .claude/settings.json / .claude/hooks/)
-    # 2026-05-23 收窄:之前用 \.claude/ 整目录命中,误触发 settings.json / hooks/
-    # 引发空跑(manifest 增量化后空跑也是几秒,但无意义占资源)
-    $docPattern = '^(' +
-        'docs/.*\.md$' +
-        '|\.claude/rules/.*\.md$' +
-        '|\.claude/skills/.*\.md$' +
-        '|apps/[^/]+/\.claude/rules/.*\.md$' +
-        '|python/stock-pipeline/\.claude/rules/.*\.md$' +
-        '|tools/.*\.md$' +
-        '|.*CLAUDE\.md$' +
-        '|.*AGENTS\.md$' +
-        '|README\.md$' +
-        ')'
+    # Reindex-scope patterns are PROJECT-DECLARED in meta.json health.* so adding a
+    # project needs no code edit here. Code carries only project-name-free generics;
+    # a project EXTENDS them via meta. Resolve this repo's project_id + codev-platform
+    # root (this canonical script lives in codev-platform\scripts).
+    $codevRoot = Split-Path -Parent $PSScriptRoot
+    $projectId = $null
+    $pjFile = Join-Path $repoRoot '.claude\project.json'
+    if (Test-Path $pjFile) {
+        try { $projectId = (Get-Content $pjFile -Encoding UTF8 -Raw | ConvertFrom-Json).project_id } catch { }
+    }
+    $healthCfg = $null
+    if ($projectId) {
+        $metaFile = Join-Path $codevRoot ('platform_meta\projects\' + $projectId + '\meta.json')
+        if (Test-Path $metaFile) {
+            try { $mj = Get-Content $metaFile -Encoding UTF8 -Raw | ConvertFrom-Json; if ($mj.health) { $healthCfg = $mj.health } } catch { }
+        }
+    }
+    function Get-MetaPatterns($key) {
+        if ($healthCfg -and $healthCfg.$key) { return @($healthCfg.$key) }
+        return @()
+    }
+    function Test-AnyPattern($text, $patterns) {
+        $t = $text -replace '\\', '/'
+        foreach ($pat in $patterns) { if ($t -match $pat) { return $true } }
+        return $false
+    }
 
-    # CROSS_LINK pattern: everything that feeds cross_link KG
-    # - Flyway SQL: defines table/column nodes
-    # - Java Mapper: SQL annotations -> reads/writes_table edges
-    # - Java Controller: @Mapping -> java_endpoint nodes
-    # - Frontend api client: generated typings -> frontend_api nodes
-    # - Python repositories: SQL in repos -> python_method edges
-    $crossLinkPattern = '^(' +
-        'apps/stock-admin-api/src/main/resources/db/migration/V.*\.sql$' +
-        '|apps/stock-admin-api/src/main/java/.*Mapper\.java$' +
-        '|apps/stock-admin-api/src/main/java/.*/controller/.*\.java$' +
-        '|apps/stock-admin-web/src/services/apis/.*\.ts$' +
-        '|python/stock-pipeline/stock_pipeline/repositories/.*\.py$' +
-        ')'
+    # DOC -> chroma reindex. Generic doc defaults + project's reindex_doc_patterns.
+    $docPatterns = @(
+        '^docs/.*\.md$', '^\.claude/(rules|skills)/.*\.md$', '^apps/[^/]+/\.claude/rules/.*\.md$',
+        '^tools/.*\.md$', '.*CLAUDE\.md$', '.*AGENTS\.md$', '^README\.md$'
+    ) + (Get-MetaPatterns 'reindex_doc_patterns')
+    # CROSS_LINK -> cross_link rebuild. No universal default (feeds are stack-specific);
+    # project declares via reindex_cross_link_patterns.
+    $crossLinkPatterns = @() + (Get-MetaPatterns 'reindex_cross_link_patterns')
+    # CODEGRAPH -> codegraph sync. Generic source default + reindex_codegraph_patterns.
+    $codegraphPatterns = @('^apps/[^/]+/src/.*\.(java|ts|tsx)$') + (Get-MetaPatterns 'reindex_codegraph_patterns')
 
-    # CODEGRAPH pattern: any source code feeds codegraph callgraph index
-    # (2026-05-22 起 watcher 弃用 — 它会写崩 codegraph.db 出 SQLITE_CORRUPT，
-    # 改用 hook 触发增量 sync。代码改动后台跑 codegraph index，~60s 无感)
-    $codegraphPattern = '^(' +
-        'apps/stock-admin-api/src/main/java/.*\.java$' +
-        '|apps/stock-admin-web/src/.*\.(ts|tsx)$' +
-        '|python/stock-pipeline/.*\.py$' +
-        ')'
-
-    $docMatched       = @($changed | Where-Object { $_ -match $docPattern })
-    $crossLinkMatched = @($changed | Where-Object { $_ -match $crossLinkPattern })
-    $codegraphMatched = @($changed | Where-Object { $_ -match $codegraphPattern })
+    $docMatched       = @($changed | Where-Object { Test-AnyPattern $_ $docPatterns })
+    $crossLinkMatched = @($changed | Where-Object { Test-AnyPattern $_ $crossLinkPatterns })
+    $codegraphMatched = @($changed | Where-Object { Test-AnyPattern $_ $codegraphPatterns })
 
     if ($docMatched.Count -eq 0 -and $crossLinkMatched.Count -eq 0 -and $codegraphMatched.Count -eq 0) { exit 0 }
 

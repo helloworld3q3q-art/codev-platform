@@ -740,7 +740,12 @@ try {
             'README\.md$',
             '^apps/[^/]+/src/.*\.(java|ts|tsx)$'
         )
-        $metaIndexable = if ($script:healthCfg -and $script:healthCfg.indexable_patterns) { @($script:healthCfg.indexable_patterns) } else { @() }
+        # Reuse the same per-project reindex-scope patterns post-commit.ps1 uses
+        # (single source of truth in meta.json health.reindex_*_patterns).
+        $metaIndexable = @()
+        foreach ($k in @('reindex_doc_patterns', 'reindex_cross_link_patterns', 'reindex_codegraph_patterns')) {
+            if ($script:healthCfg -and $script:healthCfg.$k) { $metaIndexable += @($script:healthCfg.$k) }
+        }
         $indexablePatterns = $defaultIndexable + $metaIndexable
         $shouldTrigger = $false
         foreach ($f in $headFiles) {
