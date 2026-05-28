@@ -133,6 +133,7 @@
       <p>多项目 AI 协作工具栈 · 真值源仓 × 运行时管道</p>
       <a href="#map">一图总览</a>
       <a href="#what">这平台是什么</a>
+      <a href="#xplatform">跨平台 CLI</a>
       <a href="#modules">本仓模块</a>
       <a href="#distribute">分发链路</a>
       <a href="#isolation">数据隔离</a>
@@ -148,7 +149,7 @@
       <div class="shell">
         <header class="hero">
           <h2>codev-platform</h2>
-          <p>一个仓 = 多项目 AI 协作工具栈的真值源。pip 包 + CLI + 共享规则 / Skill + Chroma daemon + cross-link MCP,被多个业务仓引用。换机器只改一份 config,所有项目跟着走。</p>
+          <p>一个仓 = 多项目 AI 协作工具栈的真值源。pip 包 + 跨平台 CLI + 共享规则 / Skill + 文档检索 daemon + 跨层链路 MCP,被多个业务仓引用。运行时(<code>.venv</code> / <code>data/</code> / launcher)已翻正归本仓自有,业务仓是纯消费者。运维编排从 Windows-only 脚本升级为跨平台 Python CLI,换机器只改一份 config,Win / Mac / Linux 通用。</p>
         </header>
 
         <section id="map">
@@ -194,14 +195,14 @@
 
               <!-- ========== TOP BAND: codev-platform 真值源仓 ========== -->
               <rect x="40" y="50" width="1400" height="150" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
-              <text class="lane-title" x="58" y="76" fill="#5b21b6">★ codev-platform</text>
+              <text class="lane-title" x="58" y="76" fill="#5b21b6">★ codev-platform 真值源仓 · 自有 .venv + data/ + 跨平台 CLI(运维编排)</text>
 
               <g filter="url(#shadow)">
                 <rect x="58" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="166" y="116" text-anchor="middle">核心</text>
+                <text class="node-title" x="166" y="116" text-anchor="middle">核心 + 运行时(自有)</text>
                 <text class="node-sub" x="166" y="135" text-anchor="middle">配置 · 检索 · 链路 · 命令</text>
-                <text class="node-sub" x="166" y="151" text-anchor="middle">真值源代码</text>
-                <text class="node-sub" x="166" y="170" text-anchor="middle" fill="#7c3aed">→ 软链到业务仓</text>
+                <text class="node-sub" x="166" y="151" text-anchor="middle">.venv + data/ + launcher 翻正归本仓</text>
+                <text class="node-sub" x="166" y="170" text-anchor="middle" fill="#7c3aed">→ 软链到业务仓(纯消费者)</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="288" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
@@ -219,10 +220,10 @@
               </g>
               <g filter="url(#shadow)">
                 <rect x="748" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="856" y="116" text-anchor="middle">命令行(6 个子命令)</text>
-                <text class="node-sub" x="856" y="135" text-anchor="middle">接入 · 查看 · 校验</text>
-                <text class="node-sub" x="856" y="151" text-anchor="middle">同步 · 配置</text>
-                <text class="node-sub" x="856" y="170" text-anchor="middle" fill="#7c3aed">→ 业务仓接入入口</text>
+                <text class="node-title" x="856" y="116" text-anchor="middle">跨平台 CLI(接入 + 运维)</text>
+                <text class="node-sub" x="856" y="135" text-anchor="middle">接入 · 查看 · 校验 · 同步 · 配置</text>
+                <text class="node-sub" x="856" y="151" text-anchor="middle">运维:体检 / 重建 / 提交钩子 / 等待</text>
+                <text class="node-sub" x="856" y="170" text-anchor="middle" fill="#7c3aed">→ Win/Mac/Linux 通用</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="978" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
@@ -290,7 +291,7 @@
               <g filter="url(#shadow)">
                 <rect x="295" y="275" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
                 <text class="node-title" x="395" y="299" text-anchor="middle">提交触发</text>
-                <text class="node-sub" x="395" y="316" text-anchor="middle">post-commit hook</text>
+                <text class="node-sub" x="395" y="316" text-anchor="middle">hook → codev-platform post-commit</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="295" y="350" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
@@ -552,6 +553,40 @@
           </div>
         </section>
 
+        <section id="xplatform">
+          <h2>跨平台 CLI 与工业化(本 session 落地)</h2>
+          <p>本轮把工具栈从"Windows 专属 + 业务仓寄居"重构为"跨平台 + 本仓自有运行时",抹掉了所有机器路径硬编码,补齐了测试与 CI。</p>
+
+          <h3>1. 平台所有权翻正</h3>
+          <p>运行时三件套从业务仓搬回本仓自有:<code>.venv</code>(约 4.66GB heavy ML 依赖,gitignored)、<code>data/</code>(向量库 + 跨层库运行态,按 project_id 物理隔离,gitignored)、<code>tools/</code> launcher。daemon 直接从本仓 <code>.venv</code> 跑,改源码即生效(本仓 editable 装在本仓 venv)。<strong>业务仓退化为纯消费者</strong> —— 只放 thin shim re-export,不再寄存运行时。</p>
+
+          <h3>2. 跨平台运维 CLI(最大变化)</h3>
+          <p>运维编排从 Windows-only <code>.ps1</code> 升级为 Python 模块 <code>codev_platform.ops</code>,子命令一套全平台跑:</p>
+          <table>
+            <tr><th>子命令</th><th>作用</th><th>原 .ps1</th></tr>
+            <tr><td><code>health</code></td><td>12 项体检 + daemon / 新鲜度</td><td>ai-health.ps1</td></tr>
+            <tr><td><code>reindex</code></td><td>重建索引(全 / 分项)</td><td>update-local-ai.ps1</td></tr>
+            <tr><td><code>post-commit</code></td><td>提交后台重建</td><td>post-commit.ps1</td></tr>
+            <tr><td><code>dirty-check</code></td><td>MCP 可信门禁</td><td>dirty-index-check.ps1</td></tr>
+            <tr><td><code>install-hooks</code></td><td>装 git hook</td><td>install-git-hooks.ps1</td></tr>
+            <tr><td><code>wait</code></td><td>等 reindex 对齐 HEAD</td><td>wait-for-reindex.ps1</td></tr>
+          </table>
+          <div class="ok">
+            ✅ git post-commit hook 改为 <code>exec codev-platform post-commit</code>(跨平台 sh stub),不再硬编码 <code>powershell.exe</code>。各 <code>.ps1</code> 退化为 Windows 薄 shim 转调 CLI,保留向后兼容。Win / Mac / Linux 一套命令通用。
+          </div>
+
+          <h3>3. 全配置驱动(零盘符硬编码)</h3>
+          <p>所有机器路径(模型 / 数据基目录 / daemon 端口 / memory cwd)集中到 <code>~/.codev-platform/config.json</code>,代码里 0 个写死盘符;缺省走 <code>~/models</code> 等跨平台默认。换机器只改 config,代码不动。</p>
+
+          <h3>4. 工业化基线</h3>
+          <table>
+            <tr><th>项</th><th>内容</th></tr>
+            <tr><td>测试</td><td>pytest 41 用例(ops / config / paths / project_id 覆盖)</td></tr>
+            <tr><td>CI</td><td>GitHub Actions 跨平台矩阵(Win / Mac / Linux)</td></tr>
+            <tr><td>可复现</td><td>setup 脚本一键重建 .venv,文档化 SETUP / USAGE</td></tr>
+          </table>
+        </section>
+
         <section id="modules">
           <h2>本仓模块结构</h2>
           <table>
@@ -616,7 +651,7 @@
             </tr>
           </table>
           <div class="warning">
-            ⚠️ 改 codev-platform 后必走 4 步:① 本仓 commit + push ② 业务仓 <code>uv pip install -e</code> 拉新版 (-e 软链不需重装) ③ 加了 symbol 时业务仓 shim 加 re-export ④ 重启 daemon 让进程加载新代码。
+            ⚠️ 改 codev-platform 后必走 4 步:① 本仓 commit + push ② 本仓 .venv 已 editable,改源码即生效(仅新增重依赖才重装) ③ 加了 symbol 时业务仓 shim 加 re-export ④ daemon 持旧代码时重启让进程加载新代码。
           </div>
         </section>
 
@@ -861,7 +896,8 @@
           <h3>本仓不要改清单(摘 CLAUDE.md §八)</h3>
           <table>
             <tr><th>路径</th><th>原因</th></tr>
-            <tr><td><code>tools/chroma/.venv/</code></td><td>在业务仓里,heavy ML 依赖,本仓 0 deps</td></tr>
+            <tr><td>本仓 <code>.venv/</code></td><td>本仓自有,heavy ML 依赖约 4.66GB,gitignored,从 requirements-runtime 重建</td></tr>
+            <tr><td>本仓 <code>data/</code></td><td>本仓自有运行态,向量库 + 跨层库,按 project_id 隔离,gitignored</td></tr>
             <tr><td>各业务仓 <code>.claude/project.json</code></td><td>各仓自己写,CLI 只 init 不远程改</td></tr>
             <tr><td>用户 <code>~/.codev-platform/config.json</code></td><td>用户主权,只通过 CLI <code>config init</code> 或 <code>--force</code></td></tr>
           </table>
@@ -870,9 +906,9 @@
           <table>
             <tr><th>步</th><th>动作</th></tr>
             <tr><td>1</td><td>本仓改完 commit + push</td></tr>
-            <tr><td>2</td><td>业务仓 chroma .venv <code>uv pip install -e D:\WorkSpace\codev-platform</code> 拉新版(-e 软链不需重装)</td></tr>
-            <tr><td>3</td><td>业务仓 shim 文件加 symbol re-export(若有新 symbol)</td></tr>
-            <tr><td>4</td><td>重启 daemon:<code>Stop-Process -Id (Get-NetTCPConnection -LocalPort 18083).OwningProcess -Force</code></td></tr>
+            <tr><td>2</td><td>本仓 .venv 已是 editable,改 <code>codev_platform/*.py</code> 即生效,无需重装(仅新增重依赖才 <code>uv pip install -r requirements-runtime.txt</code>)</td></tr>
+            <tr><td>3</td><td>业务仓 shim 文件加 symbol re-export(若有新 symbol;业务仓仍 pip -e 本仓到自己 venv)</td></tr>
+            <tr><td>4</td><td>重启 daemon(持旧代码时):<code>Stop-Process -Id (Get-NetTCPConnection -LocalPort 18083 -State Listen).OwningProcess -Force</code></td></tr>
           </table>
 
           <h3>最小验证闭环</h3>
