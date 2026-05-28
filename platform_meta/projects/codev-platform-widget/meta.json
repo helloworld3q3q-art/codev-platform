@@ -5,5 +5,8 @@
   "repo_path": "D:/WorkSpace/codev-platform-widget",
   "rules_path": ".claude/rules",
   "memory_path": "memory",
+  "health": {
+    "reindex_codegraph_patterns": ["^src/.*\\.(ts|tsx)$", "^electron/.*\\.ts$"]
+  },
   "notes": "未本地 clone 时 repo_path=null;clone 后跑 `claude-platform init codev-platform-widget` 写本地 .claude/project.json。单租户 daemon 下与 openclaw-stock 不可同时跑,需 kill daemon 或换端口。"
 }
