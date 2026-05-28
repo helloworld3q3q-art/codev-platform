@@ -38,3 +38,9 @@ target/
 # node modules (cross_link_ts)
 node_modules/
 dist/
+
+# codegraph local DB (machine-local index, rebuild via `codegraph index`)
+.codegraph/codegraph.db
+.codegraph/codegraph.db-shm
+.codegraph/codegraph.db-wal
+.codegraph/codegraph.db.bak
