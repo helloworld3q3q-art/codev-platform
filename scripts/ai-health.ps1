@@ -138,6 +138,19 @@ if ($Project) {
     }
     $script:projectId = $Project
 }
+
+# Per-project health config (config-driven, no hardcoded per-project paths in code).
+# platform_meta/projects/<id>/meta.json may carry an optional "health" section, e.g.:
+#   "health": { "cross_layer_source_dirs": ["apps/.../migration", "apps/.../mapper"] }
+# Absent / new projects => checks degrade gracefully (counts only, no project-specific probes).
+$script:healthCfg = $null
+$metaJsonPath = Join-Path $CodevRoot ('platform_meta\projects\' + $script:projectId + '\meta.json')
+if (Test-Path $metaJsonPath) {
+    try {
+        $metaParsed = Get-Content $metaJsonPath -Encoding UTF8 -Raw | ConvertFrom-Json
+        if ($metaParsed.health) { $script:healthCfg = $metaParsed.health }
+    } catch { }
+}
 Write-Host ''
 
 # 1. Chroma venv python
@@ -480,12 +493,19 @@ if ((Test-Path $IncidentDir) -and (Test-Path $RulesDir)) {
     } elseif (-not $latestIncident) {
         Line 'rules vs incident'      'OK'   'no incident files (clean)'
     }
+} else {
+    # Uniform category for every project: show 'not configured' instead of silently
+    # skipping, so all projects display the same check list (no docs/operations dir).
+    Line 'rules vs incident'      'INFO' 'not configured'
 }
 
 # 4d. Cross-layer KG freshness.
-# Data now lives in shared codev-platform\data\codegraph_ext (platform ownership
-# inversion 2026-05-28): per-project subdir, else legacy unprefixed fallback (mirrors
-# cross_link.server resolution). Repos without a cross-link MCP (e.g. widget) skip cleanly.
+# Data lives in shared codev-platform\data\codegraph_ext, namespaced PER PROJECT.
+# NO legacy unprefixed fallback: the unprefixed cross_layer.sqlite is openclaw's
+# historical data, so falling back would make every project show openclaw's numbers
+# (the bug spotted 2026-05-28). Each project shows ONLY its own per-project DB; a
+# toolstack repo with no full-stack chains (e.g. codev-platform) correctly shows
+# 'not built'. Repos without a cross-link MCP (e.g. widget) skip cleanly.
 $hasCrossLink = $false
 $mcpFile = Join-Path $RepoRoot '.mcp.json'
 if (Test-Path $mcpFile) {
@@ -495,10 +515,6 @@ if (Test-Path $mcpFile) {
     } catch { }
 }
 $CrossLayerDb = Join-Path $CodevRoot ('data\codegraph_ext\' + $script:projectId + '\cross_layer.sqlite')
-if (-not (Test-Path $CrossLayerDb)) {
-    $CrossLayerLegacy = Join-Path $CodevRoot 'data\codegraph_ext\cross_layer.sqlite'
-    if (Test-Path $CrossLayerLegacy) { $CrossLayerDb = $CrossLayerLegacy }
-}
 if ($hasCrossLink -and (Test-Path $CrossLayerDb)) {
     $size = [math]::Round((Get-Item $CrossLayerDb).Length / 1KB, 1)
     if (Test-Path $ChromaPy) {
@@ -526,11 +542,17 @@ except Exception as exc:
             $out3 = & cmd /c "`"$ChromaPy`" `"$tmp3`" 2>&1"
             $rc3 = $LASTEXITCODE
             if ($rc3 -eq 0) {
-                # Compare last_build_at vs latest Flyway/Mapper mtime
-                $migDir   = Join-Path $RepoRoot 'apps\stock-admin-api\src\main\resources\db\migration'
-                $mapDir   = Join-Path $RepoRoot 'apps\stock-admin-api\src\main\java\com\openclaw\stock\admin\infrastructure\mapper'
+                # Compare last_build_at vs latest source mtime. Source dirs are
+                # project-declared in meta.json health.cross_layer_source_dirs
+                # (no hardcoded per-project paths). Absent => skip lag, show counts only.
+                $srcDirs = @()
+                if ($script:healthCfg -and $script:healthCfg.cross_layer_source_dirs) {
+                    foreach ($rel in $script:healthCfg.cross_layer_source_dirs) {
+                        $srcDirs += (Join-Path $RepoRoot ($rel -replace '/', '\'))
+                    }
+                }
                 $latestSrc = $null
-                foreach ($d in @($migDir, $mapDir)) {
+                foreach ($d in $srcDirs) {
                     if (Test-Path $d) {
                         $c = Get-ChildItem -Path $d -Recurse -File -ErrorAction SilentlyContinue |
                              Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -546,26 +568,26 @@ except Exception as exc:
                 if ($buildAt -and $latestSrc) {
                     $lagDays = [int]([math]::Round(($latestSrc.LastWriteTime - $buildAt).TotalDays))
                     if ($lagDays -le 0) {
-                        Line 'cross_layer freshness' 'OK'   ($out3 -join ' ')
+                        Line 'cross_layer' 'OK'   ($out3 -join ' ')
                     } elseif ($lagDays -le 1) {
-                        Line 'cross_layer freshness' 'OK'   (($out3 -join ' ') + ' (lag <=1d)')
+                        Line 'cross_layer' 'OK'   (($out3 -join ' ') + ' (lag <=1d)')
                     } else {
-                        Line 'cross_layer freshness' 'WARN' (($out3 -join ' ') + ' (lag ' + $lagDays + 'd vs ' + $latestSrc.Name + ' - run python -m cross_link.build_index)')
+                        Line 'cross_layer' 'WARN' (($out3 -join ' ') + ' (lag ' + $lagDays + 'd vs ' + $latestSrc.Name + ' - run python -m cross_link.build_index)')
                     }
                 } else {
-                    Line 'cross_layer freshness' 'OK'   ($out3 -join ' ')
+                    Line 'cross_layer' 'OK'   ($out3 -join ' ')
                 }
             } else {
-                Line 'cross_layer freshness' 'FAIL' ($out3 -join ' ')
+                Line 'cross_layer' 'FAIL' ($out3 -join ' ')
             }
         } finally {
             Remove-Item -Path $tmp3 -Force -ErrorAction SilentlyContinue
         }
     }
 } elseif (-not $hasCrossLink) {
-    Line 'cross_layer KG'       'INFO' 'no cross-link MCP configured for this repo (N/A)'
+    Line 'cross_layer' 'INFO' 'not configured'
 } else {
-    Line 'cross_layer KG'       'WARN' ('missing: ' + $CrossLayerDb + ' (run python -m cross_link.build_index)')
+    Line 'cross_layer' 'INFO' 'configured, index not built'
 }
 
 # 4e. cross-link MCP process diagnostics
@@ -692,7 +714,7 @@ $jar = Get-ChildItem -Path $CgApiJar -Filter 'codegraph-api-*.jar' -ErrorAction 
 if ($jar) {
     Line 'codegraph-api'     'OK'   $jar.Name
 } elseif (-not (Test-Path $CgApiDir)) {
-    Line 'codegraph-api'     'INFO' 'no apps/codegraph-api in this repo (optional component, N/A)'
+    Line 'codegraph-api'     'INFO' 'not configured'
 } else {
     Line 'codegraph-api'     'WARN' ('no jar in ' + $CgApiJar + ' (run mvn package if needed)')
 }
@@ -705,13 +727,26 @@ try {
     $headSha = (& git -C $RepoRoot rev-parse HEAD 2>$null).Trim()
     if ($headSha) {
         $headFiles = & git -C $RepoRoot diff-tree --no-commit-id --name-only -r HEAD 2>$null
-        # Same patterns as post-commit.ps1 to detect "should have triggered reindex"
+        # Indexable-scope patterns: project-name-free generics, EXTENDED per project via
+        # meta.json health.indexable_patterns. Detects "this commit should have triggered
+        # a reindex". Adding a project needs no code edit.
+        $defaultIndexable = @(
+            '^docs/.*\.md$',
+            '^\.claude/(rules|skills)/.*\.md$',
+            '^apps/[^/]+/\.claude/rules/.*\.md$',
+            '^tools/.*\.md$',
+            '.*CLAUDE\.md$',
+            '.*AGENTS\.md$',
+            'README\.md$',
+            '^apps/[^/]+/src/.*\.(java|ts|tsx)$'
+        )
+        $metaIndexable = if ($script:healthCfg -and $script:healthCfg.indexable_patterns) { @($script:healthCfg.indexable_patterns) } else { @() }
+        $indexablePatterns = $defaultIndexable + $metaIndexable
         $shouldTrigger = $false
         foreach ($f in $headFiles) {
             $p = $f -replace '\\', '/'
-            if ($p -match '^(docs/.*\.md$|\.claude/rules/.*\.md$|\.claude/skills/.*\.md$|apps/[^/]+/\.claude/rules/.*\.md$|python/stock-pipeline/\.claude/rules/.*\.md$|tools/.*\.md$|.*CLAUDE\.md$|.*AGENTS\.md$|README\.md$)') { $shouldTrigger = $true; break }
-            if ($p -match '^(apps/stock-admin-api/src/main/java/.*\.java$|apps/stock-admin-web/src/.*\.(ts|tsx)$|python/stock-pipeline/.*\.py$)') { $shouldTrigger = $true; break }
-            if ($p -match '^(apps/stock-admin-api/src/main/resources/db/migration/V.*\.sql$|apps/stock-admin-web/src/services/apis/.*\.ts$|python/stock-pipeline/stock_pipeline/repositories/.*\.py$)') { $shouldTrigger = $true; break }
+            foreach ($pat in $indexablePatterns) { if ($p -match $pat) { $shouldTrigger = $true; break } }
+            if ($shouldTrigger) { break }
         }
         if (-not $shouldTrigger) {
             Line 'hook missed?'  'OK'   ('HEAD ' + $headSha.Substring(0,7) + ' touches no indexable file')
@@ -825,32 +860,39 @@ try {
 # Commit count alone is too noisy because many commits are L1. Also compute
 # a rough L2/L3 candidate denominator from changed paths.
 try {
+    # Candidate / strict MCP-path patterns drive the "platform-docs adopt" metric
+    # (which commits should have used MCP). Defaults below are project-name-free
+    # generics; a project EXTENDS them via meta.json health.mcp_candidate_patterns /
+    # mcp_strict_patterns (regex strings). Adding a project needs no code edit.
+    $defaultCandidatePatterns = @(
+        '^apps/[^/]+/src/.*\.(java|ts|tsx|less)$',
+        '^\.claude/(rules|skills)/.*\.md$',
+        '^apps/[^/]+/\.claude/rules/.*\.md$',
+        '^docs/.*\.md$',
+        '^tools/(dev|chroma|cross_link)/',
+        '^scripts/.*\.(ps1|cmd|bat)$'
+    )
+    $defaultStrictPatterns = @(
+        '^\.claude/(rules|skills)/',
+        '^tools/(dev|chroma|cross_link)/'
+    )
+    $metaCandidate = if ($script:healthCfg -and $script:healthCfg.mcp_candidate_patterns) { @($script:healthCfg.mcp_candidate_patterns) } else { @() }
+    $metaStrict    = if ($script:healthCfg -and $script:healthCfg.mcp_strict_patterns) { @($script:healthCfg.mcp_strict_patterns) } else { @() }
+    $candidatePatterns = $defaultCandidatePatterns + $metaCandidate
+    $strictPatterns    = $defaultStrictPatterns + $metaStrict
+
     function Test-McpCandidatePath {
-        param([string]$PathText)
+        param([string]$PathText, [string[]]$Patterns)
         $p = $PathText -replace '\\', '/'
-        return (
-            $p -match '^apps/[^/]+/src/.*\.(java|ts|tsx|less)$' -or
-            $p -match '^python/stock-pipeline/.*\.py$' -or
-            $p -match '^\.claude/(rules|skills)/.*\.md$' -or
-            $p -match '^apps/[^/]+/\.claude/rules/.*\.md$' -or
-            $p -match '^python/stock-pipeline/\.claude/rules/.*\.md$' -or
-            $p -match '^docs/.*\.md$' -or
-            $p -match '^tools/(dev|chroma|cross_link)/' -or
-            $p -match '^scripts/.*\.(ps1|cmd|bat)$'
-        )
+        foreach ($pat in $Patterns) { if ($p -match $pat) { return $true } }
+        return $false
     }
 
     function Test-StrictMcpPath {
-        param([string]$PathText)
+        param([string]$PathText, [string[]]$Patterns)
         $p = $PathText -replace '\\', '/'
-        return (
-            $p -match '^apps/stock-admin-api/src/main/resources/db/migration/' -or
-            $p -match '^apps/stock-admin-api/src/main/java/.*/(controller|facade|mapper|dto|entity|enum)/' -or
-            $p -match '^apps/stock-admin-web/src/(pages|services|models|typings\.d\.ts|app\.tsx)' -or
-            $p -match '^python/stock-pipeline/stock_pipeline/(repositories|jobs|models|core|writers|pipelines)/' -or
-            $p -match '^\.claude/(rules|skills)/' -or
-            $p -match '^tools/(dev|chroma|cross_link)/'
-        )
+        foreach ($pat in $Patterns) { if ($p -match $pat) { return $true } }
+        return $false
     }
 
     $sinceArg = '--since=7.days.ago'
@@ -875,8 +917,8 @@ try {
             $hasStrict = $false
             continue
         }
-        if (Test-McpCandidatePath $text) { $hasCandidate = $true }
-        if (Test-StrictMcpPath $text) { $hasStrict = $true }
+        if (Test-McpCandidatePath $text $candidatePatterns) { $hasCandidate = $true }
+        if (Test-StrictMcpPath $text $strictPatterns) { $hasStrict = $true }
     }
     if ($seenCommit) {
         if ($hasCandidate) { $candidateCommitCount++ }

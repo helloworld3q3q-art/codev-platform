@@ -4,5 +4,25 @@
   "repo_path": ".",
   "rules_path": ".claude/rules",
   "memory_path": "memory",
-  "notes": "原型阶段: 单仓自托管, repo_path 相对 platform-meta/ 上级。未来 server 化后改为绝对 git url。"
+  "health": {
+    "cross_layer_source_dirs": [
+      "apps/stock-admin-api/src/main/resources/db/migration",
+      "apps/stock-admin-api/src/main/java/com/openclaw/stock/admin/infrastructure/mapper"
+    ],
+    "mcp_candidate_patterns": [
+      "^python/stock-pipeline/.*\\.py$",
+      "^python/stock-pipeline/\\.claude/rules/.*\\.md$"
+    ],
+    "mcp_strict_patterns": [
+      "^apps/stock-admin-api/src/main/resources/db/migration/",
+      "^apps/stock-admin-api/src/main/java/.*/(controller|facade|mapper|dto|entity|enum)/",
+      "^apps/stock-admin-web/src/(pages|services|models|typings\\.d\\.ts|app\\.tsx)",
+      "^python/stock-pipeline/stock_pipeline/(repositories|jobs|models|core|writers|pipelines)/"
+    ],
+    "indexable_patterns": [
+      "^python/stock-pipeline/.*\\.py$",
+      "^python/stock-pipeline/\\.claude/rules/.*\\.md$"
+    ]
+  },
+  "notes": "原型阶段: 单仓自托管, repo_path 相对 platform-meta/ 上级。未来 server 化后改为绝对 git url。health.cross_layer_source_dirs 声明哪些源喂 cross_layer (供 ai-health 算索引新鲜度), 路径相对 repo 根。"
 }
