@@ -37,6 +37,10 @@ if ($Repo) {
 } else {
     $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 }
+# codev-platform repo root: this canonical script lives in codev-platform\scripts,
+# so its parent is the codev-platform root. MCP recall/usage logs are written next
+# to their Python modules in the codev-platform package dir (not the audited -Repo).
+$CodevRoot  = Split-Path -Parent $PSScriptRoot
 $ChromaDir  = Join-Path $RepoRoot 'tools\chroma'
 $ChromaPy   = Join-Path $ChromaDir '.venv\Scripts\python.exe'
 $ChromaData = Join-Path $RepoRoot 'data\chroma'
@@ -703,7 +707,9 @@ Section ''
 Section '--- usage stats (last 7 days) ---' 'Cyan'
 
 # 9.1 search_recall hit rate + top1 distance
-$recallFile = Join-Path $ChromaDir 'search_recall.jsonl'
+# Log lives in codev-platform package dir (chroma module writes next to itself),
+# shared across projects; not in the audited -Repo's tools\chroma.
+$recallFile = Join-Path $CodevRoot 'codev_platform\chroma\search_recall.jsonl'
 try {
     if (Test-Path $recallFile) {
         $cutoff = (Get-Date).AddDays(-7)
@@ -868,36 +874,40 @@ try {
     Line 'mcp usage 7d'         'WARN' ('compute error: ' + $_.Exception.Message)
 }
 
-# 9.4 cross-link usage stats from tools/cross_link/mcp_server.log.
-# This is real tool-call telemetry for project-owned cross-link MCP.
+# 9.4 cross-link usage stats from structured cross_link_usage.jsonl (per-tool telemetry).
+# The log is written by codev_platform.cross_link.server next to its module file
+# (codev-platform package dir), shared across all projects; records carry project_id.
+# Locate via the canonical script root ($PSScriptRoot\.. = codev-platform root),
+# which is correct regardless of the -Repo business repo being audited.
 try {
-    $CrossLinkLog = Join-Path $RepoRoot 'tools\cross_link\mcp_server.log'
-    if (Test-Path $CrossLinkLog) {
+    $ClUsageLog = Join-Path $CodevRoot 'codev_platform\cross_link\cross_link_usage.jsonl'
+    if (Test-Path $ClUsageLog) {
         $cutoff7b = (Get-Date).AddDays(-7)
-        $clCounts = @{
-            find_table_refs = 0
-            find_endpoint_link = 0
-            search_nodes = 0
-        }
-        Get-Content $CrossLinkLog -Encoding UTF8 | ForEach-Object {
-            $line = $_
-            if ($line -match '^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] \[(find_table_refs|find_endpoint_link|search_nodes)\] (table=|name=|q=)') {
+        $clRows = @()
+        Get-Content $ClUsageLog -Encoding UTF8 | ForEach-Object {
+            if ($_ -and $_.Trim()) {
                 try {
-                    $ts = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $null)
-                    if ($ts -ge $cutoff7b) {
-                        $toolName = $Matches[2]
-                        $clCounts[$toolName] = [int]$clCounts[$toolName] + 1
-                    }
+                    $o = $_ | ConvertFrom-Json
+                    $keep = $true
+                    if ($o.ts) { $t = [datetime]$o.ts; if ($t -lt $cutoff7b) { $keep = $false } }
+                    if ($keep) { $clRows += $o }
                 } catch { }
             }
         }
-        $clTotal = [int]$clCounts.find_table_refs + [int]$clCounts.find_endpoint_link + [int]$clCounts.search_nodes
-        $clDetail = $clTotal.ToString() + ' calls (find_table_refs=' + $clCounts.find_table_refs.ToString() +
-                    ', find_endpoint_link=' + $clCounts.find_endpoint_link.ToString() +
-                    ', search_nodes=' + $clCounts.search_nodes.ToString() + ')'
-        Line 'cross-link usage' 'INFO' ($clDetail + ' last 7d')
+        $clTotal = $clRows.Count
+        if ($clTotal -eq 0) {
+            Line 'cross-link usage' 'INFO' 'no cross-link calls (last 7d)'
+        } else {
+            $byTool = @($clRows | Group-Object tool | ForEach-Object { $_.Name + '=' + $_.Count })
+            $okCount = @($clRows | Where-Object { $_.ok }).Count
+            $okRate = [math]::Round(100.0 * $okCount / $clTotal, 0)
+            $lat = @($clRows | Where-Object { $_.elapsed_ms -ne $null } | ForEach-Object { [double]$_.elapsed_ms } | Sort-Object)
+            $medLat = if ($lat.Count -gt 0) { [math]::Round($lat[[math]::Floor($lat.Count / 2)], 0).ToString() + 'ms' } else { 'n/a' }
+            $clDetail = $clTotal.ToString() + ' calls / ok=' + $okRate.ToString() + '% / median=' + $medLat + ' / ' + ($byTool -join ',')
+            Line 'cross-link usage' 'INFO' ($clDetail + ' last 7d')
+        }
     } else {
-        Line 'cross-link usage' 'INFO' 'mcp_server.log not found'
+        Line 'cross-link usage' 'INFO' 'cross_link_usage.jsonl not found (no calls yet)'
     }
 } catch {
     Line 'cross-link usage' 'WARN' ('compute error: ' + $_.Exception.Message)

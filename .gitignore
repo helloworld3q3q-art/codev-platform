@@ -33,6 +33,7 @@ platform_meta/health/
 mcp_server.log
 *.log
 search_recall.jsonl
+cross_link_usage.jsonl
 
 # maven build artifacts (cross_link_asm)
 target/

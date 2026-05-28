@@ -72,6 +72,8 @@ else:
         DB_PATH = _new_path  # 不存在, _ensure_conn 会报"先跑 build_index"
 
 _LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
+# 使用率埋点:每次 tool 调用一行 JSON,与 chroma/search_recall.jsonl 对齐,供 ai-health 统计
+_USAGE_LOG = Path(__file__).resolve().parent / "cross_link_usage.jsonl"
 
 
 def _flog(msg: str) -> None:
@@ -85,6 +87,15 @@ def _flog(msg: str) -> None:
     except Exception:
         pass
     print(line, file=sys.stderr, flush=True)
+
+
+def _log_usage(record: dict) -> None:
+    """JSONL 使用率日志:每行一次 tool 调用。失败静默(不阻塞查询)。"""
+    try:
+        with _USAGE_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 # ----------------------------------------------------------------------
@@ -249,6 +260,31 @@ def _list_edge_sources(
 
 @server.call_tool()
 async def call_tool(name: str, args: dict) -> list[TextContent]:
+    """计时 + usage 埋点的薄包装,再分发到 _dispatch(查询逻辑不变)。"""
+    import time as _t
+    import datetime as _dt
+    _t0 = _t.perf_counter()
+    ok = True
+    result: list[TextContent] = []
+    try:
+        result = await _dispatch(name, args)
+        # _err 返回 [{"error": ...}],据此判失败
+        ok = not (len(result) == 1 and result[0].text.lstrip().startswith('{"error"'))
+        return result
+    finally:
+        _ms = (_t.perf_counter() - _t0) * 1000
+        _log_usage({
+            "ts": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "project_id": PROJECT_ID,
+            "tool": name,
+            "args": {k: str(v)[:80] for k, v in (args or {}).items()},
+            "ok": ok,
+            "result_chars": sum(len(c.text) for c in result) if result else 0,
+            "elapsed_ms": round(_ms, 1),
+        })
+
+
+async def _dispatch(name: str, args: dict) -> list[TextContent]:
     conn = _ensure_conn()
     if conn is None:
         return _err(_init_error or "cross_layer DB 未初始化")
