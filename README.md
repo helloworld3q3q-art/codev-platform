@@ -4,24 +4,33 @@ Multi-project AI 协作工具栈基础设施。让多个业务项目共享 proje
 
 ## 新机器接入(零冷启 SOP)
 
-**前置**:`uv` + `huggingface-cli` 在 PATH(`pip install uv huggingface_hub[cli]` 一行装)。
-
+> 🔒 **私有仓** — git clone 需 collaborator 邀请 + SSH/token 凭证。
+>
+> **前置工具**(需在 PATH):
+> - `uv`(Python 包管理):`irm https://astral.sh/uv/install.ps1 | iex`(PowerShell)
+> - Claude Code CLI(`claude` 命令):Anthropic 官方,自行安装
+> - `mcp-proxy`(stdio↔SSE 桥接):由 chroma .venv 的 `uv sync` 自动装,无需手动
+> - **三仓必须 clone 到同一父目录**(`.mcp.json` 用 `..\platform` 相对路径解析兄弟仓)
+> - **模型自备**:Qwen3-Embedding/Reranker 放 `~/models/`,不放则自动走仓内 MiniLM fallback
 
 ```powershell
-# 1. clone 三仓到同一父目录 (路径任选, e.g. ~/Code/ 或 D:/WorkSpace/)
-cd D:/WorkSpace      # 或 cd ~/Code
-git clone https://github.com/helloworld3q3q-art/platform.git
-git clone https://github.com/helloworld3q3q-art/codev-platform.git
-git clone https://github.com/helloworld3q3q-art/codev-platform-widget.git   # 可选, 仅 tray UI
+# 1. clone 三仓到【同一父目录】(路径任选名字, 但必须并列)
+cd ~/Code            # 或 D:/WorkSpace, 任选
+git clone <platform>.git
+git clone <codev-platform>.git
+git clone <codev-platform-widget>.git   # 可选, 仅 tray UI
 
-# 2. 装 codev-platform CLI
+# 2. 装 codev-platform CLI (system python)
 pip install -e ./codev-platform
 
-# 3. 一键全自动接入 (探测 + 装 venv + 下模型 + 写 config)
-codev-platform setup --auto    # 缺 venv 自动 uv sync, 缺模型自动 huggingface-cli download
-#  耗时 10-15 分钟 (主要 torch / chromadb / sentence-transformers / Qwen3 模型)
+# 3. 一键接入 (preflight + 装 venv + pip install -e 进 venv + 写 config + sync rules/skills)
+codev-platform setup --auto
+#  耗时 ~8 分钟 (主要 torch / chromadb / sentence-transformers 装 venv)
+#  缺 uv / claude CLI / venv 会明确报 MISSING + 修复命令, 不静默
 
-# 4. 任一仓开 Claude Code, daemon 自动 spawn — END
+# 4. (可选) 放 Qwen3 模型到 ~/models/Qwen3-Embedding-0.6B; 不放走 MiniLM fallback
+
+# 5. 任一仓开 Claude Code, daemon 自动 spawn — END
 ```
 
 ## 状态

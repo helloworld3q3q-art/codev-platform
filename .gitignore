@@ -44,3 +44,8 @@ dist/
 .codegraph/codegraph.db-shm
 .codegraph/codegraph.db-wal
 .codegraph/codegraph.db.bak
+
+# .claude/{rules,skills} 是 rules/ + skills/ 真值源的 sync 副本, 不入库 (防双写漂移)
+# 新 clone 后跑 codev-platform sync-rules / sync-skills 本地生成
+.claude/rules/
+.claude/skills/

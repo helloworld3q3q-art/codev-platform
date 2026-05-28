@@ -218,137 +218,152 @@ def _run_subprocess(cmd: list[str], cwd: Path | None = None, label: str = "") ->
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    """一键新机器接入: 探测三仓 + 自动装 venv + 自动下模型 + 写 config.
+    """一键新机器接入: preflight + 探测三仓 + 装 venv + 模型 detect + 写 config + sync.
 
     流程:
       git clone <three repos> 到同一父目录
       cd codev-platform && pip install -e .
-      codev-platform setup [--auto]   # auto 自动装 venv + 下载模型
+      codev-platform setup [--auto]   # auto 自动 uv sync venv + pip install -e + sync-rules/skills
       Claude Code 在任一仓打开即可
+
+    模型: 自备放 ~/models/Qwen3-* (或仓内 MiniLM fallback), 本命令不下载。
     """
-    from codev_platform.core.config import (
-        DEFAULTS, config_path, load_config, save_config,
-    )
+    from codev_platform.core.config import load_config, save_config
     codev_root = Path(__file__).resolve().parents[1]
     parent = codev_root.parent
+    missing: list[str] = []
     _print(f"codev-platform repo: {codev_root}")
     _print(f"parent dir:          {parent}")
     _print()
 
-    # 1. 探测兄弟仓
+    # step 0: preflight — 必备外部命令 (无 huggingface, 模型自备)
+    _print("=== step 0/5: preflight 外部命令 ===")
+    need = {"uv": "https://astral.sh/uv/install.ps1 (irm ... | iex)",
+            "claude": "Anthropic Claude Code CLI"}
+    for cmd, hint in need.items():
+        w = _which(cmd)
+        if w:
+            _print(f"  {cmd}: OK ({w})")
+        else:
+            _print(f"  {cmd}: MISSING — 装: {hint}")
+            missing.append(cmd)
+    _print()
+
+    # step 1: 兄弟仓 + 同父目录校验
     platform_repo = parent / "platform"
     widget_repo = parent / "codev-platform-widget"
-    _print("=== step 1/4: 兄弟仓探测 ===")
-    _print(f"  platform:                {'OK' if platform_repo.is_dir() else 'MISSING -- git clone <platform>.git'}")
-    _print(f"  codev-platform-widget:   {'OK' if widget_repo.is_dir() else 'MISSING (可选)'}")
+    _print("=== step 1/5: 兄弟仓 (必须同父目录) ===")
+    _print(f"  期望布局:\n    {parent}/\n      platform/\n      codev-platform/   (本仓)\n      codev-platform-widget/  (可选)")
+    _print(f"  platform:                {'OK' if platform_repo.is_dir() else 'MISSING'}")
+    _print(f"  codev-platform-widget:   {'OK' if widget_repo.is_dir() else 'MISSING (可选, 仅 Tray UI)'}")
     if not platform_repo.is_dir():
-        _eprint(f"FATAL: 必须先 git clone platform 仓到 {parent}")
+        _eprint(f"FATAL: platform 仓不在 {parent}。三仓必须 clone 到同一父目录 (.mcp.json 用 ..\\platform 相对路径)。")
+        _eprint(f"  cd {parent} && git clone <platform>.git")
         return 1
     _print()
 
-    # 2. 探测 / 装 chroma venv
+    # step 2: chroma venv
     venv_dir = platform_repo / "tools" / "chroma" / ".venv"
     venv_py = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    _print("=== step 2/4: chroma .venv ===")
+    _print("=== step 2/5: chroma .venv ===")
+    chroma_venv = None
     if venv_py.is_file():
         _print(f"  found: {venv_dir}")
         chroma_venv = str(venv_dir)
-    elif args.auto:
-        _print(f"  MISSING, auto-installing in {venv_dir.parent} ...")
-        uv = _which("uv")
-        if uv:
-            rc = _run_subprocess([uv, "venv"], cwd=venv_dir.parent, label="uv venv")
-            if rc == 0:
-                req = venv_dir.parent / "requirements.txt"
-                pyproject = venv_dir.parent / "pyproject.toml"
-                if pyproject.is_file():
-                    rc = _run_subprocess([uv, "sync"], cwd=venv_dir.parent, label="uv sync")
-                elif req.is_file():
-                    rc = _run_subprocess([uv, "pip", "install", "-r", str(req), "--python", str(venv_py)], label="uv pip install -r requirements.txt")
-            chroma_venv = str(venv_dir) if venv_py.is_file() else None
-        else:
-            _eprint("  uv not found; 装 uv 后重试: https://github.com/astral-sh/uv")
-            chroma_venv = None
+    elif args.auto and _which("uv"):
+        _print(f"  MISSING, auto-installing (uv) ...")
+        cd = venv_dir.parent
+        _run_subprocess(["uv", "venv"], cwd=cd, label="uv venv")
+        if (cd / "pyproject.toml").is_file():
+            _run_subprocess(["uv", "sync"], cwd=cd, label="uv sync")
+        elif (cd / "requirements.txt").is_file():
+            _run_subprocess(["uv", "pip", "install", "-r", "requirements.txt", "--python", str(venv_py)], cwd=cd, label="uv pip install -r")
+        chroma_venv = str(venv_dir) if venv_py.is_file() else None
     else:
-        _print(f"  MISSING — 跑 codev-platform setup --auto 或手动:")
-        _print(f"    cd {platform_repo / 'tools' / 'chroma'}")
-        _print("    uv venv && uv sync")
-        chroma_venv = None
+        _print(f"  MISSING — setup --auto 自动装, 或手动: cd {venv_dir.parent} && uv venv && uv sync")
+    if not chroma_venv:
+        missing.append("chroma-venv")
     _print()
 
-    # 3. 探测 / 下模型
-    model_root_default = Path.home() / "models"
-    embed_candidates = [
+    # step 2.5: pip install -e codev-platform 进 chroma venv (新人 P5 BLOCKER)
+    if chroma_venv and venv_py.is_file():
+        _print("=== step 2.5/5: codev-platform 装进 chroma .venv ===")
+        check = _run_subprocess([str(venv_py), "-c", "import codev_platform"], label="check codev_platform in venv")
+        if check != 0:
+            if args.auto and _which("uv"):
+                _run_subprocess(["uv", "pip", "install", "-e", str(codev_root), "--python", str(venv_py)], label=f"uv pip install -e codev-platform")
+            else:
+                _print(f"  codev_platform 未装进 chroma venv — 跑: uv pip install -e {codev_root} --python {venv_py}")
+                missing.append("codev_platform-in-venv")
+        else:
+            _print("  OK: codev_platform 已可在 chroma venv import")
+        _print()
+
+    # step 3: 模型 detect (自备, 不下载)
+    model_root = Path.home() / "models"
+    embed_path = next((str(m) for m in [
         Path(r"D:\models\Qwen3-Embedding-0.6B"),
-        model_root_default / "Qwen3-Embedding-0.6B",
+        model_root / "Qwen3-Embedding-0.6B",
         platform_repo / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
-    ]
-    embed_path = next((str(m) for m in embed_candidates if m.is_dir()), None)
-    rer_candidates = [
+    ] if m.is_dir()), None)
+    reranker_path = next((str(r) for r in [
         Path(r"D:\models\Qwen3-Reranker-0.6B"),
-        model_root_default / "Qwen3-Reranker-0.6B",
-    ]
-    reranker_path = next((str(r) for r in rer_candidates if r.is_dir()), "")
-    _print("=== step 3/4: 模型 ===")
+        model_root / "Qwen3-Reranker-0.6B",
+    ] if r.is_dir()), "")
+    _print("=== step 3/5: 模型 (自备, 本命令不下载) ===")
     if embed_path:
         _print(f"  embed:    {embed_path}")
-    elif args.auto and _which("huggingface-cli"):
-        target = model_root_default / "Qwen3-Embedding-0.6B"
-        rc = _run_subprocess([_which("huggingface-cli"), "download", "Qwen/Qwen3-Embedding-0.6B", "--local-dir", str(target)], label=f"download Qwen3-Embedding -> {target}")
-        if rc == 0 and target.is_dir():
-            embed_path = str(target)
     else:
-        _print("  MISSING embed (~1GB), 跑 --auto 或:")
-        _print(f"    huggingface-cli download Qwen/Qwen3-Embedding-0.6B --local-dir {model_root_default / 'Qwen3-Embedding-0.6B'}")
-    if reranker_path:
-        _print(f"  reranker: {reranker_path}")
-    elif args.auto and _which("huggingface-cli"):
-        target = model_root_default / "Qwen3-Reranker-0.6B"
-        rc = _run_subprocess([_which("huggingface-cli"), "download", "Qwen/Qwen3-Reranker-0.6B", "--local-dir", str(target)], label=f"download Qwen3-Reranker -> {target}")
-        if rc == 0 and target.is_dir():
-            reranker_path = str(target)
-    else:
-        _print("  MISSING reranker (可选), 跑 --auto 或:")
-        _print(f"    huggingface-cli download Qwen/Qwen3-Reranker-0.6B --local-dir {model_root_default / 'Qwen3-Reranker-0.6B'}")
+        _print(f"  MISSING embed — 放模型到 {model_root}/Qwen3-Embedding-0.6B (或仓内 MiniLM fallback 自动用)")
+        missing.append("embed-model")
+    _print(f"  reranker: {reranker_path or 'MISSING (可选, daemon 降级纯向量)'}")
     _print()
 
-    _print("=== step 4/4: 写 config ===")
-
-    # 4. 写 config
+    # step 4: 写 config
+    _print("=== step 4/5: 写 config ===")
     cfg = load_config()
     changed = False
-    if chroma_venv and cfg.get("runtime", {}).get("chroma_venv") != chroma_venv:
-        cfg.setdefault("runtime", {})["chroma_venv"] = chroma_venv
-        changed = True
-    if platform_repo.is_dir():
-        data_dir = str(platform_repo / "data")
-        if cfg.get("data", {}).get("platform_data_dir") != data_dir:
-            cfg.setdefault("data", {})["platform_data_dir"] = data_dir
+    def _set(section, key, val):
+        nonlocal changed
+        if val and cfg.get(section, {}).get(key) != val:
+            cfg.setdefault(section, {})[key] = val
             changed = True
-    if embed_path and cfg.get("models", {}).get("embed_path") != embed_path:
-        cfg.setdefault("models", {})["embed_path"] = embed_path
-        changed = True
-    if reranker_path and cfg.get("models", {}).get("reranker_path") != reranker_path:
-        cfg.setdefault("models", {})["reranker_path"] = reranker_path
-        changed = True
-
+    _set("runtime", "chroma_venv", chroma_venv)
+    _set("data", "platform_data_dir", str(platform_repo / "data"))
+    _set("models", "embed_path", embed_path)
+    _set("models", "reranker_path", reranker_path)
     if changed and not args.dry_run:
         p = save_config(cfg)
-        _print(f"=== 写入 config: {p} ===")
-        _print("  runtime.chroma_venv / data.platform_data_dir / models.* 已更新")
+        _print(f"  写入 {p}")
     elif changed:
-        _print("=== [dry-run] 会更新的字段 ===")
-        _print(json.dumps({"runtime": cfg.get("runtime"), "data": cfg.get("data"), "models": cfg.get("models")}, indent=2, ensure_ascii=False))
+        _print("  [dry-run] 会更新: " + json.dumps({k: cfg.get(k) for k in ("runtime", "data", "models")}, ensure_ascii=False))
     else:
-        _print("=== config 无需更新 (探测值已 match) ===")
-
+        _print("  config 已 match, 无需更新")
     _print()
-    if chroma_venv and embed_path:
-        _print("READY: 三仓 + venv + 模型齐备, 任一仓打开 Claude Code 即可")
-        return 0
+
+    # step 5: sync rules + skills 到兄弟仓 (新人 P12)
+    _print("=== step 5/5: sync rules + skills ===")
+    if args.auto and not args.dry_run:
+        # 含 codev_root 自身 (.claude/rules + skills gitignored, 需本地生成)
+        for repo in [codev_root, platform_repo, widget_repo]:
+            if not repo.is_dir():
+                continue
+            for kind, src in [("rules", _RULES_SRC), ("skills", _SKILLS_SRC)]:
+                dst = repo / ".claude" / kind
+                n = _sync_dir(src, dst, f"{repo.name}/{kind}", dry_run=False)
+                if n >= 0:
+                    _print(f"  {repo.name}/.claude/{kind}: synced")
     else:
-        _print("INCOMPLETE: 装 .venv / 下载模型后再跑一次 setup")
-        return 1
+        _print("  (--auto 时自动 sync; 手动跑 codev-platform sync-rules / sync-skills)")
+    _print()
+
+    # 收尾
+    if not missing:
+        _print(">>> READY <<< 三仓 + venv + codev_platform + 模型齐备, 任一仓开 Claude Code 即可")
+        return 0
+    _print(f">>> INCOMPLETE <<< 缺: {', '.join(missing)}")
+    _print("  按上面对应 MISSING 行的命令补齐后, 再跑一次 codev-platform setup --auto")
+    return 1
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -378,7 +393,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="claude-platform", description="多项目 AI 工具栈 CLI")
+    p = argparse.ArgumentParser(prog="codev-platform", description="多项目 AI 工具栈 CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp_init = sub.add_parser("init", help="创建 <cwd>/.claude/project.json")

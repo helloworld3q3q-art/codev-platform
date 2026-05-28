@@ -53,33 +53,16 @@ EMBEDDING_DEVICE = os.getenv("PLATFORM_EMBED_DEVICE", "cuda")
 # 索引侧批大小 — Qwen3-0.6B 在 RTX 5060 上 batch=16 较稳;MiniLM 可以更大
 EMBEDDING_BATCH_SIZE = int(os.getenv("PLATFORM_EMBED_BATCH_SIZE", "16"))
 
+# DEFAULT_DOC_PATTERNS: 任何项目通用的 markdown 位置 (不含业务专属路径).
+# 业务专属路径 (apps/stock-admin-* / python/stock-pipeline 等) 走各业务仓
+# <repo>/.claude/index.json:doc_patterns override (见 _load_project_index_config).
 DOC_PATTERNS = [
     "CLAUDE.md",
     "AGENTS.md",
+    "README.md",
     ".claude/rules/*.md",
     ".claude/skills/**/*.md",
-    "docs/architecture/**/*.md",
-    # docs/operations/**/*.md 递归覆盖 incident-*.md + audit-*/ 子目录(N10, 2026-05-23)
-    "docs/operations/**/*.md",
-    "docs/api/*.md",
-    "docs/*.md",
-    # docs/memory/**/*.md — 用户偏好 / 经验 / 踩坑记录(2026-05-26),原放 ~/.claude/projects/
-    # 同步链路:docs/memory(真值源) → sync-memory.ps1 SessionStart hook → ~/.claude autoload
-    # 同时索进 Chroma 让 search_docs(category="memory") 能召回
-    "docs/memory/**/*.md",
-    "docs/dev-evolution/**/*.md",
-    "docs/legal/**/*.md",
-    "docs/migration/**/*.md",
-    "docs/rules/**/*.md",
-    "apps/stock-admin-api/.claude/rules/*.md",
-    "apps/stock-admin-web/.claude/rules/*.md",
-    "python/stock-pipeline/.claude/rules/*.md",
-    "apps/stock-admin-api/CLAUDE.md",
-    "apps/stock-admin-web/CLAUDE.md",
-    "python/stock-pipeline/CLAUDE.md",
-    "tools/**/*.md",
-    # archive/incidents/ 复盘文档:虽在 archive/ 但属合规留痕,需可检索(N10, 2026-05-23)
-    "python/stock-pipeline/archive/incidents/**/*.md",
+    "docs/**/*.md",
 ]
 
 EXCLUDE_PARTS = {"archive", "node_modules", "__pycache__", "target"}

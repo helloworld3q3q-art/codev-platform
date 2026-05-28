@@ -130,12 +130,17 @@
   <div class="layout">
     <nav>
       <h1>codev-platform 一图总览</h1>
-      <p>多项目 AI 协作工具栈 · 真值源仓</p>
+      <p>多项目 AI 协作工具栈 · 真值源仓 × 运行时管道</p>
       <a href="#map">一图总览</a>
       <a href="#what">这平台是什么</a>
       <a href="#modules">本仓模块</a>
       <a href="#distribute">分发链路</a>
       <a href="#isolation">数据隔离</a>
+      <a href="#mcp">MCP 与索引</a>
+      <a href="#concurrency">并发治理</a>
+      <a href="#workflow">开发工作流</a>
+      <a href="#metrics">效率与准确率</a>
+      <a href="#boundaries">边界与验证</a>
       <a href="#value">实际效果</a>
     </nav>
 
@@ -148,20 +153,22 @@
 
         <section id="map">
           <h2>一图总览</h2>
-          <p>左:本仓真值源(代码 / 规则 / Skill / 配置)。中:分发机制(pip -e 软链 + sync 命令 + GPU daemon 单例)。右:3 个业务仓消费侧 + 物理隔离边界。</p>
+          <p><strong>顶部带</strong>:codev-platform 真值源仓(本仓提供什么)。<strong>下方 6 泳道</strong>:AI 工具链运行时管道(原 ai-dev-architecture-map 的数据源 → 触发 → 索引器 → 存储 → MCP → 会话)。紫色实线表示<strong>真值源 → 运行时</strong>的供给关系:本仓代码经 pip -e 软链成为索引器(泳道 3)和 MCP 服务(泳道 5)的实现;规则 / skill 经 sync 进入业务仓数据源(泳道 1)。最右泳道展开 3 个业务仓项目。</p>
           <div class="legend">
-            <span class="pill"><span class="dot violet"></span>本仓真值源</span>
-            <span class="pill"><span class="dot amber"></span>分发 / 接入机制</span>
-            <span class="pill"><span class="dot cyan"></span>常驻服务(单例)</span>
-            <span class="pill"><span class="dot green"></span>业务仓消费侧</span>
-            <span class="pill"><span class="dot red"></span>隔离边界 / 风险点</span>
+            <span class="pill"><span class="dot violet"></span>codev-platform 真值源</span>
+            <span class="pill"><span class="dot"></span>数据源</span>
+            <span class="pill"><span class="dot amber"></span>触发与门禁</span>
+            <span class="pill"><span class="dot violet"></span>索引器与模型</span>
+            <span class="pill"><span class="dot green"></span>本地存储</span>
+            <span class="pill"><span class="dot cyan"></span>MCP 服务</span>
+            <span class="pill"><span class="dot red"></span>会话 / 验证 / 隔离</span>
           </div>
           <div class="map-actions">
             <button class="fullscreen-btn" type="button" data-fullscreen-target="platform-map">全屏查看</button>
           </div>
 
           <div class="map-wrap" id="platform-map">
-            <svg class="map" viewBox="0 0 1480 860" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
+            <svg class="map" viewBox="0 0 1480 1080" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
               <defs>
                 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                   <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -183,210 +190,342 @@
                 </filter>
               </defs>
 
-              <rect x="18" y="20" width="1444" height="820" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
+              <rect x="18" y="20" width="1444" height="1040" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
 
-              <!-- 4 lanes -->
-              <rect x="40"   y="58" width="320" height="720" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
-              <rect x="380"  y="58" width="320" height="720" rx="10" fill="#fffbeb" stroke="#fde68a"/>
-              <rect x="720"  y="58" width="320" height="720" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
-              <rect x="1060" y="58" width="380" height="720" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
+              <!-- ========== TOP BAND: codev-platform 真值源仓 ========== -->
+              <rect x="40" y="50" width="1400" height="150" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+              <text class="lane-title" x="58" y="76" fill="#5b21b6">★ codev-platform</text>
 
-              <text class="lane-title" x="200"  y="86" text-anchor="middle">1. 本仓真值源 (codev-platform)</text>
-              <text class="lane-title" x="540"  y="86" text-anchor="middle">2. 分发机制</text>
-              <text class="lane-title" x="880"  y="86" text-anchor="middle">3. 常驻服务 (单例)</text>
-              <text class="lane-title" x="1250" y="86" text-anchor="middle">4. 业务仓消费侧</text>
-
-              <!-- Lane 1: source of truth -->
               <g filter="url(#shadow)">
-                <rect x="65" y="110" width="270" height="80" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="200" y="138" text-anchor="middle">codev_platform/ (Python 包)</text>
-                <text class="node-sub" x="200" y="158" text-anchor="middle">core · chroma · cross_link · cli</text>
-                <text class="node-sub" x="200" y="175" text-anchor="middle">真值源代码,业务仓里全是 shim</text>
+                <rect x="58" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="166" y="116" text-anchor="middle">核心</text>
+                <text class="node-sub" x="166" y="135" text-anchor="middle">配置 · 检索 · 链路 · 命令</text>
+                <text class="node-sub" x="166" y="151" text-anchor="middle">真值源代码</text>
+                <text class="node-sub" x="166" y="170" text-anchor="middle" fill="#7c3aed">→ 软链到业务仓</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="65" y="210" width="270" height="80" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="200" y="238" text-anchor="middle">rules/ (11 条通用规则)</text>
-                <text class="node-sub" x="200" y="258" text-anchor="middle">workflow · commit-pr · cross-layer-enum</text>
-                <text class="node-sub" x="200" y="275" text-anchor="middle">security · file-discipline · windows-ps · ...</text>
+                <rect x="288" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="396" y="116" text-anchor="middle">通用规则(11 条)</text>
+                <text class="node-sub" x="396" y="135" text-anchor="middle">工作流 · 提交规范</text>
+                <text class="node-sub" x="396" y="151" text-anchor="middle">跨层一致性 · 安全 等</text>
+                <text class="node-sub" x="396" y="170" text-anchor="middle" fill="#7c3aed">→ 同步规则到各仓</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="65" y="310" width="270" height="80" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="200" y="338" text-anchor="middle">skills/ (3 个通用 skill)</text>
-                <text class="node-sub" x="200" y="358" text-anchor="middle">ai-health · update-local-ai · git-commit</text>
-                <text class="node-sub" x="200" y="375" text-anchor="middle">跨项目可复用的协作动作</text>
+                <rect x="518" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="626" y="116" text-anchor="middle">通用技能(3 个)</text>
+                <text class="node-sub" x="626" y="135" text-anchor="middle">体检 · 重建索引</text>
+                <text class="node-sub" x="626" y="151" text-anchor="middle">提交流程</text>
+                <text class="node-sub" x="626" y="170" text-anchor="middle" fill="#7c3aed">→ 同步技能到各仓</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="65" y="410" width="270" height="80" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="200" y="438" text-anchor="middle">platform_meta/projects/</text>
-                <text class="node-sub" x="200" y="458" text-anchor="middle">3 项目登记 (meta.json)</text>
-                <text class="node-sub" x="200" y="475" text-anchor="middle">openclaw-stock · codev-platform · widget</text>
+                <rect x="748" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="856" y="116" text-anchor="middle">命令行(6 个子命令)</text>
+                <text class="node-sub" x="856" y="135" text-anchor="middle">接入 · 查看 · 校验</text>
+                <text class="node-sub" x="856" y="151" text-anchor="middle">同步 · 配置</text>
+                <text class="node-sub" x="856" y="170" text-anchor="middle" fill="#7c3aed">→ 业务仓接入入口</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="65" y="510" width="270" height="80" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="200" y="538" text-anchor="middle">config.example.json</text>
-                <text class="node-sub" x="200" y="558" text-anchor="middle">用户级 config 字段样板</text>
-                <text class="node-sub" x="200" y="575" text-anchor="middle">→ ~/.codev-platform/config.json</text>
+                <rect x="978" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="1086" y="116" text-anchor="middle">platform_meta/</text>
+                <text class="node-sub" x="1086" y="135" text-anchor="middle">3 项目登记 (meta.json)</text>
+                <text class="node-sub" x="1086" y="151" text-anchor="middle">业务 A · 业务 B · 本平台</text>
+                <text class="node-sub" x="1086" y="170" text-anchor="middle" fill="#7c3aed">→ project_id 注册表</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="65" y="610" width="270" height="80" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="200" y="638" text-anchor="middle">pyproject.toml + CLI</text>
-                <text class="node-sub" x="200" y="658" text-anchor="middle">codev-platform 6 子命令</text>
-                <text class="node-sub" x="200" y="675" text-anchor="middle">init · sync-rules · sync-skills · config · ...</text>
-              </g>
-              <g filter="url(#shadow)">
-                <rect x="65" y="710" width="270" height="50" rx="8" fill="#f3e8ff" stroke="#7c3aed"/>
-                <text class="node-title" x="200" y="734" text-anchor="middle">docs/ · platform_meta/</text>
-                <text class="node-sub" x="200" y="751" text-anchor="middle">设计文档 / plans / 架构图</text>
+                <rect x="1208" y="92" width="215" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="1316" y="116" text-anchor="middle">config.example.json</text>
+                <text class="node-sub" x="1316" y="135" text-anchor="middle">~/.codev-platform/config.json</text>
+                <text class="node-sub" x="1316" y="151" text-anchor="middle">env &gt; config &gt; 默认</text>
+                <text class="node-sub" x="1316" y="170" text-anchor="middle" fill="#7c3aed">→ 用户主权配置</text>
               </g>
 
-              <!-- Lane 2: distribution -->
+              <!-- ========== 6 lanes for runtime pipeline ========== -->
+              <rect x="40"   y="220" width="230" height="780" rx="10" fill="#eff6ff" stroke="#dbeafe"/>
+              <rect x="280"  y="220" width="230" height="780" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+              <rect x="520"  y="220" width="230" height="780" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+              <rect x="760"  y="220" width="230" height="780" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
+              <rect x="1000" y="220" width="230" height="780" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
+              <rect x="1240" y="220" width="200" height="780" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+
+              <text class="lane-title" x="155"  y="250" text-anchor="middle">1. 数据源(业务仓)</text>
+              <text class="lane-title" x="395"  y="250" text-anchor="middle">2. 触发与门禁</text>
+              <text class="lane-title" x="635"  y="250" text-anchor="middle">3. 索引器与模型 ★</text>
+              <text class="lane-title" x="875"  y="250" text-anchor="middle">4. 本地存储(per project)</text>
+              <text class="lane-title" x="1115" y="250" text-anchor="middle">5. MCP 服务 ★</text>
+              <text class="lane-title" x="1340" y="250" text-anchor="middle">6. 业务仓 + 会话</text>
+
+              <!-- Lane 1: 数据源 -->
               <g filter="url(#shadow)">
-                <rect x="405" y="110" width="270" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="540" y="138" text-anchor="middle">pip install -e (软链)</text>
-                <text class="node-sub" x="540" y="158" text-anchor="middle">改本仓源码 → 业务仓即时生效</text>
-                <text class="node-sub" x="540" y="175" text-anchor="middle">不需重装</text>
+                <rect x="55" y="275" width="200" height="60" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="155" y="299" text-anchor="middle">Python / Java / 前端</text>
+                <text class="node-sub" x="155" y="316" text-anchor="middle">业务代码 / Mapper / 页面</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="405" y="210" width="270" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="540" y="238" text-anchor="middle">codev-platform sync-rules</text>
-                <text class="node-sub" x="540" y="258" text-anchor="middle">rules/ → 业务仓 .claude/rules/</text>
-                <text class="node-sub" x="540" y="275" text-anchor="middle">副本机制,改真值源需重 sync</text>
+                <rect x="55" y="350" width="200" height="60" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="155" y="374" text-anchor="middle">Rules / Skills 副本</text>
+                <text class="node-sub" x="155" y="391" text-anchor="middle">sync 自本仓 + 业务仓自有</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="405" y="310" width="270" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="540" y="338" text-anchor="middle">codev-platform sync-skills</text>
-                <text class="node-sub" x="540" y="358" text-anchor="middle">skills/ → 业务仓 .claude/skills/</text>
-                <text class="node-sub" x="540" y="375" text-anchor="middle">同 sync-rules 机制</text>
+                <rect x="55" y="425" width="200" height="60" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="155" y="449" text-anchor="middle">Docs / Memory</text>
+                <text class="node-sub" x="155" y="466" text-anchor="middle">.claude · docs · dev-evolution</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="405" y="410" width="270" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="540" y="438" text-anchor="middle">codev-platform init &lt;id&gt;</text>
-                <text class="node-sub" x="540" y="458" text-anchor="middle">新业务仓 5 分钟接入</text>
-                <text class="node-sub" x="540" y="475" text-anchor="middle">写 .claude/project.json</text>
+                <rect x="55" y="500" width="200" height="60" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="155" y="524" text-anchor="middle">Flyway / SQL</text>
+                <text class="node-sub" x="155" y="541" text-anchor="middle">表结构 / 查询契约</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="405" y="510" width="270" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="540" y="538" text-anchor="middle">~/.codev-platform/config.json</text>
-                <text class="node-sub" x="540" y="558" text-anchor="middle">用户主权,单点改</text>
-                <text class="node-sub" x="540" y="575" text-anchor="middle">env &gt; config &gt; 默认</text>
+                <rect x="55" y="575" width="200" height="60" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="155" y="599" text-anchor="middle">工作树</text>
+                <text class="node-sub" x="155" y="616" text-anchor="middle">未提交文件 / 归属</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="405" y="610" width="270" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="540" y="638" text-anchor="middle">project_id resolver</text>
-                <text class="node-sub" x="540" y="658" text-anchor="middle">env &gt; .claude/project.json &gt; 硬失败</text>
-                <text class="node-sub" x="540" y="675" text-anchor="middle">+ X-Project-Id header 路由</text>
+                <rect x="55" y="650" width="200" height="60" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="155" y="674" text-anchor="middle">.claude/project.json</text>
+                <text class="node-sub" x="155" y="691" text-anchor="middle">写死 project_id</text>
               </g>
 
-              <!-- Lane 3: shared services -->
+              <!-- Lane 2: 触发与门禁 -->
               <g filter="url(#shadow)">
-                <rect x="745" y="110" width="270" height="92" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="880" y="138" text-anchor="middle">Chroma MCP daemon</text>
-                <text class="node-sub" x="880" y="158" text-anchor="middle">codev_platform/chroma/server.py (870 行)</text>
-                <text class="node-sub" x="880" y="175" text-anchor="middle">multi-tenant · contextvar 路由</text>
-                <text class="node-sub" x="880" y="192" text-anchor="middle">GPU semaphore · port 18083</text>
+                <rect x="295" y="275" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="395" y="299" text-anchor="middle">提交触发</text>
+                <text class="node-sub" x="395" y="316" text-anchor="middle">post-commit hook</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="745" y="222" width="270" height="80" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="880" y="250" text-anchor="middle">BM25 词法索引</text>
-                <text class="node-sub" x="880" y="270" text-anchor="middle">jieba + rank_bm25 + RRF</text>
-                <text class="node-sub" x="880" y="287" text-anchor="middle">中英混合,补向量召回</text>
+                <rect x="295" y="350" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="395" y="374" text-anchor="middle">兜底刷新</text>
+                <text class="node-sub" x="395" y="391" text-anchor="middle">update-local-ai (skill)</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="745" y="322" width="270" height="80" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="880" y="350" text-anchor="middle">cross-link MCP</text>
-                <text class="node-sub" x="880" y="370" text-anchor="middle">find_endpoint_link · find_table_refs</text>
-                <text class="node-sub" x="880" y="387" text-anchor="middle">search_nodes · cross_link_stats</text>
+                <rect x="295" y="425" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="395" y="449" text-anchor="middle">dirty-index</text>
+                <text class="node-sub" x="395" y="466" text-anchor="middle">MCP 可信门禁</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="745" y="422" width="270" height="80" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="880" y="450" text-anchor="middle">GPU 模型 (单例)</text>
-                <text class="node-sub" x="880" y="470" text-anchor="middle">Qwen3-Embedding-0.6B (~3GB)</text>
-                <text class="node-sub" x="880" y="487" text-anchor="middle">所有项目所有会话共享同一份</text>
+                <rect x="295" y="500" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="395" y="524" text-anchor="middle">工作流 L1-L4</text>
+                <text class="node-sub" x="395" y="541" text-anchor="middle">§0.13 trigger / 工具强度</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="745" y="522" width="270" height="80" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="880" y="550" text-anchor="middle">collection 物理隔离</text>
-                <text class="node-sub" x="880" y="570" text-anchor="middle">&lt;project_id&gt;__platform_docs</text>
-                <text class="node-sub" x="880" y="587" text-anchor="middle">contextvar 按会话路由</text>
+                <rect x="295" y="575" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="395" y="599" text-anchor="middle">ai-health (skill)</text>
+                <text class="node-sub" x="395" y="616" text-anchor="middle">新鲜度 / daemon 体检</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="745" y="622" width="270" height="80" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="880" y="650" text-anchor="middle">数据目录隔离</text>
-                <text class="node-sub" x="880" y="670" text-anchor="middle">chroma_dir / cross_link_db_path</text>
-                <text class="node-sub" x="880" y="687" text-anchor="middle">每项目独立 sqlite + chroma 文件</text>
+                <rect x="295" y="650" width="200" height="60" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="395" y="674" text-anchor="middle">project_id resolver</text>
+                <text class="node-sub" x="395" y="691" text-anchor="middle">env &gt; project.json &gt; 硬失败</text>
               </g>
 
-              <!-- Lane 4: business repos -->
+              <!-- Lane 3: 索引器与模型 (★ by codev-platform) -->
               <g filter="url(#shadow)">
-                <rect x="1085" y="110" width="330" height="92" rx="8" fill="#dcfce7" stroke="#059669"/>
-                <text class="node-title" x="1250" y="138" text-anchor="middle">openclaw-stock</text>
-                <text class="node-sub" x="1250" y="158" text-anchor="middle">真业务 · 4427 chunks</text>
-                <text class="node-sub" x="1250" y="175" text-anchor="middle">tools/_platform/ · tools/chroma/{mcp_server,bm25_index}.py</text>
-                <text class="node-sub" x="1250" y="192" text-anchor="middle">tools/cross_link/{schema,mcp_server}.py = shim</text>
+                <rect x="535" y="275" width="200" height="72" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="299" text-anchor="middle">文档索引器</text>
+                <text class="node-sub" x="635" y="316" text-anchor="middle">三级 chunk(1000/1500)</text>
+                <text class="node-sub" x="635" y="333" text-anchor="middle">DOC_PATTERNS · 重建锁</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1085" y="222" width="330" height="80" rx="8" fill="#dcfce7" stroke="#059669"/>
-                <text class="node-title" x="1250" y="250" text-anchor="middle">codev-platform (本仓自身)</text>
-                <text class="node-sub" x="1250" y="270" text-anchor="middle">工具栈本体 · 290 chunks</text>
-                <text class="node-sub" x="1250" y="287" text-anchor="middle">既是真值源也作为 project 注册</text>
+                <rect x="535" y="357" width="200" height="72" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="381" text-anchor="middle">词法索引</text>
+                <text class="node-sub" x="635" y="398" text-anchor="middle">中英混合分词</text>
+                <text class="node-sub" x="635" y="415" text-anchor="middle">与向量 RRF 融合</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1085" y="322" width="330" height="80" rx="8" fill="#dcfce7" stroke="#059669"/>
-                <text class="node-title" x="1250" y="350" text-anchor="middle">codev-platform-widget</text>
-                <text class="node-sub" x="1250" y="370" text-anchor="middle">Tray UI · 开发中</text>
-                <text class="node-sub" x="1250" y="387" text-anchor="middle">桌面挂件型项目接入演练</text>
+                <rect x="535" y="439" width="200" height="72" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="463" text-anchor="middle">代码图谱同步</text>
+                <text class="node-sub" x="635" y="480" text-anchor="middle">符号 / 调用 / 影响面</text>
+                <text class="node-sub" x="635" y="497" text-anchor="middle">重建锁</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1085" y="422" width="330" height="80" rx="8" fill="#dcfce7" stroke="#059669"/>
-                <text class="node-title" x="1250" y="450" text-anchor="middle">每仓 .claude/project.json</text>
-                <text class="node-sub" x="1250" y="470" text-anchor="middle">写死自己的 project_id</text>
-                <text class="node-sub" x="1250" y="487" text-anchor="middle">resolver 找不到就硬失败</text>
+                <rect x="535" y="521" width="200" height="72" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="545" text-anchor="middle">跨层链路构建</text>
+                <text class="node-sub" x="635" y="562" text-anchor="middle">API / SQL / 文件链路</text>
+                <text class="node-sub" x="635" y="579" text-anchor="middle">临时库发布</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1085" y="522" width="330" height="80" rx="8" fill="#dcfce7" stroke="#059669"/>
-                <text class="node-title" x="1250" y="550" text-anchor="middle">业务仓 .claude/rules + skills</text>
-                <text class="node-sub" x="1250" y="570" text-anchor="middle">sync 副本 + 业务仓自有规则</text>
-                <text class="node-sub" x="1250" y="587" text-anchor="middle">本仓改后需 sync 推送</text>
+                <rect x="535" y="603" width="200" height="72" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="627" text-anchor="middle">嵌入模型</text>
+                <text class="node-sub" x="635" y="644" text-anchor="middle">本地小模型 · 查询向量化</text>
+                <text class="node-sub" x="635" y="661" text-anchor="middle">GPU 常驻 · 跨项目共享</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1085" y="622" width="330" height="80" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="1250" y="650" text-anchor="middle">MEMORY (跨项目共享)</text>
-                <text class="node-sub" x="1250" y="670" text-anchor="middle">用户偏好不重复教 = feature</text>
-                <text class="node-sub" x="1250" y="687" text-anchor="middle">A 项目复盘污染 B 判断 = 风险</text>
+                <rect x="535" y="685" width="200" height="60" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="709" text-anchor="middle">重排模型</text>
+                <text class="node-sub" x="635" y="726" text-anchor="middle">Top-K 精排 · 可降级</text>
               </g>
 
-              <!-- edges Lane1 → Lane2 -->
-              <path class="edge-violet" d="M335 150 L405 150"/>
-              <path class="edge-violet" d="M335 250 L405 250"/>
-              <path class="edge-violet" d="M335 350 L405 350"/>
-              <path class="edge-violet" d="M335 450 L405 450"/>
-              <path class="edge-violet" d="M335 550 L405 550"/>
-              <path class="edge-violet" d="M335 650 L405 650"/>
+              <!-- Lane 4: 本地存储 (per project) -->
+              <g filter="url(#shadow)">
+                <rect x="775" y="275" width="200" height="72" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="875" y="299" text-anchor="middle">向量库</text>
+                <text class="node-sub" x="875" y="316" text-anchor="middle">按项目 ID 独立集合</text>
+                <text class="node-sub" x="875" y="333" text-anchor="middle">物理隔离 · 元数据过滤</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="775" y="357" width="200" height="72" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="875" y="381" text-anchor="middle">代码图谱库</text>
+                <text class="node-sub" x="875" y="398" text-anchor="middle">本地 SQLite</text>
+                <text class="node-sub" x="875" y="415" text-anchor="middle">节点 / 边 · WAL 模式</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="775" y="439" width="200" height="72" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="875" y="463" text-anchor="middle">跨层链路库</text>
+                <text class="node-sub" x="875" y="480" text-anchor="middle">本地 SQLite</text>
+                <text class="node-sub" x="875" y="497" text-anchor="middle">链路图 · 备份发布</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="775" y="521" width="200" height="72" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="875" y="545" text-anchor="middle">新鲜度状态</text>
+                <text class="node-sub" x="875" y="562" text-anchor="middle">最近构建 / dirty 范围</text>
+                <text class="node-sub" x="875" y="579" text-anchor="middle">过期检测</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="775" y="603" width="200" height="72" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="875" y="627" text-anchor="middle">MEMORY (用户级)</text>
+                <text class="node-sub" x="875" y="644" text-anchor="middle">~/.codev-platform/memory</text>
+                <text class="node-sub" x="875" y="661" text-anchor="middle">⚠ 跨项目共享(feature+风险)</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="775" y="685" width="200" height="60" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="875" y="709" text-anchor="middle">数据目录</text>
+                <text class="node-sub" x="875" y="726" text-anchor="middle">按 project_id 物理分</text>
+              </g>
 
-              <!-- edges Lane2 → Lane3 (distribution feeds services) -->
-              <path class="edge-blue" d="M675 150 C700 150 720 150 745 150"/>
-              <path class="edge-blue" d="M675 550 C700 540 720 460 745 462"/>
-              <path class="edge-blue" d="M675 650 C700 640 720 560 745 562"/>
-              <path class="edge-dashed" d="M675 250 C700 250 715 250 745 262"/>
-              <path class="edge-dashed" d="M675 350 C700 350 715 355 745 362"/>
+              <!-- Lane 5: MCP 服务 (★ by codev-platform) -->
+              <g filter="url(#shadow)">
+                <rect x="1015" y="275" width="200" height="84" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1115" y="299" text-anchor="middle">文档检索 daemon</text>
+                <text class="node-sub" x="1115" y="316" text-anchor="middle">多租户 · :18083</text>
+                <text class="node-sub" x="1115" y="333" text-anchor="middle">按会话路由 · GPU 信号量</text>
+                <text class="node-sub" x="1115" y="350" text-anchor="middle">向量 + 词法 RRF</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1015" y="369" width="200" height="72" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1115" y="393" text-anchor="middle">代码图谱 MCP</text>
+                <text class="node-sub" x="1115" y="410" text-anchor="middle">每会话 stdio</text>
+                <text class="node-sub" x="1115" y="427" text-anchor="middle">多读 / 重建锁</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1015" y="451" width="200" height="72" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1115" y="475" text-anchor="middle">跨层链路 MCP</text>
+                <text class="node-sub" x="1115" y="492" text-anchor="middle">端点链路 / 表引用</text>
+                <text class="node-sub" x="1115" y="509" text-anchor="middle">节点搜索 / 统计</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1015" y="533" width="200" height="72" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1115" y="557" text-anchor="middle">ai-health</text>
+                <text class="node-sub" x="1115" y="574" text-anchor="middle">daemon / 库 / 使用率</text>
+                <text class="node-sub" x="1115" y="591" text-anchor="middle">只对真实风险告警</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1015" y="615" width="200" height="72" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1115" y="639" text-anchor="middle">dirty-index</text>
+                <text class="node-sub" x="1115" y="656" text-anchor="middle">MCP 可信门禁</text>
+                <text class="node-sub" x="1115" y="673" text-anchor="middle">回读真实文件</text>
+              </g>
 
-              <!-- edges Lane3 → Lane4 -->
-              <path class="edge-green" d="M1015 150 L1085 150"/>
-              <path class="edge-green" d="M1015 250 L1085 250"/>
-              <path class="edge-green" d="M1015 360 L1085 360"/>
-              <path class="edge-green" d="M1015 460 C1050 460 1060 460 1085 460"/>
-              <path class="edge-dashed" d="M1015 560 L1085 560"/>
-              <path class="edge-dashed" d="M1015 660 L1085 660"/>
+              <!-- Lane 6: 业务仓 + 会话 -->
+              <g filter="url(#shadow)">
+                <rect x="1255" y="275" width="170" height="72" rx="8" fill="#fee2e2" stroke="#0891b2"/>
+                <text class="node-title" x="1340" y="299" text-anchor="middle">业务 A</text>
+                <text class="node-sub" x="1340" y="316" text-anchor="middle">真业务 · 约 4400 片段</text>
+                <text class="node-sub" x="1340" y="333" text-anchor="middle">工具层全是 shim 自本仓</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1255" y="357" width="170" height="72" rx="8" fill="#fee2e2" stroke="#0891b2"/>
+                <text class="node-title" x="1340" y="381" text-anchor="middle">本平台(自身)</text>
+                <text class="node-sub" x="1340" y="398" text-anchor="middle">工具栈本体 · 约 290 片段</text>
+                <text class="node-sub" x="1340" y="415" text-anchor="middle">既是真值源也作项目登记</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1255" y="439" width="170" height="72" rx="8" fill="#fee2e2" stroke="#0891b2"/>
+                <text class="node-title" x="1340" y="463" text-anchor="middle">业务 B(桌面挂件)</text>
+                <text class="node-sub" x="1340" y="480" text-anchor="middle">托盘界面 · 开发中</text>
+                <text class="node-sub" x="1340" y="497" text-anchor="middle">接入演练样板</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1255" y="521" width="170" height="72" rx="8" fill="#e0f2fe" stroke="#0891b2"/>
+                <text class="node-title" x="1340" y="545" text-anchor="middle">AI 会话</text>
+                <text class="node-sub" x="1340" y="562" text-anchor="middle">两种入口配置</text>
+                <text class="node-sub" x="1340" y="579" text-anchor="middle">多会话并发读</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1255" y="603" width="170" height="72" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1340" y="627" text-anchor="middle">验证闭环</text>
+                <text class="node-sub" x="1340" y="644" text-anchor="middle">定向 lint/test/compile</text>
+                <text class="node-sub" x="1340" y="661" text-anchor="middle">报告缺口</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1255" y="685" width="170" height="60" rx="8" fill="#f3e8ff" stroke="#7c3aed"/>
+                <text class="node-title" x="1340" y="709" text-anchor="middle">开发收益</text>
+                <text class="node-sub" x="1340" y="726" text-anchor="middle">准确率 / token / GPU 复用</text>
+              </g>
 
-              <!-- edges Lane2 → Lane4 (sync directly to repos) -->
-              <path class="edge-dashed" d="M675 250 C850 220 950 525 1085 542"/>
-              <path class="edge-dashed" d="M675 350 C850 320 950 540 1085 552"/>
-              <path class="edge-dashed" d="M675 450 C850 440 950 455 1085 462"/>
+              <!-- ★ supply edges: 顶部真值源 → 索引器(Lane 3) -->
+              <path class="edge-violet" d="M166 184 C166 220 400 250 535 290"/>
+              <path class="edge-violet" d="M166 184 C166 220 400 260 535 372"/>
+              <path class="edge-violet" d="M396 184 C396 220 450 260 535 460"/>
+              <path class="edge-violet" d="M396 184 C396 220 450 260 535 540"/>
 
-              <!-- bottom legend strip -->
-              <rect x="66" y="790" width="1368" height="40" rx="10" fill="#ffffff" stroke="#dbe3ed"/>
-              <text class="node-title" x="95" y="815">真值源 → 分发 → 服务 → 业务仓</text>
-              <text class="node-sub" x="430" y="815">代码走 pip -e 软链;规则/skill 走 sync 副本;daemon 跨项目共享 GPU;collection + 数据目录按 project_id 物理隔离。</text>
+              <!-- ★ supply edges: 顶部 → MCP(Lane 5) -->
+              <path class="edge-violet" d="M856 184 C856 220 1000 250 1015 305"/>
+              <path class="edge-violet" d="M856 184 C856 220 1000 260 1015 400"/>
+              <path class="edge-violet" d="M856 184 C856 220 1000 270 1015 482"/>
+
+              <!-- ★ supply edges: 顶部 sync → Lane 1 数据源(rules/skills 副本) -->
+              <path class="edge-violet" d="M396 184 C396 210 280 240 255 380"/>
+              <path class="edge-violet" d="M626 184 C626 210 280 250 255 380"/>
+
+              <!-- ★ supply edges: 顶部 platform_meta / config → Lane 2 / Lane 4 -->
+              <path class="edge-violet" d="M1086 184 C1086 220 600 240 495 680"/>
+              <path class="edge-violet" d="M1316 184 C1316 220 1000 250 975 715"/>
+
+              <!-- ========== runtime pipeline edges (lane→lane) ========== -->
+              <!-- Lane 1 → Lane 2 -->
+              <path class="edge" d="M255 305 L295 305"/>
+              <path class="edge" d="M255 380 L295 380"/>
+              <path class="edge" d="M255 455 L295 455"/>
+              <path class="edge" d="M255 530 L295 530"/>
+              <path class="edge-dashed" d="M255 605 L295 605"/>
+              <path class="edge" d="M255 680 L295 680"/>
+
+              <!-- Lane 2 → Lane 3 -->
+              <path class="edge-green" d="M495 305 L535 311"/>
+              <path class="edge-green" d="M495 305 C510 320 520 380 535 393"/>
+              <path class="edge-green" d="M495 305 C510 340 520 460 535 475"/>
+              <path class="edge-green" d="M495 305 C510 360 520 540 535 557"/>
+              <path class="edge-dashed" d="M495 455 L535 475"/>
+              <path class="edge-dashed" d="M495 530 L535 557"/>
+
+              <!-- Lane 3 → Lane 4 -->
+              <path class="edge-green" d="M735 311 L775 311"/>
+              <path class="edge-green" d="M735 393 L775 393"/>
+              <path class="edge-green" d="M735 475 L775 475"/>
+              <path class="edge-green" d="M735 557 L775 557"/>
+              <path class="edge-blue" d="M735 639 C755 580 760 350 775 311"/>
+              <path class="edge-blue" d="M735 715 C755 600 760 360 775 311"/>
+
+              <!-- Lane 4 → Lane 5 -->
+              <path class="edge-blue" d="M975 311 L1015 317"/>
+              <path class="edge-blue" d="M975 393 L1015 405"/>
+              <path class="edge-blue" d="M975 475 L1015 487"/>
+              <path class="edge-dashed" d="M975 557 L1015 569"/>
+              <path class="edge-dashed" d="M975 639 L1015 651"/>
+
+              <!-- Lane 5 → Lane 6 -->
+              <path class="edge-blue" d="M1215 317 L1255 311"/>
+              <path class="edge-blue" d="M1215 405 L1255 393"/>
+              <path class="edge-blue" d="M1215 487 L1255 475"/>
+              <path class="edge-blue" d="M1215 317 C1235 380 1240 510 1255 557"/>
+              <path class="edge-dashed" d="M1215 569 L1255 569"/>
+              <path class="edge-dashed" d="M1215 651 L1255 639"/>
+              <path class="edge-dashed" d="M1215 651 C1240 680 1245 700 1255 715"/>
+
+              <!-- ========== bottom narration ========== -->
+              <rect x="40" y="1014" width="1400" height="36" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
+              <text class="node-title" x="58" y="1037">★ codev-platform 供给关系:</text>
+              <text class="node-sub" x="270" y="1037">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
             </svg>
           </div>
         </section>
@@ -519,6 +658,232 @@
           <div class="ok">
             ✅ 核心数据 (代码索引、文档检索、业务链路) 物理隔离做得到位。会串的只有 MEMORY 这种"跨项目共享是 feature"的部分。
           </div>
+        </section>
+
+        <section id="mcp">
+          <h2>MCP 与索引</h2>
+          <p>三套 MCP 服务的代码全在 <code>codev_platform/</code>,业务仓只放 shim re-export。</p>
+          <table>
+            <tr>
+              <th>组件</th>
+              <th>当前形态</th>
+              <th>真值源位置</th>
+              <th>防错机制</th>
+            </tr>
+            <tr>
+              <td>platform-docs</td>
+              <td>stdio proxy → shared HTTP daemon;Hybrid:Qwen3-Embedding 向量 + BM25 词法 RRF 融合后 Qwen3-Reranker 精排</td>
+              <td><code>codev_platform/chroma/server.py</code> (870 行) + <code>bm25.py</code></td>
+              <td>spawn lock、health endpoint、listener PID + GPU PID 检查、Chroma reindex lock、DOC_PATTERNS 子目录覆盖 audit (pre-push gate 6/6)、jieba/rank_bm25 缺失自动降级纯向量。</td>
+            </tr>
+            <tr>
+              <td>codegraph</td>
+              <td>每会话 stdio server (外部工具)</td>
+              <td>外部 codegraph 包(本仓不持有)</td>
+              <td>rebuild lock、DB integrity 检查、WAL 检查、多会话只提示 INFO。</td>
+            </tr>
+            <tr>
+              <td>cross-link</td>
+              <td>每会话 stdio server</td>
+              <td><code>codev_platform/cross_link/{schema,server,query}.py</code></td>
+              <td>临时库构建、SQLite backup 发布、freshness 检查、多会话链路观测。</td>
+            </tr>
+            <tr>
+              <td>dirty-index</td>
+              <td>本地检查脚本</td>
+              <td>业务仓 <code>tools/dev/dirty-index-check.ps1</code></td>
+              <td>命中时 MCP 只能作参考,关键判断读真实文件。</td>
+            </tr>
+            <tr>
+              <td>project_id 路由</td>
+              <td>HTTP header + contextvar</td>
+              <td><code>codev_platform/core/project_id.py</code></td>
+              <td>env &gt; project.json &gt; 硬失败;collection 名 <code>&lt;project_id&gt;__platform_docs</code> 物理隔离。</td>
+            </tr>
+          </table>
+        </section>
+
+        <section id="concurrency">
+          <h2>并发治理</h2>
+          <p>多项目 + 多会话是常态。策略不是禁止多进程,而是按资源类型区分:读可以并发,写必须串行,重资源必须单例。这套语义靠 <code>codev_platform/chroma/server.py</code> 的 contextvar 路由 + GPU semaphore + reindex lock 落地。</p>
+          <table>
+            <tr>
+              <th>资源</th>
+              <th>允许并发</th>
+              <th>当前保护</th>
+            </tr>
+            <tr>
+              <td>AI 会话 / proxy</td>
+              <td>允许多个(跨项目 + 同项目多会话)。</td>
+              <td>每个会话声明文件范围;不得同时改同一文件;修改前后看 <code>git status</code>。</td>
+            </tr>
+            <tr>
+              <td>MCP 查询</td>
+              <td>允许多个读请求(跨项目按 contextvar 隔离)。</td>
+              <td>dirty-index 决定索引可信度;命中 dirty 后读真实文件兜底。</td>
+            </tr>
+            <tr>
+              <td>GPU 模型</td>
+              <td>不允许多份重模型 worker。</td>
+              <td>platform-docs shared daemon + spawn lock + health 检查;所有项目共享同一个 daemon 的 GPU。</td>
+            </tr>
+            <tr>
+              <td>索引重建</td>
+              <td>不允许并发写。</td>
+              <td>Chroma reindex lock、CodeGraph rebuild lock、cross-link 临时库发布。</td>
+            </tr>
+            <tr>
+              <td>源码文件</td>
+              <td>不同文件可并行。</td>
+              <td>发现他人改动先读最新内容,不回滚未知改动。</td>
+            </tr>
+            <tr>
+              <td>本仓 codev-platform 自身改动</td>
+              <td>不允许并发改 + 同时 daemon 持旧。</td>
+              <td>改完 commit + push + 各业务仓重启 daemon(<code>Stop-Process</code> port 18083)。</td>
+            </tr>
+          </table>
+        </section>
+
+        <section id="workflow">
+          <h2>开发工作流</h2>
+          <p>规则真值源在本仓 <code>rules/workflow.md</code>,经 <code>sync-rules</code> 推送到各业务仓 <code>.claude/rules/</code>。改前门禁:AI 做 L2/L3/L4 时,先产出合并影响面,再决定文件范围、生成边界和验证命令。</p>
+          <div class="flow" style="display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px;">
+            <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
+              <strong>0. 自报 trigger</strong>
+              <p>会话首次 Bash / Edit / Write 前输出 <code>[L1|L2|L3] 任务: ... → MCP 计划: ...</code>。把"知道映射表"转成"动手前真查"。</p>
+            </div>
+            <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
+              <strong>1. 判级</strong>
+              <p>L1 小改轻流程。L2 单层查规则+影响面。L3 跨层查三套 MCP。L4 高风险先说边界。</p>
+            </div>
+            <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
+              <strong>2. 查证</strong>
+              <p>规则靠 platform-docs,代码结构靠 codegraph,数据契约靠 cross-link。dirty 命中读真实文件。</p>
+            </div>
+            <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
+              <strong>3. 定边界</strong>
+              <p>合并影响面 → 文件归属、禁改项、生成项、验证命令。提效核心。</p>
+            </div>
+            <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
+              <strong>4. 修改</strong>
+              <p>只改本次范围。生成物、历史迁移、索引产物、缓存默认不手改。</p>
+            </div>
+            <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
+              <strong>5. 验证</strong>
+              <p>定向 lint / test / compile / 体检 ai-health。</p>
+            </div>
+          </div>
+
+          <table>
+            <tr><th>合并影响面</th><th>来源(MCP)</th><th>用途</th></tr>
+            <tr>
+              <td>规则 / 红线 / skill 步骤</td>
+              <td>platform-docs (本仓 chroma daemon)</td>
+              <td>决定能不能改、必须怎么改、哪些命令禁止自动跑。</td>
+            </tr>
+            <tr>
+              <td>函数 / 类 / 调用方 / 影响面</td>
+              <td>CodeGraph (业务仓索引)</td>
+              <td>决定改哪些代码文件、哪些调用方需要同步、哪里需要补测试。</td>
+            </tr>
+            <tr>
+              <td>SQL / 表 / 字段 / endpoint / Python writer-reader</td>
+              <td>cross-link (本仓 cross_link MCP)</td>
+              <td>决定跨层契约、DB 写入、Mapper、前端 API 类型和数据一致性风险。</td>
+            </tr>
+            <tr>
+              <td>真实工作树</td>
+              <td>dirty-index + 本地文件</td>
+              <td>发现索引滞后时兜底,防止多个会话同时改同一文件。</td>
+            </tr>
+          </table>
+
+          <table>
+            <tr><th>等级</th><th>典型范围</th><th>工具强度</th></tr>
+            <tr><td>L1</td><td>文案、注释、局部样式、单文件小修。</td><td>git status + 定向读 + 最小验证。</td></tr>
+            <tr><td>L2</td><td>单模块或同层多模块联动,不改 API / DB / DTO / enum / 跨语言字段契约。</td><td>模块 rules + codegraph 调用方/影响面;追问数据来源加 cross-link。</td></tr>
+            <tr><td>L3</td><td>DTO、API、SQL、写库字段、migration、enum、跨层契约。</td><td>platform-docs + codegraph + cross-link + 验证闭环。</td></tr>
+            <tr><td>L4</td><td>生成文件、依赖、全局 runtime、AI 工具链、历史数据边界。</td><td>先说明影响范围;禁改项拒绝或走正确生成流程。</td></tr>
+          </table>
+        </section>
+
+        <section id="metrics">
+          <h2>效率与准确率</h2>
+          <table>
+            <tr><th>目标</th><th>来源</th><th>表现</th></tr>
+            <tr>
+              <td>准确率</td>
+              <td>Rules/Skills 语义检索 + BM25 精确符号召回 + RRF 融合 + reranker + codegraph 影响面 + cross-link 跨层链路。</td>
+              <td>减少凭记忆改代码,先查约束和影响面再编辑。BM25 hybrid 补救向量漏掉的精确 token(版本号 / 规则编号 / 罕见术语)。</td>
+            </tr>
+            <tr>
+              <td>效率</td>
+              <td>GPU 模型常驻 daemon + 跨项目 + 多会话共享 + 定向 MCP 查询。</td>
+              <td>减少冷启动、重复模型占用和全仓搜索。多项目从"每仓一份 daemon → CUDA OOM"变成"全平台共享同一份"。</td>
+            </tr>
+            <tr>
+              <td>Token</td>
+              <td>文档、规则、Skills 留在索引库,按 query 返回 top-k chunk。</td>
+              <td>避免每次把大量 Markdown 全塞进上下文。BM25 路径 0 API token(纯本地)。</td>
+            </tr>
+            <tr>
+              <td>可观测性</td>
+              <td>ai-health (skill) · dirty-index · reindex log · search recall log。</td>
+              <td>发现 daemon、索引、新鲜度、dirty、BM25 命中率和使用率问题。</td>
+            </tr>
+            <tr>
+              <td>新项目接入</td>
+              <td><code>codev-platform init &lt;id&gt;</code> + <code>sync-rules</code> + <code>sync-skills</code>。</td>
+              <td>5 分钟拿到完整工具栈,不需重复拷代码 / 配 daemon / 写规则。</td>
+            </tr>
+          </table>
+
+          <h3>当前实测基线</h3>
+          <table>
+            <tr><th>指标</th><th>当前值</th><th>说明</th></tr>
+            <tr><td>项目登记数</td><td>3</td><td>openclaw-stock (真业务) · codev-platform (本仓) · widget (Tray UI 开发中)。</td></tr>
+            <tr><td>chroma chunks</td><td>4427 (openclaw) + 290 (本仓) ≈ 4717</td><td>各项目独立 collection,物理隔离。本仓 290 chunks 覆盖 rules + skills + docs + CLAUDE.md。</td></tr>
+            <tr><td>chunk 策略</td><td>target 1000 / max 1500 字符,三级(heading → paragraph → hard)</td><td>由 <code>codev_platform/chroma</code> 提供,所有项目统一策略。</td></tr>
+            <tr><td>BM25 倒排</td><td>每 collection 独立 ~2.1s 重建</td><td>daemon 启动 + chroma 重建时同步构建,中英混合分词。</td></tr>
+            <tr><td>GPU 占用</td><td>恒定 ~3GB (Qwen3-Embedding-0.6B)</td><td>所有项目所有会话共享同一 daemon。没这个共享每会话 ~3GB → 第 2 会话 OOM。</td></tr>
+            <tr><td>daemon 端口</td><td>18083 (HTTP/SSE)</td><td>所有 stdio proxy 连同一 daemon。</td></tr>
+            <tr><td>pre-push audit gates</td><td>6 项 (业务仓 openclaw)</td><td>parity / null cast / sanity test / fetcher registry / frontend grep / DOC_PATTERNS。silent failure 转 loud failure。</td></tr>
+          </table>
+        </section>
+
+        <section id="boundaries">
+          <h2>边界与验证</h2>
+          <div class="warning">
+            本仓只持有跨项目通用基础设施(代码 / 规则 / skill / 配置)。业务领域内容(投研逻辑 / 策略 / 数据)留在各业务仓自己的 <code>.claude/rules/</code> 和 <code>docs/</code>,不上溯到本仓。
+          </div>
+
+          <h3>本仓不要改清单(摘 CLAUDE.md §八)</h3>
+          <table>
+            <tr><th>路径</th><th>原因</th></tr>
+            <tr><td><code>tools/chroma/.venv/</code></td><td>在业务仓里,heavy ML 依赖,本仓 0 deps</td></tr>
+            <tr><td>各业务仓 <code>.claude/project.json</code></td><td>各仓自己写,CLI 只 init 不远程改</td></tr>
+            <tr><td>用户 <code>~/.codev-platform/config.json</code></td><td>用户主权,只通过 CLI <code>config init</code> 或 <code>--force</code></td></tr>
+          </table>
+
+          <h3>本仓改完跨仓同步 4 步(摘 CLAUDE.md §五)</h3>
+          <table>
+            <tr><th>步</th><th>动作</th></tr>
+            <tr><td>1</td><td>本仓改完 commit + push</td></tr>
+            <tr><td>2</td><td>业务仓 chroma .venv <code>uv pip install -e D:\WorkSpace\codev-platform</code> 拉新版(-e 软链不需重装)</td></tr>
+            <tr><td>3</td><td>业务仓 shim 文件加 symbol re-export(若有新 symbol)</td></tr>
+            <tr><td>4</td><td>重启 daemon:<code>Stop-Process -Id (Get-NetTCPConnection -LocalPort 18083).OwningProcess -Force</code></td></tr>
+          </table>
+
+          <h3>最小验证闭环</h3>
+          <table>
+            <tr><th>改动类型</th><th>验证方向</th></tr>
+            <tr><td>本仓 <code>codev_platform/</code> Python</td><td>业务仓侧 import 自测 + daemon 重启后 search_docs 跑通</td></tr>
+            <tr><td>本仓 <code>rules/</code> 或 <code>skills/</code></td><td>本仓 <code>sync-rules</code> + 各业务仓重 sync + 看副本一致</td></tr>
+            <tr><td>本仓 CLI</td><td><code>codev-platform current</code> · <code>list-projects</code> · <code>config show</code></td></tr>
+            <tr><td>本仓 docs</td><td>引用路径存在 + chroma reindex 后 search_docs 命中</td></tr>
+            <tr><td>新项目接入</td><td><code>codev-platform init</code> + sync 后 ai-health 体检全绿</td></tr>
+          </table>
         </section>
 
         <section id="value">
