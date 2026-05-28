@@ -29,6 +29,11 @@ runtime = [
     "httptools>=0.7.1",
     "cryptography>=48.0.0",
 ]
+# dev: 仅纯逻辑单测所需(pytest)。不拉 runtime 重依赖(torch/chromadb)。
+dev = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [project.scripts]
 codev-platform = "codev_platform.cli:main"
