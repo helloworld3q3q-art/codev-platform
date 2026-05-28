@@ -1,0 +1,30 @@
+# codev-platform 全量自立运行时依赖锁
+# 用途：在 codev-platform 自建 venv 重建运行环境（daemon / 索引器 / MCP server）。
+#
+# 重建步骤（用户手动跑）：
+#   cd D:\WorkSpace\codev-platform
+#   python -m venv .venv
+#   .venv\Scripts\activate
+#   pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+#   pip install -r requirements-runtime.txt
+#   pip install -e .
+#
+# 说明：
+# - torch 必须先单独装 CUDA 版（cu128 对应 RTX 5060 Blackwell + CUDA 12.8），
+#   否则 pip 会从 PyPI 拉 CPU 版，模型推理慢 10×。
+# - 其余依赖与 pyproject.toml [project.optional-dependencies] runtime 组对齐，
+#   此文件额外锁死版本 + 处理 torch index-url（pyproject 表达不了）。
+
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+torch==2.11.0+cu128
+
+chromadb>=1.5.9
+sentence-transformers>=5.5.1
+rank-bm25>=0.2.2
+jieba>=0.42.1
+mcp-proxy>=0.12.0
+watchfiles>=1.2.0
+websockets>=16.0
+httptools>=0.7.1
+cryptography>=48.0.0

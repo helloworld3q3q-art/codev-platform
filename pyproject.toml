@@ -12,6 +12,24 @@ authors = [{ name = "helloworld3q3q-art" }]
 license = { text = "Proprietary" }
 dependencies = []
 
+# 重运行时依赖(daemon / 索引器 / MCP server 实际运行所需)。
+# base dependencies 保持 []，默认安装仍是 0 依赖纯源码包(可作 thin shim 装进任意业务仓)。
+# 全量自立模式：在 codev-platform 自建 venv 跑 `pip install -e .[runtime]` 拉下面这些。
+# 注意：sentence-transformers 会拉 torch；CUDA 版 torch 需用对应 index-url 单独装
+#       (例 `pip install torch --index-url https://download.pytorch.org/whl/cu124`)。
+[project.optional-dependencies]
+runtime = [
+    "chromadb>=1.5.9",
+    "sentence-transformers>=5.5.1",
+    "rank-bm25>=0.2.2",
+    "jieba>=0.42.1",
+    "mcp-proxy>=0.12.0",
+    "watchfiles>=1.2.0",
+    "websockets>=16.0",
+    "httptools>=0.7.1",
+    "cryptography>=48.0.0",
+]
+
 [project.scripts]
 codev-platform = "codev_platform.cli:main"
 
