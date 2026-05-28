@@ -1,5 +1,5 @@
 {
-  "_comment": "复用 platform 仓的 daemon launcher (.cmd) — multi-tenant daemon 按 project_id 路由到正确 collection. 三仓必须 clone 到同一父目录 (..\\platform 才能解析). 跨机 portable.",
+  "_comment": "platform ownership inversion 2026-05-28: launcher 现归 codev-platform 自有 (tools/). venv 在仓根 .venv. multi-tenant daemon 按 project_id 路由到正确 collection. 跨机 portable.",
   "mcpServers": {
     "codegraph": {
       "type": "stdio",
@@ -9,13 +9,13 @@
     "platform-docs": {
       "type": "stdio",
       "command": "cmd",
-      "args": ["/c", "..\\platform\\tools\\chroma\\platform-docs-mcp.cmd"],
+      "args": ["/c", "tools\\chroma\\platform-docs-mcp.cmd"],
       "timeout": 90000
     },
     "cross-link": {
       "type": "stdio",
       "command": "cmd",
-      "args": ["/c", "..\\platform\\tools\\cross_link\\cross-link-mcp.cmd"],
+      "args": ["/c", "tools\\cross_link\\cross-link-mcp.cmd"],
       "timeout": 30000
     }
   }
