@@ -476,17 +476,26 @@ def _check_pd_servers(r: Report, port: str, procs: list[dict[str, str]]) -> None
         r.line("platform-docs servers", "OK", f"1 server pid={pd[0]['pid']} ({mode})")
     else:
         pids = ",".join(p["pid"] for p in pd)
-        http = sum(1 for p in pd if "--http" in p["cmdline"])
-        stdio = len(pd) - http
+        http = [p for p in pd if "--http" in p["cmdline"]]
+        stdio = len(pd) - len(http)
         if stdio > 0:
             r.line("platform-docs servers", "WARN",
                    f"count={len(pd)} pids={pids} ({stdio} legacy stdio still running; kill to reclaim GPU)")
-        elif http == 1:
+            return
+        # Multiple --http procs are NORMAL: the daemon runs as a bootstrap parent
+        # that re-spawns the real HTTP server as a child (different interpreters),
+        # so 2+ procs in ONE lineage == one logical daemon. Count independent
+        # roots (procs whose parent is not itself a daemon proc); only 2+ roots is
+        # a genuine duplicate. Counting bare --http occurrences (the old logic)
+        # false-flagged the normal bootstrap+server chain as a duplicate daemon.
+        http_pids = {p["pid"] for p in http}
+        roots = [p for p in http if p.get("ppid", "") not in http_pids]
+        if len(roots) <= 1:
             r.line("platform-docs servers", "OK",
-                   f"process-chain pids={pids} (multi-session proxy/shim chain, single active daemon)")
+                   f"process-chain pids={pids} (bootstrap+server chain, single active daemon)")
         else:
             r.line("platform-docs servers", "WARN",
-                   f"count={len(pd)} pids={pids} (possible duplicate daemon)")
+                   f"count={len(pd)} pids={pids} ({len(roots)} independent daemons; possible duplicate)")
 
 
 def _check_mcp_proxy(r: Report, cfg: dict) -> None:
