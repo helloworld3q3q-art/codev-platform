@@ -125,7 +125,9 @@ def _load_project_index_config() -> tuple[list[str], list[str]]:
     """读 <PLATFORM_ROOT>/.claude/index.json (若存在), 返回 (doc_patterns, external_doc_paths).
 
     - doc_patterns: 相对 PLATFORM_ROOT 的 glob (默认走 DOC_PATTERNS hardcode 列表)
-    - external_doc_paths: 绝对 glob 路径列表, 用于跨仓引入真值源 (例: 业务仓引 codev-platform/rules/*.md)
+    - external_doc_paths: 跨仓真值源 glob, 支持相对路径 (基于 PLATFORM_ROOT) 或绝对路径
+      例(相对, 推荐): "../codev-platform/rules/*.md"  → 跨机器 portable
+      例(绝对, 兼容): "D:/WorkSpace/codev-platform/rules/*.md"  → 机器绑定 (违反 feedback_no_absolute_paths)
     """
     cfg = PLATFORM_ROOT / ".claude" / "index.json"
     patterns: list[str] = list(DOC_PATTERNS)
@@ -160,9 +162,13 @@ def discover_files() -> list[Path]:
             if is_excluded(p.relative_to(PLATFORM_ROOT)):
                 continue
             seen.add(p.resolve())
-    # 外部绝对路径 glob (cross-repo 真值源, 例 codev-platform/rules/*.md)
+    # 外部 glob (cross-repo 真值源). 相对路径 anchor 到 PLATFORM_ROOT, 绝对路径直用.
     for ext_pattern in external:
-        for s in _glob.glob(ext_pattern, recursive=True):
+        if Path(ext_pattern).is_absolute():
+            anchored = ext_pattern
+        else:
+            anchored = str(PLATFORM_ROOT / ext_pattern)
+        for s in _glob.glob(anchored, recursive=True):
             p = Path(s)
             if p.is_file():
                 seen.add(p.resolve())
