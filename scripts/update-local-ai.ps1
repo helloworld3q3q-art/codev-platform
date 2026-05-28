@@ -41,8 +41,19 @@ if ($ChromaForce -or (-not $SkipCodeGraph -and -not $SkipChroma -and -not $SkipC
 }
 
 $CgScript   = Join-Path $RepoRoot 'scripts\codegraph\rebuild_index.ps1'
-$ChromaPy   = Join-Path $RepoRoot 'tools\chroma\.venv\Scripts\python.exe'
-# indexer 已迁到 codev-platform 包, 走 -m codev_platform.chroma.indexer
+# venv now owned by codev-platform (platform ownership inversion): read from
+# ~/.codev-platform/config.json runtime.chroma_venv; fall back to legacy repo-local.
+# (indexer is the codev_platform.chroma.indexer package module.)
+$ChromaVenv = $null
+$cfgPath = Join-Path $env:USERPROFILE '.codev-platform\config.json'
+if (Test-Path $cfgPath) {
+    try { $ChromaVenv = (Get-Content $cfgPath -Encoding UTF8 -Raw | ConvertFrom-Json).runtime.chroma_venv } catch { }
+}
+if ($ChromaVenv) {
+    $ChromaPy = Join-Path $ChromaVenv 'Scripts\python.exe'
+} else {
+    $ChromaPy = Join-Path $RepoRoot 'tools\chroma\.venv\Scripts\python.exe'
+}
 $CrossPy    = 'D:\ProgramFiles\Python314\python.exe'    # cross_link uses system python (has sqlglot + javalang)
 $CrossDir   = Join-Path $RepoRoot 'tools'
 $HealthPs1  = Join-Path $PSScriptRoot 'ai-health.ps1'
