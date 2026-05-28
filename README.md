@@ -4,6 +4,9 @@ Multi-project AI 协作工具栈基础设施。让多个业务项目共享 proje
 
 ## 新机器接入(零冷启 SOP)
 
+**前置**:`uv` + `huggingface-cli` 在 PATH(`pip install uv huggingface_hub[cli]` 一行装)。
+
+
 ```powershell
 # 1. clone 三仓到同一父目录 (路径任选, e.g. ~/Code/ 或 D:/WorkSpace/)
 cd D:/WorkSpace      # 或 cd ~/Code
@@ -14,22 +17,11 @@ git clone https://github.com/helloworld3q3q-art/codev-platform-widget.git   # �
 # 2. 装 codev-platform CLI
 pip install -e ./codev-platform
 
-# 3. 一键探测三仓 / chroma .venv / 模型, 写 ~/.codev-platform/config.json
-codev-platform setup
+# 3. 一键全自动接入 (探测 + 装 venv + 下模型 + 写 config)
+codev-platform setup --auto    # 缺 venv 自动 uv sync, 缺模型自动 huggingface-cli download
+#  耗时 10-15 分钟 (主要 torch / chromadb / sentence-transformers / Qwen3 模型)
 
-# 4. 按 setup 输出提示装 chroma .venv (~10 分钟, 含 torch + chromadb + sentence-transformers)
-cd platform/tools/chroma
-uv venv && uv sync         # 或 python -m venv .venv && pip install -r requirements.txt
-cd ../../..
-
-# 5. 下载 Qwen3 模型 (可选, 不下默认走仓内 MiniLM fallback)
-huggingface-cli download Qwen/Qwen3-Embedding-0.6B --local-dir ~/models/Qwen3-Embedding-0.6B
-huggingface-cli download Qwen/Qwen3-Reranker-0.6B --local-dir ~/models/Qwen3-Reranker-0.6B
-
-# 6. 再跑一次 setup 确认全 OK
-codev-platform setup     # 应输出 "READY"
-
-# 7. 任一仓开 Claude Code, daemon 自动 spawn
+# 4. 任一仓开 Claude Code, daemon 自动 spawn — END
 ```
 
 ## 状态

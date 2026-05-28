@@ -199,20 +199,37 @@ def cmd_sync_skills(args: argparse.Namespace) -> int:
     return 0 if n >= 0 else 1
 
 
-def cmd_setup(args: argparse.Namespace) -> int:
-    """一键新机器接入: 探测三仓位置 + chroma venv + 模型 + 写 config.
+def _which(cmd: str) -> str | None:
+    """跨平台查 PATH 里有没有该命令, 返回绝对路径或 None."""
+    import shutil
+    return shutil.which(cmd)
 
-    新机器流程:
+
+def _run_subprocess(cmd: list[str], cwd: Path | None = None, label: str = "") -> int:
+    """跑子进程 + 实时打印, 返回 exit code."""
+    import subprocess
+    _print(f"  → {label or ' '.join(cmd)}")
+    try:
+        rc = subprocess.call(cmd, cwd=str(cwd) if cwd else None)
+        return rc
+    except FileNotFoundError as exc:
+        _eprint(f"    FAIL: {exc!s}")
+        return 127
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    """一键新机器接入: 探测三仓 + 自动装 venv + 自动下模型 + 写 config.
+
+    流程:
       git clone <three repos> 到同一父目录
       cd codev-platform && pip install -e .
-      codev-platform setup
-      (按提示装 .venv + 下载模型)
+      codev-platform setup [--auto]   # auto 自动装 venv + 下载模型
       Claude Code 在任一仓打开即可
     """
     from codev_platform.core.config import (
         DEFAULTS, config_path, load_config, save_config,
     )
-    codev_root = Path(__file__).resolve().parents[1]  # codev-platform 仓根
+    codev_root = Path(__file__).resolve().parents[1]
     parent = codev_root.parent
     _print(f"codev-platform repo: {codev_root}")
     _print(f"parent dir:          {parent}")
@@ -221,50 +238,81 @@ def cmd_setup(args: argparse.Namespace) -> int:
     # 1. 探测兄弟仓
     platform_repo = parent / "platform"
     widget_repo = parent / "codev-platform-widget"
-    _print("=== 兄弟仓探测 ===")
-    _print(f"  platform:                {'OK' if platform_repo.is_dir() else 'MISSING -- git clone <platform>.git ' + str(parent)}")
-    _print(f"  codev-platform-widget:   {'OK' if widget_repo.is_dir() else 'MISSING (optional, 仅 UI)'}")
+    _print("=== step 1/4: 兄弟仓探测 ===")
+    _print(f"  platform:                {'OK' if platform_repo.is_dir() else 'MISSING -- git clone <platform>.git'}")
+    _print(f"  codev-platform-widget:   {'OK' if widget_repo.is_dir() else 'MISSING (可选)'}")
+    if not platform_repo.is_dir():
+        _eprint(f"FATAL: 必须先 git clone platform 仓到 {parent}")
+        return 1
     _print()
 
-    # 2. 探测 chroma venv
-    venv_candidates = [
-        platform_repo / "tools" / "chroma" / ".venv",
-        codev_root / "tools" / "chroma" / ".venv",
-    ]
-    chroma_venv = next((str(v) for v in venv_candidates if (v / "Scripts" / "python.exe").is_file() or (v / "bin" / "python").is_file()), None)
-    _print("=== chroma .venv 探测 ===")
-    if chroma_venv:
-        _print(f"  found: {chroma_venv}")
+    # 2. 探测 / 装 chroma venv
+    venv_dir = platform_repo / "tools" / "chroma" / ".venv"
+    venv_py = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    _print("=== step 2/4: chroma .venv ===")
+    if venv_py.is_file():
+        _print(f"  found: {venv_dir}")
+        chroma_venv = str(venv_dir)
+    elif args.auto:
+        _print(f"  MISSING, auto-installing in {venv_dir.parent} ...")
+        uv = _which("uv")
+        if uv:
+            rc = _run_subprocess([uv, "venv"], cwd=venv_dir.parent, label="uv venv")
+            if rc == 0:
+                req = venv_dir.parent / "requirements.txt"
+                pyproject = venv_dir.parent / "pyproject.toml"
+                if pyproject.is_file():
+                    rc = _run_subprocess([uv, "sync"], cwd=venv_dir.parent, label="uv sync")
+                elif req.is_file():
+                    rc = _run_subprocess([uv, "pip", "install", "-r", str(req), "--python", str(venv_py)], label="uv pip install -r requirements.txt")
+            chroma_venv = str(venv_dir) if venv_py.is_file() else None
+        else:
+            _eprint("  uv not found; 装 uv 后重试: https://github.com/astral-sh/uv")
+            chroma_venv = None
     else:
-        _print("  MISSING — 跑以下命令装 (~10 分钟, 含 torch + chromadb + sentence-transformers):")
-        _print(f"    cd {platform_repo}/tools/chroma")
-        _print("    uv venv && uv sync   (或 python -m venv .venv && pip install -r requirements.txt)")
+        _print(f"  MISSING — 跑 codev-platform setup --auto 或手动:")
+        _print(f"    cd {platform_repo / 'tools' / 'chroma'}")
+        _print("    uv venv && uv sync")
+        chroma_venv = None
     _print()
 
-    # 3. 探测模型
-    model_candidates = [
+    # 3. 探测 / 下模型
+    model_root_default = Path.home() / "models"
+    embed_candidates = [
         Path(r"D:\models\Qwen3-Embedding-0.6B"),
-        Path.home() / "models" / "Qwen3-Embedding-0.6B",
+        model_root_default / "Qwen3-Embedding-0.6B",
         platform_repo / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
     ]
-    embed_path = next((str(m) for m in model_candidates if m.is_dir()), None)
+    embed_path = next((str(m) for m in embed_candidates if m.is_dir()), None)
     rer_candidates = [
         Path(r"D:\models\Qwen3-Reranker-0.6B"),
-        Path.home() / "models" / "Qwen3-Reranker-0.6B",
+        model_root_default / "Qwen3-Reranker-0.6B",
     ]
     reranker_path = next((str(r) for r in rer_candidates if r.is_dir()), "")
-    _print("=== 模型探测 ===")
+    _print("=== step 3/4: 模型 ===")
     if embed_path:
         _print(f"  embed:    {embed_path}")
+    elif args.auto and _which("huggingface-cli"):
+        target = model_root_default / "Qwen3-Embedding-0.6B"
+        rc = _run_subprocess([_which("huggingface-cli"), "download", "Qwen/Qwen3-Embedding-0.6B", "--local-dir", str(target)], label=f"download Qwen3-Embedding -> {target}")
+        if rc == 0 and target.is_dir():
+            embed_path = str(target)
     else:
-        _print("  MISSING embed 模型 — 下载 (~1GB):")
-        _print("    huggingface-cli download Qwen/Qwen3-Embedding-0.6B --local-dir D:/models/Qwen3-Embedding-0.6B")
+        _print("  MISSING embed (~1GB), 跑 --auto 或:")
+        _print(f"    huggingface-cli download Qwen/Qwen3-Embedding-0.6B --local-dir {model_root_default / 'Qwen3-Embedding-0.6B'}")
     if reranker_path:
         _print(f"  reranker: {reranker_path}")
+    elif args.auto and _which("huggingface-cli"):
+        target = model_root_default / "Qwen3-Reranker-0.6B"
+        rc = _run_subprocess([_which("huggingface-cli"), "download", "Qwen/Qwen3-Reranker-0.6B", "--local-dir", str(target)], label=f"download Qwen3-Reranker -> {target}")
+        if rc == 0 and target.is_dir():
+            reranker_path = str(target)
     else:
-        _print("  MISSING reranker (可选, daemon 会降级纯向量):")
-        _print("    huggingface-cli download Qwen/Qwen3-Reranker-0.6B --local-dir D:/models/Qwen3-Reranker-0.6B")
+        _print("  MISSING reranker (可选), 跑 --auto 或:")
+        _print(f"    huggingface-cli download Qwen/Qwen3-Reranker-0.6B --local-dir {model_root_default / 'Qwen3-Reranker-0.6B'}")
     _print()
+
+    _print("=== step 4/4: 写 config ===")
 
     # 4. 写 config
     cfg = load_config()
@@ -359,6 +407,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp_setup = sub.add_parser("setup", help="新机器一键接入: 探测三仓 / venv / 模型 + 写 config")
     sp_setup.add_argument("--dry-run", action="store_true", help="只探测不写 config")
+    sp_setup.add_argument("--auto", action="store_true", help="缺 venv 自动 uv sync, 缺模型自动 huggingface-cli download")
     sp_setup.set_defaults(func=cmd_setup)
 
     sp_cfg = sub.add_parser("config", help="~/.codev-platform/config.json 管理")
