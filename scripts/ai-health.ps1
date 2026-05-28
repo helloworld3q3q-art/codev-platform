@@ -463,10 +463,24 @@ if ((Test-Path $IncidentDir) -and (Test-Path $RulesDir)) {
     }
 }
 
-# 4d. Cross-layer KG freshness (data/codegraph_ext/cross_layer.sqlite)
-# Probe: last_build_at vs latest Flyway/Mapper mtime. Stale > 1d -> WARN.
-$CrossLayerDb = Join-Path $RepoRoot 'data\codegraph_ext\cross_layer.sqlite'
-if (Test-Path $CrossLayerDb) {
+# 4d. Cross-layer KG freshness.
+# Data now lives in shared codev-platform\data\codegraph_ext (platform ownership
+# inversion 2026-05-28): per-project subdir, else legacy unprefixed fallback (mirrors
+# cross_link.server resolution). Repos without a cross-link MCP (e.g. widget) skip cleanly.
+$hasCrossLink = $false
+$mcpFile = Join-Path $RepoRoot '.mcp.json'
+if (Test-Path $mcpFile) {
+    try {
+        $mcpData = Get-Content $mcpFile -Encoding UTF8 -Raw | ConvertFrom-Json
+        if ($mcpData.mcpServers -and $mcpData.mcpServers.'cross-link') { $hasCrossLink = $true }
+    } catch { }
+}
+$CrossLayerDb = Join-Path $CodevRoot ('data\codegraph_ext\' + $script:projectId + '\cross_layer.sqlite')
+if (-not (Test-Path $CrossLayerDb)) {
+    $CrossLayerLegacy = Join-Path $CodevRoot 'data\codegraph_ext\cross_layer.sqlite'
+    if (Test-Path $CrossLayerLegacy) { $CrossLayerDb = $CrossLayerLegacy }
+}
+if ($hasCrossLink -and (Test-Path $CrossLayerDb)) {
     $size = [math]::Round((Get-Item $CrossLayerDb).Length / 1KB, 1)
     if (Test-Path $ChromaPy) {
         $probe3 = @'
@@ -529,6 +543,8 @@ except Exception as exc:
             Remove-Item -Path $tmp3 -Force -ErrorAction SilentlyContinue
         }
     }
+} elseif (-not $hasCrossLink) {
+    Line 'cross_layer KG'       'INFO' 'no cross-link MCP configured for this repo (N/A)'
 } else {
     Line 'cross_layer KG'       'WARN' ('missing: ' + $CrossLayerDb + ' (run python -m cross_link.build_index)')
 }
@@ -651,10 +667,13 @@ if (Test-Path $CgCliLockPath) {
     }
 }
 
-# 6. codegraph-api jar
+# 6. codegraph-api jar (optional Java component; absent in most repos)
+$CgApiDir = Join-Path $RepoRoot 'apps\codegraph-api'
 $jar = Get-ChildItem -Path $CgApiJar -Filter 'codegraph-api-*.jar' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($jar) {
     Line 'codegraph-api'     'OK'   $jar.Name
+} elseif (-not (Test-Path $CgApiDir)) {
+    Line 'codegraph-api'     'INFO' 'no apps/codegraph-api in this repo (optional component, N/A)'
 } else {
     Line 'codegraph-api'     'WARN' ('no jar in ' + $CgApiJar + ' (run mvn package if needed)')
 }
@@ -731,7 +750,7 @@ try {
         if ($total -eq 0) {
             Line 'search_recall'  'WARN' 'no recent queries (last 7d); run more search_docs to accumulate baseline'
         } else {
-            $withHits = ($recent | Where-Object { $_.hit -gt 0 }).Count
+            $withHits = @($recent | Where-Object { $_.hit -gt 0 }).Count
             $hitRate = [math]::Round(100.0 * $withHits / $total, 1)
             # top1 distance median (lower = more relevant in Chroma cosine)
             $top1Dists = @($recent | Where-Object { $_.top5 -and $_.top5.Count -gt 0 } | ForEach-Object { $_.top5[0].distance })
@@ -750,7 +769,8 @@ try {
 }
 
 # 9.2 reindex frequency (last 7d)
-$reindexLog2 = Join-Path $ChromaDir 'reindex.log'
+# reindex.log is per-repo: each repo's post-commit hook writes its own tools\chroma\reindex.log.
+$reindexLog2 = Join-Path $RepoRoot 'tools\chroma\reindex.log'
 try {
     if (Test-Path $reindexLog2) {
         $cutoff = (Get-Date).AddDays(-7)
@@ -774,7 +794,9 @@ try {
         if (-not $recentRuns) { $recentRuns = 0 }
         Line 'reindex 7d'       'OK'  ($recentRuns.ToString() + ' runs (post-commit + manual)')
     } else {
-        Line 'reindex 7d'       'WARN' 'reindex.log not found'
+        # Informational only: chroma freshness + 'hook missed?' cover real health.
+        # Absence just means no reindex logged in this repo's tools\chroma yet.
+        Line 'reindex 7d'       'INFO' 'no reindex.log yet (freshness/hook checks cover health)'
     }
 } catch {
     Line 'reindex 7d'           'WARN' ('parse error: ' + $_.Exception.Message)
