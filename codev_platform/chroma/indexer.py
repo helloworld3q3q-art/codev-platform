@@ -177,10 +177,13 @@ def infer_category(path: str) -> str:
     # 注意:相对路径 "docs/memory/xxx.md" 没前导 "/",不能写 "/docs/memory/" in p
     if "docs/memory/" in p:
         return "memory"
-    # dev-evolution 开发流程演化:log/ 决策日志 + incidents/ 工具栈事故复盘
-    if "docs/dev-evolution/incidents/" in p:
+    # 工具栈开发流程演化 — 两种布局都认:
+    #   业务仓: docs/dev-evolution/{log,incidents,plans}
+    #   codev-platform 仓: 顶层 docs/{log,incidents,plans}(plans/roadmap-* 也属 dev_log,
+    #   必须早于下方 roadmap->design 规则,否则会被误判成业务 design)
+    if "docs/dev-evolution/incidents/" in p or "docs/incidents/" in p:
         return "tooling_incident"
-    if "docs/dev-evolution/" in p:
+    if "docs/dev-evolution/" in p or "docs/log/" in p or "docs/plans/" in p:
         return "dev_log"
     if "/rules/" in p:
         return "rule"

@@ -92,7 +92,7 @@ Next steps:
 
 ## 相关规则
 
-- 工具栈架构:`docs/dev-evolution/ai-toolchain-guide.html` (完整说明 + SVG 节点图)
+- 工具栈架构:`docs/ai-toolchain-guide.html` (完整说明 + SVG 节点图)
 - 触发指南:`.claude/rules/ai-tools-mcp.md` (CodeGraph / Chroma / cross-link 何时用)
 - 重建逻辑:`tools/dev/update-local-ai.ps1` + `tools/dev/post-commit.ps1`
 

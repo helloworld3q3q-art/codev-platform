@@ -1,6 +1,6 @@
 """Audit: 检查 docs/ 顶级所有子目录都被 DOC_PATTERNS 白名单覆盖
 
-防止 silent failure:加了新顶级 docs 子目录(如 docs/dev-evolution/),
+防止 silent failure:加了新顶级 docs 子目录(如 docs/plans/),
 但忘了同步加 DOC_PATTERNS,导致文件不被索引,search_docs 返回空 / 0 chunks。
 
 跑法:

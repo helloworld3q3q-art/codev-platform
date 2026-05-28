@@ -1,7 +1,7 @@
 ﻿# 开发工具栈总览
 
 > 一份 md 看完平台所有开发工具:三层架构 / 规则 / skill / 数据库 / MCP / 大模型 / 开发流程。
-> 细节深入见 `docs/dev-evolution/ai-toolchain-guide.md`(AI 工具栈)+ 各子模块 `CLAUDE.md` + `.claude/rules/`。
+> 细节深入见 `docs/ai-toolchain-guide.md`(AI 工具栈)+ 各子模块 `CLAUDE.md` + `.claude/rules/`。
 > 本文档**只列入口和速查**,不重复正文规则。
 
 ---
@@ -251,7 +251,7 @@ pnpm exec eslint <file>       # 单文件 lint (AI 可跑)
 
 ## 九、MCP 工具栈(三件套)
 
-> 完整文档 `docs/dev-evolution/ai-toolchain-guide.md`。本节只列入口 + 强制规则。
+> 完整文档 `docs/ai-toolchain-guide.md`。本节只列入口 + 强制规则。
 
 ### MCP 服务清单(`.mcp.json`)
 
@@ -404,7 +404,7 @@ python optional/run_pending_jobs.py
 | 入口 / 角色 | `CLAUDE.md`(根) |
 | 规则总索引 | `.claude/rules/index.md` |
 | 工作流真值源 | `.claude/rules/workflow.md` |
-| AI 工具栈完整说明 | `docs/dev-evolution/ai-toolchain-guide.md` |
+| AI 工具栈完整说明 | `docs/ai-toolchain-guide.md` |
 | 项目结构 | `.claude/rules/project-structure.md` |
 | 当前 roadmap | `docs/architecture/roadmap-<当前周>/README.md` |
 | 累积期纪律真值源 | `.claude/rules/pit-redline-and-tracks.md` |

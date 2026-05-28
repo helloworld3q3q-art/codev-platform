@@ -561,7 +561,7 @@ powershell -ExecutionPolicy Bypass -File tools/dev/ai-health.ps1
 
 - 当前 roadmap: `docs/architecture/roadmap-2026-05-23/README.md`
 - 历史 changelog: `docs/architecture/changelog.md`
-- AI 工具链说明: `docs/dev-evolution/ai-toolchain-guide.md`
+- AI 工具链说明: `docs/ai-toolchain-guide.md`
 ```
 
 ### 7.3 从当前 `CLAUDE.md` 下沉

@@ -38,11 +38,12 @@
 | 内容 | 放哪 |
 |---|---|
 | 业务事故复盘 | `docs/operations/incident-YYYY-MM-DD-<topic>.md` |
-| 工具栈 / 协作流程事故复盘 | `docs/dev-evolution/incidents/YYYY-MM-DD-<topic>.md` |
+| 工具栈 / 协作流程事故复盘 | `docs/incidents/YYYY-MM-DD-<topic>.md` |
 | 业务功能 / 模块 plan | `docs/architecture/<feature>-plan-YYYY-MM-DD.md` |
-| 工具栈 / 流程改造 plan | `docs/dev-evolution/plans/<topic>-YYYY-MM-DD.md` |
+| 工具栈 / 流程改造 plan | `docs/plans/roadmap-YYYY-MM-DD/<topic>-YYYY-MM-DD.md`(按日期分目录,详见 §4.4)|
+| 工具栈迭代日报 | `docs/plans/roadmap-YYYY-MM-DD/daily-summary-YYYY-MM-DD.md` |
 | 业务周迭代日报 | `docs/architecture/roadmap-<anchor>/daily-summary-YYYY-MM-DD.md` |
-| 工具栈 / 协作流程月决策 | `docs/dev-evolution/log/YYYY-MM.md`(月聚合) |
+| 工具栈 / 协作流程月决策 | `docs/log/YYYY-MM.md`(月聚合) |
 | 用户偏好 / 反馈 | `docs/memory/feedback_<slug>.md`(同步加进 `MEMORY.md` 索引) |
 | 业务 API 契约 | `docs/api/` |
 | 业务规则定义 | `docs/rules/` |
@@ -51,8 +52,9 @@
 ### 4.2 禁止
 
 - ❌ `docs/` 顶层放散文件 — 必须归子目录
-- ❌ `operations/` 放工具栈事故 — 走 `dev-evolution/incidents/`
-- ❌ `architecture/` 放工具栈设计 — 走 `dev-evolution/plans/`
+- ❌ `operations/` 放工具栈事故 — 走 `docs/incidents/`
+- ❌ `architecture/` 放工具栈设计 — 走 `docs/plans/`
+- ❌ `docs/plans/` 根直接放散 plan 文件 — 必须归 `roadmap-YYYY-MM-DD/` 子目录(详见 §4.4)
 - ❌ 改 `docs/memory/` 路径 — `CLAUDE.md` autoload 依赖 `docs/memory/MEMORY.md` 写死路径
 - ❌ 加新顶级 `docs/` 子目录而不补 `tools/chroma/index_docs.py:DOC_PATTERNS`(pre-push audit 6/6 会拦)
 
@@ -64,7 +66,27 @@
 # 顶层必须 0 散文件(只允许 README.md + 子目录)
 Get-ChildItem docs -File | Where-Object Name -ne 'README.md'
 # 命中 → 违规
+
+# docs/plans 根必须 0 散文件(只允许 roadmap-* 子目录 + README.md)
+Get-ChildItem docs\plans -File | Where-Object Name -ne 'README.md'
+# 命中 → 违规, plan 文件必须在 roadmap-YYYY-MM-DD/ 子目录里
 ```
+
+### 4.4 docs/plans 按日期分目录(roadmap-YYYY-MM-DD)硬规定
+
+工具栈 plan / design / daily 不平铺在 `docs/plans/` 根,**按规划启动日期归入 `roadmap-YYYY-MM-DD/` 子目录**(与业务仓 `docs/architecture/roadmap-*/` 同构;本仓是纯工具栈仓,直接用顶层 `docs/plans/`,无 `dev-evolution/` 中间层)。
+
+| 项 | 约定 |
+|---|---|
+| 目录名 | `roadmap-YYYY-MM-DD/`,日期 = 该轮规划启动当天 |
+| 必含 | `README.md`(目录定位 + 文件清单表 + 状态) |
+| 收纳范围 | 同一轮迭代的所有 plan / design / completion-report / daily-summary 文件 |
+| 文件命名 | 仍带日期后缀(如 `agent-2026-05-28.md`) |
+| 历史样例 | `roadmap-2026-05-28/`(平台翻正 + 跨平台化 + agent 起步) |
+
+**为什么**:plan 数量增长后平铺会乱;按日期分目录让"某轮迭代做了什么"一目了然,且与业务仓 roadmap 结构对齐,协作者跨仓无切换成本。
+
+**周期生命周期**(归档 / 继承未完结项 / 写入规则)沿用 `weekly-iteration-cadence.md` 的 SOP —— 那是业务侧真值源,工具栈侧结构同构、流程复用。
 
 ---
 

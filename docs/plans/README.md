@@ -19,11 +19,11 @@
 
 - 列表:`ls`
 - 主题搜:`search_docs("...", category="dev_log")`(plans/ 落 dev_log,与 log/ 同 category)
-- 跟踪 plan 演化:`git log -- docs/dev-evolution/plans/`
+- 跟踪 plan 演化:`git log -- docs/plans/`
 
 ## 与产品 plan 的区别
 
-| | dev-evolution/plans/ | docs/architecture/*-plan-*.md |
+| | docs/plans/ | docs/architecture/*-plan-*.md |
 |---|---|---|
 | **范围** | 工具栈 / 协作流程 / AI 纪律 | 产品功能 / 业务模块 / 架构演化 |
 | **例子** | 团队化部署 / RAG 升级 / hook 重构 | java-optimization / python-optimization / frontend-optimization |

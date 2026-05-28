@@ -23,4 +23,4 @@
 
 - 列表:`ls`
 - 主题搜:`search_docs("...", category="dev_log")`
-- 跟踪某文件历史:`git log -- docs/dev-evolution/log/`
+- 跟踪某文件历史:`git log -- docs/log/`

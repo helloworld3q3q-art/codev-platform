@@ -14,7 +14,7 @@
 
 ## Decisions
 
-详见 `docs/dev-evolution/plans/team-deploy-2026-05-27-design.md` §十一/十二:
+详见 `docs/plans/roadmap-2026-05-27/team-deploy-2026-05-27-design.md` §十一/十二:
 
 - **D1** project_id = `<slug>`(扁平连字符),当前 = `openclaw-stock`
 - **D2** personal 本地 only(无 server 同步)

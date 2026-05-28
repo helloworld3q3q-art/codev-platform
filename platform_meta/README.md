@@ -29,4 +29,4 @@ platform-meta/
 2. 各业务仓通过 git submodule / MCP 拉取 platform/ 内容
 3. server 维护 projects/ 注册表 + token 颁发
 
-参考: `docs/dev-evolution/plans/team-deploy-2026-05-27-design.md`
+参考: `docs/plans/roadmap-2026-05-27/team-deploy-2026-05-27-design.md`

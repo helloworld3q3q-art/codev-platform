@@ -122,7 +122,7 @@ env > config > 代码默认。换机器只改 config,代码不动。
 
 ## 八、不要改
 
-- `.venv/`(本仓根,heavy ML 依赖 4.66GB,gitignored;**2026-05-28 平台所有权翻正**后归本仓自有,从 `requirements-runtime.txt` 重建,见 `docs/dev-evolution/plans/platform-ownership-inversion-2026-05-28.md`)
+- `.venv/`(本仓根,heavy ML 依赖 4.66GB,gitignored;**2026-05-28 平台所有权翻正**后归本仓自有,从 `requirements-runtime.txt` 重建,见 `docs/plans/roadmap-2026-05-28/platform-ownership-inversion-2026-05-28.md`)
 - `data/`(本仓根,chroma collection + cross_layer.sqlite 运行态,gitignored;多租户共享,按 project_id 隔离)
 - 各业务仓 `.claude/project.json`(各仓自己写,本仓 CLI 只 init / 不远程改)
 - 用户 `~/.codev-platform/config.json`(用户主权,本仓代码不主动覆盖,只通过 CLI `config init` 或 `--force`)

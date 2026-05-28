@@ -194,5 +194,5 @@ codev-platform config init --force
 | [SETUP.md](./SETUP.md) | 换机器 / 队友 / 服务器安装 onboarding |
 | `.claude/rules/ai-tools-mcp.md` | 三套 MCP 触发指南 + 故障应急 |
 | `.claude/rules/workflow.md §3.2` | 任务类型 → MCP 选型映射 |
-| `docs/dev-evolution/plans/xplatform-cli-2026-05-28.md` | 跨平台 CLI 重构计划 |
-| `docs/dev-evolution/log/2026-05.md` | 本月平台改造决策日志 |
+| `docs/plans/roadmap-2026-05-28/xplatform-cli-2026-05-28.md` | 跨平台 CLI 重构计划 |
+| `docs/log/2026-05.md` | 本月平台改造决策日志 |
