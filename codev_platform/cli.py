@@ -539,6 +539,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp_dae.add_argument("action", choices=["status", "stop"], help="status=查 /health / stop=按 pid 结束")
     sp_dae.set_defaults(func=cmd_daemon)
 
+    # Cross-platform ops subcommands (health / reindex / post-commit / dirty-check /
+    # install-hooks / wait-for-reindex). Each ops submodule self-registers; missing
+    # ones are skipped so partial parallel work doesn't break the CLI.
+    from codev_platform import ops
+    ops.register_all(sub)
+
     return p
 
 
