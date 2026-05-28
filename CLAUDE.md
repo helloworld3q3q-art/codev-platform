@@ -81,12 +81,14 @@ pyproject.toml            pip 包定义
 
 ## 五、跨仓改动协议
 
-改 codev-platform 影响 platform 业务仓时:
+> **2026-05-28 平台所有权翻正后**:venv + 数据 + launcher 全归本仓(`.venv` / `data/` / `tools/`)。daemon 直接从本仓 `.venv` 跑,改源码即生效(本仓 editable 装在本仓 venv)。
+
+改 codev-platform 代码时:
 
 1. **本仓改完 commit + push**
-2. **platform 仓 chroma .venv `uv pip install -e D:\WorkSpace\codev-platform`** 拉新版(自动用 -e 软链,改源码即生效,不需重装)
-3. **platform 仓 shim 文件**(tools/_platform/、tools/chroma/{mcp_server,bm25_index}.py 等)— 若加了 symbol 要同步加 re-export 行
-4. **重启 daemon**:`Stop-Process -Id (Get-NetTCPConnection -LocalPort 18083).OwningProcess -Force`(否则 daemon 持旧代码)
+2. **本仓 venv 已是 editable** —— 改 `codev_platform/*.py` 源码即生效,无需重装。仅新增重依赖时才 `uv pip install --python .venv\Scripts\python.exe -r requirements-runtime.txt`
+3. **业务仓 shim 文件**(tools/_platform/ 等)— 若加了 symbol 要同步加 re-export 行(业务仓仍 `pip install -e` 本仓到它自己的 venv)
+4. **重启 daemon**(daemon 持旧代码时):`Stop-Process -Id (Get-NetTCPConnection -LocalPort 18083 -State Listen).OwningProcess -Force`,下个 Claude 会话自动从新 launcher 重起
 
 ---
 
@@ -104,9 +106,8 @@ codev-platform init <new-project-id>
 codev-platform sync-rules
 codev-platform sync-skills
 
-# 索引自身仓 (codev-platform__platform_docs collection)
-$env:PLATFORM_ROOT = $pwd
-D:\WorkSpace\platform\tools\chroma\.venv\Scripts\python.exe D:\WorkSpace\platform\tools\chroma\index_docs.py --force
+# 索引自身仓 (codev-platform__platform_docs collection) — daemon 用本仓 .venv
+.venv\Scripts\python.exe -m codev_platform.chroma.indexer --force
 ```
 
 ---
@@ -121,6 +122,7 @@ env > config > 代码默认。换机器只改 config,代码不动。
 
 ## 八、不要改
 
-- `tools/chroma/.venv/`(platform 仓内,heavy ML 依赖,不在本仓 — 本仓 0 deps)
+- `.venv/`(本仓根,heavy ML 依赖 4.66GB,gitignored;**2026-05-28 平台所有权翻正**后归本仓自有,从 `requirements-runtime.txt` 重建,见 `docs/dev-evolution/plans/platform-ownership-inversion-2026-05-28.md`)
+- `data/`(本仓根,chroma collection + cross_layer.sqlite 运行态,gitignored;多租户共享,按 project_id 隔离)
 - 各业务仓 `.claude/project.json`(各仓自己写,本仓 CLI 只 init / 不远程改)
 - 用户 `~/.codev-platform/config.json`(用户主权,本仓代码不主动覆盖,只通过 CLI `config init` 或 `--force`)
