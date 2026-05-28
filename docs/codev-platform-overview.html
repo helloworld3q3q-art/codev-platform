@@ -624,7 +624,7 @@
             <tr>
               <td><code>platform_meta/projects/</code></td>
               <td>各 project 登记表</td>
-              <td>openclaw-stock · codev-platform · codev-platform-widget</td>
+              <td>业务A · 本平台 · 业务B</td>
             </tr>
           </table>
         </section>
@@ -877,7 +877,7 @@
           <h3>当前实测基线</h3>
           <table>
             <tr><th>指标</th><th>当前值</th><th>说明</th></tr>
-            <tr><td>项目登记数</td><td>3</td><td>openclaw-stock (真业务) · codev-platform (本仓) · widget (Tray UI 开发中)。</td></tr>
+            <tr><td>项目登记数</td><td>3</td><td>业务A (真业务) · 本平台 (codev-platform 本仓) · 业务B (Tray UI 开发中)。</td></tr>
             <tr><td>chroma chunks</td><td>4427 (openclaw) + 290 (本仓) ≈ 4717</td><td>各项目独立 collection,物理隔离。本仓 290 chunks 覆盖 rules + skills + docs + CLAUDE.md。</td></tr>
             <tr><td>chunk 策略</td><td>target 1000 / max 1500 字符,三级(heading → paragraph → hard)</td><td>由 <code>codev_platform/chroma</code> 提供,所有项目统一策略。</td></tr>
             <tr><td>BM25 倒排</td><td>每 collection 独立 ~2.1s 重建</td><td>daemon 启动 + chroma 重建时同步构建,中英混合分词。</td></tr>
