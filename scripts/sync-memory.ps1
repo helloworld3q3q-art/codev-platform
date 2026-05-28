@@ -17,13 +17,22 @@
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# Repo root: this script lives in tools/dev/, go up 2 levels
-$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# Repo root: this canonical script lives in <repo>/scripts/, go up 2 levels.
+# git rev-parse is preferred (works regardless of where the copy lives), with the
+# $PSScriptRoot derivation as fallback when not in a git context.
+$repoRoot = (& git -C $PSScriptRoot rev-parse --show-toplevel 2>$null)
+if ($repoRoot -and $LASTEXITCODE -eq 0) {
+    $repoRoot = $repoRoot.Trim().Replace('/', '\')
+} else {
+    $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+}
 $srcDir = Join-Path $repoRoot "docs\memory"
 
 # Claude Code autoload path: ~/.claude/projects/<cwd-encoded>/memory/
-# cwd encoding: D:\WorkSpace\platform -> D--WorkSpace-platform
-$cwdEncoded = "D--WorkSpace-platform"
+# cwd encoding: drive + path with every '\', '/', ':' replaced by '-'
+# (e.g. D:\WorkSpace\codev-platform -> D--WorkSpace-codev-platform).
+# Derived from the actual repo root so a machine / repo move needs no edit.
+$cwdEncoded = $repoRoot -replace '[\\/:]', '-'
 $dstDir = Join-Path $env:USERPROFILE ".claude\projects\$cwdEncoded\memory"
 
 # Source missing (e.g. first clone before memory committed) - skip silently

@@ -36,6 +36,27 @@ param(
 $ErrorActionPreference = 'Stop'
 $IsLight = ($Mode -eq 'Light')
 
+# User-level config (~/.codev-platform/config.json) is the single source of truth
+# for machine-specific paths (model dirs / venv / daemon port). Machine moves =>
+# only edit config, never these scripts. Read once; field-missing => $null fallback.
+$script:codevCfg = $null
+$cfgPath = Join-Path $env:USERPROFILE '.codev-platform\config.json'
+if (Test-Path $cfgPath) {
+    try { $script:codevCfg = Get-Content $cfgPath -Encoding UTF8 -Raw | ConvertFrom-Json } catch { }
+}
+function Get-CfgPath {
+    # Dotted lookup into config (e.g. 'models.embed_path'); returns $null if any
+    # segment missing. Callers supply a hardcoded-path-free fallback.
+    param([string]$DottedKey)
+    if (-not $script:codevCfg) { return $null }
+    $node = $script:codevCfg
+    foreach ($seg in ($DottedKey -split '\.')) {
+        if ($null -eq $node) { return $null }
+        $node = $node.$seg
+    }
+    if ($node) { return [string]$node } else { return $null }
+}
+
 if ($Repo) {
     $RepoRoot = (Resolve-Path $Repo).Path
 } else {
@@ -51,25 +72,31 @@ $CodevRoot  = Split-Path -Parent $PSScriptRoot
 $ChromaDir  = Join-Path $CodevRoot 'codev_platform\chroma'
 $ChromaPy   = Join-Path $CodevRoot '.venv\Scripts\python.exe'
 $ChromaData = Join-Path $CodevRoot 'data\chroma'
-$Qwen3Shared = 'D:\models\Qwen3-Embedding-0.6B'
+# Embedding model dir: env override > config.models.embed_path > repo-local MiniLm.
+# Machine-specific path comes from ~/.codev-platform/config.json (not hardcoded).
+$Qwen3Shared = Get-CfgPath 'models.embed_path'
 $MiniLmRepo  = Join-Path $RepoRoot 'models\paraphrase-multilingual-MiniLM-L12-v2'
 if ($env:PLATFORM_EMBED_MODEL_PATH) {
     $ModelDir = $env:PLATFORM_EMBED_MODEL_PATH
-} elseif (Test-Path $Qwen3Shared) {
+} elseif ($Qwen3Shared -and (Test-Path $Qwen3Shared)) {
     $ModelDir = $Qwen3Shared
 } else {
     $ModelDir = $MiniLmRepo
 }
 # Reranker (optional 2-stage rerank,Claude/Codex 共用环境变量)
-$RerankerDefault = 'D:\models\Qwen3-Reranker-0.6B'
+# env override > config.models.reranker_path > unset.
+$RerankerDefault = Get-CfgPath 'models.reranker_path'
 if ($env:PLATFORM_RERANKER_MODEL_PATH) {
     $RerankerDir = $env:PLATFORM_RERANKER_MODEL_PATH
-} elseif (Test-Path $RerankerDefault) {
+} elseif ($RerankerDefault -and (Test-Path $RerankerDefault)) {
     $RerankerDir = $RerankerDefault
 } else {
     $RerankerDir = $null
 }
-$RerankerEnabled = ($env:PLATFORM_RERANKER_ENABLED -ne 'false')
+# env override > config.models.reranker_enabled > default enabled.
+$RerankerEnabled = if ($env:PLATFORM_RERANKER_ENABLED) { $env:PLATFORM_RERANKER_ENABLED -ne 'false' }
+                   elseif ($script:codevCfg -and $null -ne $script:codevCfg.models.reranker_enabled) { [bool]$script:codevCfg.models.reranker_enabled }
+                   else { $true }
 $CgDb       = Join-Path $RepoRoot '.codegraph\codegraph.db'
 $CgApiJar   = Join-Path $RepoRoot 'apps\codegraph-api\target'
 
@@ -373,7 +400,7 @@ if (Test-Path $ChromaData) {
 # Detects: HTTP daemon health (/health endpoint) + duplicate mcp_server processes.
 # Daemon mode is the only viable path on 8GB GPU where per-session stdio mcp_server
 # would CUDA OOM at the 2nd session.
-$DaemonPort = if ($env:PLATFORM_DOCS_DAEMON_PORT) { $env:PLATFORM_DOCS_DAEMON_PORT } else { '18083' }
+$DaemonPort = if ($env:PLATFORM_DOCS_DAEMON_PORT) { $env:PLATFORM_DOCS_DAEMON_PORT } elseif (Get-CfgPath 'daemon.port') { Get-CfgPath 'daemon.port' } else { '18083' }
 try {
     $req = [System.Net.WebRequest]::Create('http://127.0.0.1:' + $DaemonPort + '/health')
     $req.Timeout = 2000
