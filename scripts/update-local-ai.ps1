@@ -30,6 +30,16 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+
+# P8 hint: a full/forced rebuild (codegraph ~60s + chroma full ~90s) is long.
+# Run it in the FOREGROUND so you can watch per-stage progress and catch errors.
+# Incremental refreshes after a commit are handled automatically in the
+# background by tools\dev\post-commit.ps1 -- no need to launch this by hand for
+# routine edits. Use wait-for-reindex.ps1 to block on that background run.
+if ($ChromaForce -or (-not $SkipCodeGraph -and -not $SkipChroma -and -not $SkipCrossLink)) {
+    Write-Host '[update-local-ai] full rebuild: run in foreground to watch progress (post-commit handles incremental in background)' -ForegroundColor DarkGray
+}
+
 $CgScript   = Join-Path $RepoRoot 'scripts\codegraph\rebuild_index.ps1'
 $ChromaPy   = Join-Path $RepoRoot 'tools\chroma\.venv\Scripts\python.exe'
 # indexer 已迁到 codev-platform 包, 走 -m codev_platform.chroma.indexer

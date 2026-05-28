@@ -108,6 +108,12 @@ try {
 
     $commitSha = (& git rev-parse HEAD 2>$null).Trim()
     Write-Host ('[post-commit] ' + ($scopes -join '+') + ' changed, spawning background reindex...')
+    # P7 progress hint: the reindex runs detached, so this commit's changes are
+    # NOT yet queryable via MCP. Tell the user how to wait / verify / re-run.
+    Write-Host '[post-commit] index updates in background (~30-90s); MCP results lag until it finishes'
+    Write-Host '[post-commit]   wait:   powershell -File tools\dev\wait-for-reindex.ps1'
+    Write-Host '[post-commit]   verify: powershell -File tools\dev\ai-health.ps1 -Mode Light  (see hook missed? line)'
+    Write-Host '[post-commit]   manual: powershell -File tools\dev\post-commit.ps1  (re-run if it missed)'
 
     # Sync header (lands before background output)
     $startStamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
