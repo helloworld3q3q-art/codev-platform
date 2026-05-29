@@ -1061,10 +1061,21 @@ async def _run_http(port: int) -> None:
             status_code=200 if all_ready else 503,
         )
 
+    async def platform_status(_request):
+        # 平台控制面: 所有项目 x 三库 + 记忆 + 使用率, 以 JSON 暴露 (服务端读本机资源)。
+        # 原则: 访问平台数据走 HTTP/HTTPS, 客户端 (health --all / 子应用) 不碰文件路径。
+        try:
+            from codev_platform.platform_status import build_platform_status
+            from codev_platform.core.config import load_config
+            return JSONResponse(build_platform_status(load_config()))
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
     app = Starlette(
         debug=False,
         routes=[
             Route("/health", health, methods=["GET"]),
+            Route("/platform/status", platform_status, methods=["GET"]),
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],

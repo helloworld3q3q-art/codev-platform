@@ -21,7 +21,7 @@ description: 检查本地 AI 工具栈状态 —— 当前仓体检 (health) + �
 | 选项 | 含义 | 适用场景 |
 |---|---|---|
 | `health` (当前仓体检) | `codev-platform health` — 当前仓 ~17 项检查 (Qwen3 模型 / Chroma chunks / CodeGraph db / GPU / daemon / git / 使用率) | 重启 / 升级后,怀疑底层 |
-| `health --all` (平台全局) | `codev-platform health --all` — 所有已注册项目 x 三库(chroma / codegraph / cross-link)+ 记忆作用域,一张矩阵 | 看全平台规模 / 各项目对比 / 记忆隔离 |
+| `health --all` (平台全局) | `codev-platform health --all` — **HTTP 客户端**:GET 平台服务 `/platform/status`,返回所有项目 x 三库 + 记忆 + 使用率。**不读本地路径**(原则:访问平台数据走 HTTP) | 看全平台规模 / 各项目对比 / 记忆隔离 / 子应用查自己 |
 | `dirty` (索引一致性) | `codev-platform dirty-check` — 列工作树命中索引范围的 dirty 文件 | 改了没 commit,要让 AI 决策前 |
 | `both` (推荐) | health + dirty 都跑 | 不确定时默认 |
 
@@ -38,8 +38,8 @@ description: 检查本地 AI 工具栈状态 —— 当前仓体检 (health) + �
 codev-platform health
 codev-platform health --mode light
 
-# 平台全局视图 — 所有项目 x 三库 + 记忆(不限当前仓)
-codev-platform health --all
+# 平台全局视图 — 所有项目 x 三库 + 记忆(HTTP 客户端,调平台服务 /platform/status)
+codev-platform health --all      # 需 daemon 在跑(平台服务);远程平台配 config.platform.url
 
 # 工作树索引一致性 — 列受影响文件 + 兜底建议
 codev-platform dirty-check
@@ -81,9 +81,11 @@ codev-platform health --json-out
 ```
 > 使用率按 project_id 分:chroma 召回日志加了 project_id 字段(**daemon 重启后**新查询才分项目;旧日志归 "legacy 无 project_id");cross-link 日志本就带 project_id。
 
-- **chroma / cross-link / memory** 中心化(`data/` + PG 一个库),`--all` 直接全看到。
-- **codegraph** 是每仓 `.codegraph`(散在各业务仓),靠 `~/.codev-platform/config.json` 的 `projects.<id>.repo_path` 定位;没配的项目标 "仓路径未登记"。
+- **访问走 HTTP 服务地址**:`--all` 是客户端,GET 平台 daemon 的 `/platform/status`(`config.platform.url` 或默认 `http://127.0.0.1:<daemon.port>`);服务端跑在平台主机上聚合本机 data/+PG,客户端不碰路径。**子应用 / 远程机器查平台数据用同一个地址** —— 这才能多用户多项目共享。
+- **chroma / cross-link / memory** 中心化(`data/` + PG 一个库),服务端直读。
+- **codegraph** 是每仓 `.codegraph`(散在各业务仓),平台服务端靠 `config.projects.<id>.repo_path`(**服务端配置**)定位本机 co-located 仓;没配的标 "仓路径未在平台登记"。codegraph 数据跨机共享需它本身服务化(下一步)。
 - **org 共享记忆**全项目通用(有意共享);**project 记忆**只该项目召回(隔离),`--all` 一眼看出谁有几条、串没串。
+- daemon 没起 → `--all` 报连不上 + 提示(访问平台数据一律走 HTTP,不退回本地读)。
 
 ### dirty-check 输出
 列 `[CodeGraph] / [cross-link] / [Chroma]` 命中索引范围的 dirty 文件。**退出码**:干净→0 / 命中→1 / 非 git→2。命中时:允许 grep/read 兜底,或 commit 让 post-commit hook 重建。
