@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from codev_platform.agent.brain import AssistantTurn, LLMProvider
 from codev_platform.agent.services.chat_service import ChatService
-from codev_platform.agent.session import SessionStore
+from codev_platform.agent.session import InMemorySessionStore
 from codev_platform.agent.tools.base import ToolRegistry
 
 
@@ -17,7 +17,7 @@ class _FakeProvider(LLMProvider):
 
 def _service() -> ChatService:
     return ChatService(
-        sessions=SessionStore(),
+        sessions=InMemorySessionStore(),
         registry=ToolRegistry(),
         provider_factory=_FakeProvider,
         default_max_steps=lambda: 5,
@@ -47,7 +47,15 @@ def test_provider_factory_called_per_ask(monkeypatch):
         calls["n"] += 1
         return _FakeProvider()
 
-    svc = ChatService(SessionStore(), ToolRegistry(), factory, lambda: 5)
+    svc = ChatService(InMemorySessionStore(), ToolRegistry(), factory, lambda: 5)
     svc.ask("a")
     svc.ask("b")
     assert calls["n"] == 2  # 每次 ask 重解析 provider(支持运行中切换)
+
+
+def test_sessions_isolated_per_user():
+    svc = _service()
+    out_a = svc.ask("q", user_id="alice")
+    # bob 用 alice 的 session_id 拿不到她的会话 -> 服务给 bob 新建 session
+    out_b = svc.ask("q", session_id=out_a.session_id, user_id="bob")
+    assert out_b.session_id != out_a.session_id

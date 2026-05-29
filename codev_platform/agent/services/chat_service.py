@@ -38,18 +38,21 @@ class ChatService:
         self._default_max_steps = default_max_steps
 
     def ask(self, question: str, session_id: str | None = None,
-            max_steps: int | None = None) -> ChatOutcome:
+            max_steps: int | None = None, user_id: str = "local") -> ChatOutcome:
         provider = self._provider_factory()  # 缺 key 抛 RuntimeError,由调用层(route)映射
 
-        sid = session_id if (session_id and self._sessions.has(session_id)) else self._sessions.new()
-        history = self._sessions.get(sid)
+        if session_id and self._sessions.has(session_id, user_id):
+            sid = session_id
+        else:
+            sid = self._sessions.new(user_id)
+        history = self._sessions.get(sid, user_id)
 
         loop = AgentLoop(provider, self._registry, max_steps=max_steps or self._default_max_steps())
         trace = Trace(sid, provider.name, provider.model)
         result = loop.run(question, history=history, trace=trace)
 
         self._sessions.append(
-            sid,
+            sid, user_id,
             Message(role="user", content=question),
             Message(role="assistant", content=result.answer),
         )
