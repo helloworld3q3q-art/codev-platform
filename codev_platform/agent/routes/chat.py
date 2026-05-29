@@ -37,9 +37,12 @@ def _resolve_project_id(req: ChatRequest, request: Request) -> str | None:
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, request: Request) -> ChatResponse:
-    user_id = identity.resolve_from_request(request.headers)  # X-User-Id > env > 'local'
+    try:  # 非法 X-User-Id / X-Org-Id(含非法字符)→ 400,而非未捕获 500
+        user_id = identity.resolve_from_request(request.headers)  # X-User-Id > env > 'local'
+        org_id = identity.resolve_org_from_request(request.headers)  # X-Org-Id > 'default'(plan §3.4)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     project_id = _resolve_project_id(req, request)  # X-Project-Id > body > None(cwd)
-    org_id = identity.resolve_org_from_request(request.headers)  # X-Org-Id > 'default'(plan §3.4)
     try:
         outcome = deps.get_chat_service().ask(
             req.question, req.session_id, req.max_steps,

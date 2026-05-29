@@ -32,8 +32,11 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
         raise HTTPException(status_code=503, detail="memory PG 未启用(配 memory.pg_dsn + session_backend)")
     if req.scope not in SCOPES:
         raise HTTPException(status_code=400, detail=f"scope 须为 {SCOPES}")
-    org_id = identity.resolve_org_from_request(request.headers)
-    user_id = identity.resolve_from_request(request.headers)
+    try:  # 非法 X-Org-Id / X-User-Id → 400
+        org_id = identity.resolve_org_from_request(request.headers)
+        user_id = identity.resolve_from_request(request.headers)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     # personal 作用域的 scope_ref 恒为写入者 user_id(plan §3.2 语义)——强制对齐,
     # 不信任 client 传的 scope_ref,杜绝"以别人名义写个人记忆"。其它作用域用 client 给的 ref。
     # ⚠️ M5 前无 ACL:除 personal 外,任何 caller 可写任意 org/team/project 作用域。
@@ -62,10 +65,13 @@ def list_memory(
     store = deps.get_memory_store()
     if store is None:
         raise HTTPException(status_code=503, detail="memory PG 未启用")
-    org_id = identity.resolve_org_from_request(request.headers)
     # personal 隐私:只能读自己的(scope_ref==自己 user_id),不得读他人个人记忆(recall ≠ read)。
     # ⚠️ M5 前无 ACL:org/team/project 作用域暂不拦,任何 caller 可读。
-    user_id = identity.resolve_from_request(request.headers)
+    try:  # 非法 X-Org-Id / X-User-Id → 400
+        org_id = identity.resolve_org_from_request(request.headers)
+        user_id = identity.resolve_from_request(request.headers)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if scope == "personal" and scope_ref != user_id:
         raise HTTPException(status_code=403, detail="personal 记忆只能读本人")
     try:
