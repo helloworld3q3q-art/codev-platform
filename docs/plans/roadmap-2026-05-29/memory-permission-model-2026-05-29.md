@@ -12,16 +12,19 @@
 
 ### 1.1 两个正交轴(最关键,防把"人/团队"和"数据归谁"混成一棵树)
 
+**Org 是根**:user / team / project / memory 全挂在某个 org 下,跨 org 完全不可见(最外硬隔离)。两轴都在 org 之内展开:
+
 ```
-轴 A:身份(你是谁)— 认证       轴 B:记忆作用域(数据归哪层)— 授权资源
-─────────────────              ──────────────────────
-Org 组织                        org memory     公司级(合规/红线,硬约束)
- └ Team 团队(多对多)            team memory    团队约定
-    └ Person 个人(原子单位)      project memory 项目约定
- + Service/Agent 机器身份         personal memory 个人偏好
+            ┌─ Org 组织(租户根,最外隔离边界)──────────────────┐
+轴 A:身份  │  Users(成员,org_members 多对多)                  │
+(认证)     │   └ Teams(team_members 多对多)                     │
+            │  + Service/Agent 机器身份                          │
+轴 B:作用域│  org memory > team memory > project memory > personal│
+(授权资源) └────────────────────────────────────────────────────┘
+请求上下文 = (org_id, user_id, project_id)   ← 三元组,org 最外
 ```
 
-**为什么正交**:一个人属于多团队、做多项目 → 不是树,是图。Person ∈ 多 Team,Team 拥有多 Project,Person 参与多 Project。认证认到**人**;数据按**作用域** namespace 分,不按人分目录;两轴用 `role(person, scope)` 桥接。
+**为什么正交**:org 内,一个人属于多团队、做多项目 → 不是树,是图。Person ∈ 多 Team,Team 拥有多 Project。认证认到**人**(在某 org 内);数据按**作用域** namespace 分;两轴用 `role(person, scope)` 桥接。**org 之上跨租户不可见**,team/project/personal 是 org 内的细分。
 
 ### 1.2 记忆的特殊性
 
@@ -62,7 +65,36 @@ user_id: X-User-Id header  (P1 先采集不拦截)
 后续(P5): Bearer token -> user_id, 防伪
 ```
 
-新增 `core/identity.py`:`resolve_user(headers) -> str`,与 `project_id` 解析对称。agent 请求上下文 = `(user_id, project_id)`。
+新增 `core/identity.py`:`resolve_user(headers) -> str`,与 `project_id` 解析对称。
+
+**请求上下文是三元组 `(org_id, user_id, project_id)`**(org 是根,见 §3.4):
+```
+org_id:     X-Org-Id header(必须请求带,因一人多 org 无法推导单一)> "default"(单 org 期)
+user_id:    X-User-Id header > env > config > "local"
+project_id: X-Project-Id header > body > cwd 回退
+校验(M5):(org_id, user_id) ∈ org_members 且 user 对 project(同 org)有 access,否则 403。
+```
+注:user↔org 多对多(§3.4),所以"当前 org"是请求级选择(widget 需 org 选择器),不能从 user 推。
+
+### 3.1b 认证层(身份可信)—— M6,登录 / API key
+
+`X-User-Id` 明文头只够"自报身份"(防误操作,挡不了冒充)。**真权限要求身份可信** → 加认证层,在授权(§3.4 校验)之前:
+
+```
+请求 → [认证层] 验凭证 → 可信 (org_id, user_id) → [授权层 §3.4] → 路由
+```
+
+两类凭证,都解析成 `(org_id, user_id)`:
+| 凭证 | 谁用 | 载体 |
+|---|---|---|
+| **登录(SSO/账号)** | 人(widget/web)| 登录 → JWT,每请求 `Authorization: Bearer` |
+| **API key/token** | 程序/CLI/headless | config 持有方的 key → 映射到一个 user/service 身份 |
+
+- 账号 + key 存 **PG `users` 表 / key 表**(`codev_platform_memory` 库),**不进 config**(config 只放"本机调用方自己的那把 key")。
+- **身份可信度 = 权限可信度**:自报身份(明文头)只够团队内"软隔离";对外/敏感必须登录 token 验签。
+- **widget 怎么知道是谁**:现在写死 `local`;团队期 config/设置填或 API key;对外期 widget 登录拿 token。
+
+**agent project 绑定 = memory 权限同一套**:agent 选项目(§agent plan P2)与 memory 召回都走 `allowed(org_id, user_id, project_id, action)`,共用本节认证 + §3.4 授权,不各搞一套。
 
 ### 3.2 记忆数据模型(结构化存储 + 向量召回 双写)
 
@@ -152,14 +184,33 @@ role ∈ {admin, member, viewer}     action ∈ {read, write, recall, admin}
 
 权限表(M5/M6,单人前用默认全通过;同在 `codev_platform_memory` 库):
 
+**org 是租户根**:user / team / project 全挂 org,每表带 `org_id`;跨 org 完全不可见(最外硬隔离边界)。
+
 ```sql
-CREATE TABLE users        (user_id TEXT PRIMARY KEY, display_name TEXT, org_role TEXT DEFAULT 'member');
-CREATE TABLE teams        (team_id TEXT PRIMARY KEY, name TEXT);
+CREATE TABLE orgs         (org_id TEXT PRIMARY KEY, name TEXT, created_at TIMESTAMPTZ DEFAULT now());
+
+CREATE TABLE users        (user_id TEXT PRIMARY KEY, display_name TEXT, created_at TIMESTAMPTZ DEFAULT now());
+-- user↔org 多对多(2026-05-29 定):一个人可属多个 org,一个 org 可有多个人。
+-- user 独立实体,通过 org_members 加入 org(像 GitHub/Slack 一个账号多 workspace)。
+CREATE TABLE org_members  (org_id TEXT REFERENCES orgs, user_id TEXT REFERENCES users,
+                           org_role TEXT DEFAULT 'member',  -- admin | member | viewer(org 级)
+                           PRIMARY KEY (org_id, user_id));
+
+CREATE TABLE teams        (team_id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs, name TEXT);
 CREATE TABLE team_members (team_id TEXT REFERENCES teams, user_id TEXT REFERENCES users,
                            role TEXT, PRIMARY KEY (team_id, user_id));   -- 多对多 + 角色
-CREATE TABLE project_access(project_id TEXT, principal TEXT, principal_kind TEXT, role TEXT,
-                            PRIMARY KEY (project_id, principal));        -- principal = user_id 或 team_id
+
+CREATE TABLE projects     (project_id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES orgs,
+                           display_name TEXT);                          -- 项目挂 org
+CREATE TABLE project_access(project_id TEXT REFERENCES projects, principal TEXT, principal_kind TEXT,
+                            role TEXT, PRIMARY KEY (project_id, principal)); -- principal = user_id 或 team_id
+
+-- memory_entries(§3.2)也加 org_id 列:作用域链最外是 org,所有查询带 WHERE org_id=?
 ```
+
+**user↔org 多对多(已定)**:一个人可属多个组织、一个组织可有多个人 → `org_members` 多对多表(不在 users 表放 org_id 列)。
+
+**关键推论 —— "当前 org" 也是请求级**:既然一人多 org,那"这次请求在哪个 org 下"必须每请求带 `X-Org-Id`(像 project 一样),不能从 user 推导单一 org。校验:`(org_id, user_id)` 必须在 org_members 里,且该 user 对 project 在此 org 内有 access。widget 需要 **org 选择器**(像项目下拉),或登录后选 workspace。
 
 ### 3.5 召回 × 冲突消解 × 权限(三位一体)
 
@@ -198,8 +249,8 @@ POST   /memory               写记忆   body{scope,scope_ref,content,kind,topic
 GET    /memory/recall        召回(权限过滤)  ?query=&project_id=  (user 来自 header)
 PATCH  /memory/{id}          更新(supersede)
 DELETE /memory/{id}          遗忘
-GET    /memory/scopes        当前 user 可见作用域(调试 + 前端)
-身份:X-User-Id + X-Project-Id header(与现有 chat 一致)
+GET    /memory/scopes        当前 user 在当前 org 可见作用域(调试 + 前端)
+身份:X-Org-Id + X-User-Id + X-Project-Id header(三元组,与 chat 一致)
 ```
 
 agent loop 召回改走 `/memory/recall` 的权限过滤版,替代当前"全量塞 context"。
@@ -267,8 +318,9 @@ agent loop 召回改走 `/memory/recall` 的权限过滤版,替代当前"全量�
 ## 六、待确认
 
 - ~~**PG 部署形态**~~ → **已定(2026-05-29)**:**独立 PG 实例,docker 平台专属容器**(`codev-platform-postgres`)。详见 §3.2c。理由:平台定位团队/组织,故障/资源/权限隔离全是真收益;从开发期就独立(docker 降成本),避免"单人共 server → 团队拆实例"的迁移返工;数据卷归平台 `data/`,契合所有权翻正主线。
-- org 是否单一假设(单公司)?还是要支持多 org(SaaS 多租户)?—— 影响是否要 org_id 列。
-- M1 user_id 来源:先 `X-User-Id` header 够吗?还是直接上 token?(建议先 header)
+- ~~org 单一假设?~~ → **已定**:org 是租户根,**多 org(SaaS 多租户)**,全表带 org_id;user↔org **多对多**(org_members)。详见 §1.1 / §3.4。单 org 期用隐含 `default` org,代码不强制。
+- ~~user_id 来源~~ → **已定分层**:现在 `X-User-Id` 明文头(够单人/软隔离)→ 团队 config key/设置填 → 对外登录 SSO/JWT(§3.1b 认证层,M6)。
+- **widget org/user 来源待定**:org 选择器 + user 身份(OS 名 / 设置填 / 登录)—— 现在隐含 default org + local user,多人时补。
 - 压缩/摘要融合用哪个模型?复用 agent 的 provider(Claude)还是单独配?
 - 是否现在就把 MEMORY.md 14 条按作用域重分(org vs personal)?还是 M2 再迁?
 - config 新增 `config.memory.pg_dsn`(连接串走平台 config,不碰业务库 DSN)—— 确认字段名?
