@@ -15,15 +15,23 @@ from codev_platform.agent.tools.base import ToolRegistry
 
 
 def _build_session_store() -> SessionStore:
-    """按 config.agent.session_backend 选实现。默认内存;'pg' 等 PG 库就绪后接入(M2)。
-
-    接缝已留:加 SqlSessionStore 后,这里按 backend 分支返回即可,上层零改。
+    """按 config.agent.session_backend 选实现:'memory'(默认,进程内)| 'pg'(持久化)。
+    上层(ChatService)只依赖 SessionStore 抽象,换实现零改。
     """
-    backend = acfg.get(acfg.agent_cfg(), "agent.session_backend", "memory")
-    if backend != "memory":
-        # pg 实现(SqlSessionStore)待 codev_platform_memory 库就绪(memory plan M2)
+    cfg = acfg.agent_cfg()
+    backend = acfg.get(cfg, "agent.session_backend", "memory")
+    if backend == "pg":
         import sys
-        print(f"[agent.deps] session_backend='{backend}' 尚未实现, 回退 memory", file=sys.stderr)
+        dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN", cfg, "memory.pg_dsn")
+        if not dsn:
+            print("[agent.deps] session_backend=pg 但 memory.pg_dsn 未配, 回退 memory", file=sys.stderr)
+            return InMemorySessionStore()
+        try:
+            from codev_platform.agent.session_pg import SqlSessionStore
+            return SqlSessionStore(dsn)  # schema 首次操作时幂等建;连不上在首次操作报
+        except Exception as e:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 回退内存,不挂服务
+            print(f"[agent.deps] PG 会话存储不可用({type(e).__name__}: {e}), 回退 memory", file=sys.stderr)
+            return InMemorySessionStore()
     return InMemorySessionStore()
 
 

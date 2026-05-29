@@ -67,6 +67,15 @@ DEFAULTS: dict[str, Any] = {
     "runtime": {
         "chroma_venv": None,  # chroma daemon 用的 venv 目录 (含 python.exe + mcp-proxy.exe). 必填.
     },
+    "memory": {
+        # 平台独立 PG 库 (codev_platform_memory) 连接串. 严禁复用业务库 DSN (见 memory plan §3.2b).
+        # 密码走 env CODEV_PLATFORM_MEMORY_DSN 覆盖更安全; None = memory PG 未启用 (会话仅内存).
+        "pg_dsn": None,
+    },
+    "agent": {
+        # 会话存储后端: "memory" (默认, 进程内, 重启丢) | "pg" (持久化到 memory.pg_dsn).
+        "session_backend": "memory",
+    },
 }
 
 
