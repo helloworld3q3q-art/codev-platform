@@ -1,5 +1,5 @@
 {
-  "_comment": "platform ownership inversion 2026-05-28: launcher 现归 codev-platform 自有 (tools/). venv 在仓根 .venv. multi-tenant daemon 按 project_id 路由到正确 collection. 跨机 portable.",
+  "_comment": "跨平台 (2026-05-29): command/args 用 ${VAR:-默认} 展开。env 未设时=Windows 原行为 (cmd /c daemon launcher), 与历史逐字不变。Mac/Linux 在 shell profile export PLATFORM_MCP_SH=sh / PLATFORM_MCP_FLAG=-c / PLATFORM_MCP_CHROMA / PLATFORM_MCP_CROSSLINK 即切到 stdio 直跑 server (绕开 launcher/mcp-proxy)。CLAUDE_PROJECT_DIR 由 Claude Code 注入。",
   "mcpServers": {
     "codegraph": {
       "type": "stdio",
@@ -8,14 +8,14 @@
     },
     "platform-docs": {
       "type": "stdio",
-      "command": "cmd",
-      "args": ["/c", "tools\\chroma\\platform-docs-mcp.cmd"],
+      "command": "${PLATFORM_MCP_SH:-cmd}",
+      "args": ["${PLATFORM_MCP_FLAG:-/c}", "${PLATFORM_MCP_CHROMA:-tools\\chroma\\platform-docs-mcp.cmd}"],
       "timeout": 90000
     },
     "cross-link": {
       "type": "stdio",
-      "command": "cmd",
-      "args": ["/c", "tools\\cross_link\\cross-link-mcp.cmd"],
+      "command": "${PLATFORM_MCP_SH:-cmd}",
+      "args": ["${PLATFORM_MCP_FLAG:-/c}", "${PLATFORM_MCP_CROSSLINK:-tools\\cross_link\\cross-link-mcp.cmd}"],
       "timeout": 30000
     }
   }
