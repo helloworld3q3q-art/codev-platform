@@ -155,7 +155,7 @@
 
         <section id="map">
           <h2>一图总览</h2>
-          <p><strong>顶部带</strong>:codev-platform 真值源仓(本仓提供什么)。<strong>中部 6 泳道</strong>:AI 工具链运行时管道(原 ai-dev-architecture-map 的数据源 → 触发 → 索引器 → 存储 → MCP → 会话)。<strong>底部紫色带 = 今日新增</strong>:Agent 服务 + Memory 基建(常驻 Agent + 四作用域分层记忆 + 数据库持久化 + 多租户隔离),关键点见图。紫色实线表示<strong>真值源 → 运行时</strong>的供给关系:本仓代码经 pip -e 软链成为索引器(泳道 3)和 MCP 服务(泳道 5)的实现;规则 / skill 经 sync 进入业务仓数据源(泳道 1)。最右泳道展开 3 个业务仓项目。</p>
+          <p><strong>顶部带</strong>:codev-platform 真值源仓(本仓提供什么)。<strong>中部 6 泳道</strong>:AI 工具链运行时管道(原 ai-dev-architecture-map 的数据源 → 触发 → 索引器 → 存储 → MCP → 会话)。<strong>底部紫色带</strong>:Agent 服务 + Memory 基建(常驻 Agent + 四作用域分层记忆 + 数据库持久化 + 多租户隔离),与中部泳道逐列对齐,关键点见图。紫色实线表示<strong>真值源 → 运行时</strong>的供给关系:本仓代码经 pip -e 软链成为索引器(泳道 3)和 MCP 服务(泳道 5)的实现;规则 / skill 经 sync 进入业务仓数据源(泳道 1)。最右泳道展开 3 个业务仓项目。</p>
           <div class="legend">
             <span class="pill"><span class="dot violet"></span>codev-platform 真值源</span>
             <span class="pill"><span class="dot"></span>数据源</span>
@@ -164,14 +164,27 @@
             <span class="pill"><span class="dot green"></span>本地存储</span>
             <span class="pill"><span class="dot cyan"></span>MCP 服务</span>
             <span class="pill"><span class="dot red"></span>会话 / 验证 / 隔离</span>
-            <span class="pill"><span class="dot violet"></span>★ 今日新增 Agent + Memory</span>
+            <span class="pill"><span class="dot violet"></span>Agent + Memory</span>
           </div>
-          <div class="map-actions">
+          <div class="map-actions" style="gap:8px">
+            <button class="fullscreen-btn" type="button" data-export-target="platform-map">导出图片</button>
             <button class="fullscreen-btn" type="button" data-fullscreen-target="platform-map">全屏查看</button>
           </div>
 
           <div class="map-wrap" id="platform-map">
             <svg class="map" viewBox="0 0 1480 1372" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
+              <style>
+                text { font-family: "Microsoft YaHei","Segoe UI",-apple-system,sans-serif; }
+                .lane-title { font-size:13px; font-weight:800; fill:#334155; }
+                .node-title { font-size:12.5px; font-weight:800; fill:#0f172a; }
+                .node-sub { font-size:10.4px; fill:#475569; }
+                .kw { fill:#db2777; font-weight:800; }
+                .edge { fill:none; stroke:#64748b; stroke-width:1.5; marker-end:url(#arrow); }
+                .edge-blue { fill:none; stroke:#2563eb; stroke-width:2; marker-end:url(#arrow-blue); }
+                .edge-green { fill:none; stroke:#059669; stroke-width:1.8; marker-end:url(#arrow-green); }
+                .edge-violet { fill:none; stroke:#7c3aed; stroke-width:1.8; marker-end:url(#arrow-violet); }
+                .edge-dashed { fill:none; stroke:#94a3b8; stroke-width:1.35; stroke-dasharray:5 4; marker-end:url(#arrow-soft); }
+              </style>
               <defs>
                 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                   <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -525,7 +538,7 @@
               <path class="edge-dashed" d="M1215 651 L1255 639"/>
               <path class="edge-dashed" d="M1215 651 C1240 680 1245 700 1255 715"/>
 
-              <!-- ========== 连线:6 泳道底部 → 今日新增带(逐列对齐串起来)========== -->
+              <!-- ========== 连线:6 泳道底部 → Agent + Memory 层(逐列对齐串起来)========== -->
               <path class="edge-blue" d="M395 1000 L395 1086"/>
               <text class="node-sub" x="395" y="1042" text-anchor="middle" fill="#1d4ed8">身份/路由同源</text>
               <path d="M635 1000 L635 1086" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-violet)"/>
@@ -537,64 +550,58 @@
               <path class="edge-blue" d="M1340 1000 L1340 1086"/>
               <text class="node-sub" x="1340" y="1042" text-anchor="middle" fill="#1d4ed8">会话经 Agent</text>
 
-              <!-- ========== 今日新增:Agent 服务 + Memory 基建(节点逐列对齐 L2-L6)========== -->
+              <!-- ========== Agent 服务 + Memory 基建(节点逐列对齐 L2-L6)========== -->
               <rect x="40" y="1090" width="1400" height="190" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
-              <text class="lane-title" x="58" y="1114" fill="#5b21b6">★ 今日新增:Agent 服务 + Memory 基建 — 一条新层,逐列对齐上方泳道(箭头表示沿用 / 供给 / 复用 / 消费)</text>
-              <text class="node-sub" x="155" y="1150" text-anchor="middle" fill="#94a3b8">(L1 业务代码</text>
-              <text class="node-sub" x="155" y="1168" text-anchor="middle" fill="#94a3b8">为数据源,</text>
-              <text class="node-sub" x="155" y="1186" text-anchor="middle" fill="#94a3b8">不直接接 Agent)</text>
+              <text class="lane-title" x="58" y="1114" fill="#5b21b6">Agent 服务 + Memory 基建 — 与上方泳道逐列对齐(<tspan class="kw">沿用 / 供给 / 复用 / 消费</tspan>)</text>
+              <text class="node-sub" x="155" y="1162" text-anchor="middle" fill="#94a3b8">L1 = 数据源</text>
+              <text class="node-sub" x="155" y="1182" text-anchor="middle" fill="#94a3b8">不直接接 Agent</text>
 
               <g filter="url(#shadow)">
                 <rect x="295" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="395" y="1150" text-anchor="middle">身份 + 多租户隔离</text>
-                <text class="node-sub" x="395" y="1172" text-anchor="middle">组织 · 用户 · 项目三元组</text>
-                <text class="node-sub" x="395" y="1192" text-anchor="middle">读写均带组织/用户维度</text>
-                <text class="node-sub" x="395" y="1212" text-anchor="middle">个人记忆只读本人</text>
-                <text class="node-sub" x="395" y="1232" text-anchor="middle">沿用并扩展 project_id 解析</text>
-                <text class="node-sub" x="395" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L2 触发/门禁</text>
+                <text class="node-title" x="395" y="1152" text-anchor="middle">身份 · 多租户</text>
+                <text class="node-sub" x="395" y="1178" text-anchor="middle"><tspan class="kw">三元组</tspan>(组织/用户/项目)</text>
+                <text class="node-sub" x="395" y="1200" text-anchor="middle">行级 <tspan class="kw">org/user 隔离</tspan></text>
+                <text class="node-sub" x="395" y="1222" text-anchor="middle"><tspan class="kw">RBAC</tspan> 接缝 · 个人记忆私有</text>
+                <text class="node-sub" x="395" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L2</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="535" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="635" y="1150" text-anchor="middle">多模型大脑</text>
-                <text class="node-sub" x="635" y="1172" text-anchor="middle">多家大模型可插拔</text>
-                <text class="node-sub" x="635" y="1192" text-anchor="middle">按协议族接入</text>
-                <text class="node-sub" x="635" y="1212" text-anchor="middle">加厂商多数零代码/一行</text>
-                <text class="node-sub" x="635" y="1232" text-anchor="middle">中性类型 + 策略接口</text>
-                <text class="node-sub" x="635" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L3 索引器与模型</text>
+                <text class="node-title" x="635" y="1152" text-anchor="middle">多模型大脑</text>
+                <text class="node-sub" x="635" y="1178" text-anchor="middle"><tspan class="kw">协议族</tspan>可插拔</text>
+                <text class="node-sub" x="635" y="1200" text-anchor="middle">加厂商 <tspan class="kw">≈ 零代码</tspan></text>
+                <text class="node-sub" x="635" y="1222" text-anchor="middle"><tspan class="kw">策略接口</tspan> + 中性类型</text>
+                <text class="node-sub" x="635" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L3</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="775" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="875" y="1150" text-anchor="middle">分层记忆 + 生命周期</text>
-                <text class="node-sub" x="875" y="1172" text-anchor="middle">四作用域 · 跨重启持久化</text>
-                <text class="node-sub" x="875" y="1192" text-anchor="middle">召回融合 · 红线最高</text>
-                <text class="node-sub" x="875" y="1212" text-anchor="middle">到期归档 · 压缩融合(留痕)</text>
-                <text class="node-sub" x="875" y="1232" text-anchor="middle">平台独立库 · 读写分离</text>
-                <text class="node-sub" x="875" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L4 本地存储</text>
+                <text class="node-title" x="875" y="1152" text-anchor="middle">分层记忆 · 生命周期</text>
+                <text class="node-sub" x="875" y="1178" text-anchor="middle"><tspan class="kw">四作用域</tspan>持久化</text>
+                <text class="node-sub" x="875" y="1200" text-anchor="middle"><tspan class="kw">RRF 召回融合</tspan> · 红线优先</text>
+                <text class="node-sub" x="875" y="1222" text-anchor="middle"><tspan class="kw">TTL 归档</tspan> · 压缩融合</text>
+                <text class="node-sub" x="875" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L4</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="1015" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="1115" y="1150" text-anchor="middle">常驻 Agent 服务</text>
-                <text class="node-sub" x="1115" y="1172" text-anchor="middle">计划→工具→观察 循环</text>
-                <text class="node-sub" x="1115" y="1192" text-anchor="middle">6 只读工具复用 MCP</text>
-                <text class="node-sub" x="1115" y="1212" text-anchor="middle">防空转硬护栏</text>
-                <text class="node-sub" x="1115" y="1232" text-anchor="middle">问答按身份路由</text>
-                <text class="node-sub" x="1115" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L5 MCP 服务</text>
+                <text class="node-title" x="1115" y="1152" text-anchor="middle">常驻 Agent 服务</text>
+                <text class="node-sub" x="1115" y="1178" text-anchor="middle"><tspan class="kw">plan→act→observe</tspan></text>
+                <text class="node-sub" x="1115" y="1200" text-anchor="middle">6 工具 <tspan class="kw">复用 MCP</tspan></text>
+                <text class="node-sub" x="1115" y="1222" text-anchor="middle"><tspan class="kw">防空转护栏</tspan></text>
+                <text class="node-sub" x="1115" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L5</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="1255" y="1126" width="170" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="1340" y="1150" text-anchor="middle">会话 + 业务仓接入</text>
-                <text class="node-sub" x="1340" y="1172" text-anchor="middle">会话经 Agent 问答</text>
-                <text class="node-sub" x="1340" y="1192" text-anchor="middle">会话跨重启不丢</text>
-                <text class="node-sub" x="1340" y="1212" text-anchor="middle">消息自增定序(免竞态)</text>
-                <text class="node-sub" x="1340" y="1232" text-anchor="middle">多租户物理隔离</text>
-                <text class="node-sub" x="1340" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L6 会话</text>
+                <text class="node-title" x="1340" y="1152" text-anchor="middle">会话 · 业务仓接入</text>
+                <text class="node-sub" x="1340" y="1178" text-anchor="middle">会话经 Agent 问答</text>
+                <text class="node-sub" x="1340" y="1200" text-anchor="middle"><tspan class="kw">跨重启持久化</tspan></text>
+                <text class="node-sub" x="1340" y="1222" text-anchor="middle"><tspan class="kw">BIGSERIAL</tspan> 定序免竞态</text>
+                <text class="node-sub" x="1340" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L6</text>
               </g>
 
               <!-- ========== bottom narration ========== -->
               <rect x="40" y="1294" width="1400" height="50" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
               <text class="node-title" x="58" y="1314">★ codev-platform 供给关系:</text>
               <text class="node-sub" x="270" y="1314">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
-              <text class="node-sub" x="58" y="1334">★ 今日新增 Agent + Memory(紫色带):与上方泳道<tspan font-weight="700" fill="#5b21b6">逐列对齐</tspan> —— 身份沿用 L2 解析 · 大脑与 L3 同源(本仓代码供给)· 分层记忆从 L4 用户级 MEMORY 进化 · Agent 复用 L5 三套 MCP 为只读工具 · L6 会话经 Agent 问答并写记忆。</text>
+              <text class="node-sub" x="58" y="1334">★ Agent + Memory(紫色带):与上方泳道<tspan font-weight="700" fill="#5b21b6">逐列对齐</tspan> —— 身份沿用 L2 解析 · 大脑与 L3 同源(本仓代码供给)· 分层记忆从 L4 用户级 MEMORY 进化 · Agent 复用 L5 三套 MCP 为只读工具 · L6 会话经 Agent 问答并写记忆。</text>
             </svg>
           </div>
         </section>
@@ -665,12 +672,19 @@
             <span class="pill"><span class="dot violet"></span>推理 + 多模型 ★</span>
             <span class="pill"><span class="dot green"></span>持久 + 多租户隔离</span>
           </div>
-          <div class="map-actions">
+          <div class="map-actions" style="gap:8px">
+            <button class="fullscreen-btn" type="button" data-export-target="agent-map">导出图片</button>
             <button class="fullscreen-btn" type="button" data-fullscreen-target="agent-map">全屏查看</button>
           </div>
 
           <div class="map-wrap" id="agent-map">
             <svg class="map" viewBox="0 0 1380 824" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agent 服务 + Memory 基建架构图">
+              <style>
+                text { font-family: "Microsoft YaHei","Segoe UI",-apple-system,sans-serif; }
+                .lane-title { font-size:13px; font-weight:800; fill:#334155; }
+                .node-title { font-size:12.5px; font-weight:800; fill:#0f172a; }
+                .node-sub { font-size:10.4px; fill:#475569; }
+              </style>
               <defs>
                 <marker id="arrow-ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/></marker>
                 <marker id="arrow-ag-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"/></marker>
@@ -783,7 +797,7 @@
               <td>schema.py · server.py · query.py</td>
             </tr>
             <tr>
-              <td><code>codev_platform/agent/</code> ★新</td>
+              <td><code>codev_platform/agent/</code></td>
               <td>Agent HTTP 服务:多模型推理 + 6 只读工具 + Memory(四作用域 / 召回 / 生命周期)</td>
               <td>service · loop · brain/ · recall_service · memory_store · session · memory_maintenance</td>
             </tr>
@@ -959,22 +973,22 @@
               <td>改完 commit + push + 各业务仓重启 daemon(<code>Stop-Process</code> port 18083)。</td>
             </tr>
             <tr>
-              <td>会话 / 记忆持久化(数据库)★今日</td>
+              <td>会话 / 记忆持久化(数据库)</td>
               <td>读可并发,写走短事务。</td>
               <td>读写分离接缝(只读副本可选,不预建);连接池上限可调;主键带组织 + 用户维度物理隔离。</td>
             </tr>
             <tr>
-              <td>会话消息顺序(多窗口)★今日</td>
+              <td>会话消息顺序(多窗口)</td>
               <td>多窗口可并发写同一会话。</td>
               <td>数据库自增序号定序,不在应用层算序号(免并发竞态);消息按序号读回。</td>
             </tr>
             <tr>
-              <td>记忆维护任务(到期归档 / 压缩融合)★今日</td>
+              <td>记忆维护任务(到期归档 / 压缩融合)</td>
               <td>不允许并发跑同一主题。</td>
               <td>数据库会话级单实例锁(抢不到即跳过),防并发压同主题写出重复摘要。</td>
             </tr>
             <tr>
-              <td>多租户记忆访问 ★今日</td>
+              <td>多租户记忆访问 </td>
               <td>跨组织 / 用户读可并发。</td>
               <td>所有读写带组织 + 用户维度;个人记忆只能读本人(召回 ≠ 直接读);授权层接缝留待多人期。</td>
             </tr>
@@ -1183,10 +1197,51 @@
       };
       bind('[data-fullscreen-target="platform-map"]', 'platform-map');
       bind('[data-fullscreen-target="agent-map"]', 'agent-map');
+
+      // 导出 PNG:克隆 SVG(已内联 <style>,文本/连线可独立渲染)→ canvas 栅格化 → 下载
+      const exportSvg = (wrapId) => {
+        const wrap = document.getElementById(wrapId);
+        const svg = wrap && wrap.querySelector('svg');
+        if (!svg) return;
+        const vb = svg.viewBox.baseVal;
+        const w = (vb && vb.width) ? vb.width : svg.clientWidth || 1480;
+        const h = (vb && vb.height) ? vb.height : svg.clientHeight || 1000;
+        const clone = svg.cloneNode(true);
+        clone.setAttribute('width', w);
+        clone.setAttribute('height', h);
+        clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const xml = new XMLSerializer().serializeToString(clone);
+        const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+        const img = new Image();
+        const scale = 2;  // 2x 导出更清晰
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.ceil(w * scale);
+          canvas.height = Math.ceil(h * scale);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.setTransform(scale, 0, 0, scale, 0, 0);
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((blob) => {
+            if (!blob) { alert('导出失败'); return; }
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = wrapId + '.png';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          }, 'image/png');
+        };
+        img.onerror = () => alert('导出失败:浏览器未能渲染 SVG');
+        img.src = src;
+      };
+      document.querySelectorAll('[data-export-target]').forEach((btn) => {
+        btn.addEventListener('click', () => exportSvg(btn.getAttribute('data-export-target')));
+      });
+
       document.addEventListener('fullscreenchange', () => {
-        document.querySelectorAll('.fullscreen-btn').forEach((b) => {
-          const id = b.getAttribute('data-fullscreen-target');
-          const el = document.getElementById(id);
+        document.querySelectorAll('[data-fullscreen-target]').forEach((b) => {
+          const el = document.getElementById(b.getAttribute('data-fullscreen-target'));
           b.textContent = (document.fullscreenElement === el) ? '退出全屏' : '全屏查看';
         });
       });

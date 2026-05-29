@@ -373,12 +373,23 @@
             <span class="pill"><span class="dot cyan"></span>MCP 服务</span>
             <span class="pill"><span class="dot red"></span>防错与验证</span>
           </div>
-          <div class="map-actions">
+          <div class="map-actions" style="gap:8px">
+            <button class="fullscreen-btn" type="button" data-export-target="architecture-map">导出图片</button>
             <button class="fullscreen-btn" type="button" data-fullscreen-target="architecture-map">全屏查看</button>
           </div>
 
           <div class="map-wrap" id="architecture-map">
             <svg class="map" viewBox="0 0 1480 860" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI 开发架构节点图">
+              <style>
+                text { font-family: "Microsoft YaHei","Segoe UI",-apple-system,sans-serif; }
+                .lane-title { font-size:13px; font-weight:800; fill:#334155; }
+                .node-title { font-size:12.5px; font-weight:800; fill:#0f172a; }
+                .node-sub { font-size:10.4px; fill:#475569; }
+                .edge { fill:none; stroke:#64748b; stroke-width:1.5; marker-end:url(#arrow); }
+                .edge-blue { fill:none; stroke:#2563eb; stroke-width:2; marker-end:url(#arrow-blue); }
+                .edge-green { fill:none; stroke:#059669; stroke-width:1.8; marker-end:url(#arrow-green); }
+                .edge-dashed { fill:none; stroke:#94a3b8; stroke-width:1.35; stroke-dasharray:5 4; marker-end:url(#arrow-soft); }
+              </style>
               <defs>
                 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                   <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -650,12 +661,19 @@
             <span class="pill"><span class="dot violet"></span>推理 + 多模型 ★</span>
             <span class="pill"><span class="dot green"></span>持久 + 多租户隔离</span>
           </div>
-          <div class="map-actions">
+          <div class="map-actions" style="gap:8px">
+            <button class="fullscreen-btn" type="button" data-export-target="agent-map">导出图片</button>
             <button class="fullscreen-btn" type="button" data-fullscreen-target="agent-map">全屏查看</button>
           </div>
 
           <div class="map-wrap" id="agent-map">
             <svg class="map" viewBox="0 0 1380 824" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agent 服务 + Memory 基建架构图">
+              <style>
+                text { font-family: "Microsoft YaHei","Segoe UI",-apple-system,sans-serif; }
+                .lane-title { font-size:13px; font-weight:800; fill:#334155; }
+                .node-title { font-size:12.5px; font-weight:800; fill:#0f172a; }
+                .node-sub { font-size:10.4px; fill:#475569; }
+              </style>
               <defs>
                 <marker id="arrow-ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/></marker>
                 <marker id="arrow-ag-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"/></marker>
@@ -1132,8 +1150,50 @@
       };
       bind('[data-fullscreen-target="architecture-map"]', 'architecture-map');
       bind('[data-fullscreen-target="agent-map"]', 'agent-map');
+
+      // 导出 PNG:克隆 SVG(已内联 <style>)→ canvas 栅格化 → 下载
+      const exportSvg = (wrapId) => {
+        const wrap = document.getElementById(wrapId);
+        const svg = wrap && wrap.querySelector('svg');
+        if (!svg) return;
+        const vb = svg.viewBox.baseVal;
+        const w = (vb && vb.width) ? vb.width : svg.clientWidth || 1480;
+        const h = (vb && vb.height) ? vb.height : svg.clientHeight || 1000;
+        const clone = svg.cloneNode(true);
+        clone.setAttribute('width', w);
+        clone.setAttribute('height', h);
+        clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const xml = new XMLSerializer().serializeToString(clone);
+        const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+        const img = new Image();
+        const scale = 2;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.ceil(w * scale);
+          canvas.height = Math.ceil(h * scale);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.setTransform(scale, 0, 0, scale, 0, 0);
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((blob) => {
+            if (!blob) { alert('导出失败'); return; }
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = wrapId + '.png';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          }, 'image/png');
+        };
+        img.onerror = () => alert('导出失败:浏览器未能渲染 SVG');
+        img.src = src;
+      };
+      document.querySelectorAll('[data-export-target]').forEach((btn) => {
+        btn.addEventListener('click', () => exportSvg(btn.getAttribute('data-export-target')));
+      });
+
       document.addEventListener('fullscreenchange', () => {
-        document.querySelectorAll('.fullscreen-btn').forEach((b) => {
+        document.querySelectorAll('[data-fullscreen-target]').forEach((b) => {
           const el = document.getElementById(b.getAttribute('data-fullscreen-target'));
           b.textContent = (document.fullscreenElement === el) ? '退出全屏' : '全屏查看';
         });
