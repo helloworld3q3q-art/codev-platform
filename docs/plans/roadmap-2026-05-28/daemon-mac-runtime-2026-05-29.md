@@ -86,4 +86,4 @@ env + 硬编码默认、不读 config,与 `server.py`(读 config)不一致,会�
 
 **最终修法**:`launchctl setenv` 把 4 个变量塞进 launchd 环境(GUI 启动可见)+ `~/Library/LaunchAgents/com.codev-platform.mcp-env.plist`(`RunAtLoad`)持久化,重启不丢。验收:platform-docs / cross-link 均 connected,`search_docs` 实跑返回相关 chunk(mps,680 chunks)。onboarding 文档与 `setup` 已据此从 `~/.zshrc` 改为 launchctl/LaunchAgent。
 
-> codegraph MCP 仍 failed —— 它是独立第三方工具(需单独装 `codegraph` 二进制),不在本方案范围。
+> codegraph MCP(独立第三方工具 `@colbymchenry/codegraph`)后续也接通了:同类 PATH 坑(Dock 启动 VSCode 的 PATH 不含 `/usr/local/bin`)→ `.mcp.json` 用 `${PLATFORM_CODEGRAPH:-codegraph}` + launchctl/LaunchAgent 设绝对路径。装法见 docs/onboarding-mac.md。三套 MCP 现全 connected。
