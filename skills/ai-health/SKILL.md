@@ -76,8 +76,10 @@ codev-platform health --json-out
     codegraph 代码 = nodes=N edges=N        # 每仓 .codegraph,经 config.projects.<id>.repo_path 定位
     cross-link 链路 = nodes=N / 未建        # 仅全栈仓建
     memory 项目专属 = N 条  (+ org 共享 M)  # project 作用域,只该项目召回
+    使用率(7d) = search_docs N / cross-link N  # 按 project_id 拆;codegraph 未计数
 合计: chroma 全项目总数 ; memory M org + K project
 ```
+> 使用率按 project_id 分:chroma 召回日志加了 project_id 字段(**daemon 重启后**新查询才分项目;旧日志归 "legacy 无 project_id");cross-link 日志本就带 project_id。
 
 - **chroma / cross-link / memory** 中心化(`data/` + PG 一个库),`--all` 直接全看到。
 - **codegraph** 是每仓 `.codegraph`(散在各业务仓),靠 `~/.codev-platform/config.json` 的 `projects.<id>.repo_path` 定位;没配的项目标 "仓路径未登记"。

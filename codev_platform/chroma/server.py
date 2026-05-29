@@ -849,6 +849,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
                 top5.append(entry)
             _log_recall({
                 "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+                "project_id": pid,
                 "query": query,
                 "k": k,
                 "category": category,

@@ -1064,9 +1064,34 @@ def _project_repo(cfg: dict, cdv: Path, pid: str, self_pid: str | None) -> Path 
     return None
 
 
+def _usage_by_project(cdv: Path) -> dict[str, dict[str, int]]:
+    """{project_id: {'search_docs': n, 'cross_link': n}} over last 7d from jsonl logs.
+
+    Entries without a project_id (logged before per-project tagging) bucket under
+    '(legacy 无 project_id)'. codegraph has no usage log yet.
+    """
+    cutoff = datetime.now() - timedelta(days=7)
+    res: dict[str, dict[str, int]] = {}
+
+    def bump(pid: str | None, key: str) -> None:
+        k = pid or "(legacy 无 project_id)"
+        res.setdefault(k, {"search_docs": 0, "cross_link": 0})[key] += 1
+
+    for path, key in (
+        (cdv / "codev_platform" / "chroma" / "search_recall.jsonl", "search_docs"),
+        (cdv / "codev_platform" / "cross_link" / "cross_link_usage.jsonl", "cross_link"),
+    ):
+        for o in _iter_jsonl(path):
+            ts = _parse_dt(str(o["ts"])) if o.get("ts") else None
+            if ts is not None and ts < cutoff:
+                continue
+            bump(o.get("project_id"), key)
+    return res
+
+
 def cmd_health_all(args: argparse.Namespace) -> int:
     """Platform-wide view: every registered project x (chroma / codegraph / cross-link)
-    + memory scopes. Centralized stores (chroma/cross-link/memory) need no repo path;
+    + memory scopes + per-project usage (7d). Centralized stores need no repo path;
     codegraph is per-repo, resolved via config.projects.<id>.repo_path."""
     cfg = load_cfg()
     cdv = codev_root()
@@ -1089,6 +1114,7 @@ def cmd_health_all(args: argparse.Namespace) -> int:
         elif scope == "project":
             mem_proj[ref] = mem_proj.get(ref, 0) + n
 
+    usage = _usage_by_project(cdv)
     pids = sorted(set(registered) | set(chroma_pid))
 
     out("=== codev-platform health --all (平台全局视图) ===")
@@ -1115,15 +1141,21 @@ def cmd_health_all(args: argparse.Namespace) -> int:
         xdb = cdv / "data" / "codegraph_ext" / pid / "cross_layer.sqlite"
         xl = f"nodes={_sqlite_counts(xdb, 'nodes').get('nodes', 0)}" if xdb.is_file() else "未建(不适用/未建)"
         mp = mem_proj.get(pid, 0)
+        u = usage.get(pid, {})
         reg_tag = "" if pid in registered else "  (未注册 platform_meta)"
         out(f"[{pid}]{reg_tag}")
         out(f"    chroma 文档 = {ch} chunks")
         out(f"    codegraph 代码 = {cg}")
         out(f"    cross-link 链路 = {xl}")
         out(f"    memory 项目专属 = {mp} 条  (+ org 共享 {mem_org})")
+        out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / cross-link {u.get('cross_link', 0)}  (codegraph 未计数)")
         out("")
 
     out(f"合计: chroma {tot_chroma} chunks / {len(pids)} 项目 ; memory {mem_org} org + {sum(mem_proj.values())} project")
+    legacy = usage.get("(legacy 无 project_id)")
+    if legacy:
+        out(f"[INFO] 旧日志未带 project_id(daemon 重启后新查询才分项目): "
+            f"search_docs {legacy.get('search_docs', 0)} / cross-link {legacy.get('cross_link', 0)}")
     for e in probe.get("err", []):
         out(f"[WARN] {e}")
     if missing_repo:
