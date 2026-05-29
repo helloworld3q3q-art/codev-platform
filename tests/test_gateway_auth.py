@@ -9,7 +9,9 @@ from codev_platform.gateway.auth import (
     Unauthorized,
     build_authenticator,
     token_hash,
+    warn_if_insecure,
 )
+from codev_platform.gateway.middleware import AuthMiddleware
 
 
 # ---- authenticators(纯逻辑)----
@@ -123,6 +125,36 @@ def test_middleware_public_and_passthrough():
     assert _run_asgi(app, "/health", {}) == 200                                  # public 放行
     assert _run_asgi(app, "/who", {"X-User-Id": "alice", "X-Org-Id": "acme"}) == 200
     assert cap["identity"] is not None and cap["identity"].user_id == "alice"    # 身份挂上 request.state
+
+
+def test_middleware_public_prefix_segment_boundary():
+    # /health 放行其子路径, 但不放行同前缀的别的路径 (防 startswith 子串绕过)
+    app, _ = _starlette_app({})
+    app2 = AuthMiddleware(None, build_authenticator({}), public_paths={"/health"})
+    assert app2._is_public("/health") is True
+    assert app2._is_public("/health/live") is True       # 段边界子路径放行
+    assert app2._is_public("/healthcheck-evil") is False  # 同前缀非段边界 → 不放行
+    assert app2._is_public("/who") is False
+
+
+def test_middleware_rejects_traversal_in_public_check():
+    # /health/../who 不得被当 public 放行 (含 .. 段直接判非 public)
+    mw = AuthMiddleware(None, build_authenticator({}), public_paths={"/health"})
+    assert mw._is_public("/health/../who") is False
+    assert mw._is_public("/../secret") is False
+
+
+def test_warn_if_insecure_only_passthrough_nonloopback(caplog):
+    import logging
+    pt = PassthroughAuthenticator()
+    tok = TokenAuthenticator({token_hash("x"): {"user_id": "u"}})
+    with caplog.at_level(logging.WARNING, logger="codev_platform.gateway"):
+        warn_if_insecure(pt, "127.0.0.1")   # loopback → 不警告
+        warn_if_insecure(tok, "0.0.0.0")    # token 模式 → 不警告
+    assert not caplog.records
+    with caplog.at_level(logging.WARNING, logger="codev_platform.gateway"):
+        warn_if_insecure(pt, "0.0.0.0")     # passthrough + 非 loopback → 警告
+    assert any("passthrough" in r.message for r in caplog.records)
 
 
 def test_middleware_token_mode_gates():

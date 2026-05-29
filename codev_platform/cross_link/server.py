@@ -112,7 +112,8 @@ def _log_usage(record: dict) -> None:
 # ----------------------------------------------------------------------
 
 _conns: dict[str, sqlite3.Connection] = {}   # project_id -> sqlite conn
-_init_errors: dict[str, str] = {}            # project_id -> 初始化失败原因
+_init_errors: dict[str, str] = {}            # project_id -> **硬**加载失败 (持久缓存, 重启才清)
+_missing_db: dict[str, str] = {}             # project_id -> DB 文件缺失 (瞬时, 每次重查; 见 _ensure_conn_for)
 
 # asyncio 单线程, dict 操作原子, 不上锁。stdio 模式 contextvar 不设 → fallback PROJECT_ID。
 _current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextVar(
@@ -126,22 +127,33 @@ def _active_pid() -> str:
     return pid if pid is not None else _EXPLICIT_KEY
 
 
+def _error_for(pid: str) -> str | None:
+    """当前 pid 的初始化错误文案 (硬错误优先, 其次文件缺失)。"""
+    return _init_errors.get(pid) or _missing_db.get(pid)
+
+
 def _ensure_conn_for(pid: str) -> sqlite3.Connection | None:
-    """按 project_id 取/建 sqlite 连接(缓存)。缺 DB / 加载失败 → None + 记 _init_errors。"""
+    """按 project_id 取/建 sqlite 连接(缓存)。
+
+    - DB 文件缺失: 记 _missing_db (**瞬时**, 不持久缓存) —— daemon 起来后才 build_index 的项目,
+      下次调用会重新查存在性而非永远报缺失 (审计 Concern 3)。
+    - 硬加载失败 (sqlite 损坏等): 记 _init_errors (持久缓存, 重启才清)。
+    """
     conn = _conns.get(pid)
     if conn is not None:
         return conn
-    if pid in _init_errors:
+    if pid in _init_errors:        # 硬错误才短路; 文件缺失不短路, 每次重查
         return None
     dbp = _db_path_for(None if pid == _EXPLICIT_KEY else pid)
+    if not dbp.exists():
+        _missing_db[pid] = (
+            f"cross_layer DB 不存在: {dbp}; 先跑 python -m codev_platform.cross_link.build_index"
+        )
+        _flog(f"[init] pid={pid} db missing: {dbp} (瞬时, 下次重查)")
+        return None
+    _missing_db.pop(pid, None)     # 文件出现了, 清瞬时缺失标记
     try:
         _flog(f"[init] pid={pid} db_path={dbp}")
-        if not dbp.exists():
-            _init_errors[pid] = (
-                f"cross_layer DB 不存在: {dbp}; 先跑 python -m codev_platform.cross_link.build_index"
-            )
-            _flog(f"[init] ERROR: {_init_errors[pid]}")
-            return None
         conn = sqlite3.connect(dbp)
         conn.row_factory = sqlite3.Row
         nodes = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
@@ -316,7 +328,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 async def _dispatch(name: str, args: dict) -> list[TextContent]:
     conn = _current_conn()
     if conn is None:
-        return _err(_init_errors.get(_active_pid()) or "cross_layer DB 未初始化")
+        return _err(_error_for(_active_pid()) or "cross_layer DB 未初始化")
 
     import time as _t
     _t0 = _t.perf_counter()
@@ -535,13 +547,15 @@ async def run_http(port: int = _CL_SSE_PORT) -> None:
 
     async def health(_request):
         # 存活探针: 报已加载 project 的连接状态 (不强制任何 project 可用)。
-        loaded = {pid: (pid in _conns) for pid in set(list(_conns) + list(_init_errors))}
+        seen = set(list(_conns) + list(_init_errors) + list(_missing_db))
+        loaded = {pid: (pid in _conns) for pid in seen}
         return JSONResponse({
             "status": "ok",
             "service": "cross-link",
             "default_project_id": PROJECT_ID,
             "loaded_projects": loaded,
-            "init_errors": _init_errors,
+            "init_errors": _init_errors,      # 硬加载失败 (持久)
+            "missing_db": _missing_db,        # 文件缺失 (瞬时, 每次重查)
         })
 
     app = Starlette(

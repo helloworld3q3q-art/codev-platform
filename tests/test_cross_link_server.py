@@ -51,6 +51,7 @@ def two_projects(tmp_path, monkeypatch):
     # 隔离全局连接缓存,避免污染其它测试
     monkeypatch.setattr(srv, "_conns", {})
     monkeypatch.setattr(srv, "_init_errors", {})
+    monkeypatch.setattr(srv, "_missing_db", {})
     monkeypatch.setattr(srv, "PROJECT_ID", None)
     return mapping
 
@@ -101,6 +102,51 @@ def test_missing_project_returns_friendly_error(two_projects):
     r = _call("proj-zzz", "find_table_refs", {"table": "t_a"})
     assert "error" in r
     assert "cross_layer DB 不存在" in r["error"]
+
+
+def test_concurrent_sessions_isolated(two_projects):
+    # 两个并发 task 各 set 不同 project_id + 跨 await 边界交错, 断言互不串库
+    # (锁定 2026-05-28 串库回归 + 审计 Concern 5: contextvar 跨 task 复制隔离)。
+    async def query(pid):
+        tok = srv._current_project_id.set(pid)
+        try:
+            await asyncio.sleep(0)  # 让出, 强制与另一 task 交错
+            res = await srv._dispatch("find_table_refs", {"table": "t_a"})
+            await asyncio.sleep(0)
+            return json.loads(res[0].text)
+        finally:
+            srv._current_project_id.reset(tok)
+
+    async def go():
+        # create_task 各自复制 context → 任务内 set 不互相污染
+        return await asyncio.gather(
+            asyncio.create_task(query("proj-a")),
+            asyncio.create_task(query("proj-b")),
+        )
+
+    a, b = asyncio.run(go())
+    assert [w["name"] for w in a["python_writers"]] == ["wa"]  # proj-a 见 t_a
+    assert b["python_writers"] == []                            # proj-b 无 t_a, 未串到 a
+
+
+def test_missing_db_not_cached_so_late_build_works(tmp_path, monkeypatch):
+    # 审计 Concern 3: DB 在 daemon 起来后才 build_index → 不应被永久缓存为"缺失"
+    db = tmp_path / "late" / "cross_layer.sqlite"
+    db.parent.mkdir(parents=True)
+    monkeypatch.setattr(srv, "_db_path_for", lambda pid: db)
+    monkeypatch.setattr(srv, "_conns", {})
+    monkeypatch.setattr(srv, "_init_errors", {})
+    monkeypatch.setattr(srv, "_missing_db", {})
+    monkeypatch.setattr(srv, "PROJECT_ID", None)
+    # 1st: 文件不存在 → 友好错误
+    r1 = _call("late", "cross_link_stats", {})
+    assert "error" in r1 and "不存在" in r1["error"]
+    # build 之后
+    _build_db(db, "t_late", "wl")
+    # 2nd: 重查存在性 → 成功(证明 missing 没被永久缓存)
+    r2 = _call("late", "cross_link_stats", {})
+    assert r2.get("project_id") == "late"
+    assert r2["nodes_by_kind"].get("table") == 1
 
 
 def test_active_pid_falls_back_to_explicit_key(monkeypatch):

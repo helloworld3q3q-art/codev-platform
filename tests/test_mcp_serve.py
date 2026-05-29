@@ -76,6 +76,24 @@ def test_iter_endpoints_auto_assigns_port_when_unset(tmp_path):
     assert ports == [ms.DEFAULT_CODEGRAPH_BASE_PORT, ms.DEFAULT_CODEGRAPH_BASE_PORT + 1]
 
 
+def test_auto_port_skips_explicit_and_reserved(tmp_path):
+    # 审计 Concern 4: auto 端口不得撞显式端口或 chroma/cross-link 端口
+    r1 = tmp_path / "r1"; r1.mkdir()
+    r2 = tmp_path / "r2"; r2.mkdir()
+    cfg = {
+        "daemon": {"port": 18083},
+        "mcp": {"cross_link_sse_port": 18086},
+        "projects": {
+            "p-explicit": {"repo_path": str(r1), "codegraph_sse_port": ms.DEFAULT_CODEGRAPH_BASE_PORT},
+            "p-auto": {"repo_path": str(r2)},  # 不能拿到 DEFAULT_CODEGRAPH_BASE_PORT(被 explicit 占)
+        },
+    }
+    cg = {e.project_id: e.port for e in ms.iter_endpoints(cfg) if e.kind == "codegraph"}
+    assert cg["p-explicit"] == ms.DEFAULT_CODEGRAPH_BASE_PORT
+    assert cg["p-auto"] != cg["p-explicit"]          # 无撞
+    assert cg["p-auto"] not in {18083, 18086}        # 不撞 chroma/cross-link
+
+
 def test_probe_http_kind_uses_health(monkeypatch):
     monkeypatch.setattr(ms, "_http_health", lambda url, timeout=2.0: True)
     monkeypatch.setattr(ms, "_tcp_open", lambda h, p, timeout=2.0: False)  # 不应被调用

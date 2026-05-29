@@ -27,6 +27,15 @@ def cmd_agent(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    # passthrough 绑非 loopback = 未认证对外开放 → loud WARN(secure-by-default 兜底)
+    try:
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        from codev_platform.core.config import load_config
+        from codev_platform.gateway.auth import build_authenticator, warn_if_insecure
+        warn_if_insecure(build_authenticator(load_config()), args.host)
+    except Exception:  # noqa: BLE001 - 警告失败不阻塞起服务
+        pass
     # 延迟到此 import service,避免没装 extra 时整个 CLI 挂掉
     uvicorn.run(
         "codev_platform.agent.service:app",

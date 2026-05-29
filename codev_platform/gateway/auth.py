@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from codev_platform.core import identity as _identity
 from codev_platform.core.config import get as _cfg_get
+
+_log = logging.getLogger("codev_platform.gateway")
 
 
 def token_hash(token: str) -> str:
@@ -85,11 +88,11 @@ class TokenAuthenticator:
             raise Unauthorized("缺少 Authorization: Bearer <token>")
         presented = token_hash(tok)
         ident = None
-        # 遍历 + 常量时间比对:不因命中/字符差异泄漏时序;hash 本身已使明文不可逆
+        # 遍历 + 常量时间比对:不因命中/字符差异泄漏时序;hash 本身已使明文不可逆。
+        # 不 break —— 命中后仍走完全表, 使命中/未命中耗时一致(消除"提前返回"时序侧信道)。
         for h, meta in self._by_hash.items():
             if hmac.compare_digest(h, presented):
                 ident = meta
-                break
         if ident is None:
             raise Unauthorized("无效 token")
         return Identity(
@@ -105,3 +108,20 @@ def build_authenticator(cfg: dict | None = None) -> Authenticator:
     if mode == "token":
         return TokenAuthenticator(_cfg_get(cfg or {}, "gateway.tokens", {}) or {})
     return PassthroughAuthenticator()
+
+
+def _is_loopback(host: str) -> bool:
+    h = (host or "").strip().lower()
+    return h in {"127.0.0.1", "::1", "localhost", ""}
+
+
+def warn_if_insecure(authenticator: Authenticator, host: str) -> None:
+    """passthrough 绑非 loopback = 未认证对外开放 → 启动期 loud WARN(secure-by-default 兜底)。
+
+    passthrough 不验签, 任何请求落 local/default。绑 127.0.0.1 仅本机可达可接受;一旦绑
+    0.0.0.0 / 实 IP 暴露到网络, 必须切 token 模式。挂载端点时调一次。"""
+    if isinstance(authenticator, PassthroughAuthenticator) and not _is_loopback(host):
+        _log.warning(
+            "[gateway] auth_mode=passthrough 绑非 loopback host=%s —— 未认证对外开放! "
+            "网络暴露请切 config.gateway.auth_mode=token(见 config.example.json)。", host,
+        )

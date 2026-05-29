@@ -130,9 +130,26 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     out.append(MCPEndpoint(name="cross-link", kind="cross_link", port=cl_port,
                            cmd=build_cross_link_cmd(venv_py, cl_port)))
 
-    # codegraph per-project
+    # codegraph per-project。auto 分配端口时跳过所有显式端口 + chroma/cross-link 端口, 防撞
+    # (审计 Concern 4: 显式 18090 与 auto base 18090 会撞)。注: auto 端口随"有几个 repo 存在"
+    # 浮动 → 业务仓 .mcp.json 要连固定 URL 必须显式 pin codegraph_sse_port(config.example 已说明)。
     projects = _cfg_get(cfg, "projects") or {}
+    reserved: set[int] = {chroma_port, cl_port}
+    for p in projects:
+        pc = projects.get(p)
+        if isinstance(pc, dict) and pc.get("codegraph_sse_port"):
+            reserved.add(int(pc["codegraph_sse_port"]))
     auto_port = DEFAULT_CODEGRAPH_BASE_PORT
+
+    def _next_auto() -> int:
+        nonlocal auto_port
+        while auto_port in reserved:
+            auto_port += 1
+        p = auto_port
+        reserved.add(p)
+        auto_port += 1
+        return p
+
     for pid in sorted(p for p in projects if isinstance(projects.get(p), dict)):
         pconf = projects[pid]
         repo = pconf.get("repo_path")
@@ -142,9 +159,7 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
         repo_path = Path(repo).expanduser()
         if not repo_path.exists():
             continue
-        port = int(explicit_port) if explicit_port else auto_port
-        if not explicit_port:
-            auto_port += 1
+        port = int(explicit_port) if explicit_port else _next_auto()
         out.append(MCPEndpoint(
             name=f"codegraph:{pid}", kind="codegraph", port=port, project_id=pid,
             cmd=build_codegraph_proxy_cmd(mcp_proxy, port), cwd=str(repo_path),
