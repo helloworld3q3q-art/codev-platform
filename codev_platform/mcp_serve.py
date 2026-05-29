@@ -115,10 +115,15 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     mcp_proxy = _mcp_proxy_exe(cfg)
     out: list[MCPEndpoint] = []
 
-    # chroma (self-spawn via launcher; 仅登记用于健康探测)
+    # chroma daemon。业务仓 .mcp.json 走 type:sse 直连后, 失去 launcher 的 per-session
+    # auto-spawn → `serve-mcp start` 负责把它拉起作常驻 (residency)。self_spawned=True 仅
+    # 表示它也可被业务仓 Claude 会话经 launcher 拉起 (两条路径幂等: 已起则都跳过)。
     chroma_port = int(_cfg_get(cfg, "daemon.port") or DEFAULT_CHROMA_PORT)
-    out.append(MCPEndpoint(name="platform-docs", kind="chroma", port=chroma_port,
-                           cmd=None, self_spawned=True))
+    out.append(MCPEndpoint(
+        name="platform-docs", kind="chroma", port=chroma_port,
+        cmd=[str(venv_py), "-m", "codev_platform.chroma.server", "--http"],
+        self_spawned=True,
+    ))
 
     # cross-link (本仓, 本编排器拉起)
     cl_port = int(_cfg_get(cfg, "mcp.cross_link_sse_port") or DEFAULT_CROSS_LINK_PORT)
@@ -216,11 +221,9 @@ def ensure_serving(cfg: dict | None = None) -> list[dict[str, Any]]:
         if status == "ok":
             results.append({"name": ep.name, "action": "already-up", "status": "ok"})
             continue
-        if ep.self_spawned or ep.cmd is None:
-            results.append({
-                "name": ep.name, "action": "skip-self-spawn", "status": status,
-                "note": "chroma daemon 由业务仓 Claude 会话经 launcher 自动拉起",
-            })
+        if ep.cmd is None:
+            results.append({"name": ep.name, "action": "skip", "status": status,
+                            "note": "无 spawn 命令(外部托管)"})
             continue
         # 缺 mcp-proxy / venv python 时给清晰错误, 不静默
         exe = Path(ep.cmd[0])
@@ -229,5 +232,7 @@ def ensure_serving(cfg: dict | None = None) -> list[dict[str, Any]]:
                             "error": f"可执行不存在: {exe}"})
             continue
         pid = _spawn_detached(ep.cmd, ep.cwd, log_dir / f"{ep.name.replace(':', '_')}.log")
-        results.append({"name": ep.name, "action": "spawned", "status": "starting", "pid": pid})
+        note = "chroma daemon 预热模型 ~30-60s" if ep.kind == "chroma" else ""
+        results.append({"name": ep.name, "action": "spawned", "status": "starting",
+                        "pid": pid, "note": note})
     return results

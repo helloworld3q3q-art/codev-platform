@@ -37,7 +37,10 @@ def test_iter_endpoints_always_has_chroma_and_cross_link(tmp_path):
     cfg = {"daemon": {"port": 18083}, "mcp": {"cross_link_sse_port": 18086}, "projects": {}}
     eps = ms.iter_endpoints(cfg)
     kinds = {e.kind: e for e in eps}
-    assert kinds["chroma"].self_spawned is True and kinds["chroma"].cmd is None
+    # chroma 现在也可由 serve-mcp start 拉起作常驻 (cutover 后失去 launcher auto-spawn);
+    # self_spawned 仅表示它也能被业务仓 Claude 会话经 launcher 拉起
+    assert kinds["chroma"].self_spawned is True and kinds["chroma"].cmd is not None
+    assert "codev_platform.chroma.server" in kinds["chroma"].cmd
     assert kinds["cross_link"].port == 18086 and kinds["cross_link"].cmd is not None
 
 
