@@ -71,7 +71,9 @@ class SqlMemoryStore(MemoryStore):
 
     def write(self, entry: MemoryEntry) -> str:
         self._ensure()
-        eid = entry.id or uuid.uuid4().hex
+        # 用 str(uuid4) 规范 dashed 形式:与 _row_to_entry 的 str(UUID) 读回形式一致,
+        # 保证 write() 返回的 id 能与 list_scope 读回的 id 字符串相等(否则 hex 与 dashed 不等)。
+        eid = entry.id or str(uuid.uuid4())
         with self._write_pool.connection() as conn:
             conn.execute(
                 "INSERT INTO memory_entries "
@@ -85,16 +87,23 @@ class SqlMemoryStore(MemoryStore):
         return eid
 
     def supersede(self, old_id: str, new_entry: MemoryEntry) -> str:
-        """新条目取代旧条目:旧 status→superseded,新条目 supersedes=old_id(留痕,不物删)。"""
+        """新条目取代旧条目:旧 status→superseded,新条目 supersedes=old_id(留痕,不物删)。
+
+        旧条目须存在且与新条目同 org(防跨 org 串接 supersede 链);找不到 → 抛 ValueError
+        回滚事务,不写孤儿新条目。
+        """
         self._ensure()
         new_entry.supersedes = old_id
         with self._write_pool.connection() as conn:
             with conn.transaction():
-                conn.execute(
-                    "UPDATE memory_entries SET status='superseded', updated_at=now() WHERE id=%s",
-                    (old_id,),
+                cur = conn.execute(
+                    "UPDATE memory_entries SET status='superseded', updated_at=now() "
+                    "WHERE id=%s AND org_id=%s",
+                    (old_id, new_entry.org_id),
                 )
-                eid = new_entry.id or uuid.uuid4().hex
+                if cur.rowcount == 0:
+                    raise ValueError(f"supersede 目标不存在或跨 org: id={old_id} org={new_entry.org_id}")
+                eid = new_entry.id or str(uuid.uuid4())
                 conn.execute(
                     "INSERT INTO memory_entries "
                     "(id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "

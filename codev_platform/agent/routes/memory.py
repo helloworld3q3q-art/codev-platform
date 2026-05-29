@@ -5,6 +5,8 @@ memory PG 未配 → 503。权限校验(allowed)是 M5,这里先不拦(单人期
 """
 from __future__ import annotations
 
+import sys
+
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from codev_platform.agent import deps
@@ -47,8 +49,9 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     )
     try:
         eid = store.write(entry)
-    except Exception as e:  # noqa: BLE001 — DB 错转 503
-        raise HTTPException(status_code=503, detail=f"memory write 失败: {e}") from e
+    except Exception as e:  # noqa: BLE001 — DB 错转 503;完整异常只进 server 日志,不回客户端(防泄漏拓扑)
+        print(f"[memory.write] {type(e).__name__}: {e}", file=sys.stderr)
+        raise HTTPException(status_code=503, detail="memory store unavailable") from e
     entry.id = eid
     return _to_out(entry)
 
@@ -66,6 +69,7 @@ def list_memory(
     org_id = _org_id(request)
     try:
         entries = store.list_scope(scope, scope_ref, org_id=org_id, limit=limit)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"memory list 失败: {e}") from e
+    except Exception as e:  # noqa: BLE001 — 同 write:完整异常只进 server 日志
+        print(f"[memory.list] {type(e).__name__}: {e}", file=sys.stderr)
+        raise HTTPException(status_code=503, detail="memory store unavailable") from e
     return [_to_out(e) for e in entries]

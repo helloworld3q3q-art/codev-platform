@@ -19,17 +19,21 @@ _NONREDLINE_ORDER = {
     "personal_first": {"personal": 0, "project": 1, "team": 2, "org": 3},
     "org_first": {"org": 0, "project": 1, "team": 2, "personal": 3},
 }
+# 红线之间固定按 org 治理序裁决(org 最高),不受 policy 影响 —— plan §3.5
+# "is_redline 永远最高不可配"。否则 personal_first 会让个人 redline 压过 org 合规红线。
+_REDLINE_ORDER = {"org": 0, "project": 1, "team": 2, "personal": 3}
 DEFAULT_POLICY = "personal_first"
 
 
 def _rank(entry: MemoryEntry, policy: str) -> tuple[int, int]:
     """排序键(越小越优先)。
     第 1 维:红线 0 / 非红线 1(红线永远压非红线,不论 policy)。
-    第 2 维:非红线时按 policy 的作用域序;红线之间按同序兜底。
+    第 2 维:红线之间按 org 治理序(不可配,合规底线);非红线按 policy 的作用域序。
     """
+    if entry.is_redline:
+        return (0, _REDLINE_ORDER.get(entry.scope, 99))
     order = _NONREDLINE_ORDER.get(policy, _NONREDLINE_ORDER[DEFAULT_POLICY])
-    scope_rank = order.get(entry.scope, 99)
-    return (0 if entry.is_redline else 1, scope_rank)
+    return (1, order.get(entry.scope, 99))
 
 
 def resolve_conflicts(entries: list[MemoryEntry], policy: str = DEFAULT_POLICY) -> list[MemoryEntry]:

@@ -71,26 +71,41 @@ def main() -> int:
     else:
         _fail("list_scope 没读到刚写的"); fails += 1
 
+    def _status(entry_id):
+        """直查某行 status(绕过 list_scope 只看 active,验"留痕不物删")。"""
+        with mem._read_pool.connection() as conn:
+            row = conn.execute("SELECT status FROM memory_entries WHERE id=%s", (entry_id,)).fetchone()
+        return row[0] if row else None
+
     # ---- 2. supersede(留痕)----
     print("\n[2] supersede")
     e2 = MemoryEntry(id="", scope="personal", scope_ref=uid, owner_user_id=uid,
                      content="我改主意了,要详细", kind="preference", topic_key="style")
-    mem.supersede(mid, e2)
+    new_id = mem.supersede(mid, e2)
     active = mem.list_scope("personal", uid)
-    if any(m.content == "我改主意了,要详细" for m in active) and \
-       not any(m.content == "我喜欢简洁回答" for m in active):
-        _ok("supersede 后只见新值,旧值 superseded 不在 active")
+    seen_new = any(m.content == "我改主意了,要详细" for m in active)
+    gone_old = not any(m.content == "我喜欢简洁回答" for m in active)
+    # 关键:直查旧行 status 必须真变 'superseded'(不是被物删 —— 留痕),新行 supersedes 指向旧 id
+    old_superseded = _status(mid) == "superseded"
+    chain_ok = any(m.id == new_id and m.supersedes == mid for m in active)
+    if seen_new and gone_old and old_superseded and chain_ok:
+        _ok("supersede:新值生效 + 旧行 status=superseded 留痕(非物删)+ 新行 supersedes 指旧 id")
     else:
-        _fail("supersede 语义不对"); fails += 1
+        _fail(f"supersede 语义不对 (新={seen_new} 旧不在active={gone_old} "
+              f"旧status={_status(mid)} 链={chain_ok})"); fails += 1
 
     # ---- 3. forget ----
     print("\n[3] forget")
-    for m in active:
-        mem.forget(m.id)
-    if not mem.list_scope("personal", uid):
-        _ok("forget 后 active 为空")
+    forget_ids = [m.id for m in active]
+    for eid in forget_ids:
+        mem.forget(eid)
+    # 直查:forgotten 行 status 必须真变 'forgotten'(留痕,非物删)
+    statuses_ok = all(_status(eid) == "forgotten" for eid in forget_ids)
+    repeat_false = all(mem.forget(eid) is False for eid in forget_ids)  # 重复 forget 返回 False
+    if not mem.list_scope("personal", uid) and statuses_ok and repeat_false:
+        _ok("forget:active 清空 + 行 status=forgotten 留痕 + 重复 forget 返回 False")
     else:
-        _fail("forget 后仍有 active"); fails += 1
+        _fail(f"forget 语义不对 (statuses_ok={statuses_ok} repeat_false={repeat_false})"); fails += 1
 
     # ---- 4. 冲突消解(纯逻辑,顺带验)----
     print("\n[4] 冲突消解 policy")

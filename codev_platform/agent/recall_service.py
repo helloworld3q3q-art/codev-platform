@@ -24,8 +24,6 @@ from abc import ABC, abstractmethod
 from codev_platform.agent.memory_recall import DEFAULT_POLICY, resolve_conflicts
 from codev_platform.agent.memory_store import MemoryEntry, MemoryStore
 
-_DEFAULT_ORG = "default"
-
 
 def visible_scopes(org_id: str, user_id: str | None, project_id: str | None) -> list[tuple[str, str]]:
     """当前请求上下文下,该 user 可被 recall 的 (scope, scope_ref) 集合。
