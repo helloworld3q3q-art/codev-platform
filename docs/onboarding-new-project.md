@@ -50,6 +50,8 @@ cd <你的项目仓>
 }
 ```
 > `$CLAUDE_PROJECT_DIR` 由 Claude Code 注入、sh 运行时展开 —— 它保证 server 在**你打开的仓根**解析 project_id + 数据,不靠 spawn 时的 cwd(那个不可靠)。
+>
+> ⚠️ **`business-link` 默认别放**。cross-link 只适用 **Java+Flyway SQL+Python 全栈**(扫接口↔表↔写库),且扫描器在那类业务仓里。TS / 前端 / 纯文档项目放了它,一调就报 `cross_layer.sqlite 不存在`。只在确为该类全栈项目时才加这第三个 server。
 
 ### 3. doc_patterns —— 文档不在默认位置时必做
 默认只扫 `CLAUDE.md` / `README.md` / `docs/**`。**设计文档在根目录或别处**(如 `PRD.md`、`prompts/*.md`)就建 `<你的仓>/.claude/index.json`:
@@ -79,7 +81,7 @@ echo "data/chroma/" >> .gitignore   # chroma 索引机器本地, 别提交(.code
 ## 说明 / 边界
 
 - **数据隔离**:`~/.codev-platform/config.json` 的 `data.platform_data_dir=null` 时,每个项目索引存各自仓 `data/`(gitignored),互不影响。
-- **cross-link(business-link)是进阶项**:需 Flyway + Java mapper/controller(+前端/Python)全栈结构,且在 `platform_meta/projects/<id>/meta.json` 配 `health.*_patterns` 后单独建图。纯文档/单语言项目 connected 但空即可。
+- **cross-link(business-link)是进阶项,默认不放**:需 Flyway + Java mapper/controller(+前端/Python)全栈结构,扫描器在那类业务仓里,且要在 `platform_meta/projects/<id>/meta.json` 配 `health.*_patterns` 后单独建图。**非该类项目放了它,调用即报 `cross_layer.sqlite 不存在`** —— 直接从 .mcp.json 删掉。
 - **日常维护**:改完重建 —— 在仓里 `codev-platform reindex --chroma --force` / `codegraph sync`;装了 `codev-platform install-hooks` 则 commit 自动重建。
 
 ---
