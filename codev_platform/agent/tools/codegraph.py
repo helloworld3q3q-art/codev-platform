@@ -16,6 +16,16 @@ from codev_platform.agent.tools.base import Tool
 _MAX_ROWS = 20
 
 
+def _fts_query(q: str) -> str:
+    """把自由文本转成安全的 FTS5 查询:逐 token 包成带引号的字符串字面量,
+    避免 '.' '/' '(' 等被 FTS5 当语法符号报错。token 间 OR(宽松召回)。"""
+    import re
+    tokens = re.findall(r"[A-Za-z0-9_]+", q)
+    if not tokens:
+        return '""'
+    return " OR ".join(f'"{t}"' for t in tokens)
+
+
 def _find_db() -> Path | None:
     """从 cwd 向上找 .codegraph/codegraph.db(agent 在某仓内运行)."""
     cur = Path.cwd().resolve()
@@ -63,12 +73,16 @@ class CodegraphSearchTool(Tool):
                 rows = con.execute(
                     "SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.id "
                     "WHERE nodes_fts MATCH ? LIMIT ?",
-                    (q, _MAX_ROWS),
+                    (_fts_query(q), _MAX_ROWS),
                 ).fetchall()
                 if not rows:
+                    # 回退:按最后一个标识符 token 做 LIKE(应对 FTS 分词不命中)
+                    import re as _re
+                    toks = _re.findall(r"[A-Za-z0-9_]+", q)
+                    needle = toks[-1] if toks else q
                     rows = con.execute(
                         "SELECT * FROM nodes WHERE name LIKE ? LIMIT ?",
-                        (f"%{q}%", _MAX_ROWS),
+                        (f"%{needle}%", _MAX_ROWS),
                     ).fetchall()
             finally:
                 con.close()
@@ -76,6 +90,18 @@ class CodegraphSearchTool(Tool):
             return ToolResult(call_id="", content=f"codegraph 查询失败: {e}", is_error=True)
         if not rows:
             return ToolResult(call_id="", content=f"未找到符号: {q}")
+        # 排序:精确名命中 > 名字含 query token > 其余;同档 file/import 排后(优先 class/function/method)
+        import re as _re
+        toks = [t.lower() for t in _re.findall(r"[A-Za-z0-9_]+", q)]
+        kind_rank = {"class": 0, "function": 0, "method": 0, "interface": 0}
+
+        def _score(r: sqlite3.Row) -> tuple:
+            nm = (r["name"] or "").lower()
+            exact = 0 if nm in toks else 1
+            contains = 0 if any(t in nm for t in toks) else 1
+            return (exact, contains, kind_rank.get(r["kind"], 5))
+
+        rows = sorted(rows, key=_score)
         out = [_node_brief(r) for r in rows]
         return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
 
@@ -84,10 +110,18 @@ def _relations(name: str, incoming: bool) -> ToolResult:
     """incoming=True 找 callers(谁指向它);False 找 callees(它指向谁)."""
     if not name:
         return ToolResult(call_id="", content="缺少 name 参数", is_error=True)
+    # 支持 Class.method 限定名:先按全名,再退到点号后的裸名(codegraph 多按裸名存方法)
+    candidates = [name]
+    if "." in name:
+        candidates.append(name.rsplit(".", 1)[1])
     try:
         con = _connect()
         try:
-            ids = [r["id"] for r in con.execute("SELECT id FROM nodes WHERE name = ? LIMIT 5", (name,))]
+            ids: list[Any] = []
+            for cand in candidates:
+                ids = [r["id"] for r in con.execute("SELECT id FROM nodes WHERE name = ? LIMIT 5", (cand,))]
+                if ids:
+                    break
             if not ids:
                 return ToolResult(call_id="", content=f"未找到符号: {name}")
             ph = ",".join("?" * len(ids))

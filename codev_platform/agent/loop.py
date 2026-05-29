@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,6 +54,7 @@ class AgentLoop:
         specs = self.registry.specs()
         steps: list[Step] = []
         total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+        seen_calls: set[str] = set()  # 硬护栏:记录已执行过的 (tool, args) 指纹
 
         for n in range(1, self.max_steps + 1):
             turn: AssistantTurn = self.provider.chat(CODE_UNDERSTANDING_SYSTEM, messages, specs)
@@ -68,14 +70,28 @@ class AgentLoop:
                 return AgentResult(answer, steps, total_usage, "answered")
 
             # 有工具调用:记录 assistant 这轮,执行每个 call,把结果回灌
-            messages.append(Message(role="assistant", content=turn.text, tool_calls=turn.tool_calls))
+            messages.append(Message(role="assistant", content=turn.text,
+                                    tool_calls=turn.tool_calls, extra=turn.extra))
+            near_limit = n >= self.max_steps - 1  # 倒数一步:提示强制收尾
             for call in turn.tool_calls:
+                fp = f"{call.name}:{json.dumps(call.args, sort_keys=True, ensure_ascii=False)}"
                 tool = self.registry.get(call.name)
                 if tool is None:
                     result = ToolResult(call_id=call.id, content=f"未知工具: {call.name}", is_error=True)
+                elif fp in seen_calls:
+                    # 硬护栏:同 tool+args 重复调用 → 不再执行,回灌提示逼其换路或收尾
+                    result = ToolResult(
+                        call_id=call.id, is_error=True,
+                        content=(f"[loop guard] 你已用相同参数调用过 {call.name},结果不会变。"
+                                 f"请换不同查法,或用已掌握的证据给出(部分)最终答案,不要重复同一调用。"),
+                    )
                 else:
+                    seen_calls.add(fp)
                     result = tool.run(call.args)
                     result.call_id = call.id
+                    if near_limit:
+                        result.content += ("\n\n[loop guard] 步数即将用尽,请基于现有证据立即给出最终答案"
+                                           "(已解决的部分先答,未解决的标注清楚),不要再调用工具。")
                 summary = _summarize(result.content)
                 steps.append(Step(n, turn.text, call.name, call.args, summary))
                 if trace:
