@@ -5,8 +5,10 @@ getter,不自己 new 单例。
 """
 from __future__ import annotations
 
+from codev_platform.agent import config as acfg
 from codev_platform.agent.brain.base import LLMProvider
 from codev_platform.agent.brain.registry import get_provider as _get_provider
+from codev_platform.agent.services.chat_service import ChatService
 from codev_platform.agent.session import SessionStore
 from codev_platform.agent.tools import build_default_registry
 from codev_platform.agent.tools.base import ToolRegistry
@@ -26,3 +28,19 @@ def get_registry() -> ToolRegistry:
 def get_provider() -> LLMProvider:
     """每次读 config 解析(便于运行中切 provider). key 缺失抛 RuntimeError."""
     return _get_provider()
+
+
+_chat_service: ChatService | None = None
+
+
+def get_chat_service() -> ChatService:
+    """ChatService 单例,注入进程级 sessions/registry + provider 工厂 + max_steps 解析。"""
+    global _chat_service
+    if _chat_service is None:
+        _chat_service = ChatService(
+            sessions=_sessions,
+            registry=_registry,
+            provider_factory=_get_provider,
+            default_max_steps=lambda: acfg.max_steps(acfg.agent_cfg()),
+        )
+    return _chat_service
