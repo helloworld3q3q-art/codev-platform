@@ -74,6 +74,13 @@ DEFAULTS: dict[str, Any] = {
         # 读写分离扩展口 (预留, 不预建副本): 配只读副本 DSN 后读路径(get/has)自动走它,
         # 写路径(new/append)仍走 pg_dsn 主库. None = 读写同库 (单 PG 现状). 详见 memory plan §3.9。
         "pg_dsn_read": None,
+        # M3 召回: 后端 "local"(直查 PG 结构化召回+冲突消解, 现状) | "vector"(chroma 语义排序, 数据量大时接,
+        # 接缝已留见 recall_service.py). recall_limit = 注入 prompt 的最多记忆条数.
+        "recall_backend": "local",
+        "recall_limit": 8,
+        # 冲突消解 policy (memory plan §3.5): "personal_first"(默认) | "org_first". 红线永远最高不可配.
+        # M5 起改从 PG orgs.conflict_policy 读, 现为静态默认.
+        "conflict_policy": "personal_first",
     },
     "agent": {
         # 会话存储后端: "memory" (默认, 进程内, 重启丢) | "pg" (持久化到 memory.pg_dsn).

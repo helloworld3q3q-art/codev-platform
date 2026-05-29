@@ -79,17 +79,48 @@ def get_memory_store():
     return _memory_store
 
 
+_recall_built = False
+_recall_service = None  # type: ignore[var-annotated]
+
+
+def get_recall_service():
+    """记忆召回服务(M3)。无 memory store → None(召回不启用)。
+    backend="local" → LocalRecallService 直查 PG;"vector" 接缝(未接,见 recall_service.py)。
+    单例懒建。
+    """
+    global _recall_built, _recall_service
+    if not _recall_built:
+        _recall_built = True
+        store = get_memory_store()
+        if store is not None:
+            cfg = acfg.agent_cfg()
+            backend = acfg.get(cfg, "memory.recall_backend", "local")
+            policy = acfg.get(cfg, "memory.conflict_policy", "personal_first")
+            if backend == "local":
+                from codev_platform.agent.recall_service import LocalRecallService
+                _recall_service = LocalRecallService(store, default_policy=policy)
+            else:
+                import sys
+                print(f"[agent.deps] memory.recall_backend={backend!r} 暂未接(仅 'local' 可用), "
+                      f"召回退化为不启用", file=sys.stderr)
+                _recall_service = None
+    return _recall_service
+
+
 _chat_service: ChatService | None = None
 
 
 def get_chat_service() -> ChatService:
-    """ChatService 单例,注入进程级 sessions/registry + provider 工厂 + max_steps 解析。"""
+    """ChatService 单例,注入进程级 sessions/registry + provider 工厂 + max_steps 解析 + 召回。"""
     global _chat_service
     if _chat_service is None:
+        cfg = acfg.agent_cfg()
         _chat_service = ChatService(
             sessions=_sessions,
             registry_factory=build_default_registry,  # (project_id) -> registry,P2 多租户
             provider_factory=_get_provider,
             default_max_steps=lambda: acfg.max_steps(acfg.agent_cfg()),
+            recall=get_recall_service(),
+            recall_limit=acfg.get(cfg, "memory.recall_limit", 8),
         )
     return _chat_service

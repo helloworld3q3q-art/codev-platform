@@ -12,6 +12,7 @@ from typing import Callable
 from codev_platform.agent.brain.base import LLMProvider, Message
 from codev_platform.agent.loop import AgentLoop, AgentResult
 from codev_platform.agent.prompts import build_code_understanding_system
+from codev_platform.agent.recall_service import RecallService
 from codev_platform.agent.session import SessionStore
 from codev_platform.agent.tools.base import ToolRegistry
 from codev_platform.agent.trace import Trace
@@ -31,17 +32,22 @@ class ChatService:
         registry_factory: Callable[[str | None], ToolRegistry],
         provider_factory: Callable[[], LLMProvider],
         default_max_steps: Callable[[], int],
+        recall: RecallService | None = None,
+        recall_limit: int = 8,
     ) -> None:
         # provider_factory: 每次调用重解析 config(支持运行中切 provider)。
         # registry_factory(project_id): 按请求 project_id 建工具集(P2 多租户路由)。
+        # recall: 分层记忆召回(M3),None = 未启用 memory(召回段不注入)。
         self._sessions = sessions
         self._registry_factory = registry_factory
         self._provider_factory = provider_factory
         self._default_max_steps = default_max_steps
+        self._recall = recall
+        self._recall_limit = recall_limit
 
     def ask(self, question: str, session_id: str | None = None,
             max_steps: int | None = None, user_id: str = "local",
-            project_id: str | None = None) -> ChatOutcome:
+            project_id: str | None = None, org_id: str = "default") -> ChatOutcome:
         provider = self._provider_factory()  # 缺 key 抛 RuntimeError,由调用层(route)映射
 
         if session_id and self._sessions.has(session_id, user_id):
@@ -51,8 +57,10 @@ class ChatService:
         history = self._sessions.get(sid, user_id)
 
         registry = self._registry_factory(project_id)  # 工具按 project_id 路由
-        # 把上下文注入 system prompt,让模型"知道"自己在哪个项目 / 为谁(认知与工具路由一致)
-        system = build_code_understanding_system(project_id=project_id, user_id=user_id)
+        memories = self._recall_memories(org_id, user_id, project_id, question)
+        # 把上下文 + 召回记忆注入 system prompt,让模型"知道"自己在哪个项目 / 为谁 + 遵循已知偏好
+        system = build_code_understanding_system(
+            project_id=project_id, user_id=user_id, org_id=org_id, memories=memories)
         loop = AgentLoop(provider, registry, max_steps=max_steps or self._default_max_steps())
         trace = Trace(sid, provider.name, provider.model)
         result = loop.run(question, history=history, trace=trace, system=system)
@@ -63,3 +71,14 @@ class ChatService:
             Message(role="assistant", content=result.answer),
         )
         return ChatOutcome(session_id=sid, result=result)
+
+    def _recall_memories(self, org_id: str, user_id: str, project_id: str | None, question: str):
+        """召回分层记忆;失败(DB 抖动等)只退化为"不注入记忆",绝不阻断问答。"""
+        if self._recall is None:
+            return []
+        try:
+            return self._recall.recall(
+                org_id=org_id, user_id=user_id, project_id=project_id,
+                query=question, limit=self._recall_limit)
+        except Exception:  # noqa: BLE001 — 召回非关键路径,失败静默退化
+            return []

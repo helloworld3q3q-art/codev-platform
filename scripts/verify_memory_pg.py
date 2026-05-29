@@ -102,6 +102,24 @@ def main() -> int:
     else:
         _fail("冲突消解结果不对"); fails += 1
 
+    # ---- 4b. 跨作用域召回端到端(M3,直查真库)----
+    print("\n[4b] 跨作用域召回(M3 真机)")
+    from codev_platform.agent.recall_service import LocalRecallService
+    proj = f"projverify-{uid}"
+    mem.write(MemoryEntry(id="", scope="org", scope_ref="org", owner_user_id=uid,
+                          content="提交不带 AI 痕迹", is_redline=True, topic_key="commit-style"))
+    mem.write(MemoryEntry(id="", scope="project", scope_ref=proj, owner_user_id=uid,
+                          content="本项目用 conventional commits"))
+    mem.write(MemoryEntry(id="", scope="personal", scope_ref=uid, owner_user_id=uid,
+                          content="我喜欢中文 commit message"))
+    recalled = LocalRecallService(mem).recall(
+        org_id="default", user_id=uid, project_id=proj, query="commit", limit=8)
+    rc = [m.content for m in recalled]
+    if len(recalled) == 3 and recalled[0].is_redline and recalled[0].content == "提交不带 AI 痕迹":
+        _ok(f"召回 3 作用域合并,redline 居首:{rc}")
+    else:
+        _fail(f"召回结果不对:{rc}"); fails += 1
+
     # ---- 5. 会话 round-trip + 模拟重启持久化 ----
     print("\n[5] 会话持久化 + 模拟重启")
     s1 = SqlSessionStore(dsn, read_dsn=read_dsn)

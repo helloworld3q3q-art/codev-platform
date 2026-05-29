@@ -25,28 +25,49 @@ CODE_UNDERSTANDING_SYSTEM = """你是 codev-platform 的只读代码理解 agent
 """
 
 
+def _format_memories(memories) -> str:
+    """把召回的记忆(MemoryEntry 列表)排成 prompt 段。redline 明确标注为组织硬约束。
+
+    duck-typed:只用 .content / .scope / .is_redline,不强依赖 MemoryEntry 类型(便于测试 / 解耦)。
+    """
+    lines = ["【已知记忆(按作用域 + 优先级召回,供回答时遵循)】"]
+    for m in memories:
+        tag = "redline/" + m.scope if m.is_redline else m.scope
+        lines.append(f"- [{tag}] {m.content}")
+    lines.append("遵循上述记忆;标 redline 的是组织硬约束,任何情况不得违背,与其它记忆冲突时以 redline 为准。")
+    return "\n".join(lines)
+
+
 def build_code_understanding_system(
     project_id: str | None = None,
     user_id: str | None = None,
     org_id: str | None = None,
+    memories=None,
 ) -> str:
-    """在基础 prompt 前注入当前请求上下文 (org/user/project),让模型"知道自己在为谁、
-    在哪个组织/项目工作"。工具已按 project_id 路由(查对应项目的库),本注入让模型的
-    自我认知与之一致 —— 否则问"现在哪个项目"会照写死 prompt 瞎猜。也是权限的认知地基。
+    """在基础 prompt 前注入当前请求上下文 (org/user/project) + 召回的分层记忆,让模型
+    "知道自己在为谁、在哪个组织/项目工作"并遵循已知偏好/约束。工具已按 project_id 路由
+    (查对应项目的库),本注入让模型的自我认知与之一致 —— 否则问"现在哪个项目"会照写死
+    prompt 瞎猜。也是权限的认知地基。memories 由 RecallService 召回(M3),空则不注入。
     """
-    if not (project_id or user_id or org_id):
+    if not (project_id or user_id or org_id or memories):
         return CODE_UNDERSTANDING_SYSTEM
-    ctx_lines = ["【当前会话上下文】"]
-    if org_id:
-        ctx_lines.append(f"- 组织(org):{org_id}")
-    if user_id:
-        ctx_lines.append(f"- 用户(user):{user_id}")
-    if project_id:
-        ctx_lines.append(
-            f"- 项目(project):{project_id}"
-            "(你的检索工具已绑定到此项目,所有 codegraph/cross_link/search_docs"
-            "查的都是这个项目的数据;问'现在哪个项目'就答它)"
-        )
-    else:
-        ctx_lines.append("- 项目:未指定(工具按进程默认仓)")
-    return "\n".join(ctx_lines) + "\n\n" + CODE_UNDERSTANDING_SYSTEM
+    parts: list[str] = []
+    if project_id or user_id or org_id:
+        ctx_lines = ["【当前会话上下文】"]
+        if org_id:
+            ctx_lines.append(f"- 组织(org):{org_id}")
+        if user_id:
+            ctx_lines.append(f"- 用户(user):{user_id}")
+        if project_id:
+            ctx_lines.append(
+                f"- 项目(project):{project_id}"
+                "(你的检索工具已绑定到此项目,所有 codegraph/cross_link/search_docs"
+                "查的都是这个项目的数据;问'现在哪个项目'就答它)"
+            )
+        else:
+            ctx_lines.append("- 项目:未指定(工具按进程默认仓)")
+        parts.append("\n".join(ctx_lines))
+    if memories:
+        parts.append(_format_memories(memories))
+    parts.append(CODE_UNDERSTANDING_SYSTEM)
+    return "\n\n".join(parts)

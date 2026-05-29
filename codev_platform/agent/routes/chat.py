@@ -35,13 +35,24 @@ def _resolve_project_id(req: ChatRequest, request: Request) -> str | None:
     return req.project_id
 
 
+def _resolve_org_id(request: Request) -> str:
+    """X-Org-Id 头 > 'default'(单 org 期)。一人多 org 无法从 user 推,故请求级带(plan §3.4)。"""
+    for key in ("X-Org-Id", "x-org-id", "X-ORG-ID"):
+        v = request.headers.get(key)
+        if v:
+            return v.strip()
+    return "default"
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, request: Request) -> ChatResponse:
     user_id = identity.resolve_from_request(request.headers)  # X-User-Id > env > 'local'
     project_id = _resolve_project_id(req, request)  # X-Project-Id > body > None(cwd)
+    org_id = _resolve_org_id(request)  # X-Org-Id > 'default'
     try:
         outcome = deps.get_chat_service().ask(
-            req.question, req.session_id, req.max_steps, user_id=user_id, project_id=project_id)
+            req.question, req.session_id, req.max_steps,
+            user_id=user_id, project_id=project_id, org_id=org_id)
     except RuntimeError as e:  # provider 缺 key 等 -> 503
         raise HTTPException(status_code=503, detail=str(e)) from e
     return _to_response(outcome)
