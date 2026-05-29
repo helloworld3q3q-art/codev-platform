@@ -64,6 +64,13 @@ env + 硬编码默认、不读 config,与 `server.py`(读 config)不一致,会�
 
 ---
 
+### 实施记录(2026-05-29)
+- **未动 `launcher.py`**:确认 `server.py` 不带 `--http` 即 stdio MCP 模式,Mac 直接 stdio 跑 server,绕开 launcher+mcp-proxy+daemon 整条链 → launcher 的 Windows 路径无需改,Windows 路径零风险。
+- **`.mcp.json`**:`command`/`args` 用 `${VAR:-默认}`,env 未设=Windows 原行为(逐字不变),Mac 在 shell profile 设 `PLATFORM_MCP_SH/FLAG/CHROMA/CROSSLINK` 切到 stdio。已用 `mcp` SDK 模拟 spawn 验证 `search_docs` 可用。
+- **`.cmd`**:保留(Windows 默认仍用),Mac 不经它。
+- **附带**:`codev-platform setup` 翻新为自包含+跨平台(原绑死三仓布局已脱节);新增 `docs/onboarding-mac.md`。
+- **遗留(用户侧)**:Mac 上把 4 行 export 加进 `~/.zshrc` + 完全重启 VSCode(CLI/agent 不越权改 shell profile)。
+
 ## 不做(YAGNI)
 - 不动 cross_link MCP(本次只解决 chroma 检索)。
 - 不开 reranker(后续单独验证 mps 可用性再开)。
