@@ -15,6 +15,7 @@ stdio 协议；启动日志写 stderr 不污染。
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import sqlite3
@@ -38,26 +39,44 @@ from mcp.types import TextContent, Tool
 from codev_platform.core.project_id import ProjectIdError, resolve_local
 from codev_platform.core.paths import cross_link_db_path
 
+# CROSS_LINK_DB 显式覆盖所有 project (stdio 调试用); 否则按 project_id 解析 per-project DB。
+# Per-project DB only. NO legacy unprefixed fallback: the unprefixed cross_layer.sqlite
+# is openclaw's historical data, so falling back would make every OTHER project serve
+# openclaw's chains (cross-project data bleed, found 2026-05-28).
 _explicit_db = os.getenv("CROSS_LINK_DB")
+_EXPLICIT_KEY = "__explicit__"  # 无 project 时的连接缓存键 (CROSS_LINK_DB 覆盖)
+
 if _explicit_db:
-    DB_PATH = Path(_explicit_db)
-    PROJECT_ID = None  # CROSS_LINK_DB 显式覆盖, 跳过 project_id 解析
     print(
-        f"[cross_link.mcp_server] DB explicit override via CROSS_LINK_DB: {DB_PATH}",
+        f"[cross_link.mcp_server] DB explicit override via CROSS_LINK_DB: {_explicit_db}",
         file=sys.stderr,
         flush=True,
     )
-else:
+
+
+def _resolve_default_project() -> str | None:
+    """import 期 best-effort 解析单 project (stdio 模式默认)。
+
+    HTTP daemon 多租户, 每请求带 ?project_id=, 不依赖此值; 故解析失败**不退出**
+    (从平台仓跑 daemon 时 resolve_local 可能解析到平台自身或失败, 都无所谓)。
+    stdio 模式真缺 project 时, main() 会硬失败。
+    """
+    if _explicit_db:
+        return None
     try:
-        PROJECT_ID = resolve_local()
-    except ProjectIdError as _pid_exc:
-        print(f"[cross_link.mcp_server] FATAL: {_pid_exc!s}", file=sys.stderr, flush=True)
-        sys.exit(1)
-    # Per-project DB only. NO legacy unprefixed fallback: the unprefixed
-    # cross_layer.sqlite is openclaw's historical data, so falling back would make
-    # every OTHER project serve openclaw's chains (cross-project data bleed, found
-    # 2026-05-28). Missing per-project DB => _ensure_conn reports "run build_index".
-    DB_PATH = cross_link_db_path(PROJECT_ID)
+        return resolve_local()
+    except ProjectIdError:
+        return None
+
+
+PROJECT_ID = _resolve_default_project()
+
+
+def _db_path_for(pid: str | None) -> Path:
+    """project_id -> cross_layer.sqlite 路径。CROSS_LINK_DB 覆盖时忽略 pid。"""
+    if _explicit_db:
+        return Path(_explicit_db)
+    return cross_link_db_path(pid)
 
 _LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
 # 使用率埋点:每次 tool 调用一行 JSON,与 chroma/search_recall.jsonl 对齐,供 ai-health 统计
@@ -87,40 +106,62 @@ def _log_usage(record: dict) -> None:
 
 
 # ----------------------------------------------------------------------
-# 连接（lazy 初始化）
+# 连接（per-project, lazy 初始化）—— 多租户: 一 daemon 服务多 project_id,
+# 每 SSE session 用 contextvar 绑定 project_id, 路由到对应 cross_layer.sqlite。
+# (镜像 chroma daemon 的 _current_project_id contextvar 模式)
 # ----------------------------------------------------------------------
 
-_conn: sqlite3.Connection | None = None
-_init_error: str | None = None
+_conns: dict[str, sqlite3.Connection] = {}   # project_id -> sqlite conn
+_init_errors: dict[str, str] = {}            # project_id -> 初始化失败原因
+
+# asyncio 单线程, dict 操作原子, 不上锁。stdio 模式 contextvar 不设 → fallback PROJECT_ID。
+_current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextVar(
+    "_cross_link_project_id", default=None
+)
 
 
-def _ensure_conn() -> sqlite3.Connection | None:
-    global _conn, _init_error
-    if _conn is not None:
-        return _conn
-    if _init_error is not None:
+def _active_pid() -> str:
+    """当前请求的 project_id: contextvar(HTTP per-session) > 默认 PROJECT_ID > explicit 键。"""
+    pid = _current_project_id.get() or PROJECT_ID
+    return pid if pid is not None else _EXPLICIT_KEY
+
+
+def _ensure_conn_for(pid: str) -> sqlite3.Connection | None:
+    """按 project_id 取/建 sqlite 连接(缓存)。缺 DB / 加载失败 → None + 记 _init_errors。"""
+    conn = _conns.get(pid)
+    if conn is not None:
+        return conn
+    if pid in _init_errors:
         return None
+    dbp = _db_path_for(None if pid == _EXPLICIT_KEY else pid)
     try:
-        _flog(f"[init] db_path={DB_PATH}")
-        if not DB_PATH.exists():
-            _init_error = f"cross_layer DB 不存在: {DB_PATH}；先跑 python -m cross_link.build_index"
-            _flog(f"[init] ERROR: {_init_error}")
+        _flog(f"[init] pid={pid} db_path={dbp}")
+        if not dbp.exists():
+            _init_errors[pid] = (
+                f"cross_layer DB 不存在: {dbp}; 先跑 python -m codev_platform.cross_link.build_index"
+            )
+            _flog(f"[init] ERROR: {_init_errors[pid]}")
             return None
-        _conn = sqlite3.connect(DB_PATH)
-        _conn.row_factory = sqlite3.Row
-        # 摸下基础统计
-        nodes = _conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
-        edges = _conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
-        meta_row = _conn.execute(
+        conn = sqlite3.connect(dbp)
+        conn.row_factory = sqlite3.Row
+        nodes = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        edges = conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        meta_row = conn.execute(
             "SELECT value FROM build_meta WHERE key='last_build_at'"
         ).fetchone()
         last_build = meta_row[0] if meta_row else "?"
-        _flog(f"[init] loaded nodes={nodes} edges={edges} last_build={last_build}")
-        return _conn
+        _flog(f"[init] pid={pid} loaded nodes={nodes} edges={edges} last_build={last_build}")
+        _conns[pid] = conn
+        return conn
     except Exception as exc:
-        _init_error = f"cross_layer DB 加载失败: {exc!s}"
-        _flog(f"[init] ERROR: {_init_error}")
+        _init_errors[pid] = f"cross_layer DB 加载失败: {exc!s}"
+        _flog(f"[init] ERROR: {_init_errors[pid]}")
         return None
+
+
+def _current_conn() -> sqlite3.Connection | None:
+    """当前 contextvar 绑定的 project 的连接。"""
+    return _ensure_conn_for(_active_pid())
 
 
 # ----------------------------------------------------------------------
@@ -263,7 +304,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         _ms = (_t.perf_counter() - _t0) * 1000
         _log_usage({
             "ts": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            "project_id": PROJECT_ID,
+            "project_id": _active_pid(),
             "tool": name,
             "args": {k: str(v)[:80] for k, v in (args or {}).items()},
             "ok": ok,
@@ -273,9 +314,9 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
 
 async def _dispatch(name: str, args: dict) -> list[TextContent]:
-    conn = _ensure_conn()
+    conn = _current_conn()
     if conn is None:
-        return _err(_init_error or "cross_layer DB 未初始化")
+        return _err(_init_errors.get(_active_pid()) or "cross_layer DB 未初始化")
 
     import time as _t
     _t0 = _t.perf_counter()
@@ -421,7 +462,8 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
                 for r in conn.execute("SELECT key, value FROM build_meta")
             }
             payload = {
-                "db_path": str(DB_PATH),
+                "project_id": _active_pid(),
+                "db_path": str(_db_path_for(None if _active_pid() == _EXPLICIT_KEY else _active_pid())),
                 "nodes_by_kind": dict(sorted(nodes_by_kind.items(), key=lambda x: -x[1])),
                 "edges_by_rel":  dict(sorted(edges_by_rel.items(), key=lambda x: -x[1])),
                 "build_meta": meta,
@@ -436,10 +478,98 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
 
 
 async def main() -> None:
-    _ensure_conn()  # 预热（失败不挂 server，让 tool 调用时返回友好错误）
+    # stdio 模式: 真缺 project 时硬失败 (HTTP 模式才允许无单 project)。
+    if not _explicit_db and PROJECT_ID is None:
+        _flog("FATAL(stdio): 无法解析 project_id (env CODEV_PROJECT_ID / .claude/project.json)")
+        sys.exit(1)
+    _ensure_conn_for(_active_pid())  # 预热（失败不挂 server，让 tool 调用时返回友好错误）
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
+# ----------------------------------------------------------------------
+# HTTP (SSE) transport —— 多租户单端点, 镜像 chroma daemon。
+# 业务仓 .mcp.json 走 {"type":"sse","url":"http://<平台>:<port>/sse?project_id=<id>"}
+# 不再用文件路径 launcher。
+# ----------------------------------------------------------------------
+
+_CL_SSE_PORT = int(os.getenv("CROSS_LINK_SSE_PORT", "18086"))
+
+
+async def run_http(port: int = _CL_SSE_PORT) -> None:
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+    import uvicorn
+
+    from codev_platform.core.project_id import validate as _pid_validate
+    from codev_platform.gateway import AuthMiddleware, build_authenticator
+    from codev_platform.core.config import load_config
+
+    sse_transport = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        # GET /sse?project_id=<pid>: 建流 + 绑定 project_id 到 contextvar (多租户路由)。
+        pid_raw = request.query_params.get("project_id")
+        if not pid_raw:
+            pid = PROJECT_ID  # 向后兼容: 不传则 fallback 默认 (可能 None → tool 报错)
+            _flog(f"[sse] no ?project_id=, fallback default {pid}")
+        else:
+            try:
+                pid = _pid_validate(pid_raw)
+            except Exception as exc:  # noqa: BLE001
+                _flog(f"[sse] reject invalid project_id {pid_raw!r}: {exc!s}")
+                return
+        token = _current_project_id.set(pid)
+        _flog(f"[sse] session start project_id={pid}")
+        try:
+            async with sse_transport.connect_sse(
+                request.scope, request.receive, request._send
+            ) as (read_stream, write_stream):
+                await server.run(read_stream, write_stream, server.create_initialization_options())
+        finally:
+            _current_project_id.reset(token)
+            _flog(f"[sse] session end project_id={pid}")
+
+    async def health(_request):
+        # 存活探针: 报已加载 project 的连接状态 (不强制任何 project 可用)。
+        loaded = {pid: (pid in _conns) for pid in set(list(_conns) + list(_init_errors))}
+        return JSONResponse({
+            "status": "ok",
+            "service": "cross-link",
+            "default_project_id": PROJECT_ID,
+            "loaded_projects": loaded,
+            "init_errors": _init_errors,
+        })
+
+    app = Starlette(
+        debug=False,
+        routes=[
+            Route("/health", health, methods=["GET"]),
+            Route("/sse", handle_sse, methods=["GET"]),
+            Mount("/messages/", app=sse_transport.handle_post_message),
+        ],
+        middleware=[
+            Middleware(
+                AuthMiddleware,
+                authenticator=build_authenticator(load_config()),
+                public_paths={"/health"},
+            ),
+        ],
+    )
+    _flog(f"[http] cross-link SSE server starting on 127.0.0.1:{port}")
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
+    await uvicorn.Server(config).serve()
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    if "--http" in sys.argv:
+        # 端口: --port <n> > env CROSS_LINK_SSE_PORT > 默认
+        _port = _CL_SSE_PORT
+        if "--port" in sys.argv:
+            _port = int(sys.argv[sys.argv.index("--port") + 1])
+        asyncio.run(run_http(_port))
+    else:
+        asyncio.run(main())
