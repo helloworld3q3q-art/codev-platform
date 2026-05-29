@@ -38,15 +38,22 @@
   },
 
   "agent": {
-    "_comment": "agent HTTP 服务 (codev-platform agent serve)。provider 选大脑; api_key 留空则走 env (ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)。安全红线: 真 key 只写本机 ~/.codev-platform/config.json, 绝不进仓; 本样板只放占位符。",
+    "_comment": "agent HTTP 服务 (codev-platform agent serve)。provider 选大脑; api_key 留空则走 env (ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)。安全红线: 真 key 只写本机 ~/.codev-platform/config.json, 绝不进仓; 本样板只放占位符。session_backend: memory(默认,进程内,重启丢) | pg(持久化到 memory.pg_dsn)。",
     "provider": "claude",
     "model": "claude-opus-4-7",
     "max_steps": 12,
+    "session_backend": "memory",
     "providers": {
       "claude":   { "api_key": "" },
       "gpt":      { "base_url": "https://api.openai.com/v1",        "model": "gpt-4o",        "api_key": "" },
       "deepseek": { "base_url": "https://api.deepseek.com",         "model": "deepseek-chat", "api_key": "" },
       "qwen":     { "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-max", "api_key": "" }
     }
+  },
+
+  "memory": {
+    "_comment": "memory 持久化用的平台独立 PG 库 (codev_platform_memory)。pg_dsn=主库(写); pg_dsn_read=只读副本(读,预留,留空=读写同库)。安全红线: 含密码, 真值只写本机 config 或 env (CODEV_PLATFORM_MEMORY_DSN / _READ), 绝不进仓; 严禁复用业务库 DSN (见 memory plan §3.2b)。null = 不启用 memory PG, 会话仅内存。",
+    "pg_dsn": null,
+    "pg_dsn_read": null
   }
 }
