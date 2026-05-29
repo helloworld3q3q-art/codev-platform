@@ -341,6 +341,22 @@ agent loop 召回改走 `/memory/recall` 的权限过滤版,替代当前"全量�
 - job:`scripts/run_memory_maintenance.py`(手动/cron/Task Scheduler);config `memory.compress_min_entries`(默认 3)。
 - 阈值/调度待定:压缩触发阈值现静态 config;定时调度归 ops(未进程内常驻 job)。
 
+**多人/多组织验收(2026-05-29,4 角色:隔离/并发/权限/正确性)**:
+
+已修(单 org 期就该对的隔离接缝 + 并发硬化):
+- 会话 org 透传:`SessionStore.new/get/has/append` 加请求级 `org_id`(默认 'default'),`ChatService.ask` 透传 —— 此前 SqlSessionStore org 写死构造期,多 org 同名 user 会撞进同一会话命名空间。
+- personal 隐私:`POST /memory` 写 personal 强制 `scope_ref=user_id`(不信 client);`GET /memory` 读 personal 校验 `scope_ref==请求者`,否则 403(recall ≠ read)。
+- 连接池:`memory.pool_max_size`(默认 10,可调),deps 透传给两个 store —— 防多人高峰 PoolTimeout(原硬编码 4)。
+- maintenance 单实例:`SqlMemoryStore.advisory_lock` + `run_memory_maintenance.py` 起手 `pg_try_advisory_lock`,抢不到即跳过 —— 防并发压同 topic 双写 summary。
+- 接缝/收敛:org 解析收敛进 `identity.resolve_org_from_request`(chat/memory 共用,M5 鉴权单点);`visible_scopes` 改 `LocalRecallService._visible_scopes` 可覆写方法(M5 查 org_members/team_members 时子类覆写,recall 调用点零改);路由内联 ⚠️ "M5 前无 ACL" 标注。
+
+延后到 M5/M6(真需认证层 / 真多 org 才有意义,现在做是空跑):
+- X-Org-Id 缺失:多 org 启用时从静默 'default' 改强制拒绝(现单 org 期 'default' 正确)。
+- `archive_expired(org_id=None)` 跨全 org:多 org 期改按 org 迭代 / admin 守卫(现单 org 期全局口径正确)。
+- `forget`/`archive` 按 id 无 org 守卫:待这两个动作有 HTTP 端点(M5)时加(现无端点暴露,UUID 主键不撞)。
+- 单例懒建 double-check 锁:当前并发首请求最多多建一个池(浪费,DDL/open 幂等无数据错),扩容后顺手做。
+- 统一授权层 `allowed(org,user,project,action)` + 认证层(§3.1b):上述 X-Org-Id / archive / forget 守卫的统一根因,M5/M6 落地。
+
 ---
 
 ## 五、难点

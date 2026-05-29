@@ -50,11 +50,11 @@ class ChatService:
             project_id: str | None = None, org_id: str = "default") -> ChatOutcome:
         provider = self._provider_factory()  # 缺 key 抛 RuntimeError,由调用层(route)映射
 
-        if session_id and self._sessions.has(session_id, user_id):
+        if session_id and self._sessions.has(session_id, user_id, org_id=org_id):
             sid = session_id
         else:
-            sid = self._sessions.new(user_id)
-        history = self._sessions.get(sid, user_id)
+            sid = self._sessions.new(user_id, org_id=org_id)
+        history = self._sessions.get(sid, user_id, org_id=org_id)
 
         registry = self._registry_factory(project_id)  # 工具按 project_id 路由
         memories = self._recall_memories(org_id, user_id, project_id, question)
@@ -69,6 +69,7 @@ class ChatService:
             sid, user_id,
             Message(role="user", content=question),
             Message(role="assistant", content=result.answer),
+            org_id=org_id,
         )
         return ChatOutcome(session_id=sid, result=result)
 

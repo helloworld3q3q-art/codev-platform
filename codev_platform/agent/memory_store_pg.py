@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import contextmanager
 
 from codev_platform.agent.memory_store import MemoryEntry, MemoryStore, _DEFAULT_ORG
 
@@ -137,6 +138,22 @@ class SqlMemoryStore(MemoryStore):
                 (entry_id,),
             )
             return cur.rowcount > 0
+
+    @contextmanager
+    def advisory_lock(self, key: int):
+        """会话级 pg advisory lock 上下文:yield 是否抢到锁;退出自动释放(连接关闭即释放)。
+
+        用于把 maintenance job 串行成单实例(workflow §6.1 写侧串行)——防两个并发 job
+        压同一 topic 各写一条重复 summary(compress 是 list→fuse→write→archive 非原子)。
+        """
+        self._ensure()
+        with self._write_pool.connection() as conn:
+            got = conn.execute("SELECT pg_try_advisory_lock(%s)", (key,)).fetchone()[0]
+            try:
+                yield got
+            finally:
+                if got:
+                    conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
 
     def archive_expired(self, org_id: str | None = None) -> int:
         """TTL 到期批量归档(ttl_at 已过 且 active → archived)。org_id=None 跨全 org。返回条数。"""

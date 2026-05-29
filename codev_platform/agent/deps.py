@@ -28,9 +28,10 @@ def _build_session_store() -> SessionStore:
             return InMemorySessionStore()
         # 读写分离扩展口(预留):配了只读副本 DSN 则读走它,否则读写同库
         read_dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN_READ", cfg, "memory.pg_dsn_read")
+        pool_max = acfg.get(cfg, "memory.pool_max_size", 10)
         try:
             from codev_platform.agent.session_pg import SqlSessionStore
-            return SqlSessionStore(dsn, read_dsn=read_dsn)  # schema 首次操作幂等建;连不上首次操作报
+            return SqlSessionStore(dsn, read_dsn=read_dsn, max_size=pool_max)  # schema 首次操作幂等建
         except Exception as e:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 回退内存,不挂服务
             print(f"[agent.deps] PG 会话存储不可用({type(e).__name__}: {e}), 回退 memory", file=sys.stderr)
             return InMemorySessionStore()
@@ -69,9 +70,10 @@ def get_memory_store():
         dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN", cfg, "memory.pg_dsn")
         if dsn:
             read_dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN_READ", cfg, "memory.pg_dsn_read")
+            pool_max = acfg.get(cfg, "memory.pool_max_size", 10)
             try:
                 from codev_platform.agent.memory_store_pg import SqlMemoryStore
-                _memory_store = SqlMemoryStore(dsn, read_dsn=read_dsn)
+                _memory_store = SqlMemoryStore(dsn, read_dsn=read_dsn, max_size=pool_max)
             except Exception as e:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → memory 不可用,不挂服务
                 import sys
                 print(f"[agent.deps] memory store 不可用({type(e).__name__}: {e})", file=sys.stderr)

@@ -174,6 +174,16 @@ def main() -> int:
     else:
         _fail(f"压缩语义不对 (fused_id={fused_id} active={len(active_cmp)} 原条归档={originals_archived})"); fails += 1
 
+    # ---- 4e. maintenance 单实例锁(M4 并发防护)----
+    print("\n[4e] maintenance 单实例锁")
+    with mem.advisory_lock(0x6D656D31) as got1:
+        mem2 = SqlMemoryStore(dsn, read_dsn=read_dsn)
+        with mem2.advisory_lock(0x6D656D31) as got2:
+            if got1 and not got2:
+                _ok("advisory_lock:第一个抢到,第二个实例被拒(maintenance 串成单实例)")
+            else:
+                _fail(f"advisory_lock 互斥失效 (got1={got1} got2={got2})"); fails += 1
+
     # ---- 5. 会话 round-trip + 模拟重启持久化 ----
     print("\n[5] 会话持久化 + 模拟重启")
     s1 = SqlSessionStore(dsn, read_dsn=read_dsn)
@@ -189,11 +199,13 @@ def main() -> int:
         _ok(f"新 store 实例读回 {len(hist)} 条(含 tool_calls)→ 跨重启持久化 OK")
     else:
         _fail(f"重启后历史不对: {[(m.role, m.content) for m in hist]}"); fails += 1
-    # user 隔离
-    if not s2.has(sid, "other-user"):
-        _ok("user 隔离:别的 user 看不到此会话")
+    # user 隔离 + org 隔离(多 org 期同名 user 不撞)
+    user_iso = not s2.has(sid, "other-user")
+    org_iso = not s2.has(sid, uid, org_id="other-org")
+    if user_iso and org_iso:
+        _ok("隔离:别的 user 看不到此会话 + 别的 org 同 user 也看不到")
     else:
-        _fail("user 隔离失效"); fails += 1
+        _fail(f"隔离失效 (user_iso={user_iso} org_iso={org_iso})"); fails += 1
 
     # ---- 清理自造数据 ----
     print("\n[6] 清理测试数据")

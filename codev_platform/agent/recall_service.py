@@ -75,11 +75,21 @@ class LocalRecallService(RecallService):
         self._policy = default_policy
         self._per_scope_limit = per_scope_limit
 
+    def _visible_scopes(self, org_id: str, user_id: str | None,
+                        project_id: str | None) -> list[tuple[str, str]]:
+        """该 user 可 recall 的 (scope, scope_ref) 集合。
+
+        M5 接缝:现委托模块级 `visible_scopes`(无 ACL,返回 org+project+personal)。
+        M5 起在子类 / 此处覆写为查 org_members / team_members / project_access(可访问 self._store),
+        recall() 调用点不变(plan §3.9 上层零改)。
+        """
+        return visible_scopes(org_id, user_id, project_id)
+
     def recall(self, *, org_id: str, user_id: str | None, project_id: str | None,
                query: str = "", limit: int = 8, policy: str | None = None) -> list[MemoryEntry]:
         policy = policy or self._policy
         pooled: list[MemoryEntry] = []
-        for scope, ref in visible_scopes(org_id, user_id, project_id):
+        for scope, ref in self._visible_scopes(org_id, user_id, project_id):
             pooled.extend(self._store.list_scope(scope, ref, org_id=org_id, limit=self._per_scope_limit))
         resolved = resolve_conflicts(pooled, policy=policy)
         return _rank_for_query(resolved, query)[:limit]

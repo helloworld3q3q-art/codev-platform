@@ -21,19 +21,33 @@ import sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 
+# maintenance 单实例锁 key(固定常量,任意进程抢到才跑,防并发压同 topic 双写 summary)
+_MAINT_LOCK_KEY = 0x6D656D31  # 'mem1'
+
+
 def main() -> int:
     from codev_platform.agent import deps
     maint = deps.get_memory_maintenance()
-    if maint is None:
+    store = deps.get_memory_store()  # 与 maint 同一实例(同连接池),用于加单实例锁
+    if maint is None or store is None:
         print("[ABORT] memory 未启用(配 memory.pg_dsn + 装 psycopg)。", file=sys.stderr)
         return 2
+
+    with store.advisory_lock(_MAINT_LOCK_KEY) as got:
+        if not got:
+            print("[SKIP] 另一个 maintenance 实例正在运行(未抢到 advisory lock),本次跳过。")
+            return 0
+        return _run(maint, sys.argv[1:])
+
+
+def _run(maint, args) -> int:
+    from codev_platform.agent import deps
 
     # 1) TTL 归档(总是跑)
     archived = maint.archive_expired()
     print(f"[TTL] 归档过期记忆 {archived} 条")
 
     # 2) 压缩(给了 scope + scope_ref 才跑)
-    args = sys.argv[1:]
     if len(args) >= 2:
         scope, scope_ref = args[0], args[1]
         org_id = args[2] if len(args) >= 3 else "default"

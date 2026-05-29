@@ -5,7 +5,7 @@
 - 消息顺序用 BIGSERIAL `id` 自增 + 按 id 排序,**不在应用层算 seq**(两窗口并发会 race)。
 - 连接池(psycopg_pool):每请求独立连接,单连接非线程安全由池兜。
 - append 一个短事务:user+assistant 一对要么都进要么都不进(不留"有问无答")。
-- org_id 现填 'default'(单 org 期);M5 多 org 时传真实 org_id,表无需改。
+- org_id 随每次调用传入(请求级,plan §3.4 一人多 org 不可从 user 推),默认 'default'(单 org 期)。
 
 依赖 psycopg[binary,pool](在 [agent] extra)。schema 首次连接幂等建(CREATE IF NOT EXISTS)。
 """
@@ -66,9 +66,9 @@ def _row_to_msg(role: str, content: str | None, payload: dict) -> Message:
 
 
 class SqlSessionStore(SessionStore):
-    """PG 持久化会话存储。org_id 现固定 'default'(单 org 期),多 org 时构造传入。"""
+    """PG 持久化会话存储。org_id 随每次调用传入(请求级),非构造期固定。"""
 
-    def __init__(self, dsn: str, read_dsn: str | None = None, org_id: str = _DEFAULT_ORG,
+    def __init__(self, dsn: str, read_dsn: str | None = None,
                  *, min_size: int = 1, max_size: int = 4) -> None:
         """读写分离接缝:
         - dsn      → 写池(new/append/建表),指向主库。
@@ -77,7 +77,6 @@ class SqlSessionStore(SessionStore):
         现在不预建副本(那是 infra),只留路由接缝(plan §3.9 留接缝不预建分布式)。
         """
         from psycopg_pool import ConnectionPool  # 延迟导入:没装 [agent] 不影响其它子命令
-        self._org = org_id
         # open=False + 首次用时 open:没 PG 的机器 import 不崩;连不上在首次操作时报。
         self._write_pool = ConnectionPool(dsn, min_size=min_size, max_size=max_size, open=False)
         if read_dsn and read_dsn != dsn:
@@ -100,38 +99,39 @@ class SqlSessionStore(SessionStore):
 
     # ---- 写路径(主库)----
 
-    def new(self, user_id: str) -> str:
+    def new(self, user_id: str, org_id: str = _DEFAULT_ORG) -> str:
         self._ensure()
         sid = uuid.uuid4().hex
         with self._write_pool.connection() as conn:
             conn.execute(
                 "INSERT INTO agent_sessions (org_id, user_id, session_id) VALUES (%s, %s, %s)",
-                (self._org, user_id, sid),
+                (org_id, user_id, sid),
             )
         return sid
 
     # ---- 读路径(副本,若配置;否则同主库)----
 
-    def has(self, session_id: str, user_id: str) -> bool:
+    def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> bool:
         self._ensure()
         with self._read_pool.connection() as conn:
             row = conn.execute(
                 "SELECT 1 FROM agent_sessions WHERE org_id=%s AND user_id=%s AND session_id=%s",
-                (self._org, user_id, session_id),
+                (org_id, user_id, session_id),
             ).fetchone()
         return row is not None
 
-    def get(self, session_id: str, user_id: str) -> list[Message]:
+    def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> list[Message]:
         self._ensure()
         with self._read_pool.connection() as conn:
             rows = conn.execute(
                 "SELECT role, content, payload FROM agent_messages "
                 "WHERE org_id=%s AND user_id=%s AND session_id=%s ORDER BY id",
-                (self._org, user_id, session_id),
+                (org_id, user_id, session_id),
             ).fetchall()
         return [_row_to_msg(r[0], r[1], r[2]) for r in rows]
 
-    def append(self, session_id: str, user_id: str, *messages: Message) -> None:
+    def append(self, session_id: str, user_id: str, *messages: Message,
+               org_id: str = _DEFAULT_ORG) -> None:
         if not messages:
             return
         self._ensure()
@@ -142,10 +142,10 @@ class SqlSessionStore(SessionStore):
                     conn.execute(
                         "INSERT INTO agent_messages (org_id, user_id, session_id, role, content, payload) "
                         "VALUES (%s, %s, %s, %s, %s, %s::jsonb)",
-                        (self._org, user_id, session_id, m.role, m.content, _msg_to_payload(m)),
+                        (org_id, user_id, session_id, m.role, m.content, _msg_to_payload(m)),
                     )
                 conn.execute(
                     "UPDATE agent_sessions SET updated_at=now() "
                     "WHERE org_id=%s AND user_id=%s AND session_id=%s",
-                    (self._org, user_id, session_id),
+                    (org_id, user_id, session_id),
                 )

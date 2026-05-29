@@ -83,6 +83,8 @@ DEFAULTS: dict[str, Any] = {
         "conflict_policy": "personal_first",
         # M4 压缩: 一个 (scope,topic) 攒到这么多条 active 记忆才触发 LLM 融合 (少于此不值得压).
         "compress_min_entries": 3,
+        # PG 连接池每实例最大连接数. 多人并发高峰下 4 易撞 PoolTimeout; 默认 10, 按并发上调.
+        "pool_max_size": 10,
     },
     "agent": {
         # 会话存储后端: "memory" (默认, 进程内, 重启丢) | "pg" (持久化到 memory.pg_dsn).
