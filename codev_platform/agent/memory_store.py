@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 _DEFAULT_ORG = "default"
@@ -35,6 +36,7 @@ class MemoryEntry:
     is_redline: bool = False    # org 硬约束,冲突时最高优先
     status: str = "active"      # active | superseded | archived | forgotten
     supersedes: str | None = None
+    ttl_at: datetime | None = None  # 遗忘:到期自动 archive(M4);None = 永久
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -53,3 +55,13 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def forget(self, entry_id: str) -> bool: ...
+
+    @abstractmethod
+    def archive(self, entry_id: str) -> bool:
+        """显式归档单条(status→archived)。压缩融合时归档原条用(留痕,不物删)。"""
+        ...
+
+    @abstractmethod
+    def archive_expired(self, org_id: str | None = None) -> int:
+        """TTL 到期批量归档(ttl_at < now 且 active → archived)。返回归档条数。"""
+        ...

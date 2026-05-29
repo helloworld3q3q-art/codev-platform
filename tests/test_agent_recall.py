@@ -34,6 +34,12 @@ class FakeStore(MemoryStore):
     def forget(self, entry_id):
         return True
 
+    def archive(self, entry_id):
+        return True
+
+    def archive_expired(self, org_id=None):
+        return 0
+
 
 def _e(scope, ref, content, *, topic_key=None, is_redline=False, org="default"):
     return MemoryEntry(id=content, scope=scope, scope_ref=ref, owner_user_id="u",

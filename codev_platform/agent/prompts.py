@@ -25,6 +25,16 @@ CODE_UNDERSTANDING_SYSTEM = """你是 codev-platform 的只读代码理解 agent
 """
 
 
+# 记忆压缩融合(M4)系统提示:把同 topic 多条记忆融合成一条
+MEMORY_FUSION_SYSTEM = """你是记忆压缩器。把同一主题下的多条记忆融合成一条简洁、无冗余、不丢关键信息的记忆。
+规则:
+1. 只输出融合后的一条记忆正文,不要解释、不要列表标记、不要任何前后缀。
+2. 保留所有关键事实 / 偏好 / 约束;表述冲突时以更具体或更新的为准。
+3. 严禁编造原文没有的信息。
+4. 用中文,一到两句话为宜。
+"""
+
+
 def _format_memories(memories) -> str:
     """把召回的记忆(MemoryEntry 列表)排成 prompt 段。redline 明确标注为组织硬约束。
 

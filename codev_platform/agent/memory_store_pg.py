@@ -78,11 +78,11 @@ class SqlMemoryStore(MemoryStore):
             conn.execute(
                 "INSERT INTO memory_entries "
                 "(id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "
-                " is_redline, status, supersedes, extra) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
+                " is_redline, status, supersedes, ttl_at, extra) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
                 (eid, entry.org_id, entry.scope, entry.scope_ref, entry.owner_user_id,
                  entry.content, entry.kind, entry.topic_key, entry.is_redline, entry.status,
-                 entry.supersedes, json.dumps(entry.extra or {}, ensure_ascii=False)),
+                 entry.supersedes, entry.ttl_at, json.dumps(entry.extra or {}, ensure_ascii=False)),
             )
         return eid
 
@@ -107,11 +107,12 @@ class SqlMemoryStore(MemoryStore):
                 conn.execute(
                     "INSERT INTO memory_entries "
                     "(id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "
-                    " is_redline, status, supersedes, extra) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
+                    " is_redline, status, supersedes, ttl_at, extra) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
                     (eid, new_entry.org_id, new_entry.scope, new_entry.scope_ref, new_entry.owner_user_id,
                      new_entry.content, new_entry.kind, new_entry.topic_key, new_entry.is_redline,
-                     new_entry.status, old_id, json.dumps(new_entry.extra or {}, ensure_ascii=False)),
+                     new_entry.status, old_id, new_entry.ttl_at,
+                     json.dumps(new_entry.extra or {}, ensure_ascii=False)),
                 )
         return eid
 
@@ -126,16 +127,45 @@ class SqlMemoryStore(MemoryStore):
             )
             return cur.rowcount > 0
 
+    def archive(self, entry_id: str) -> bool:
+        """显式归档单条(status→archived)。压缩融合归档原条用(留痕,不物删)。"""
+        self._ensure()
+        with self._write_pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE memory_entries SET status='archived', updated_at=now() "
+                "WHERE id=%s AND status='active'",
+                (entry_id,),
+            )
+            return cur.rowcount > 0
+
+    def archive_expired(self, org_id: str | None = None) -> int:
+        """TTL 到期批量归档(ttl_at 已过 且 active → archived)。org_id=None 跨全 org。返回条数。"""
+        self._ensure()
+        sql = ("UPDATE memory_entries SET status='archived', updated_at=now() "
+               "WHERE status='active' AND ttl_at IS NOT NULL AND ttl_at < now()")
+        params: tuple = ()
+        if org_id is not None:
+            sql += " AND org_id=%s"
+            params = (org_id,)
+        with self._write_pool.connection() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount
+
     # ---- 读路径(副本,若配置)----
 
     def list_scope(self, scope: str, scope_ref: str, org_id: str = _DEFAULT_ORG,
                    limit: int = 100) -> list[MemoryEntry]:
-        """列某作用域的 active 记忆(按 org_id 隔离)。recall 向量融合是 M3,这里是结构化直查。"""
+        """列某作用域的 active 记忆(按 org_id 隔离)。
+
+        防御性排除已过期(ttl_at < now):即便 archive_expired job 还没跑,过期记忆也绝不被
+        召回 —— TTL 语义在两次 job 之间也正确。
+        """
         self._ensure()
         with self._read_pool.connection() as conn:
             rows = conn.execute(
                 f"SELECT {_COLS} FROM memory_entries "
                 "WHERE org_id=%s AND scope=%s AND scope_ref=%s AND status='active' "
+                "AND (ttl_at IS NULL OR ttl_at > now()) "
                 "ORDER BY created_at DESC LIMIT %s",
                 (org_id, scope, scope_ref, limit),
             ).fetchall()

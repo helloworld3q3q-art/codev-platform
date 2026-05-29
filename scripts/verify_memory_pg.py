@@ -135,6 +135,45 @@ def main() -> int:
     else:
         _fail(f"召回结果不对:{rc}"); fails += 1
 
+    # ---- 4c. TTL 归档(M4 真机)----
+    print("\n[4c] TTL 归档(M4 真机)")
+    from datetime import datetime, timedelta, timezone
+    from codev_platform.agent.memory_maintenance import MemoryMaintenance
+    ttl_ref = f"ttl-{uid}"
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    expired_id = mem.write(MemoryEntry(id="", scope="personal", scope_ref=ttl_ref, owner_user_id=uid,
+                                       content="过期记忆", ttl_at=past))
+    mem.write(MemoryEntry(id="", scope="personal", scope_ref=ttl_ref, owner_user_id=uid,
+                          content="未过期记忆", ttl_at=future))
+    # 防御:archive 前,过期记忆就不该出现在 active 列表
+    pre = {m.content for m in mem.list_scope("personal", ttl_ref)}
+    n_arch = MemoryMaintenance(mem).archive_expired(org_id="default")
+    post_status = _status(expired_id)
+    if pre == {"未过期记忆"} and n_arch >= 1 and post_status == "archived":
+        _ok(f"TTL:过期记忆 list_scope 已排除(防御)+ archive_expired 归档 {n_arch} 条 + status=archived")
+    else:
+        _fail(f"TTL 语义不对 (pre={pre} n_arch={n_arch} status={post_status})"); fails += 1
+
+    # ---- 4d. 压缩融合(M4 真机,确定性 fuse_fn 不调 LLM)----
+    print("\n[4d] 压缩融合(M4 真机)")
+    cmp_ref = f"cmp-{uid}"
+    src_ids = [mem.write(MemoryEntry(id="", scope="personal", scope_ref=cmp_ref, owner_user_id=uid,
+                                     content=c, topic_key="pref")) for c in ("早起", "喝美式", "用 vim")]
+    fused_id = MemoryMaintenance(mem, min_entries=3).compress_topic(
+        "personal", cmp_ref, "pref", lambda cs: "融合:" + "/".join(cs), org_id="default")
+    active_cmp = mem.list_scope("personal", cmp_ref)
+    originals_archived = all(_status(i) == "archived" for i in src_ids)
+    # 融合内容顺序不作契约(list_scope 按 created_at DESC),只验三条都进了 + summary 语义 + 留痕
+    content_ok = active_cmp and active_cmp[0].content.startswith("融合:") and \
+        all(w in active_cmp[0].content for w in ("早起", "喝美式", "用 vim"))
+    if fused_id and len(active_cmp) == 1 and active_cmp[0].kind == "summary" \
+       and content_ok and originals_archived \
+       and set(active_cmp[0].extra.get("fused_from", [])) == set(src_ids):
+        _ok("压缩:3 条融合成 1 条 summary + 原条 archived 留痕 + fused_from 指向原条")
+    else:
+        _fail(f"压缩语义不对 (fused_id={fused_id} active={len(active_cmp)} 原条归档={originals_archived})"); fails += 1
+
     # ---- 5. 会话 round-trip + 模拟重启持久化 ----
     print("\n[5] 会话持久化 + 模拟重启")
     s1 = SqlSessionStore(dsn, read_dsn=read_dsn)

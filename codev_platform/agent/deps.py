@@ -107,6 +107,19 @@ def get_recall_service():
     return _recall_service
 
 
+def get_memory_maintenance():
+    """记忆维护(M4:TTL 归档 + 压缩融合)。无 memory store → None。
+    每次新建(job 调用频率低,无需缓存;底层复用 store 的连接池)。
+    """
+    store = get_memory_store()
+    if store is None:
+        return None
+    cfg = acfg.agent_cfg()
+    min_n = acfg.get(cfg, "memory.compress_min_entries", 3)
+    from codev_platform.agent.memory_maintenance import MemoryMaintenance
+    return MemoryMaintenance(store, min_entries=min_n)
+
+
 _chat_service: ChatService | None = None
 
 

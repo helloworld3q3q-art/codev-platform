@@ -321,7 +321,7 @@ agent loop 召回改走 `/memory/recall` 的权限过滤版,替代当前"全量�
 | **M1 身份** | `core/identity.py` + `X-User-Id` 采集(不拦截) | ✅ 单人 | 低 | ✅ 已落地 |
 | **M2 作用域存储** | 平台独立 PG 库 `codev_platform_memory` + 4 层 namespace + write/list/supersede/forget + 读写分离接缝 | ✅ 单人 | 中 | ✅ 已落地 + 真机验证(2026-05-29,`scripts/verify_memory_pg.py` 全绿) |
 | **M3 召回合并 + 冲突** | 跨作用域召回 + 冲突优先级 + redline 硬约束;agent loop 接入 | ✅ 单人 | 中 | ✅ 已落地 + 真机验证(2026-05-29,`RecallService`/`LocalRecallService`,agent 仅凭注入记忆答出事实) |
-| **M4 生命周期** | update/supersede(已具)+ TTL/forget(forget 已具)+ 压缩摘要 job | ✅ 单人 | 中 | 🟡 supersede/forget 已落,TTL 自动 archive + 压缩摘要 job 待补 |
+| **M4 生命周期** | update/supersede + TTL 自动 archive + forget + 压缩摘要 job | ✅ 单人 | 中 | ✅ 已落地 + 真机验证(2026-05-29,`memory_maintenance.py`:TTL 归档 + 同 topic LLM 融合,注入式 fuse_fn 可单测) |
 | **M5 ACL** | 可见性表 + visible_scopes 真实计算(先 ACL)+ orgs.conflict_policy 从 PG 读 | 🟡 需第二人验证 | 中 | ⏳ 接缝已留(`visible_scopes` / `resolve_conflicts(policy)` 参数化) |
 | **M6 RBAC + 审计 + secrets/team** | 角色 + 审计日志 + per-team secrets + 认证层(§3.1b) | ❌ 需多团队 | 高 | ⏳ |
 
@@ -333,6 +333,13 @@ agent loop 召回改走 `/memory/recall` 的权限过滤版,替代当前"全量�
 - 冲突:`agent/memory_recall.py:resolve_conflicts(policy)`,红线最高不可配 + policy(personal_first/org_first)控非红线;policy 来源 M5 从 PG 读。
 - 注入:`prompts.build_code_understanding_system(memories=...)` 注入召回记忆段(redline 标注);`ChatService.ask` 召回失败静默退化不阻断问答。
 - 库:现有 PG 17(localhost:5432)内独立 database `codev_platform_memory`,role `codev_platform`(§3.2b 红线满足:独立 database,非业务库)。
+
+**M4 落地实现备忘(2026-05-29)**:
+- TTL:`MemoryEntry.ttl_at` + write 持久化;`list_scope` 防御性排除已过期(即便归档 job 未跑,过期记忆也绝不召回);`SqlMemoryStore.archive_expired()` 批量归档(留痕,status=archived 非物删)。
+- 压缩:`agent/memory_maintenance.py:MemoryMaintenance` —— `compress_topic/compress_scope` 把同 (scope,topic) 多条 active 融合成 1 条 summary(kind='summary',extra.fused_from 指向原条),原条 archived 可回溯(plan 难点 #2);**redline 逐条保留不参与融合**(组织硬约束不被稀释)。
+- LLM 解耦:融合走注入式 `fuse_fn`(`list[str]->str`),编排可用 fake fuse_fn 单测;真 LLM 是 `make_llm_fuse(provider)` 薄适配器(走 `MEMORY_FUSION_SYSTEM`)。
+- job:`scripts/run_memory_maintenance.py`(手动/cron/Task Scheduler);config `memory.compress_min_entries`(默认 3)。
+- 阈值/调度待定:压缩触发阈值现静态 config;定时调度归 ops(未进程内常驻 job)。
 
 ---
 

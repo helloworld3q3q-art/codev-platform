@@ -81,6 +81,8 @@ DEFAULTS: dict[str, Any] = {
         # 冲突消解 policy (memory plan §3.5): "personal_first"(默认) | "org_first". 红线永远最高不可配.
         # M5 起改从 PG orgs.conflict_policy 读, 现为静态默认.
         "conflict_policy": "personal_first",
+        # M4 压缩: 一个 (scope,topic) 攒到这么多条 active 记忆才触发 LLM 融合 (少于此不值得压).
+        "compress_min_entries": 3,
     },
     "agent": {
         # 会话存储后端: "memory" (默认, 进程内, 重启丢) | "pg" (持久化到 memory.pg_dsn).
