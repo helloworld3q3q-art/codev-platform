@@ -228,13 +228,27 @@ def recall(user_id, project_id, query):
     # 3. 冲突消解:按 topic_key 分组,同组按作用域优先级取胜
     return resolve_conflicts(hits)
 
-# 冲突优先级(治理决策,非纯技术):
-#   is_redline(org 硬约束)  > project > team > personal
-#   红线永远赢;非红线问题个人偏好可压过团队/项目
-PRIORITY = {"redline": 0, "project": 1, "team": 2, "personal": 3}
+# 冲突优先级(2026-05-29 定:可配 policy,不写死)
+#   ① is_redline(org 硬约束)永远最高 —— 不可配(合规底线)
+#   ② 非红线部分按 policy 排(org / 个人可选,综合两种治理倾向):
+#        "personal_first"(默认): personal > project > team > org   (我的偏好盖团队默认,除非硬红线)
+#        "org_first":             org > project > team > personal   (组织规则盖个人,合规强)
+def resolve_conflicts(entries, policy="personal_first"):
+    # 红线最高 + policy 控非红线;同 topic_key 取最高优先级胜出,其余视为被压。
 ```
 
-**关键**:冲突优先级表 = 权限模型的一部分,不能等召回做完再补。
+**policy 是数据,分 org / 个人两级配(不是代码写死)**:
+| 配置 | 存哪 | 谁改 | 阶段 |
+|---|---|---|---|
+| 红线最高 | 代码常量(不可配) | — | 现在 |
+| org 默认 policy | PG `orgs.conflict_policy` | org admin | M5 |
+| 是否允许个人覆盖 | PG `orgs.allow_personal_override` | org admin | M5 |
+| 个人覆盖选择 | org_members / personal memory | 个人(org 允许时) | M5 |
+
+**现在(纯逻辑,已落地)**:`resolve_conflicts(entries, policy)` 参数化 policy,A/B 都支持,默认 personal_first,单测覆盖。
+**M5(等 DB+多人)**:从 `orgs.conflict_policy` 读 org 策略 + 个人覆盖判定 → 传 policy。接缝已留,加 DB 读取即可。
+
+**关键**:冲突消解逻辑(纯)与 policy 来源(DB)分离 —— 逻辑现在做+可测,policy 来源 M5 接。
 
 ### 3.6 生命周期(JD 的 写/更新/压缩/遗忘)
 
