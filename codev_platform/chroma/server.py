@@ -1071,6 +1071,12 @@ async def _run_http(port: int) -> None:
         except Exception as exc:  # noqa: BLE001
             return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
 
+    # 统一认证拦截: 复用 gateway 的纯 ASGI 中间件 (SSE 安全 + 高并发, 不缓冲 /sse 长连接)。
+    # passthrough 模式非破坏 (无身份头 → local/default); token 模式对外按 Bearer 鉴权。
+    # /health 留 public 作存活探针 (ai-health / 子应用健康检查不带 token 也能探)。
+    from starlette.middleware import Middleware
+    from codev_platform.gateway import AuthMiddleware, build_authenticator
+
     app = Starlette(
         debug=False,
         routes=[
@@ -1078,6 +1084,13 @@ async def _run_http(port: int) -> None:
             Route("/platform/status", platform_status, methods=["GET"]),
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
+        ],
+        middleware=[
+            Middleware(
+                AuthMiddleware,
+                authenticator=build_authenticator(load_config()),
+                public_paths={"/health"},
+            ),
         ],
     )
 
