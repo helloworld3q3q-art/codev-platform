@@ -1,0 +1,132 @@
+# Plan — 业务↔平台 MCP 服务化(脱文件路径,走服务地址)2026-05-30
+
+> **定位**:让业务仓访问平台的三套 MCP(代码图谱 / 文档检索 / 跨层链路)从"stdio + 本地文件路径"迁到"**服务地址(HTTP/SSE)**",支撑多用户多机共享。
+>
+> **关联**:`platform_status.py`(已落地 health --all 走 HTTP)/ `codev_platform/chroma/server.py`(daemon 已原生 SSE)/ 业务仓 `.mcp.json`。
+
+---
+
+## 一、原则(用户拍板 2026-05-30)
+
+1. **平台内部本地**:平台服务 ↔ 模型 ↔ data/(同一台服务器,co-located)→ 直接本地读,**不 HTTP 化**(更快;没有跨边界)。
+2. **业务 → 平台 走服务地址**:业务仓的 MCP **不能再走文件路径**(`cmd /c ..\codev-platform\tools\...` / 读本地 `.codegraph`),必须连平台的 **HTTP/SSE 端点**。
+3. **不手搓协议**:传输用 **MCP 标准远程协议**(Streamable HTTP,SSE 兼容),桥接用现成 **`mcp-proxy`** 库(venv 已装)+ **MCP Python SDK**;慢了在库支持的协议里换,不自己写传输层。
+
+---
+
+## 二、现状与硬约束
+
+| MCP | 现在(业务 .mcp.json) | 走 HTTP 的可行性 |
+|---|---|---|
+| platform-docs(chroma) | stdio launcher → mcp-proxy 桥到 daemon HTTP :18083 | ✅ daemon **已原生 SSE**(`/sse?project_id=`),可直连 |
+| codegraph | `codegraph serve --mcp`(**外部工具,stdio-only**)读本地 `.codegraph` | ⚠️ 工具本身无 HTTP;**用 mcp-proxy 把 stdio 包成 SSE**(不丢工具集) |
+| cross-link | stdio launcher → 我们的 `cross_link.server` 读本地 sqlite | ✅ 我们的代码,加原生 Streamable HTTP 或 mcp-proxy 包 |
+
+**关键约束**:
+- `codegraph serve` 实测只有 `--mcp`(stdio),**无 HTTP/SSE 选项**(`codegraph serve --help` 已验)。其工具集(callers/callees/impact/context/explore)比 codegraph-api REST(stats/search/node/neighbors/file-tree/graph)**更全** → **不能用 codegraph-api 替换 codegraph MCP**(会丢工具)。正解是 **mcp-proxy 把 stdio 工具包成 SSE**,保留全工具集。
+- codegraph-api(:18082)保留作**平台 status / 健康**的 HTTP 面(已落地),**不承担** AI 的 MCP 查询。
+
+---
+
+## 三、传输协议选型(不手搓,用库)
+
+| 选择 | 库 | 用途 |
+|---|---|---|
+| **Streamable HTTP**(MCP 2025 标准远程传输,首选) | MCP Python SDK(`mcp`)`streamable_http` / Claude Code `.mcp.json` `type:"http"` | chroma daemon 加该 transport;业务直连 |
+| **SSE**(兼容/过渡) | 同 SDK `mcp.server.sse`(daemon 现用)/ `type:"sse"` | 现成可用,先用它打通 |
+| **stdio→SSE/HTTP 桥** | **`mcp-proxy`**(venv 已装 mcp-proxy.exe) | 把 codegraph(外部 stdio)+ cross-link 包成 HTTP 端点 |
+
+**性能与回退(测了再换,不臆造)**:
+- 同机 loopback HTTP 是微秒级,瓶颈在模型/LLM 不在传输 —— **大概率不需要换协议**。
+- 真测出远程延迟问题:① 先用 Streamable HTTP 的 **HTTP/2 持久连接 / keep-alive**(SDK 自带);② 仍不够 → 评估 **WebSocket transport**(找支持的 MCP 库,如 `mcp` 后续 / 社区适配器);③ **绝不手写传输** —— 在库的协议选项里切。
+- 决策门槛:**先加埋点测 p50/p95 往返延迟**,有数据再决定换不换。
+
+---
+
+## 四、目标架构
+
+```
+平台服务器(服务 + 模型 + data/ 全本地 co-located)
+├── chroma daemon         :18083  /sse(已有) + /streamable(可加)  · 多租户 contextvar
+├── codegraph MCP 端点      :PORT_CG   mcp-proxy 包 `codegraph serve --mcp`(per-project)
+├── cross-link MCP 端点     :PORT_CL   原生 Streamable HTTP 或 mcp-proxy 包
+└── codegraph-api          :18082  REST(平台 status/健康用,非 MCP 查询)
+         ▲ HTTP/SSE(服务地址,无文件路径)
+         │
+业务仓 .mcp.json:
+  "platform-docs": { "type": "sse",  "url": "http://<平台>:18083/sse?project_id=<id>" }
+  "codegraph":     { "type": "sse",  "url": "http://<平台>:PORT_CG/sse?project_id=<id>" }
+  "cross-link":    { "type": "sse",  "url": "http://<平台>:PORT_CL/sse?project_id=<id>" }
+```
+
+---
+
+## 五、多租户(按 project_id 隔离)
+
+- **chroma**:daemon 已用 `?project_id=` + contextvar 路由,多项目共享一 daemon。✅ 现成。
+- **cross-link**:我们的 server 加 `?project_id=` 路由(按 project 选 `cross_layer.sqlite`),单端点多租户。中等。
+- **codegraph**:`codegraph serve` 是 per-repo(`--path` / 客户端 rootUri)。SSE 多租户两选:
+  - **a. 每项目一个 mcp-proxy 实例**(一项目一端口,`--path <repo>`)—— 简单,起步用;
+  - **b. 一个网关按 project_id 路由到对应 codegraph 实例** —— 干净,后做。
+  起步 **a**(端口表写 config),量大再上 b。
+
+---
+
+## 六、分阶段实施
+
+| 阶段 | 内容 | 风险 | 验证 |
+|---|---|---|---|
+| **P1 chroma 直连 SSE** | 业务 `.mcp.json` 的 platform-docs 改 `type:sse` 直连 daemon /sse;去掉 launcher 路径 | 低(daemon 已 SSE;失 auto-spawn,需 daemon 常驻) | `/mcp` connected + search_docs 命中 |
+| **P2 cross-link HTTP 端点** | 我们的 `cross_link.server` 加 Streamable HTTP/SSE transport(MCP SDK)+ `?project_id=` 路由;或 mcp-proxy 包。平台起常驻端点 | 中(我们代码) | curl /sse + 业务 find_table_refs 通 |
+| **P3 codegraph SSE(mcp-proxy)** | 平台跑 `mcp-proxy --sse-port <p> -- codegraph serve --mcp --path <repo>`(per-project);业务改 `type:sse` | 中(端口/多租户/常驻) | codegraph_search 全工具经 SSE 通 |
+| **P4 业务 .mcp.json 切换** | 三套全改 `type:sse`+URL,删 `cmd /c ..\tools` 路径;URL 走 config | 中(改业务仓配置,影响其 MCP) | 业务仓 `/mcp` 三绿 + 各工具调通 |
+| **P5 端口/启动/健康编排** | SSE 端点随平台启动(launcher / service manager);`health --all` + `ai-health` 报各 MCP 端点状态 | 中 | 重启后端点自起;health 全绿 |
+
+---
+
+## 七、配置(机器路径/地址进 config 不进 git)
+
+```jsonc
+// ~/.codev-platform/config.json
+"platform": { "url": "http://127.0.0.1:18083" },     // 平台服务基址(已有)
+"mcp": {
+  "codegraph_sse": "http://127.0.0.1:18085",          // P3 端口
+  "cross_link_sse": "http://127.0.0.1:18086"          // P2 端口
+},
+"projects": {
+  "openclaw-stock": { "codegraph_api_url": "http://127.0.0.1:18082", "codegraph_sse_port": 18085 }
+}
+```
+业务仓 `.mcp.json` 的 URL 可由 `codev-platform init` / 一个 `codev-platform mcp-config` 子命令按 config 生成,避免手填。
+
+---
+
+## 八、启动 / 运维
+
+- 三个 SSE 端点(chroma 已有 + codegraph + cross-link)随平台常驻;mcp-proxy/daemon 进程由 launcher 或 service manager 拉起(沿用 chroma daemon 的 spawn lock 思路)。
+- `ai-health` / `health --all` 增加"各 MCP SSE 端点 reachable"检查。
+- daemon 必须常驻(失去 stdio 的 per-session auto-spawn)—— 平台开机/首次访问拉起。
+
+---
+
+## 九、风险与"现在不做"
+
+- **单机现在 stdio 更快**(无网络往返,auto-spawn 方便)。本套**收益在跨机共享**;单机是为多机铺路。→ **留接缝、分阶段**,不一次性全切。
+- **codegraph 多租户**是最复杂点(per-repo 工具 + 每项目端口/路由)。P3 起步用"每项目一端口",别先做网关。
+- **daemon 常驻依赖**:SSE 没了 stdio auto-spawn,平台必须保证端点常驻,否则业务 `/mcp` 红。
+- **不手搓传输**:坚持 mcp-proxy + MCP SDK;协议慢先测再在库内换(§三)。
+
+## 十、验收
+
+- [ ] 业务仓 `.mcp.json` **零** `cmd /c ..\tools` 文件路径,三套全 `type:sse/http` + URL。
+- [ ] 业务仓 `/mcp` 三绿;codegraph 全工具(callers/impact/context...)经 SSE 可用(无工具集退化)。
+- [ ] 多项目隔离:openclaw 查不到 widget 的图谱(project_id 路由)。
+- [ ] 平台重启后三端点自起;`health --all` 报端点 reachable。
+- [ ] 传输延迟 p50/p95 有埋点;未出现需换协议的实测瓶颈(或换了也是库内切换)。
+
+---
+
+## 十一、与既有的关系
+
+- **已落地**(本轮前):`health --all` / 平台 status 走 daemon `/platform/status` HTTP;codegraph/cross-link **统计**经 codegraph-api HTTP。本 plan 是把 **AI 的 MCP 查询路径**也服务化,补齐最后一段。
+- codegraph-api 不改(REST 作 status 面);codegraph 查询走 mcp-proxy 包的 SSE(保全工具集)。
