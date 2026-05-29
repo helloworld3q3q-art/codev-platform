@@ -1,0 +1,89 @@
+"""认证策略(可插拔)—— credential → Identity。
+
+接口 Authenticator;两个实现:
+  - PassthroughAuthenticator:信任 X-User-Id / X-Org-Id 头(单人/开发期,不验签)。
+  - TokenAuthenticator:验 Authorization: Bearer <token> → 映射到 (org,user)(M6,token 走 config/PG)。
+loop / 路由只依赖 Identity + 抽象,换鉴权方式零改(同 agent provider 的策略接口思路)。
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Mapping, Protocol, runtime_checkable
+
+from codev_platform.core import identity as _identity
+from codev_platform.core.config import get as _cfg_get
+
+
+class Unauthorized(Exception):
+    """认证失败(缺/坏 token、身份非法)。中间件转 401。"""
+
+
+@dataclass(frozen=True)
+class Identity:
+    """请求级身份(认证结果)。org 是租户根,user 是主体,via 标认证方式(审计用)。"""
+    user_id: str
+    org_id: str
+    via: str  # passthrough | token
+
+
+@runtime_checkable
+class Authenticator(Protocol):
+    def authenticate(self, headers: Mapping[str, str]) -> Identity:
+        ...
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    # headers 大小写不敏感(Starlette Headers 已是);兜底手动找
+    if hasattr(headers, "get"):
+        v = headers.get(name) or headers.get(name.lower()) or headers.get(name.upper())
+        if v:
+            return v
+    return None
+
+
+def _bearer(headers: Mapping[str, str]) -> str | None:
+    raw = _header(headers, "Authorization")
+    if raw and raw.lower().startswith("bearer "):
+        return raw[7:].strip()
+    return None
+
+
+class PassthroughAuthenticator:
+    """单人/开发期:信任明文头解析身份,不验签。是"身份解析+上下文",不是真鉴权。"""
+
+    def authenticate(self, headers: Mapping[str, str]) -> Identity:
+        try:
+            user_id = _identity.resolve_from_request(headers)
+            org_id = _identity.resolve_org_from_request(headers)
+        except ValueError as exc:
+            raise Unauthorized(f"非法身份头: {exc}") from exc
+        return Identity(user_id=user_id, org_id=org_id, via="passthrough")
+
+
+class TokenAuthenticator:
+    """M6:验 Bearer token → (org,user)。tokens 形如 {<token>: {"user_id":..,"org_id":..}}。
+    真 token 表应走 PG(codev_platform_memory),config 仅放本机调用方自己的 key。"""
+
+    def __init__(self, tokens: Mapping[str, Mapping[str, Any]]) -> None:
+        self._tokens = dict(tokens or {})
+
+    def authenticate(self, headers: Mapping[str, str]) -> Identity:
+        tok = _bearer(headers)
+        if not tok:
+            raise Unauthorized("缺少 Authorization: Bearer <token>")
+        ident = self._tokens.get(tok)
+        if not ident:
+            raise Unauthorized("无效 token")
+        return Identity(
+            user_id=str(ident.get("user_id") or "unknown"),
+            org_id=str(ident.get("org_id") or "default"),
+            via="token",
+        )
+
+
+def build_authenticator(cfg: dict | None = None) -> Authenticator:
+    """按 config.gateway.auth_mode 选认证器(默认 passthrough)。换模式零改上层。"""
+    mode = _cfg_get(cfg or {}, "gateway.auth_mode", "passthrough") if cfg is not None else "passthrough"
+    if mode == "token":
+        return TokenAuthenticator(_cfg_get(cfg or {}, "gateway.tokens", {}) or {})
+    return PassthroughAuthenticator()

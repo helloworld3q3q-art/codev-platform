@@ -36,10 +36,12 @@
 | **SSE**(兼容/过渡) | 同 SDK `mcp.server.sse`(daemon 现用)/ `type:"sse"` | 现成可用,先用它打通 |
 | **stdio→SSE/HTTP 桥** | **`mcp-proxy`**(venv 已装 mcp-proxy.exe) | 把 codegraph(外部 stdio)+ cross-link 包成 HTTP 端点 |
 
-**性能与回退(测了再换,不臆造)**:
-- 同机 loopback HTTP 是微秒级,瓶颈在模型/LLM 不在传输 —— **大概率不需要换协议**。
-- 真测出远程延迟问题:① 先用 Streamable HTTP 的 **HTTP/2 持久连接 / keep-alive**(SDK 自带);② 仍不够 → 评估 **WebSocket transport**(找支持的 MCP 库,如 `mcp` 后续 / 社区适配器);③ **绝不手写传输** —— 在库的协议选项里切。
-- 决策门槛:**先加埋点测 p50/p95 往返延迟**,有数据再决定换不换。
+**协议决策(已分析,2026-05-30 锁定)**:
+- **锁定 Streamable HTTP** —— MCP 标准远程传输 + Claude Code 原生 `type:http` + MCP SDK/mcp-proxy 现成 + HTTP/2 持久连接。
+- **WebSocket / 裸 TCP / Unix socket 一律不用**:三者都**非 MCP 标准传输**,`.mcp.json` 无对应 `type` → 客户端连不上 → 只能 fork/手搓(违背"用库不手搓");且相对 Streamable HTTP(HTTP/2 多路复用 + 二进制帧 + header 压缩)的提升是**亚毫秒级**,被 LLM/工具耗时(秒 / 百毫秒级)完全淹没 = 伪优化。
+- 同机极致快本就是 **stdio**(管道 < loopback TCP),但它是路径,与"服务地址"矛盾 → 只在不要求服务化时用。
+- **真正的提速杠杆**:① 连接复用(长连接,别 per-call 握手)② 暖 daemon ③ 工具本身快。**换协议不是杠杆**。
+- 门槛:**先埋点测 p50/p95**,有数据才动 —— 预计不会动。
 
 ---
 
@@ -76,6 +78,7 @@
 
 | 阶段 | 内容 | 风险 | 验证 |
 |---|---|---|---|
+| **P0 网关/认证基础 ✅ 已落地** | `codev_platform/gateway/`(auth 可插拔:passthrough/token + 统一拦截中间件)+ 挂到 agent 服务,`/health` public;config `gateway.auth_mode` | 低(passthrough 不破坏现有) | 单测 10 通过 + agent app 加载 AuthMiddleware;各 HTTP 入口复用同一模块 |
 | **P1 chroma 直连 SSE** | 业务 `.mcp.json` 的 platform-docs 改 `type:sse` 直连 daemon /sse;去掉 launcher 路径 | 低(daemon 已 SSE;失 auto-spawn,需 daemon 常驻) | `/mcp` connected + search_docs 命中 |
 | **P2 cross-link HTTP 端点** | 我们的 `cross_link.server` 加 Streamable HTTP/SSE transport(MCP SDK)+ `?project_id=` 路由;或 mcp-proxy 包。平台起常驻端点 | 中(我们代码) | curl /sse + 业务 find_table_refs 通 |
 | **P3 codegraph SSE(mcp-proxy)** | 平台跑 `mcp-proxy --sse-port <p> -- codegraph serve --mcp --path <repo>`(per-project);业务改 `type:sse` | 中(端口/多租户/常驻) | codegraph_search 全工具经 SSE 通 |
