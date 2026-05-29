@@ -73,6 +73,38 @@ def _query_codegraph_api(base_url: str) -> Any:
     return "api_error"
 
 
+def _query_crosslink_api(base_url: str) -> Any:
+    """通过 codegraph-api(:18082)取 cross-link 统计 —— POST /v1/cross-link/stats。
+    nodesByKind / edgesByRel 求和得总数。成功返回 {'nodes','edges','source':'http'};
+    服务没起 'api_down';无 cross-link 数据(库空/不适用)'no_data'。"""
+    import urllib.request
+    url = base_url.rstrip("/") + "/v1/cross-link/stats"
+    try:
+        req = urllib.request.Request(
+            url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001
+        return "api_down"
+    if d.get("result") == 0 and isinstance(d.get("data"), dict):
+        nk = d["data"].get("nodesByKind") or {}
+        ek = d["data"].get("edgesByRel") or {}
+        if nk:
+            return {"nodes": sum(int(v) for v in nk.values()),
+                    "edges": sum(int(v) for v in ek.values()), "source": "http"}
+        return "no_data"
+    return "api_error"
+
+
+def _local_crosslink(data_dir: Path, pid: str) -> Any:
+    """平台本地 cross_layer.sqlite(中心化, 平台自有)读 nodes 数。未建返回 'not_built'。"""
+    xdb = data_dir / "codegraph_ext" / pid / "cross_layer.sqlite"
+    if not xdb.is_file():
+        return "not_built"
+    c = _sqlite_counts(xdb, "nodes") or {}
+    return {"nodes": c.get("nodes", 0), "source": "local"}
+
+
 def _self_project_id(repo_root: Path) -> str | None:
     pj = repo_root / ".claude" / "project.json"
     if pj.is_file():
@@ -183,14 +215,19 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
                 else:
                     codegraph = "no_db"
 
-        xdb = data / "codegraph_ext" / pid / "cross_layer.sqlite"
-        xcounts = _sqlite_counts(xdb, "nodes") if xdb.is_file() else None
-        cross_link_nodes = xcounts.get("nodes") if isinstance(xcounts, dict) else None
+        # cross-link: 优先 codegraph-api /v1/cross-link/stats(HTTP);否则 / API 无数据时
+        # 退回平台本地 cross_layer.sqlite(中心化, 平台自有)。
+        cross_link: Any
+        if api_url:
+            cl = _query_crosslink_api(api_url)
+            cross_link = cl if isinstance(cl, dict) else _local_crosslink(data, pid)
+        else:
+            cross_link = _local_crosslink(data, pid)
 
         projects[pid] = {
             "chroma_chunks": chroma_pid.get(pid, 0),
             "codegraph": codegraph,
-            "cross_link_nodes": cross_link_nodes,
+            "cross_link": cross_link,
             "memory_project": mem_proj.get(pid, 0),
             "usage_7d": usage.get(pid, {"search_docs": 0, "cross_link": 0}),
             "registered": pid in registered,

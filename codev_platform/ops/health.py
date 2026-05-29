@@ -1050,8 +1050,17 @@ def cmd_health_all(args: argparse.Namespace) -> int:
             cg_s = "codegraph-api 返回错误"
         else:
             cg_s = str(cg)
-        xl = p.get("cross_link_nodes")
-        xl_s = f"nodes={xl}" if xl is not None else "未建(不适用/未建)"
+        xl = p.get("cross_link")
+        if isinstance(xl, dict):
+            xsrc = xl.get("source")
+            xtag = " (via codegraph-api HTTP)" if xsrc == "http" else " (本地)" if xsrc == "local" else ""
+            xl_s = f"nodes={xl.get('nodes', 0)}{xtag}"
+        elif xl == "not_built":
+            xl_s = "未建(不适用/未建)"
+        elif xl == "api_down":
+            xl_s = "codegraph-api 未响应"
+        else:
+            xl_s = "未建/不可用"
         u = p.get("usage_7d", {})
         reg_tag = "" if p.get("registered") else "  (未注册 platform_meta)"
         out(f"[{pid}]{reg_tag}")
