@@ -57,7 +57,7 @@ cat > "$PLIST" <<'PLIST_EOF'
   <key>RunAtLoad</key><true/>
   <key>ProgramArguments</key><array>
     <string>/bin/sh</string><string>-c</string>
-    <string>launchctl setenv PLATFORM_MCP_SH sh; launchctl setenv PLATFORM_MCP_FLAG -c; launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'; launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'</string>
+    <string>launchctl setenv PLATFORM_MCP_SH sh; launchctl setenv PLATFORM_MCP_FLAG -c; launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'; launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'; launchctl setenv PLATFORM_CODEGRAPH /usr/local/bin/codegraph</string>
   </array>
 </dict></plist>
 PLIST_EOF
@@ -67,9 +67,10 @@ launchctl setenv PLATFORM_MCP_SH sh
 launchctl setenv PLATFORM_MCP_FLAG -c
 launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'
 launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'
+launchctl setenv PLATFORM_CODEGRAPH /usr/local/bin/codegraph   # 仅装了 codegraph 才需要; 路径以 `which codegraph` 为准
 ```
 
-> 这 4 个值对每个 Mac 同学**完全一样**(走 `$CLAUDE_PROJECT_DIR/.venv` 项目相对路径,跟克隆位置/用户名无关),直接抄。卸载:`launchctl unload "$PLIST" && rm "$PLIST"`。
+> 前 4 个值对每个 Mac 同学**完全一样**(走 `$CLAUDE_PROJECT_DIR/.venv` 项目相对路径,跟克隆位置/用户名无关),直接抄。`PLATFORM_CODEGRAPH` 是 codegraph 二进制的**绝对路径**(Dock 启动的 VSCode 的 PATH 不含 `/usr/local/bin`,故 `.mcp.json` 里 codegraph 也走 `${PLATFORM_CODEGRAPH:-codegraph}`)。卸载:`launchctl unload "$PLIST" && rm "$PLIST"`。
 
 然后 **完全退出 VSCode(Cmd+Q)再从 Dock 重开** —— 新的扩展宿主才会从 launchd 读到这些变量。
 
@@ -77,11 +78,25 @@ launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/pyt
 
 ---
 
+## (可选)codegraph 代码图谱 MCP
+
+`.mcp.json` 里还有第三个 server `codegraph`(**独立第三方工具**,通用代码图谱:符号 / 调用链 / impact)。想要就装:
+
+```bash
+npm install -g @colbymchenry/codegraph   # 第三方个人作者包, 自行评估信任; 提供 /usr/local/bin/codegraph
+which codegraph                          # 确认路径(上面 LaunchAgent 的 PLATFORM_CODEGRAPH 要对上)
+cd <codev-platform 仓> && codegraph init -i   # 建本仓 .codegraph/codegraph.db(gitignored, 每台各建)
+```
+
+> PATH 坑同 env:Dock 启动的 VSCode PATH 不含 `/usr/local/bin`,所以 `.mcp.json` 用 `${PLATFORM_CODEGRAPH:-codegraph}`,靠上面 LaunchAgent 里的 `PLATFORM_CODEGRAPH` 绝对路径找到它。不装 codegraph 就忽略,另外两个 server 不受影响。
+
+---
+
 ## 验证
 
-1. Claude Code 里 `/mcp` → `platform-docs` 应为 **connected**。
+1. Claude Code 里 `/mcp` → `platform-docs`、`cross-link` 应为 **connected**(装了 codegraph 则三个全 connected)。
 2. 让 Claude 调一次 `search_docs`(如查"commit 规范"),应返回相关文档 chunk。
-3. `cross-link` 也会 connected,但工具报"DB 不存在" —— 正常,cross-link 数据本流程没建(只覆盖 chroma 检索)。
+3. `cross-link` connected,但其工具可能报"DB 不存在" —— 正常,cross-link 数据本流程没建(只覆盖 chroma 检索)。
 
 ---
 
@@ -93,3 +108,4 @@ launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/pyt
 | daemon 日志 `模型加载失败` | `~/models/Qwen3-Embedding-0.6B` 没下全,或 config `embed_path` 写错 |
 | mps 报算子不支持 | config `embed_device` 改 `cpu`(0.6B 模型 CPU 也够快) |
 | search 返回空 | 索引没建 → 跑 `python -m codev_platform.chroma.indexer --force` |
+| `/mcp` 里 codegraph failed | ① `which codegraph` 为空 → 没装(`npm i -g @colbymchenry/codegraph`);② 装了但 `launchctl getenv PLATFORM_CODEGRAPH` 为空/路径不对 → 重设 + Cmd+Q 重启;③ 没建库 → `codegraph init -i` |
