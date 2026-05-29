@@ -15,7 +15,7 @@
 | [xplatform-cli-2026-05-28.md](xplatform-cli-2026-05-28.md) | .ps1 工具链 → 跨平台 Python CLI(`codev_platform.ops`)| ✅ 已落地(未 push)|
 | [cross-link-scanner-framework-2026-05-28.md](cross-link-scanner-framework-2026-05-28.md) | cross-link 扫描器框架 | 📋 计划 |
 | [daemon-sre-phase2-2026-05-28.md](daemon-sre-phase2-2026-05-28.md) | daemon SRE Phase 2 | 📋 计划 |
-| [agent-2026-05-28.md](agent-2026-05-28.md) | agent 开发 plan(技术方案 / 产品规划 / 难点)| 📋 待拍板 |
+| [agent-2026-05-28.md](agent-2026-05-28.md) | agent 开发 plan | 🟡 P0/P1/P1.5 已落地实测(DeepSeek);P1.6 widget 接入代码完成;P2 多租户化待做 |
 
 ## 关联
 
