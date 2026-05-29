@@ -75,3 +75,15 @@ env + 硬编码默认、不读 config,与 `server.py`(读 config)不一致,会�
 - 不动 cross_link MCP(本次只解决 chroma 检索)。
 - 不开 reranker(后续单独验证 mps 可用性再开)。
 - 不改 Windows 既有路径行为(仅新增非 win 分支)。
+
+---
+
+## L5 实施结论(2026-05-29)
+
+`.mcp.json` 用 `${VAR:-默认}` 跨平台(未设=Windows `cmd /c`,Mac 设 4 个 `PLATFORM_MCP_*` 切 `sh -c` 直跑 server,绕开 launcher/mcp-proxy)。
+
+**踩坑 + 根因**:初版让 Mac 用户把这 4 个变量写 `~/.zshrc` → `/mcp` 红 failed。根因:`.mcp.json` 的 `${VAR}` 展开取自 **VSCode 扩展宿主的 `process.env`**;**从 Dock/Finder 启动的 VSCode 不读 `~/.zshrc`**(只继承 launchd 环境),变量缺失 → `${PLATFORM_MCP_SH:-cmd}` 回退成 `cmd` → Mac 无 `cmd` → spawn 失败。(官方文档佐证:`.mcp.json` 支持 `${VAR:-default}`;扩展宿主 env 不含 shell profile。)
+
+**最终修法**:`launchctl setenv` 把 4 个变量塞进 launchd 环境(GUI 启动可见)+ `~/Library/LaunchAgents/com.codev-platform.mcp-env.plist`(`RunAtLoad`)持久化,重启不丢。验收:platform-docs / cross-link 均 connected,`search_docs` 实跑返回相关 chunk(mps,680 chunks)。onboarding 文档与 `setup` 已据此从 `~/.zshrc` 改为 launchctl/LaunchAgent。
+
+> codegraph MCP 仍 failed —— 它是独立第三方工具(需单独装 `codegraph` 二进制),不在本方案范围。

@@ -38,22 +38,42 @@ python -m codev_platform.chroma.indexer --force
 
 ---
 
-## 接入 Claude Code(关键一步:shell 环境变量)
+## 接入 Claude Code(关键一步:用 launchctl,不要用 ~/.zshrc)
 
-`.mcp.json` 是 Win/Mac 共用的提交文件,用 `${VAR:-默认}` 展开:**变量没设时 = Windows 行为**。Mac 要靠 4 个环境变量切到 stdio 直跑 server。把下面这块**原样**粘到 `~/.zshrc` 末尾(单引号别动,`$CLAUDE_PROJECT_DIR` 留字面,由 Claude Code 注入):
+`.mcp.json` 是 Win/Mac 共用的提交文件,用 `${VAR:-默认}` 展开:**变量没设时 = Windows 行为**(`cmd /c`)。Mac 要让 VSCode 扩展宿主在**展开阶段**就看到这 4 个变量,才会切到 stdio 直跑 server。
+
+> ⚠️ **别放 `~/.zshrc`**。从 Dock / 聚焦 / 双击图标启动的 VSCode **不读 `~/.zshrc`**(只继承 launchd 环境),扩展宿主拿不到变量 → `.mcp.json` 回退成 Windows 的 `cmd` 命令 → Mac 上必然 `failed`。必须用 **`launchctl`**(进 launchd 环境,GUI 启动也可见),并用 **LaunchAgent** 让它重启电脑不丢。
+
+把下面**整段**粘到终端跑一次(写 LaunchAgent + 立即生效;`$CLAUDE_PROJECT_DIR` 留字面,运行时由 Claude Code 注入):
 
 ```bash
-# >>> codev-platform MCP cross-platform >>>
-export PLATFORM_MCP_SH=sh
-export PLATFORM_MCP_FLAG=-c
-export PLATFORM_MCP_CHROMA='exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'
-export PLATFORM_MCP_CROSSLINK='exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'
-# <<< codev-platform MCP cross-platform <<<
+PLIST=~/Library/LaunchAgents/com.codev-platform.mcp-env.plist
+mkdir -p ~/Library/LaunchAgents
+cat > "$PLIST" <<'PLIST_EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.codev-platform.mcp-env</string>
+  <key>RunAtLoad</key><true/>
+  <key>ProgramArguments</key><array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>launchctl setenv PLATFORM_MCP_SH sh; launchctl setenv PLATFORM_MCP_FLAG -c; launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'; launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'</string>
+  </array>
+</dict></plist>
+PLIST_EOF
+launchctl unload "$PLIST" 2>/dev/null; launchctl load "$PLIST"
+# 立即生效一份(本次会话,不必等下次登录)
+launchctl setenv PLATFORM_MCP_SH sh
+launchctl setenv PLATFORM_MCP_FLAG -c
+launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'
+launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'
 ```
 
-> 这 4 行对每个 Mac 同学**完全一样**(走 `$CLAUDE_PROJECT_DIR/.venv` 项目相对路径,跟克隆位置/用户名无关),直接抄。
+> 这 4 个值对每个 Mac 同学**完全一样**(走 `$CLAUDE_PROJECT_DIR/.venv` 项目相对路径,跟克隆位置/用户名无关),直接抄。卸载:`launchctl unload "$PLIST" && rm "$PLIST"`。
 
-然后 **完全退出 VSCode 再重开**(不是 reload window)—— 扩展进程要重新解析 shell 环境才读得到新变量。
+然后 **完全退出 VSCode(Cmd+Q)再从 Dock 重开** —— 新的扩展宿主才会从 launchd 读到这些变量。
+
+> 快速替代(不想装 LaunchAgent):从**终端**里 `code .` 启动 VSCode,可继承终端的 shell 环境;但每次都得从终端开,易忘。
 
 ---
 
@@ -69,7 +89,7 @@ export PLATFORM_MCP_CROSSLINK='exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m co
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| `/mcp` 里 platform-docs failed | 4 个 env 没生效 → 确认粘进 `~/.zshrc` 且**完全重启**了 VSCode;终端里 `echo $PLATFORM_MCP_CHROMA` 应非空 |
+| `/mcp` 里 platform-docs failed | 4 个 env 没进 launchd → `launchctl getenv PLATFORM_MCP_CHROMA` 应非空;为空就重跑上面那段 + **Cmd+Q 完全重启** VSCode(reload window 不够) |
 | daemon 日志 `模型加载失败` | `~/models/Qwen3-Embedding-0.6B` 没下全,或 config `embed_path` 写错 |
 | mps 报算子不支持 | config `embed_device` 改 `cpu`(0.6B 模型 CPU 也够快) |
 | search 返回空 | 索引没建 → 跑 `python -m codev_platform.chroma.indexer --force` |

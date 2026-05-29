@@ -436,22 +436,28 @@ def cmd_setup(args: argparse.Namespace) -> int:
         _print("  (--auto 时自动 sync; 或手动 codev-platform sync-rules / sync-skills)")
     if is_win:
         _print("  Windows: .mcp.json 默认即 cmd /c daemon launcher, 无需额外 env。")
+    elif is_mac:
+        # .mcp.json 的 ${VAR} 展开取自 VSCode 扩展宿主 process.env。Dock/Finder 启动的 VSCode
+        # 不读 ~/.zshrc(只继承 launchd 环境) → 必须用 launchctl(GUI 可见)+ LaunchAgent 持久化。
+        import subprocess as _sp
+        try:
+            cur = _sp.check_output(["launchctl", "getenv", "PLATFORM_MCP_CHROMA"], text=True).strip()
+        except Exception:  # noqa: BLE001
+            cur = ""
+        if cur:
+            _print("  Mac MCP env: OK (launchctl 已设 PLATFORM_MCP_CHROMA)")
+        else:
+            _print("  Mac 接 Claude Code: 用 launchctl 设 4 个 env (别用 ~/.zshrc — Dock 启动的 VSCode 读不到)。")
+            _print("  跑 docs/onboarding-mac.md 『接入 Claude Code』那段 (写 LaunchAgent + launchctl setenv), 再 Cmd+Q 重启 VSCode。")
     else:
-        _print("  Mac/Linux 接 Claude Code: 把下面 4 行加到 ~/.zshrc 后【完全重启】 VSCode:")
-        _print("    # >>> codev-platform MCP cross-platform >>>")
-        _print("    export PLATFORM_MCP_SH=sh")
-        _print("    export PLATFORM_MCP_FLAG=-c")
-        _print("    export PLATFORM_MCP_CHROMA='exec \"$CLAUDE_PROJECT_DIR/.venv/bin/python\" -m codev_platform.chroma.server'")
-        _print("    export PLATFORM_MCP_CROSSLINK='exec \"$CLAUDE_PROJECT_DIR/.venv/bin/python\" -m codev_platform.cross_link.server'")
-        _print("    # <<< codev-platform MCP cross-platform <<<")
-        _print("  (CLI 不替你改 shell profile; 全流程见 docs/onboarding-mac.md)")
+        _print("  Linux 接 Claude Code: 在登录环境 export PLATFORM_MCP_SH=sh / FLAG=-c / CHROMA / CROSSLINK (见 docs/onboarding-mac.md), 或从终端启动 IDE。")
     _print()
 
     # 收尾
     if not missing:
         _print(">>> READY <<< venv + codev_platform + 模型 + config 齐备")
         if not is_win:
-            _print("  最后: 建索引 (python -m codev_platform.chroma.indexer --force) + 加 shell env + 重启 VSCode")
+            _print("  最后: 建索引 (python -m codev_platform.chroma.indexer --force) + 配 MCP env (launchctl, 见 docs/onboarding-mac.md) + 重启 VSCode")
         return 0
     _print(f">>> INCOMPLETE <<< 缺: {', '.join(missing)}")
     _print("  按上面 MISSING 行补齐后, 再跑 codev-platform setup --auto")
