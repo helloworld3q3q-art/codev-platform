@@ -5,6 +5,7 @@ agent 重依赖(fastapi/uvicorn/anthropic)在可选 extra `[agent]`,未装时给
 from __future__ import annotations
 
 import argparse
+import sys
 
 
 def cmd_agent(args: argparse.Namespace) -> int:
@@ -14,7 +15,17 @@ def cmd_agent(args: argparse.Namespace) -> int:
     try:
         import uvicorn  # noqa: F401
     except ImportError:
-        print("缺少 agent 依赖。先装:  pip install -e .[agent]")
+        # 关键:agent extra 要装到"当前运行 codev-platform 的解释器",不一定是仓内 .venv。
+        # 报清楚当前解释器,避免装错环境(常见坑:CLI 在系统 python,依赖却装进 .venv)。
+        print(
+            "缺少 agent 依赖(fastapi/uvicorn/anthropic/openai)。\n"
+            f"当前解释器: {sys.executable}\n"
+            "给这个解释器装 agent extra:\n"
+            f'  "{sys.executable}" -m pip install -e "<codev-platform 仓路径>[agent]"\n'
+            "或直接用已装依赖的 venv 起:\n"
+            "  <venv>\\Scripts\\python.exe -m codev_platform.cli agent serve",
+            file=sys.stderr,
+        )
         return 1
     # 延迟到此 import service,避免没装 extra 时整个 CLI 挂掉
     uvicorn.run(
