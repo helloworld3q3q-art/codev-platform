@@ -1,8 +1,10 @@
-# codev-platform 专属基础设施。
+# codev-platform 专属基础设施 —— memory 用的独立 PostgreSQL。
 #
-# 目前只有 memory 用的独立 PostgreSQL(详见 docs/plans/roadmap-2026-05-29/
-# memory-permission-model-2026-05-29.md §3.2c)。平台定位团队/组织,PG 从开发期
-# 就独立部署(非共业务 server),数据卷归平台 data/,契合所有权翻正。
+# 备选方案(2026-05-29):若开发机已有原生 PostgreSQL(本机有 PG17 @ 5432),
+# 优先在现有 server 建独立库 codev_platform_memory(见 plan §3.2c),无需本 compose。
+# 本文件供「无原生 PG 的机器 / 团队服务器」用 —— docker 起一个平台专属 PG。
+#
+# 详见 docs/plans/roadmap-2026-05-29/memory-permission-model-2026-05-29.md §3.2c。
 #
 # 起停:
 #   docker compose up -d          # 起 PG(首次自动建库 codev_platform_memory)

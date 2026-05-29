@@ -137,30 +137,33 @@ CREATE INDEX ix_mem_topic ON memory_entries(topic_key, status);
 | 库内隔离 | 仍按 project_id 多租户隔离(openclaw / widget / 未来项目的 memory 在平台库内分租户,不混) |
 | 复用边界 | 复用的是"PG 这套技术栈/实例运维能力",**不是** openclaw 的那个 business database |
 
-### 3.2c PG 部署形态(2026-05-29 定:独立实例,docker 平台专属容器)
+### 3.2c PG 部署形态(2026-05-29 修订:用现有 PG server + 独立 database)
 
-平台定位团队/组织 → **独立 PG 实例**(非共业务 server)。但开发期仍单机,故用 **docker 平台专属容器**落地,拿到独立实例的隔离收益又不背双套原生运维负债。
+> **修订原因**:开发机已有原生 PostgreSQL 17 在跑(localhost:5432,服务 `postgresql-x64-17`)。无需再装 Docker —— 直接在现有 server 里建**独立 database** 即可,这是本节"共 server + 独立 database"的可接受形态(§3.2b 红线只要求 database 独立,不要求 server 独立)。原 docker 方案(`docker-compose.yml`)保留作**备选**(无原生 PG 的机器 / 团队服务器仍可用)。
 
 ```
-codev-platform-postgres (docker container)
-├── image: postgres:16
-├── port: 5433(避开业务 PG 5432)
-├── database: codev_platform_memory
-├── 数据卷: <平台仓根>/data/postgres/(归平台,契合所有权翻正)
-└── 独立 role: codev_platform(限权,非业务 superuser)
+现有 PG server (localhost:5432)
+├── (openclaw 等业务库)            ← 不碰(红线)
+└── codev_platform_memory          ← 平台独立库,OWNER = codev_platform 角色
+```
+
+建库(用户执行,需 postgres 超级用户;codev-platform 代码无密码不自动建):
+```sql
+CREATE ROLE codev_platform LOGIN PASSWORD '<设一个>';
+CREATE DATABASE codev_platform_memory OWNER codev_platform;
 ```
 
 | 阶段 | 落地 |
 |---|---|
-| 单人开发(现在) | `docker compose up -d` 起容器;数据卷在 `data/postgres/`(gitignored,同 chroma data) |
-| 团队部署 | 同 compose 部署到团队服务器,**零改动**(从开发期就独立,无迁移) |
-| 组织级 | 容器挪独立机器 / 换托管 PG(RDS 等),改 `config.memory.pg_dsn` 一行 |
+| 单人开发(现在) | 现有 PG 5432 建独立库 `codev_platform_memory` |
+| 团队 / 无原生 PG 的机器 | 备选 `docker-compose.yml`(postgres:16,端口 5433,数据卷 data/postgres/)|
+| 组织级 | 独立实例 / 托管 PG(RDS 等),改 `config.memory.pg_dsn` 一行 |
 
-**为什么不共 server 起步**:终局是独立,共 server 起步等于"先寄生 openclaw → 团队了再拆实例",制造迁移返工 + 破坏刚完成的所有权翻正(数据又寄生业务)。从第一天独立(docker 降成本)走直线。
+**红线不变**:独立 **database**(非业务库),连接串走 `config.memory.pg_dsn`,密码走 env / config(不进 git)。共 server 省运维 + 红线满足,二者兼得。
 
-**config**:`config.memory.pg_dsn = "postgresql://codev_platform:***@localhost:5433/codev_platform_memory"`(key/密码走 env,不进 git;复用 §3.2 的 secrets 红线)。
+**config**:`config.memory.pg_dsn = "postgresql://codev_platform:***@localhost:5432/codev_platform_memory"`(密码走 env,不进 git;复用 §3.2 secrets 红线)。
 
-**A(会话持久化 M2)前置已解除**:部署形态定 + `docker compose up` 即有 PG,可排实施。
+**A(会话持久化 M2)前置**:DB 待用户建(上面 SQL);M2 代码动工时建库即可,现在不强制(建了也空着到 M2)。
 
 ### 3.3 作用域 → collection 映射
 
