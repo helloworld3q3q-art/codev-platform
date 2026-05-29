@@ -155,10 +155,10 @@
 
         <section id="map">
           <h2>一图总览</h2>
-          <p>按<strong>平面分层</strong>从上到下:<strong>① 真值源仓</strong>(本仓核心代码 + 运行时 + 规则 / 技能 / CLI / 配置,经 pip -e / sync 供给下方所有层)→ <strong>② 数据与本地索引</strong>(索引器把业务仓数据建成 per-project 本地库)+ <strong>③ 记忆与会话 PG</strong>(独立库、四作用域、多租户,并列另一种存储)→ <strong>④ 服务层</strong>(全部服务化对外:检索 MCP / daemon + 主动 Agent HTTP 服务,Agent 自己调 MCP 工具 + 读写记忆)→ <strong>⑤ 消费者</strong>(会话 / Agent 调用方 / 业务仓)。<strong>⊗ 贯穿层</strong>(身份三元组 / 门禁 / dirty-index / ai-health / 多租户隔离)横切全程。<strong>存储已全服务化</strong> —— 本地索引数据经 daemon / MCP 访问,记忆 / 会话走 PG 独立库。</p>
+          <p>按<strong>平面分层</strong>从上到下:<strong>① 真值源仓</strong>(本仓核心代码 + 运行时 + 规则 / 技能 / CLI / 配置,经 pip -e / sync 供给下方所有层)→ <strong>② 数据与索引</strong>(索引器把业务仓数据建成<strong>平台库</strong>:归本仓 <code>data/</code> · 按 project_id 多租户 · 业务仓只放 shim)+ <strong>③ 记忆与会话 PG</strong>(独立库、四作用域、多租户,并列另一种存储)→ <strong>④ 服务层</strong>(全部服务化对外:检索 MCP / daemon + 主动 Agent HTTP 服务,Agent 自己调 MCP 工具 + 读写记忆)→ <strong>⑤ 消费者</strong>(会话 / Agent 调用方 / 业务仓)。<strong>⊗ 贯穿层</strong>(身份三元组 / 门禁 / dirty-index / ai-health / 多租户隔离)横切全程。<strong>存储已全归平台 + 服务化</strong> —— 索引数据归本仓 <code>data/</code>(按 project_id 多租户)经 daemon / MCP 访问,记忆 / 会话走 PG 独立库。</p>
           <div class="legend">
             <span class="pill"><span class="dot violet"></span>① 真值源仓</span>
-            <span class="pill"><span class="dot green"></span>② 数据与本地索引</span>
+            <span class="pill"><span class="dot green"></span>② 数据与索引(平台 data/)</span>
             <span class="pill"><span class="dot cyan"></span>③ 记忆 / 会话 PG</span>
             <span class="pill"><span class="dot amber"></span>④ 服务层(检索 + Agent)</span>
             <span class="pill"><span class="dot"></span>⑤ 消费者</span>
@@ -253,10 +253,10 @@
                 <text class="node-sub" x="1316" y="170" text-anchor="middle" fill="#7c3aed">→ 用户主权配置</text>
               </g>
 
-              <!-- ========== ② 数据与本地索引(左) + ③ 记忆/会话 PG(右),并列存储层 ========== -->
-              <!-- ② 数据与本地索引 -->
+              <!-- ========== ② 数据与索引(平台 data/,左) + ③ 记忆/会话 PG(右),并列存储层 ========== -->
+              <!-- ② 数据与索引(平台 data/) -->
               <rect x="40" y="214" width="860" height="392" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
-              <text class="lane-title" x="58" y="238" fill="#047857">② 数据与本地索引(per project)— 索引器把业务仓数据建成本地库</text>
+              <text class="lane-title" x="58" y="238" fill="#047857">② 数据与索引 · 平台 data/(归本仓,按 project_id 多租户)— 索引器把业务仓数据建成平台库</text>
               <g filter="url(#shadow)">
                 <rect x="58" y="254" width="246" height="334" rx="8" fill="#dbeafe" stroke="#2563eb"/>
                 <text class="node-title" x="181" y="280" text-anchor="middle">业务仓数据源</text>
@@ -279,11 +279,11 @@
               <path class="edge-green" d="M586 420 L606 420"/>
               <g filter="url(#shadow)">
                 <rect x="606" y="254" width="276" height="334" rx="8" fill="#dcfce7" stroke="#059669"/>
-                <text class="node-title" x="744" y="280" text-anchor="middle">本地数据(per project)</text>
-                <text class="node-sub" x="744" y="306" text-anchor="middle">向量库 · 元数据过滤</text>
-                <text class="node-sub" x="744" y="328" text-anchor="middle">代码图谱库 SQLite</text>
-                <text class="node-sub" x="744" y="350" text-anchor="middle">跨层链路库 SQLite</text>
-                <text class="node-sub" x="744" y="372" text-anchor="middle"><tspan class="kw">按 project_id 物理隔离</tspan></text>
+                <text class="node-title" x="744" y="280" text-anchor="middle">平台数据 · data/(归本仓)</text>
+                <text class="node-sub" x="744" y="306" text-anchor="middle">向量库 · 代码图谱库 · 链路库</text>
+                <text class="node-sub" x="744" y="328" text-anchor="middle">SQLite / chroma collection</text>
+                <text class="node-sub" x="744" y="350" text-anchor="middle"><tspan class="kw">多租户 · 按 project_id 隔离</tspan></text>
+                <text class="node-sub" x="744" y="372" text-anchor="middle">不在业务仓,业务仓只放 shim</text>
                 <text class="node-sub" x="744" y="394" text-anchor="middle">新鲜度 / dirty 范围</text>
               </g>
 
@@ -411,9 +411,9 @@
               <path class="edge-violet" d="M1086 184 C1086 210 1150 240 1180 272"/>
               <path class="edge-violet" d="M856 184 C856 360 1120 560 1160 662" stroke-dasharray="5 4"/>
 
-              <!-- ② 本地数据 → ④ 检索服务读;③ 记忆 → ④ Agent 读写 -->
+              <!-- ② 平台数据 → ④ 检索服务读;③ 记忆 → ④ Agent 读写 -->
               <path class="edge-green" d="M470 606 C470 615 360 645 300 662"/>
-              <text class="node-sub" x="360" y="620" text-anchor="middle" fill="#047857">本地索引 → 检索服务读</text>
+              <text class="node-sub" x="360" y="620" text-anchor="middle" fill="#047857">平台数据 → 检索服务读</text>
               <path class="edge-blue" d="M1180 606 C1180 630 1170 645 1160 662"/>
               <text class="node-sub" x="1250" y="624" text-anchor="middle" fill="#0e7490">Agent 读写记忆</text>
 
@@ -431,8 +431,8 @@
               <!-- ========== bottom narration ========== -->
               <rect x="40" y="1078" width="1400" height="54" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
               <text class="node-title" x="58" y="1099">★ 一句话:</text>
-              <text class="node-sub" x="150" y="1099">真值源(①)→ 数据/本地索引(②)+ 记忆 PG(③)→ <tspan class="kw">服务层(④ 检索 MCP + 主动 Agent)</tspan>→ 消费者(⑤);身份 / 门禁 / 隔离(⊗)横切全程。</text>
-              <text class="node-sub" x="58" y="1119">★ 存储已全服务化:本地索引数据经 <tspan class="kw">daemon / MCP</tspan> 访问,记忆 / 会话走 <tspan class="kw">PG 独立库(多租户)</tspan>;Agent 自己调 MCP 工具 + 读写分层记忆,按身份路由。</text>
+              <text class="node-sub" x="150" y="1099">真值源(①)→ 数据/索引(②,平台 data/)+ 记忆 PG(③)→ <tspan class="kw">服务层(④ 检索 MCP + 主动 Agent)</tspan>→ 消费者(⑤);身份 / 门禁 / 隔离(⊗)横切全程。</text>
+              <text class="node-sub" x="58" y="1119">★ 存储已全归平台 + 服务化:索引数据归本仓 data/ 经 <tspan class="kw">daemon / MCP</tspan> 访问,记忆 / 会话走 <tspan class="kw">PG 独立库</tspan>,均<tspan class="kw">按 project_id 多租户</tspan>;Agent 自己调 MCP 工具 + 读写分层记忆。</text>
             </svg>
           </div>
         </section>
