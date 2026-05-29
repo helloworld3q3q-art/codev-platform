@@ -172,13 +172,13 @@
           </div>
 
           <div class="map-wrap" id="platform-map">
-            <svg class="map" viewBox="0 0 1480 1372" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
+            <svg class="map" viewBox="0 0 1480 1137" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
               <style>
                 text { font-family: "Microsoft YaHei","Segoe UI",-apple-system,sans-serif; }
                 .lane-title { font-size:13px; font-weight:800; fill:#334155; }
                 .node-title { font-size:12.5px; font-weight:800; fill:#0f172a; }
                 .node-sub { font-size:10.4px; fill:#475569; }
-                .kw { fill:#db2777; font-weight:800; }
+                .kw { fill:rgb(220, 38, 38); font-weight:800; }
                 .edge { fill:none; stroke:#64748b; stroke-width:1.5; marker-end:url(#arrow); }
                 .edge-blue { fill:none; stroke:#2563eb; stroke-width:2; marker-end:url(#arrow-blue); }
                 .edge-green { fill:none; stroke:#059669; stroke-width:1.8; marker-end:url(#arrow-green); }
@@ -206,7 +206,7 @@
                 </filter>
               </defs>
 
-              <rect x="18" y="20" width="1444" height="1332" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
+              <rect x="18" y="20" width="1444" height="1097" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
 
               <!-- ========== TOP BAND: codev-platform 真值源仓 ========== -->
               <rect x="40" y="50" width="1400" height="150" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
@@ -256,12 +256,12 @@
               </g>
 
               <!-- ========== 6 lanes for runtime pipeline ========== -->
-              <rect x="40"   y="220" width="230" height="780" rx="10" fill="#eff6ff" stroke="#dbeafe"/>
-              <rect x="280"  y="220" width="230" height="780" rx="10" fill="#fffbeb" stroke="#fde68a"/>
-              <rect x="520"  y="220" width="230" height="780" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
-              <rect x="760"  y="220" width="230" height="780" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
-              <rect x="1000" y="220" width="230" height="780" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
-              <rect x="1240" y="220" width="200" height="780" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+              <rect x="40"   y="220" width="230" height="545" rx="10" fill="#eff6ff" stroke="#dbeafe"/>
+              <rect x="280"  y="220" width="230" height="545" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+              <rect x="520"  y="220" width="230" height="545" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+              <rect x="760"  y="220" width="230" height="545" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
+              <rect x="1000" y="220" width="230" height="545" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
+              <rect x="1240" y="220" width="200" height="545" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
 
               <text class="lane-title" x="155"  y="250" text-anchor="middle">1. 数据源(业务仓)</text>
               <text class="lane-title" x="395"  y="250" text-anchor="middle">2. 触发与门禁</text>
@@ -539,69 +539,69 @@
               <path class="edge-dashed" d="M1215 651 C1240 680 1245 700 1255 715"/>
 
               <!-- ========== 连线:6 泳道底部 → Agent + Memory 层(逐列对齐串起来)========== -->
-              <path class="edge-blue" d="M395 1000 L395 1086"/>
-              <text class="node-sub" x="395" y="1042" text-anchor="middle" fill="#1d4ed8">身份/路由同源</text>
-              <path d="M635 1000 L635 1086" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-violet)"/>
-              <text class="node-sub" x="635" y="1042" text-anchor="middle" fill="#6d28d9">本仓代码供给</text>
-              <path class="edge-green" d="M875 1000 L875 1086"/>
-              <text class="node-sub" x="875" y="1042" text-anchor="middle" fill="#047857">MEMORY→分层记忆</text>
-              <path class="edge-blue" d="M1115 1000 L1115 1086"/>
-              <text class="node-sub" x="1115" y="1042" text-anchor="middle" fill="#0e7490">复用三套 MCP 为工具</text>
-              <path class="edge-blue" d="M1340 1000 L1340 1086"/>
-              <text class="node-sub" x="1340" y="1042" text-anchor="middle" fill="#1d4ed8">会话经 Agent</text>
+              <path class="edge-blue" d="M395 765 L395 851"/>
+              <text class="node-sub" x="395" y="807" text-anchor="middle" fill="#1d4ed8">身份/路由同源</text>
+              <path d="M635 765 L635 851" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-violet)"/>
+              <text class="node-sub" x="635" y="807" text-anchor="middle" fill="#6d28d9">本仓代码供给</text>
+              <path class="edge-green" d="M875 765 L875 851"/>
+              <text class="node-sub" x="875" y="807" text-anchor="middle" fill="#047857">MEMORY→分层记忆</text>
+              <path class="edge-blue" d="M1115 765 L1115 851"/>
+              <text class="node-sub" x="1115" y="807" text-anchor="middle" fill="#0e7490">复用三套 MCP 为工具</text>
+              <path class="edge-blue" d="M1340 765 L1340 851"/>
+              <text class="node-sub" x="1340" y="807" text-anchor="middle" fill="#1d4ed8">会话经 Agent</text>
 
               <!-- ========== Agent 服务 + Memory 基建(节点逐列对齐 L2-L6)========== -->
-              <rect x="40" y="1090" width="1400" height="190" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
-              <text class="lane-title" x="58" y="1114" fill="#5b21b6">Agent 服务 + Memory 基建 — 与上方泳道逐列对齐(<tspan class="kw">沿用 / 供给 / 复用 / 消费</tspan>)</text>
-              <text class="node-sub" x="155" y="1162" text-anchor="middle" fill="#94a3b8">L1 = 数据源</text>
-              <text class="node-sub" x="155" y="1182" text-anchor="middle" fill="#94a3b8">不直接接 Agent</text>
+              <rect x="40" y="855" width="1400" height="190" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+              <text class="lane-title" x="58" y="879" fill="#5b21b6">Agent 服务 + Memory 基建 — 与上方泳道逐列对齐(<tspan class="kw">沿用 / 供给 / 复用 / 消费</tspan>)</text>
+              <text class="node-sub" x="155" y="927" text-anchor="middle" fill="#94a3b8">L1 = 数据源</text>
+              <text class="node-sub" x="155" y="947" text-anchor="middle" fill="#94a3b8">不直接接 Agent</text>
 
               <g filter="url(#shadow)">
-                <rect x="295" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="395" y="1152" text-anchor="middle">身份 · 多租户</text>
-                <text class="node-sub" x="395" y="1178" text-anchor="middle"><tspan class="kw">三元组</tspan>(组织/用户/项目)</text>
-                <text class="node-sub" x="395" y="1200" text-anchor="middle">行级 <tspan class="kw">org/user 隔离</tspan></text>
-                <text class="node-sub" x="395" y="1222" text-anchor="middle"><tspan class="kw">RBAC</tspan> 接缝 · 个人记忆私有</text>
-                <text class="node-sub" x="395" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L2</text>
+                <rect x="295" y="891" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="395" y="917" text-anchor="middle">身份 · 多租户</text>
+                <text class="node-sub" x="395" y="943" text-anchor="middle"><tspan class="kw">三元组</tspan>(组织/用户/项目)</text>
+                <text class="node-sub" x="395" y="965" text-anchor="middle">行级 <tspan class="kw">org/user 隔离</tspan></text>
+                <text class="node-sub" x="395" y="987" text-anchor="middle"><tspan class="kw">RBAC</tspan> 接缝 · 个人记忆私有</text>
+                <text class="node-sub" x="395" y="1017" text-anchor="middle" fill="#7c3aed">↑ 对齐 L2</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="535" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="635" y="1152" text-anchor="middle">多模型大脑</text>
-                <text class="node-sub" x="635" y="1178" text-anchor="middle"><tspan class="kw">协议族</tspan>可插拔</text>
-                <text class="node-sub" x="635" y="1200" text-anchor="middle">加厂商 <tspan class="kw">≈ 零代码</tspan></text>
-                <text class="node-sub" x="635" y="1222" text-anchor="middle"><tspan class="kw">策略接口</tspan> + 中性类型</text>
-                <text class="node-sub" x="635" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L3</text>
+                <rect x="535" y="891" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="917" text-anchor="middle">多模型大脑</text>
+                <text class="node-sub" x="635" y="943" text-anchor="middle"><tspan class="kw">协议族</tspan>可插拔</text>
+                <text class="node-sub" x="635" y="965" text-anchor="middle">加厂商 <tspan class="kw">≈ 零代码</tspan></text>
+                <text class="node-sub" x="635" y="987" text-anchor="middle"><tspan class="kw">策略接口</tspan> + 中性类型</text>
+                <text class="node-sub" x="635" y="1017" text-anchor="middle" fill="#7c3aed">↑ 对齐 L3</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="775" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="875" y="1152" text-anchor="middle">分层记忆 · 生命周期</text>
-                <text class="node-sub" x="875" y="1178" text-anchor="middle"><tspan class="kw">四作用域</tspan>持久化</text>
-                <text class="node-sub" x="875" y="1200" text-anchor="middle"><tspan class="kw">RRF 召回融合</tspan> · 红线优先</text>
-                <text class="node-sub" x="875" y="1222" text-anchor="middle"><tspan class="kw">TTL 归档</tspan> · 压缩融合</text>
-                <text class="node-sub" x="875" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L4</text>
+                <rect x="775" y="891" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="875" y="917" text-anchor="middle">分层记忆 · 生命周期</text>
+                <text class="node-sub" x="875" y="943" text-anchor="middle"><tspan class="kw">四作用域</tspan>持久化</text>
+                <text class="node-sub" x="875" y="965" text-anchor="middle"><tspan class="kw">RRF 召回融合</tspan> · 红线优先</text>
+                <text class="node-sub" x="875" y="987" text-anchor="middle"><tspan class="kw">TTL 归档</tspan> · 压缩融合</text>
+                <text class="node-sub" x="875" y="1017" text-anchor="middle" fill="#7c3aed">↑ 对齐 L4</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1015" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="1115" y="1152" text-anchor="middle">常驻 Agent 服务</text>
-                <text class="node-sub" x="1115" y="1178" text-anchor="middle"><tspan class="kw">plan→act→observe</tspan></text>
-                <text class="node-sub" x="1115" y="1200" text-anchor="middle">6 工具 <tspan class="kw">复用 MCP</tspan></text>
-                <text class="node-sub" x="1115" y="1222" text-anchor="middle"><tspan class="kw">防空转护栏</tspan></text>
-                <text class="node-sub" x="1115" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L5</text>
+                <rect x="1015" y="891" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="1115" y="917" text-anchor="middle">常驻 Agent 服务</text>
+                <text class="node-sub" x="1115" y="943" text-anchor="middle"><tspan class="kw">plan→act→observe</tspan></text>
+                <text class="node-sub" x="1115" y="965" text-anchor="middle">6 工具 <tspan class="kw">复用 MCP</tspan></text>
+                <text class="node-sub" x="1115" y="987" text-anchor="middle"><tspan class="kw">防空转护栏</tspan></text>
+                <text class="node-sub" x="1115" y="1017" text-anchor="middle" fill="#7c3aed">↑ 对齐 L5</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1255" y="1126" width="170" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="1340" y="1152" text-anchor="middle">会话 · 业务仓接入</text>
-                <text class="node-sub" x="1340" y="1178" text-anchor="middle">会话经 Agent 问答</text>
-                <text class="node-sub" x="1340" y="1200" text-anchor="middle"><tspan class="kw">跨重启持久化</tspan></text>
-                <text class="node-sub" x="1340" y="1222" text-anchor="middle"><tspan class="kw">BIGSERIAL</tspan> 定序免竞态</text>
-                <text class="node-sub" x="1340" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L6</text>
+                <rect x="1255" y="891" width="170" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="1340" y="917" text-anchor="middle">会话 · 业务仓接入</text>
+                <text class="node-sub" x="1340" y="943" text-anchor="middle">会话经 Agent 问答</text>
+                <text class="node-sub" x="1340" y="965" text-anchor="middle"><tspan class="kw">跨重启持久化</tspan></text>
+                <text class="node-sub" x="1340" y="987" text-anchor="middle"><tspan class="kw">BIGSERIAL</tspan> 定序免竞态</text>
+                <text class="node-sub" x="1340" y="1017" text-anchor="middle" fill="#7c3aed">↑ 对齐 L6</text>
               </g>
 
               <!-- ========== bottom narration ========== -->
-              <rect x="40" y="1294" width="1400" height="50" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
-              <text class="node-title" x="58" y="1314">★ codev-platform 供给关系:</text>
-              <text class="node-sub" x="270" y="1314">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
-              <text class="node-sub" x="58" y="1334">★ Agent + Memory(紫色带):与上方泳道<tspan font-weight="700" fill="#5b21b6">逐列对齐</tspan> —— 身份沿用 L2 解析 · 大脑与 L3 同源(本仓代码供给)· 分层记忆从 L4 用户级 MEMORY 进化 · Agent 复用 L5 三套 MCP 为只读工具 · L6 会话经 Agent 问答并写记忆。</text>
+              <rect x="40" y="1059" width="1400" height="50" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
+              <text class="node-title" x="58" y="1079">★ codev-platform 供给关系:</text>
+              <text class="node-sub" x="270" y="1079">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
+              <text class="node-sub" x="58" y="1099">★ Agent + Memory(紫色带):与上方泳道<tspan font-weight="700" fill="#5b21b6">逐列对齐</tspan> —— 身份沿用 L2 解析 · 大脑与 L3 同源(本仓代码供给)· 分层记忆从 L4 用户级 MEMORY 进化 · Agent 复用 L5 三套 MCP 为只读工具 · L6 会话经 Agent 问答并写记忆。</text>
             </svg>
           </div>
         </section>
