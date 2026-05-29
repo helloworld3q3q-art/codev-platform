@@ -21,16 +21,16 @@ def _daemon_url() -> str:
     return f"http://127.0.0.1:{port}/sse"
 
 
-def _project_id() -> str:
-    from codev_platform.core.project_id import resolve_local
-    return resolve_local()
+def _resolve_project_id(explicit: str | None) -> str:
+    from codev_platform.agent.tools._project import resolve_project_id
+    return resolve_project_id(explicit)
 
 
-async def _call_search(query: str, category: str | None, module: str | None) -> str:
+async def _call_search(query: str, category: str | None, module: str | None, project_id: str) -> str:
     from mcp import ClientSession
     from mcp.client.sse import sse_client
 
-    url = f"{_daemon_url()}?project_id={_project_id()}"
+    url = f"{_daemon_url()}?project_id={project_id}"
     args: dict[str, Any] = {"query": query}
     if category:
         args["category"] = category
@@ -61,14 +61,18 @@ class SearchDocsTool(Tool):
         "required": ["query"],
     }
 
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
     def run(self, args: dict[str, Any]) -> ToolResult:
         q = (args or {}).get("query", "").strip()
         if not q:
             return ToolResult(call_id="", content="缺少 query 参数", is_error=True)
         try:
+            pid = _resolve_project_id(self.project_id)
             text = asyncio.run(
                 asyncio.wait_for(
-                    _call_search(q, (args or {}).get("category"), (args or {}).get("module")),
+                    _call_search(q, (args or {}).get("category"), (args or {}).get("module"), pid),
                     timeout=_TIMEOUT_SEC,
                 )
             )
@@ -82,5 +86,5 @@ class SearchDocsTool(Tool):
         return ToolResult(call_id="", content=text)
 
 
-def register_into(registry) -> None:
-    registry.register(SearchDocsTool())
+def register_into(registry, project_id: str | None = None) -> None:
+    registry.register(SearchDocsTool(project_id))

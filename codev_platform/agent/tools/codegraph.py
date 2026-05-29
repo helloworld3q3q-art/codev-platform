@@ -26,8 +26,17 @@ def _fts_query(q: str) -> str:
     return " OR ".join(f'"{t}"' for t in tokens)
 
 
-def _find_db() -> Path | None:
-    """从 cwd 向上找 .codegraph/codegraph.db(agent 在某仓内运行)."""
+def _find_db(project_id: str | None = None) -> Path | None:
+    """定位 .codegraph/codegraph.db。
+    P2 多租户:project_id 给定 → 按 meta.json repo_path 找该项目仓的 .codegraph;
+    None → 从 cwd 向上找(agent 在某仓内运行,单项目兼容)。"""
+    if project_id:
+        from codev_platform.agent.tools._project import repo_path_of
+        repo = repo_path_of(project_id)
+        if repo is not None:
+            cand = repo / ".codegraph" / "codegraph.db"
+            return cand if cand.is_file() else None
+        return None
     cur = Path.cwd().resolve()
     for d in (cur, *cur.parents):
         cand = d / ".codegraph" / "codegraph.db"
@@ -36,10 +45,11 @@ def _find_db() -> Path | None:
     return None
 
 
-def _connect() -> sqlite3.Connection:
-    db = _find_db()
+def _connect(project_id: str | None = None) -> sqlite3.Connection:
+    db = _find_db(project_id)
     if db is None:
-        raise FileNotFoundError("未找到 .codegraph/codegraph.db(codegraph 未建索引?)")
+        hint = f"project '{project_id}' " if project_id else ""
+        raise FileNotFoundError(f"未找到 {hint}.codegraph/codegraph.db(codegraph 未建索引?)")
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con
@@ -63,12 +73,15 @@ class CodegraphSearchTool(Tool):
         "required": ["query"],
     }
 
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
     def run(self, args: dict[str, Any]) -> ToolResult:
         q = (args or {}).get("query", "").strip()
         if not q:
             return ToolResult(call_id="", content="缺少 query 参数", is_error=True)
         try:
-            con = _connect()
+            con = _connect(self.project_id)
             try:
                 rows = con.execute(
                     "SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.id "
@@ -106,7 +119,7 @@ class CodegraphSearchTool(Tool):
         return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
 
 
-def _relations(name: str, incoming: bool) -> ToolResult:
+def _relations(name: str, incoming: bool, project_id: str | None = None) -> ToolResult:
     """incoming=True 找 callers(谁指向它);False 找 callees(它指向谁)."""
     if not name:
         return ToolResult(call_id="", content="缺少 name 参数", is_error=True)
@@ -115,7 +128,7 @@ def _relations(name: str, incoming: bool) -> ToolResult:
     if "." in name:
         candidates.append(name.rsplit(".", 1)[1])
     try:
-        con = _connect()
+        con = _connect(project_id)
         try:
             ids: list[Any] = []
             for cand in candidates:
@@ -153,8 +166,11 @@ class CodegraphCallersTool(Tool):
         "required": ["name"],
     }
 
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
     def run(self, args: dict[str, Any]) -> ToolResult:
-        return _relations((args or {}).get("name", "").strip(), incoming=True)
+        return _relations((args or {}).get("name", "").strip(), incoming=True, project_id=self.project_id)
 
 
 class CodegraphCalleesTool(Tool):
@@ -166,11 +182,14 @@ class CodegraphCalleesTool(Tool):
         "required": ["name"],
     }
 
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
     def run(self, args: dict[str, Any]) -> ToolResult:
-        return _relations((args or {}).get("name", "").strip(), incoming=False)
+        return _relations((args or {}).get("name", "").strip(), incoming=False, project_id=self.project_id)
 
 
-def register_into(registry) -> None:
-    registry.register(CodegraphSearchTool())
-    registry.register(CodegraphCallersTool())
-    registry.register(CodegraphCalleesTool())
+def register_into(registry, project_id: str | None = None) -> None:
+    registry.register(CodegraphSearchTool(project_id))
+    registry.register(CodegraphCallersTool(project_id))
+    registry.register(CodegraphCalleesTool(project_id))

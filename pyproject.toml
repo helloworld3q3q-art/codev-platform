@@ -31,13 +31,16 @@ runtime = [
 ]
 # dev: 仅纯逻辑单测所需(pytest)。不拉 runtime 重依赖(torch/chromadb)。
 dev = ["pytest>=7"]
-# agent: HTTP 服务 + LLM provider。Claude 必装;openai 供 GPT/DeepSeek/Qwen(P1)共用。
+# agent: HTTP 服务 + LLM provider + search_docs 的 MCP client。
+# Claude 必装;openai 供 GPT/DeepSeek/Qwen 共用;mcp 供 search_docs 工具连 chroma daemon
+# (SSE client)—— 漏了它 search_docs 会 ModuleNotFoundError(codegraph/cross_link 走 sqlite 不受影响)。
 agent = [
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
     "anthropic>=0.40.0",
     "openai>=1.55.0",
     "pydantic>=2.0",
+    "mcp>=1.0.0",
 ]
 
 [tool.pytest.ini_options]

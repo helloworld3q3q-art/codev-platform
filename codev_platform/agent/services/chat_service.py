@@ -27,18 +27,20 @@ class ChatService:
     def __init__(
         self,
         sessions: SessionStore,
-        registry: ToolRegistry,
+        registry_factory: Callable[[str | None], ToolRegistry],
         provider_factory: Callable[[], LLMProvider],
         default_max_steps: Callable[[], int],
     ) -> None:
-        # provider_factory 是 callable(每次调用重解析 config,支持运行中切 provider)
+        # provider_factory: 每次调用重解析 config(支持运行中切 provider)。
+        # registry_factory(project_id): 按请求 project_id 建工具集(P2 多租户路由)。
         self._sessions = sessions
-        self._registry = registry
+        self._registry_factory = registry_factory
         self._provider_factory = provider_factory
         self._default_max_steps = default_max_steps
 
     def ask(self, question: str, session_id: str | None = None,
-            max_steps: int | None = None, user_id: str = "local") -> ChatOutcome:
+            max_steps: int | None = None, user_id: str = "local",
+            project_id: str | None = None) -> ChatOutcome:
         provider = self._provider_factory()  # 缺 key 抛 RuntimeError,由调用层(route)映射
 
         if session_id and self._sessions.has(session_id, user_id):
@@ -47,7 +49,8 @@ class ChatService:
             sid = self._sessions.new(user_id)
         history = self._sessions.get(sid, user_id)
 
-        loop = AgentLoop(provider, self._registry, max_steps=max_steps or self._default_max_steps())
+        registry = self._registry_factory(project_id)  # 工具按 project_id 路由
+        loop = AgentLoop(provider, registry, max_steps=max_steps or self._default_max_steps())
         trace = Trace(sid, provider.name, provider.model)
         result = loop.run(question, history=history, trace=trace)
 

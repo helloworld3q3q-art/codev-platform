@@ -7,11 +7,12 @@ from __future__ import annotations
 from codev_platform.agent.tools.base import ToolRegistry
 
 
-def build_default_registry() -> ToolRegistry:
-    """组装默认工具集. 加 codegraph / search_docs 工具时在此追加 register_into。"""
+def build_default_registry(project_id: str | None = None) -> ToolRegistry:
+    """组装默认工具集. project_id 给定 → 工具按该项目路由(P2 多租户);
+    None → 工具按进程 cwd 推导(单项目兼容)。加新工具在此追加 register_into。"""
     reg = ToolRegistry()
     from codev_platform.agent.tools import codegraph, cross_link, search_docs
-    cross_link.register_into(reg)
-    codegraph.register_into(reg)
-    search_docs.register_into(reg)
+    cross_link.register_into(reg, project_id)
+    codegraph.register_into(reg, project_id)
+    search_docs.register_into(reg, project_id)
     return reg

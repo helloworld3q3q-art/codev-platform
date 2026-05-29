@@ -18,7 +18,7 @@ class _FakeProvider(LLMProvider):
 def _service() -> ChatService:
     return ChatService(
         sessions=InMemorySessionStore(),
-        registry=ToolRegistry(),
+        registry_factory=lambda pid: ToolRegistry(),
         provider_factory=_FakeProvider,
         default_max_steps=lambda: 5,
     )
@@ -47,7 +47,7 @@ def test_provider_factory_called_per_ask(monkeypatch):
         calls["n"] += 1
         return _FakeProvider()
 
-    svc = ChatService(InMemorySessionStore(), ToolRegistry(), factory, lambda: 5)
+    svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), factory, lambda: 5)
     svc.ask("a")
     svc.ask("b")
     assert calls["n"] == 2  # 每次 ask 重解析 provider(支持运行中切换)
@@ -59,3 +59,16 @@ def test_sessions_isolated_per_user():
     # bob 用 alice 的 session_id 拿不到她的会话 -> 服务给 bob 新建 session
     out_b = svc.ask("q", session_id=out_a.session_id, user_id="bob")
     assert out_b.session_id != out_a.session_id
+
+
+def test_registry_factory_called_with_project_id():
+    seen: list[str | None] = []
+
+    def reg_factory(pid):
+        seen.append(pid)
+        return ToolRegistry()
+
+    svc = ChatService(InMemorySessionStore(), reg_factory, _FakeProvider, lambda: 5)
+    svc.ask("q", project_id="proj-x")
+    svc.ask("q2")  # 无 project_id -> None
+    assert seen == ["proj-x", None]  # P2: project_id 透传到工具组装

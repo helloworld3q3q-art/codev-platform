@@ -2,19 +2,28 @@
 
 封 codev_platform.cross_link.query 的常用查询,给 agent 看"表/端点的跨层引用链"。
 backend = in-process sqlite(最省,无需起 daemon)。
+P2 多租户:按 project_id 路由到 cross_link_db_path(project_id);None 走 .default()(cwd 兼容)。
 """
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any
 
 from codev_platform.agent.brain import ToolResult
 from codev_platform.agent.tools.base import Tool
 
 
-def _db():
+def _open_db(project_id: str | None):
+    """按 project_id 开只读 cross_layer DB;None 回退 CrossLayerDB.default()(cwd 推导)。"""
     from codev_platform.cross_link.query import CrossLayerDB
-    return CrossLayerDB.default()
+    if not project_id:
+        return CrossLayerDB.default()
+    from codev_platform.core.paths import cross_link_db_path
+    path = cross_link_db_path(project_id)
+    if not path.exists():
+        raise FileNotFoundError(f"project '{project_id}' 的 cross_layer DB 不存在: {path}")
+    return CrossLayerDB(sqlite3.connect(f"file:{path}?mode=ro", uri=True))
 
 
 class CrossLinkTableRefsTool(Tool):
@@ -29,12 +38,15 @@ class CrossLinkTableRefsTool(Tool):
         "required": ["table"],
     }
 
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
     def run(self, args: dict[str, Any]) -> ToolResult:
         table = (args or {}).get("table", "").strip()
         if not table:
             return ToolResult(call_id="", content="缺少 table 参数", is_error=True)
         try:
-            db = _db()
+            db = _open_db(self.project_id)
             try:
                 refs = db.find_all_references(table)
             finally:
@@ -58,12 +70,15 @@ class CrossLinkEndpointTool(Tool):
         "required": ["endpoint"],
     }
 
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
     def run(self, args: dict[str, Any]) -> ToolResult:
         endpoint = (args or {}).get("endpoint", "").strip()
         if not endpoint:
             return ToolResult(call_id="", content="缺少 endpoint 参数", is_error=True)
         try:
-            db = _db()
+            db = _open_db(self.project_id)
             try:
                 callers = db.list_endpoint_callers(endpoint)
             finally:
@@ -75,6 +90,6 @@ class CrossLinkEndpointTool(Tool):
         return ToolResult(call_id="", content=json.dumps(callers, ensure_ascii=False, indent=2))
 
 
-def register_into(registry) -> None:
-    registry.register(CrossLinkTableRefsTool())
-    registry.register(CrossLinkEndpointTool())
+def register_into(registry, project_id: str | None = None) -> None:
+    registry.register(CrossLinkTableRefsTool(project_id))
+    registry.register(CrossLinkEndpointTool(project_id))

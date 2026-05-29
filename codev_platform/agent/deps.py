@@ -53,7 +53,7 @@ def get_chat_service() -> ChatService:
     if _chat_service is None:
         _chat_service = ChatService(
             sessions=_sessions,
-            registry=_registry,
+            registry_factory=build_default_registry,  # (project_id) -> registry,P2 多租户
             provider_factory=_get_provider,
             default_max_steps=lambda: acfg.max_steps(acfg.agent_cfg()),
         )

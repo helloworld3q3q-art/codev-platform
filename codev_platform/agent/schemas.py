@@ -10,6 +10,7 @@ class ChatRequest(BaseModel):
     question: str = Field(..., description="问题")
     session_id: str | None = Field(None, description="多轮会话 id;省略=新会话")
     max_steps: int | None = Field(None, description="本次循环 step 上限;省略走 config")
+    project_id: str | None = Field(None, description="按此 project 路由工具(P2);省略走 X-Project-Id 头 / cwd")
 
 
 class StepOut(BaseModel):
