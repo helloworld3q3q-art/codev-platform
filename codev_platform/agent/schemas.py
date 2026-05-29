@@ -39,3 +39,27 @@ class HealthOut(BaseModel):
     status: str
     provider: str
     model: str
+
+
+# ---- memory(M2)----
+
+class MemoryWriteRequest(BaseModel):
+    scope: str = Field(..., description="org | team | project | personal")
+    scope_ref: str = Field(..., description="org='org' / team_id / project_id / user_id")
+    content: str = Field(..., description="记忆内容")
+    kind: str | None = Field(None, description="preference | fact | task ...")
+    topic_key: str | None = Field(None, description="冲突检测键(M3 用)")
+    is_redline: bool = Field(False, description="org 硬约束(冲突最高优先)")
+
+
+class MemoryEntryOut(BaseModel):
+    id: str
+    scope: str
+    scope_ref: str
+    owner_user_id: str
+    content: str
+    org_id: str
+    kind: str | None = None
+    topic_key: str | None = None
+    is_redline: bool = False
+    status: str = "active"

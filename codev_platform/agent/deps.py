@@ -54,6 +54,31 @@ def get_provider() -> LLMProvider:
     return _get_provider()
 
 
+_memory_store_built = False
+_memory_store = None  # type: ignore[var-annotated]
+
+
+def get_memory_store():
+    """记忆条目存储(SqlMemoryStore)。未配 memory.pg_dsn / 缺 psycopg → None(memory 未启用)。
+    单例懒建;路由层据 None 返 503。
+    """
+    global _memory_store_built, _memory_store
+    if not _memory_store_built:
+        _memory_store_built = True
+        cfg = acfg.agent_cfg()
+        dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN", cfg, "memory.pg_dsn")
+        if dsn:
+            read_dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN_READ", cfg, "memory.pg_dsn_read")
+            try:
+                from codev_platform.agent.memory_store_pg import SqlMemoryStore
+                _memory_store = SqlMemoryStore(dsn, read_dsn=read_dsn)
+            except Exception as e:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → memory 不可用,不挂服务
+                import sys
+                print(f"[agent.deps] memory store 不可用({type(e).__name__}: {e})", file=sys.stderr)
+                _memory_store = None
+    return _memory_store
+
+
 _chat_service: ChatService | None = None
 
 

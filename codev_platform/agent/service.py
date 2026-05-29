@@ -10,9 +10,10 @@ from fastapi import FastAPI
 
 def create_app() -> FastAPI:
     app = FastAPI(title="codev-platform agent", version="0.1.0")
-    from codev_platform.agent.routes import chat, meta
+    from codev_platform.agent.routes import chat, meta, memory
     app.include_router(meta.router)
     app.include_router(chat.router)
+    app.include_router(memory.router)
     return app
 
 
