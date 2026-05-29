@@ -38,6 +38,8 @@ class Message:
     content: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
+    # provider 往返用的不透明袋子(如思考模型的 reasoning_content);loop 不解释,原样透传。
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -50,6 +52,8 @@ class AssistantTurn:
     tool_calls: list[ToolCall]
     stop_reason: str
     usage: dict[str, Any] = field(default_factory=dict)
+    # provider 往返用的不透明袋子(如思考模型的 reasoning_content);loop 原样回灌进 assistant Message。
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
