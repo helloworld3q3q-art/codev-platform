@@ -7,11 +7,19 @@ loop / 路由只依赖 Identity + 抽象,换鉴权方式零改(同 agent provide
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from codev_platform.core import identity as _identity
 from codev_platform.core.config import get as _cfg_get
+
+
+def token_hash(token: str) -> str:
+    """token → sha256 十六进制。config 只存 hash,明文 token 不落盘/不进 git。
+    生成:`python -c "import hashlib;print(hashlib.sha256(b'你的token').hexdigest())"`。"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class Unauthorized(Exception):
@@ -61,18 +69,28 @@ class PassthroughAuthenticator:
 
 
 class TokenAuthenticator:
-    """M6:验 Bearer token → (org,user)。tokens 形如 {<token>: {"user_id":..,"org_id":..}}。
-    真 token 表应走 PG(codev_platform_memory),config 仅放本机调用方自己的 key。"""
+    """验 Bearer token → (org,user)。**认证加密**:config/PG 只存 token 的 sha256 hash
+    (明文 token 不落盘),每请求 hash 入参 + `hmac.compare_digest` 常量时间比对(防时序攻击)。
 
-    def __init__(self, tokens: Mapping[str, Mapping[str, Any]]) -> None:
-        self._tokens = dict(tokens or {})
+    token_hashes 形如 {<sha256hex>: {"user_id":..,"org_id":..}}。真 token 表应走 PG
+    (codev_platform_memory),config 仅放本机调用方自己的 key hash。
+    传输加密(HTTPS/TLS)是部署层:远程平台 platform.url 用 https,TLS 在反代/uvicorn 终结。"""
+
+    def __init__(self, token_hashes: Mapping[str, Mapping[str, Any]]) -> None:
+        self._by_hash = {str(k): dict(v) for k, v in (token_hashes or {}).items()}
 
     def authenticate(self, headers: Mapping[str, str]) -> Identity:
         tok = _bearer(headers)
         if not tok:
             raise Unauthorized("缺少 Authorization: Bearer <token>")
-        ident = self._tokens.get(tok)
-        if not ident:
+        presented = token_hash(tok)
+        ident = None
+        # 遍历 + 常量时间比对:不因命中/字符差异泄漏时序;hash 本身已使明文不可逆
+        for h, meta in self._by_hash.items():
+            if hmac.compare_digest(h, presented):
+                ident = meta
+                break
+        if ident is None:
             raise Unauthorized("无效 token")
         return Identity(
             user_id=str(ident.get("user_id") or "unknown"),

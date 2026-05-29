@@ -8,6 +8,7 @@ from codev_platform.gateway.auth import (
     TokenAuthenticator,
     Unauthorized,
     build_authenticator,
+    token_hash,
 )
 
 
@@ -28,20 +29,35 @@ def test_passthrough_rejects_illegal_header():
         PassthroughAuthenticator().authenticate({"X-User-Id": "bad id!"})
 
 
-def test_token_valid():
-    a = TokenAuthenticator({"tok-1": {"user_id": "bob", "org_id": "acme"}})
+def test_token_valid_by_hash():
+    # config 存 sha256 hash,客户端发明文;hash 比对命中
+    a = TokenAuthenticator({token_hash("tok-1"): {"user_id": "bob", "org_id": "acme"}})
     idt = a.authenticate({"Authorization": "Bearer tok-1"})
     assert idt.user_id == "bob" and idt.org_id == "acme" and idt.via == "token"
 
 
+def test_token_plaintext_in_config_does_not_match():
+    # 防回归:config 里若误存明文(非 hash),明文 token 不应认证通过(只认 hash)
+    a = TokenAuthenticator({"tok-1": {"user_id": "bob"}})  # 明文当 key(错误用法)
+    with pytest.raises(Unauthorized):
+        a.authenticate({"Authorization": "Bearer tok-1"})
+
+
 def test_token_missing_rejected():
     with pytest.raises(Unauthorized):
-        TokenAuthenticator({"t": {"user_id": "u"}}).authenticate({})
+        TokenAuthenticator({token_hash("t"): {"user_id": "u"}}).authenticate({})
 
 
 def test_token_invalid_rejected():
     with pytest.raises(Unauthorized):
-        TokenAuthenticator({"t": {"user_id": "u"}}).authenticate({"Authorization": "Bearer nope"})
+        TokenAuthenticator({token_hash("t"): {"user_id": "u"}}).authenticate(
+            {"Authorization": "Bearer nope"})
+
+
+def test_token_hash_is_sha256_hex():
+    import hashlib
+    assert token_hash("abc") == hashlib.sha256(b"abc").hexdigest()
+    assert len(token_hash("x")) == 64  # sha256 hex
 
 
 def test_build_authenticator_default_passthrough():
@@ -50,7 +66,7 @@ def test_build_authenticator_default_passthrough():
 
 
 def test_build_authenticator_token_mode():
-    cfg = {"gateway": {"auth_mode": "token", "tokens": {"t": {"user_id": "u"}}}}
+    cfg = {"gateway": {"auth_mode": "token", "tokens": {token_hash("t"): {"user_id": "u"}}}}
     assert isinstance(build_authenticator(cfg), TokenAuthenticator)
 
 
@@ -110,9 +126,10 @@ def test_middleware_public_and_passthrough():
 
 
 def test_middleware_token_mode_gates():
-    cfg = {"gateway": {"auth_mode": "token", "tokens": {"good": {"user_id": "bob", "org_id": "acme"}}}}
+    cfg = {"gateway": {"auth_mode": "token", "tokens": {token_hash("good"): {"user_id": "bob", "org_id": "acme"}}}}
     app, cap = _starlette_app(cfg)
     assert _run_asgi(app, "/health", {}) == 200                                  # public 放行
     assert _run_asgi(app, "/who", {}) == 401                                     # 无 token → 401
-    assert _run_asgi(app, "/who", {"Authorization": "Bearer good"}) == 200
+    assert _run_asgi(app, "/who", {"Authorization": "Bearer bad"}) == 401        # 错 token → 401
+    assert _run_asgi(app, "/who", {"Authorization": "Bearer good"}) == 200       # 对 token(hash 命中)
     assert cap["identity"].user_id == "bob" and cap["identity"].via == "token"

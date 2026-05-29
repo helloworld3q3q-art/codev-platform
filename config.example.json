@@ -63,9 +63,9 @@
   },
 
   "gateway": {
-    "_comment": "HTTP 入口统一认证拦截 (codev_platform.gateway)。auth_mode: passthrough(默认,单人/开发期,信任 X-User-Id/X-Org-Id 明文头,不验签) | token(多人/对外,验 Authorization: Bearer)。tokens 仅本机调用方自己的 key, 真 token 表应走 PG, 绝不进仓。",
+    "_comment": "HTTP 入口统一认证拦截 (codev_platform.gateway, 纯 ASGI 中间件, SSE 安全 + 高并发)。auth_mode: passthrough(默认, 单人/开发期, 信任 X-User-Id/X-Org-Id 明文头, 不验签) | token(多人/对外, 验 Authorization: Bearer)。认证加密: tokens 的 key 是 token 的 sha256 hash(明文不落盘), 生成 python -c \"import hashlib;print(hashlib.sha256(b'你的token').hexdigest())\"; 真表走 PG, 绝不进仓。传输加密(HTTPS/TLS)是部署层: 远程平台 url 用 https, TLS 在反代/uvicorn 终结。",
     "auth_mode": "passthrough",
-    "tokens": {}
+    "tokens": { "<token-sha256-hex>": { "user_id": "alice", "org_id": "default" } }
   },
 
   "projects": {
