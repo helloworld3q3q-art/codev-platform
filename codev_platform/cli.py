@@ -224,6 +224,39 @@ def cmd_daemon(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_serve_mcp(args: argparse.Namespace) -> int:
+    """平台 MCP 端点编排: status (探测) / start (幂等拉起 cross-link + 各项目 codegraph)。
+
+    chroma daemon 由业务仓 Claude 会话经 launcher 自 spawn, 本命令不拉起它, 只报状态。
+    """
+    from codev_platform.core.config import load_config
+    from codev_platform import mcp_serve
+    cfg = load_config()
+    if args.action == "status":
+        rows = mcp_serve.probe_all(cfg)
+        _print(f"{'endpoint'.ljust(22)} {'kind'.ljust(11)} {'port'.ljust(6)} status   sse_url")
+        _print("-" * 90)
+        any_down = False
+        for r in rows:
+            mark = "OK  " if r["status"] == "ok" else "DOWN"
+            if r["status"] != "ok" and not r["self_spawned"]:
+                any_down = True
+            _print(f"{r['name'].ljust(22)} {r['kind'].ljust(11)} {str(r['port']).ljust(6)} "
+                   f"{mark}     {r['sse_url']}")
+        return 1 if any_down else 0
+    if args.action == "start":
+        results = mcp_serve.ensure_serving(cfg)
+        for r in results:
+            extra = r.get("error") or r.get("note") or ""
+            pid = f" pid={r['pid']}" if r.get("pid") else ""
+            _print(f"  {r['name'].ljust(22)} {r['action']}{pid}  {extra}")
+        _print()
+        _print("提示: codegraph 端点需 ~2-5s 起来; 再跑 `codev-platform serve-mcp status` 确认。")
+        return 0
+    _eprint(f"unknown action: {args.action}")
+    return 1
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from codev_platform import __version__
     _print(f"codev-platform {__version__}")
@@ -543,6 +576,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")
     sp_dae.add_argument("action", choices=["status", "stop"], help="status=查 /health / stop=按 pid 结束")
     sp_dae.set_defaults(func=cmd_daemon)
+
+    sp_mcp = sub.add_parser("serve-mcp", help="平台 MCP 端点编排 (status 探测 / start 拉起 cross-link + codegraph)")
+    sp_mcp.add_argument("action", choices=["status", "start"], help="status=探测所有端点 / start=幂等拉起")
+    sp_mcp.set_defaults(func=cmd_serve_mcp)
 
     # Cross-platform ops subcommands (health / reindex / post-commit / dirty-check /
     # install-hooks / wait-for-reindex). Each ops submodule self-registers; missing

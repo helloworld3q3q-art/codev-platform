@@ -186,6 +186,15 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         errors.append("memory:" + repr(e))
 
+    # MCP 端点 reachability (P5): cross-link / codegraph SSE 端点是否常驻可达。
+    # chroma 自身就是本 daemon, 不重复探。失败不阻塞整体 status。
+    mcp_endpoints: list[dict] = []
+    try:
+        from codev_platform import mcp_serve
+        mcp_endpoints = mcp_serve.probe_all(cfg)
+    except Exception as e:  # noqa: BLE001
+        errors.append("mcp_endpoints:" + repr(e))
+
     usage = _usage_7d(repo_root)
     pids = sorted(set(registered) | set(chroma_pid))
     projects: dict[str, Any] = {}
@@ -240,6 +249,7 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
         "memory_org": mem_org,
         "registered": registered,
         "projects": projects,
+        "mcp_endpoints": mcp_endpoints,
         "usage_legacy": usage.get("(legacy)"),
         "errors": errors,
     }

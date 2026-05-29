@@ -1071,6 +1071,18 @@ def cmd_health_all(args: argparse.Namespace) -> int:
         out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / cross-link {u.get('cross_link', 0)}  (codegraph 未计数)")
         out("")
 
+    # MCP 端点 reachability (P5): 业务仓走服务地址连的端点是否常驻可达。
+    eps = data.get("mcp_endpoints") or []
+    if eps:
+        out("MCP 服务端点 (业务仓走服务地址连这些):")
+        for e in eps:
+            mark = "OK  " if e.get("status") == "ok" else "DOWN"
+            note = ""
+            if e.get("status") != "ok":
+                note = "  (chroma 由会话自动拉起)" if e.get("self_spawned") else "  (跑 codev-platform serve-mcp start)"
+            out(f"    [{mark}] {e.get('name'):<20} :{e.get('port')}  {e.get('sse_url')}{note}")
+        out("")
+
     proj_mem = sum(p.get("memory_project", 0) for p in projects.values())
     out(f"合计: chroma {tot_chroma} chunks / {len(projects)} 项目 ; memory {mem_org} org + {proj_mem} project")
     leg = data.get("usage_legacy")
