@@ -171,7 +171,7 @@
           </div>
 
           <div class="map-wrap" id="platform-map">
-            <svg class="map" viewBox="0 0 1480 1280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
+            <svg class="map" viewBox="0 0 1480 1372" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
               <defs>
                 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                   <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -193,7 +193,7 @@
                 </filter>
               </defs>
 
-              <rect x="18" y="20" width="1444" height="1240" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
+              <rect x="18" y="20" width="1444" height="1332" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
 
               <!-- ========== TOP BAND: codev-platform 真值源仓 ========== -->
               <rect x="40" y="50" width="1400" height="150" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
@@ -525,47 +525,76 @@
               <path class="edge-dashed" d="M1215 651 L1255 639"/>
               <path class="edge-dashed" d="M1215 651 C1240 680 1245 700 1255 715"/>
 
-              <!-- ========== 今日新增:Agent 服务 + Memory 基建 ========== -->
-              <rect x="40" y="1014" width="1400" height="184" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
-              <text class="lane-title" x="58" y="1042" fill="#5b21b6">★ 今日新增:Agent 服务 + Memory 基建(从"被动检索"走向"主动 Agent + 分层记忆")</text>
+              <!-- ========== 连线:6 泳道底部 → 今日新增带(逐列对齐串起来)========== -->
+              <path class="edge-blue" d="M395 1000 L395 1086"/>
+              <text class="node-sub" x="395" y="1042" text-anchor="middle" fill="#1d4ed8">身份/路由同源</text>
+              <path d="M635 1000 L635 1086" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-violet)"/>
+              <text class="node-sub" x="635" y="1042" text-anchor="middle" fill="#6d28d9">本仓代码供给</text>
+              <path class="edge-green" d="M875 1000 L875 1086"/>
+              <text class="node-sub" x="875" y="1042" text-anchor="middle" fill="#047857">MEMORY→分层记忆</text>
+              <path class="edge-blue" d="M1115 1000 L1115 1086"/>
+              <text class="node-sub" x="1115" y="1042" text-anchor="middle" fill="#0e7490">复用三套 MCP 为工具</text>
+              <path class="edge-blue" d="M1340 1000 L1340 1086"/>
+              <text class="node-sub" x="1340" y="1042" text-anchor="middle" fill="#1d4ed8">会话经 Agent</text>
+
+              <!-- ========== 今日新增:Agent 服务 + Memory 基建(节点逐列对齐 L2-L6)========== -->
+              <rect x="40" y="1090" width="1400" height="190" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+              <text class="lane-title" x="58" y="1114" fill="#5b21b6">★ 今日新增:Agent 服务 + Memory 基建 — 一条新层,逐列对齐上方泳道(箭头表示沿用 / 供给 / 复用 / 消费)</text>
+              <text class="node-sub" x="155" y="1150" text-anchor="middle" fill="#94a3b8">(L1 业务代码</text>
+              <text class="node-sub" x="155" y="1168" text-anchor="middle" fill="#94a3b8">为数据源,</text>
+              <text class="node-sub" x="155" y="1186" text-anchor="middle" fill="#94a3b8">不直接接 Agent)</text>
+
               <g filter="url(#shadow)">
-                <rect x="58" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="223" y="1082" text-anchor="middle">常驻 Agent 服务</text>
-                <text class="node-sub" x="223" y="1104" text-anchor="middle">多模型可插拔(按协议族接入)</text>
-                <text class="node-sub" x="223" y="1124" text-anchor="middle">加新厂商多数零代码 / 一行</text>
-                <text class="node-sub" x="223" y="1144" text-anchor="middle">自带只读工具 + 防空转护栏</text>
-                <text class="node-sub" x="223" y="1164" text-anchor="middle">问答按组织 / 用户 / 项目路由</text>
+                <rect x="295" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="395" y="1150" text-anchor="middle">身份 + 多租户隔离</text>
+                <text class="node-sub" x="395" y="1172" text-anchor="middle">组织 · 用户 · 项目三元组</text>
+                <text class="node-sub" x="395" y="1192" text-anchor="middle">读写均带组织/用户维度</text>
+                <text class="node-sub" x="395" y="1212" text-anchor="middle">个人记忆只读本人</text>
+                <text class="node-sub" x="395" y="1232" text-anchor="middle">沿用并扩展 project_id 解析</text>
+                <text class="node-sub" x="395" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L2 触发/门禁</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="408" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="573" y="1082" text-anchor="middle">分层记忆(四作用域)</text>
-                <text class="node-sub" x="573" y="1104" text-anchor="middle">组织 · 团队 · 项目 · 个人</text>
-                <text class="node-sub" x="573" y="1124" text-anchor="middle">召回时跨作用域合并</text>
-                <text class="node-sub" x="573" y="1144" text-anchor="middle">冲突消解:红线最高不可配</text>
-                <text class="node-sub" x="573" y="1164" text-anchor="middle">个人偏好可盖团队默认(可配)</text>
+                <rect x="535" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="635" y="1150" text-anchor="middle">多模型大脑</text>
+                <text class="node-sub" x="635" y="1172" text-anchor="middle">多家大模型可插拔</text>
+                <text class="node-sub" x="635" y="1192" text-anchor="middle">按协议族接入</text>
+                <text class="node-sub" x="635" y="1212" text-anchor="middle">加厂商多数零代码/一行</text>
+                <text class="node-sub" x="635" y="1232" text-anchor="middle">中性类型 + 策略接口</text>
+                <text class="node-sub" x="635" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L3 索引器与模型</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="758" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="923" y="1082" text-anchor="middle">数据库持久化</text>
-                <text class="node-sub" x="923" y="1104" text-anchor="middle">会话 + 记忆跨重启不丢</text>
-                <text class="node-sub" x="923" y="1124" text-anchor="middle">平台独立库(不与业务库同库)</text>
-                <text class="node-sub" x="923" y="1144" text-anchor="middle">读写分离接缝(副本可选)</text>
-                <text class="node-sub" x="923" y="1164" text-anchor="middle">连接池上限可调 · 消息自增定序</text>
+                <rect x="775" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="875" y="1150" text-anchor="middle">分层记忆 + 生命周期</text>
+                <text class="node-sub" x="875" y="1172" text-anchor="middle">四作用域 · 跨重启持久化</text>
+                <text class="node-sub" x="875" y="1192" text-anchor="middle">召回融合 · 红线最高</text>
+                <text class="node-sub" x="875" y="1212" text-anchor="middle">到期归档 · 压缩融合(留痕)</text>
+                <text class="node-sub" x="875" y="1232" text-anchor="middle">平台独立库 · 读写分离</text>
+                <text class="node-sub" x="875" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L4 本地存储</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1108" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="1273" y="1082" text-anchor="middle">生命周期 + 多租户隔离</text>
-                <text class="node-sub" x="1273" y="1104" text-anchor="middle">到期归档 · 压缩融合(留痕)</text>
-                <text class="node-sub" x="1273" y="1124" text-anchor="middle">改写留旧值(可回溯)</text>
-                <text class="node-sub" x="1273" y="1144" text-anchor="middle">读写都带组织 / 用户维度</text>
-                <text class="node-sub" x="1273" y="1164" text-anchor="middle">个人记忆只能读本人 · 维护单实例锁</text>
+                <rect x="1015" y="1126" width="200" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="1115" y="1150" text-anchor="middle">常驻 Agent 服务</text>
+                <text class="node-sub" x="1115" y="1172" text-anchor="middle">计划→工具→观察 循环</text>
+                <text class="node-sub" x="1115" y="1192" text-anchor="middle">6 只读工具复用 MCP</text>
+                <text class="node-sub" x="1115" y="1212" text-anchor="middle">防空转硬护栏</text>
+                <text class="node-sub" x="1115" y="1232" text-anchor="middle">问答按身份路由</text>
+                <text class="node-sub" x="1115" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L5 MCP 服务</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1255" y="1126" width="170" height="146" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="1340" y="1150" text-anchor="middle">会话 + 业务仓接入</text>
+                <text class="node-sub" x="1340" y="1172" text-anchor="middle">会话经 Agent 问答</text>
+                <text class="node-sub" x="1340" y="1192" text-anchor="middle">会话跨重启不丢</text>
+                <text class="node-sub" x="1340" y="1212" text-anchor="middle">消息自增定序(免竞态)</text>
+                <text class="node-sub" x="1340" y="1232" text-anchor="middle">多租户物理隔离</text>
+                <text class="node-sub" x="1340" y="1252" text-anchor="middle" fill="#7c3aed">↑ 对齐 L6 会话</text>
               </g>
 
               <!-- ========== bottom narration ========== -->
-              <rect x="40" y="1212" width="1400" height="48" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
-              <text class="node-title" x="58" y="1232">★ codev-platform 供给关系:</text>
-              <text class="node-sub" x="270" y="1232">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
-              <text class="node-sub" x="58" y="1252">★ 今日新增 Agent + Memory(紫色带):同一份核心代码新长出"主动 Agent 服务 + 分层记忆",身份按组织 / 用户 / 项目三元组路由,数据落平台独立库,多租户物理隔离。</text>
+              <rect x="40" y="1294" width="1400" height="50" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
+              <text class="node-title" x="58" y="1314">★ codev-platform 供给关系:</text>
+              <text class="node-sub" x="270" y="1314">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
+              <text class="node-sub" x="58" y="1334">★ 今日新增 Agent + Memory(紫色带):与上方泳道<tspan font-weight="700" fill="#5b21b6">逐列对齐</tspan> —— 身份沿用 L2 解析 · 大脑与 L3 同源(本仓代码供给)· 分层记忆从 L4 用户级 MEMORY 进化 · Agent 复用 L5 三套 MCP 为只读工具 · L6 会话经 Agent 问答并写记忆。</text>
             </svg>
           </div>
         </section>
