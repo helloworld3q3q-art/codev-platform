@@ -26,9 +26,11 @@ def _build_session_store() -> SessionStore:
         if not dsn:
             print("[agent.deps] session_backend=pg 但 memory.pg_dsn 未配, 回退 memory", file=sys.stderr)
             return InMemorySessionStore()
+        # 读写分离扩展口(预留):配了只读副本 DSN 则读走它,否则读写同库
+        read_dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN_READ", cfg, "memory.pg_dsn_read")
         try:
             from codev_platform.agent.session_pg import SqlSessionStore
-            return SqlSessionStore(dsn)  # schema 首次操作时幂等建;连不上在首次操作报
+            return SqlSessionStore(dsn, read_dsn=read_dsn)  # schema 首次操作幂等建;连不上首次操作报
         except Exception as e:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 回退内存,不挂服务
             print(f"[agent.deps] PG 会话存储不可用({type(e).__name__}: {e}), 回退 memory", file=sys.stderr)
             return InMemorySessionStore()
