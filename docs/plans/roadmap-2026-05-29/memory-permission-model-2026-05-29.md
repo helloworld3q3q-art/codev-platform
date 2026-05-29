@@ -105,6 +105,31 @@ CREATE INDEX ix_mem_topic ON memory_entries(topic_key, status);
 | 库内隔离 | 仍按 project_id 多租户隔离(openclaw / widget / 未来项目的 memory 在平台库内分租户,不混) |
 | 复用边界 | 复用的是"PG 这套技术栈/实例运维能力",**不是** openclaw 的那个 business database |
 
+### 3.2c PG 部署形态(2026-05-29 定:独立实例,docker 平台专属容器)
+
+平台定位团队/组织 → **独立 PG 实例**(非共业务 server)。但开发期仍单机,故用 **docker 平台专属容器**落地,拿到独立实例的隔离收益又不背双套原生运维负债。
+
+```
+codev-platform-postgres (docker container)
+├── image: postgres:16
+├── port: 5433(避开业务 PG 5432)
+├── database: codev_platform_memory
+├── 数据卷: <平台仓根>/data/postgres/(归平台,契合所有权翻正)
+└── 独立 role: codev_platform(限权,非业务 superuser)
+```
+
+| 阶段 | 落地 |
+|---|---|
+| 单人开发(现在) | `docker compose up -d` 起容器;数据卷在 `data/postgres/`(gitignored,同 chroma data) |
+| 团队部署 | 同 compose 部署到团队服务器,**零改动**(从开发期就独立,无迁移) |
+| 组织级 | 容器挪独立机器 / 换托管 PG(RDS 等),改 `config.memory.pg_dsn` 一行 |
+
+**为什么不共 server 起步**:终局是独立,共 server 起步等于"先寄生 openclaw → 团队了再拆实例",制造迁移返工 + 破坏刚完成的所有权翻正(数据又寄生业务)。从第一天独立(docker 降成本)走直线。
+
+**config**:`config.memory.pg_dsn = "postgresql://codev_platform:***@localhost:5433/codev_platform_memory"`(key/密码走 env,不进 git;复用 §3.2 的 secrets 红线)。
+
+**A(会话持久化 M2)前置已解除**:部署形态定 + `docker compose up` 即有 PG,可排实施。
+
 ### 3.3 作用域 → collection 映射
 
 个人/团队/org 跨 project,故 memory 不复用 `<project_id>__platform_docs`,独立命名:
@@ -241,7 +266,7 @@ agent loop 召回改走 `/memory/recall` 的权限过滤版,替代当前"全量�
 
 ## 六、待确认
 
-- **PG 部署形态**:openclaw 共 server + 独立 database `codev_platform_memory`(省运维)/ 还是独立 PG 实例(更契合自包含)?**独立 database 是底线,二选一只是 server 是否共用。**
+- ~~**PG 部署形态**~~ → **已定(2026-05-29)**:**独立 PG 实例,docker 平台专属容器**(`codev-platform-postgres`)。详见 §3.2c。理由:平台定位团队/组织,故障/资源/权限隔离全是真收益;从开发期就独立(docker 降成本),避免"单人共 server → 团队拆实例"的迁移返工;数据卷归平台 `data/`,契合所有权翻正主线。
 - org 是否单一假设(单公司)?还是要支持多 org(SaaS 多租户)?—— 影响是否要 org_id 列。
 - M1 user_id 来源:先 `X-User-Id` header 够吗?还是直接上 token?(建议先 header)
 - 压缩/摘要融合用哪个模型?复用 agent 的 provider(Claude)还是单独配?
