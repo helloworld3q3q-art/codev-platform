@@ -53,6 +53,26 @@ def _parse_dt(text: str) -> datetime | None:
     return None
 
 
+def _query_codegraph_api(base_url: str) -> Any:
+    """通过 codegraph-api(Java HTTP 服务, 默认 :18082)取 codegraph 统计 —— "访问 codegraph
+    数据走 HTTP" 的落地。成功返回 {'nodes','edges','source':'http'};服务没起/出错返回
+    'api_down' / 'api_error'(调用方退回本地 sqlite 或标注)。"""
+    import urllib.request
+    url = base_url.rstrip("/") + "/v1/codegraph/stats"
+    try:
+        req = urllib.request.Request(
+            url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001 - service 没起 / 网络
+        return "api_down"
+    if d.get("result") == 0 and isinstance(d.get("data"), dict):
+        s = d["data"]
+        return {"nodes": int(s.get("totalNodes") or 0),
+                "edges": int(s.get("totalEdges") or 0), "source": "http"}
+    return "api_error"
+
+
 def _self_project_id(repo_root: Path) -> str | None:
     pj = repo_root / ".claude" / "project.json"
     if pj.is_file():
@@ -138,19 +158,30 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
     pids = sorted(set(registered) | set(chroma_pid))
     projects: dict[str, Any] = {}
     for pid in pids:
-        # codegraph: 本机 co-located 仓的 .codegraph(repo_path 是服务端配置)
-        if self_pid and pid == self_pid:
-            repo: Path | None = repo_root
+        # codegraph: 优先走 codegraph-api(HTTP, "访问 codegraph 数据走 HTTP");
+        # 没配 codegraph_api_url 才退回读本机 co-located 仓的 .codegraph 文件(repo_path 服务端配置)。
+        codegraph: Any
+        api_url = _cfg_get(cfg, f"projects.{pid}.codegraph_api_url")
+        if api_url:
+            codegraph = _query_codegraph_api(api_url)
         else:
-            rp = _cfg_get(cfg, f"projects.{pid}.repo_path")
-            repo = Path(rp).expanduser() if rp else None
-            if repo and not repo.exists():
-                repo = None
-        if repo is None:
-            codegraph: Any = "no_repo_path"
-        else:
-            db = repo / ".codegraph" / "codegraph.db"
-            codegraph = _sqlite_counts(db, "nodes", "edges") if db.is_file() else "no_db"
+            if self_pid and pid == self_pid:
+                repo: Path | None = repo_root
+            else:
+                rp = _cfg_get(cfg, f"projects.{pid}.repo_path")
+                repo = Path(rp).expanduser() if rp else None
+                if repo and not repo.exists():
+                    repo = None
+            if repo is None:
+                codegraph = "no_repo_path"
+            else:
+                db = repo / ".codegraph" / "codegraph.db"
+                if db.is_file():
+                    counts = _sqlite_counts(db, "nodes", "edges") or {}
+                    codegraph = {"nodes": counts.get("nodes", 0),
+                                 "edges": counts.get("edges", 0), "source": "local"}
+                else:
+                    codegraph = "no_db"
 
         xdb = data / "codegraph_ext" / pid / "cross_layer.sqlite"
         xcounts = _sqlite_counts(xdb, "nodes") if xdb.is_file() else None

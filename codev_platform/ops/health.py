@@ -1037,11 +1037,17 @@ def cmd_health_all(args: argparse.Namespace) -> int:
         tot_chroma += ch
         cg = p.get("codegraph")
         if isinstance(cg, dict):
-            cg_s = f"nodes={cg.get('nodes', 0)} edges={cg.get('edges', 0)}"
+            src = cg.get("source")
+            tag = " (via codegraph-api HTTP)" if src == "http" else " (本地 sqlite)" if src == "local" else ""
+            cg_s = f"nodes={cg.get('nodes', 0)} edges={cg.get('edges', 0)}{tag}"
         elif cg == "no_repo_path":
             cg_s = "?(仓路径未在平台登记)"
         elif cg == "no_db":
             cg_s = "无 .codegraph db"
+        elif cg == "api_down":
+            cg_s = "codegraph-api 未响应(启动 :18082 / 查 config.projects.<id>.codegraph_api_url)"
+        elif cg == "api_error":
+            cg_s = "codegraph-api 返回错误"
         else:
             cg_s = str(cg)
         xl = p.get("cross_link_nodes")
