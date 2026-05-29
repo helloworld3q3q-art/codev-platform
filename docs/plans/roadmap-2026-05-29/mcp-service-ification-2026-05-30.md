@@ -78,7 +78,7 @@
 
 | 阶段 | 内容 | 风险 | 验证 |
 |---|---|---|---|
-| **P0 网关/认证基础 ✅ 已落地** | `codev_platform/gateway/`(auth 可插拔:passthrough/token + 统一拦截中间件)+ 挂到 agent 服务,`/health` public;config `gateway.auth_mode` | 低(passthrough 不破坏现有) | 单测 10 通过 + agent app 加载 AuthMiddleware;各 HTTP 入口复用同一模块 |
+| **P0 网关/认证基础 ✅ 已落地(含高并发+认证加密硬化)** | `codev_platform/gateway/`(auth 可插拔:passthrough/token + **纯 ASGI** 统一拦截中间件)→ 挂到 **agent 服务 + chroma daemon**(两 HTTP 入口),`/health` public;config `gateway.auth_mode`。**高并发**:纯 ASGI 不缓冲 /sse 长连接 + 认证器只读无锁。**认证加密**:token 存 sha256 hash(明文不落盘)+ `hmac.compare_digest` 常量时间比对;HTTPS/TLS 记为部署层 | 低(passthrough 非破坏;daemon 生效需重启) | 单测 12 通过(hash 命中/明文不通过/错 token 401)+ 全量 135 + agent/daemon app 均加载 AuthMiddleware |
 | **P1 chroma 直连 SSE** | 业务 `.mcp.json` 的 platform-docs 改 `type:sse` 直连 daemon /sse;去掉 launcher 路径 | 低(daemon 已 SSE;失 auto-spawn,需 daemon 常驻) | `/mcp` connected + search_docs 命中 |
 | **P2 cross-link HTTP 端点** | 我们的 `cross_link.server` 加 Streamable HTTP/SSE transport(MCP SDK)+ `?project_id=` 路由;或 mcp-proxy 包。平台起常驻端点 | 中(我们代码) | curl /sse + 业务 find_table_refs 通 |
 | **P3 codegraph SSE(mcp-proxy)** | 平台跑 `mcp-proxy --sse-port <p> -- codegraph serve --mcp --path <repo>`(per-project);业务改 `type:sse` | 中(端口/多租户/常驻) | codegraph_search 全工具经 SSE 通 |
