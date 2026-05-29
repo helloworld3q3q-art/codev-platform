@@ -315,17 +315,24 @@ agent loop 召回改走 `/memory/recall` 的权限过滤版,替代当前"全量�
 
 ## 四、分阶段(标注单人可做 / 需多人)
 
-| 阶段 | 交付 | 单人能做? | 难度 |
-|---|---|---|---|
-| **M0 现状** | project_id 隔离 + MEMORY.md(人肉) | — | ✅ |
-| **M1 身份** | `core/identity.py` + `X-User-Id` 采集(不拦截) | ✅ 单人 | 低 |
-| **M2 作用域存储** | 平台独立 PG 库 `codev_platform_memory` + 4 层 namespace + collection 映射 + write/recall API | ✅ 单人 | 中 |
-| **M3 召回合并 + 冲突** | 跨作用域召回 + 冲突优先级 + redline 硬约束;agent loop 接入 | ✅ 单人 | 中 |
-| **M4 生命周期** | update/supersede + TTL/forget + 压缩摘要 job | ✅ 单人 | 中 |
-| **M5 ACL** | 可见性表 + visible_scopes 真实计算(先 ACL) | 🟡 需第二人验证 | 中 |
-| **M6 RBAC + 审计 + secrets/team** | 角色 + 审计日志 + per-team secrets | ❌ 需多团队 | 高 |
+| 阶段 | 交付 | 单人能做? | 难度 | 状态 |
+|---|---|---|---|---|
+| **M0 现状** | project_id 隔离 + MEMORY.md(人肉) | — | ✅ | ✅ |
+| **M1 身份** | `core/identity.py` + `X-User-Id` 采集(不拦截) | ✅ 单人 | 低 | ✅ 已落地 |
+| **M2 作用域存储** | 平台独立 PG 库 `codev_platform_memory` + 4 层 namespace + write/list/supersede/forget + 读写分离接缝 | ✅ 单人 | 中 | ✅ 已落地 + 真机验证(2026-05-29,`scripts/verify_memory_pg.py` 全绿) |
+| **M3 召回合并 + 冲突** | 跨作用域召回 + 冲突优先级 + redline 硬约束;agent loop 接入 | ✅ 单人 | 中 | ✅ 已落地 + 真机验证(2026-05-29,`RecallService`/`LocalRecallService`,agent 仅凭注入记忆答出事实) |
+| **M4 生命周期** | update/supersede(已具)+ TTL/forget(forget 已具)+ 压缩摘要 job | ✅ 单人 | 中 | 🟡 supersede/forget 已落,TTL 自动 archive + 压缩摘要 job 待补 |
+| **M5 ACL** | 可见性表 + visible_scopes 真实计算(先 ACL)+ orgs.conflict_policy 从 PG 读 | 🟡 需第二人验证 | 中 | ⏳ 接缝已留(`visible_scopes` / `resolve_conflicts(policy)` 参数化) |
+| **M6 RBAC + 审计 + secrets/team** | 角色 + 审计日志 + per-team secrets + 认证层(§3.1b) | ❌ 需多团队 | 高 | ⏳ |
 
 **M1-M4 单人就做、立刻有用**(让 agent 有分层记忆 + 不爆 context);M5-M6 等真多人。
+
+**M2/M3 落地实现备忘(2026-05-29)**:
+- 存储:`agent/session_pg.py`(会话)+ `agent/memory_store_pg.py`(记忆条目),读写分离接缝(`read_dsn` 可选,默认同池)。
+- 召回:`agent/recall_service.py` —— `RecallService` 抽象 + `LocalRecallService`(直查 PG);向量后端(chroma)留 `config.memory.recall_backend="vector"` 接缝,**未预建**(记忆量≈0 时语义排序零边际价值,同读写副本取舍)。
+- 冲突:`agent/memory_recall.py:resolve_conflicts(policy)`,红线最高不可配 + policy(personal_first/org_first)控非红线;policy 来源 M5 从 PG 读。
+- 注入:`prompts.build_code_understanding_system(memories=...)` 注入召回记忆段(redline 标注);`ChatService.ask` 召回失败静默退化不阻断问答。
+- 库:现有 PG 17(localhost:5432)内独立 database `codev_platform_memory`,role `codev_platform`(§3.2b 红线满足:独立 database,非业务库)。
 
 ---
 
