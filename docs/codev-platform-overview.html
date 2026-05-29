@@ -133,6 +133,7 @@
       <p>多项目 AI 协作工具栈 · 真值源仓 × 运行时管道</p>
       <a href="#map">一图总览</a>
       <a href="#what">这平台是什么</a>
+      <a href="#advantages">作用与优势</a>
       <a href="#xplatform">跨平台 CLI</a>
       <a href="#agent">Agent 服务 + Memory</a>
       <a href="#modules">本仓模块</a>
@@ -456,6 +457,55 @@
               <h3>4. 用户配置中心</h3>
               <p><code>~/.codev-platform/config.json</code> 单一文件:模型路径 / daemon 端口 / 数据基目录 / search 参数。换机器只改这,代码不动。</p>
             </div>
+          </div>
+        </section>
+
+        <section id="advantages">
+          <h2>平台的作用与优势</h2>
+          <p>一句话定位:把"多项目 AI 协作"里重复的基建 —— <strong>检索 / 规则 / 模型 / 记忆 / 运维</strong> —— 收敛成<strong>一份自包含、多租户、可插拔</strong>的平台,让 AI 既能<strong>查</strong>(代码/契约/规则)、又能<strong>记</strong>(分层记忆)、还能<strong>主动干</strong>(常驻 Agent),且按需演进不背早期负债。</p>
+
+          <h3>作用 —— 平台在做的 5 件事</h3>
+          <div class="grid">
+            <div class="item">
+              <h3>1. 一份真值源,多项目复用</h3>
+              <p>核心代码 / 规则 / 技能 / 配置集中本仓,业务仓只靠 <code>shim</code> + <code>sync</code> 消费,不各自拷贝、各自演化。改一处,全仓生效。</p>
+            </div>
+            <div class="item">
+              <h3>2. AI 协作的检索底座</h3>
+              <p>三套 MCP(<strong>代码图谱 / 跨层链路 / 文档检索</strong>)预索引。AI 改代码前先查定义、调用链、影响面、规则,少凭记忆瞎改 —— 准确率的地基。</p>
+            </div>
+            <div class="item">
+              <h3>3. 常驻 Agent 服务</h3>
+              <p>FastAPI 多模型可插拔(按<strong>协议族</strong>,加厂商≈零代码),自带 6 只读工具 + 防空转护栏。从"被动检索"升级为"<strong>主动问答 / 执行</strong>",可被 widget / CLI / 会话调用。</p>
+            </div>
+            <div class="item">
+              <h3>4. 分层记忆基建</h3>
+              <p><strong>组织 / 团队 / 项目 / 个人</strong>四作用域,跨会话不失忆;召回融合 + 冲突消解(<strong>红线最高</strong>)+ 生命周期(TTL / 压缩)。让 AI 记住偏好与约定,不必每次重教。</p>
+            </div>
+            <div class="item">
+              <h3>5. 多租户 + 跨平台运维</h3>
+              <p>一套服务多项目按 <code>project_id</code> / <code>org/user</code> 物理隔离;运维编排升级为跨平台 CLI,<strong>Win / Mac / Linux 一份 config</strong> 通用。</p>
+            </div>
+          </div>
+
+          <h3>优势 —— 为什么这么做赢</h3>
+          <table>
+            <tr><th>维度</th><th>没这平台</th><th>有了平台</th></tr>
+            <tr><td>代码复用</td><td>每仓拷一份 daemon / BM25 / cross-link,改 bug 同步 N 处</td><td>改本仓一处,<code>pip -e</code> 全仓即时生效</td></tr>
+            <tr><td>规则一致</td><td>各仓规则各自演化,半年后南辕北辙</td><td>单一真值源,<code>sync</code> 拉同一份</td></tr>
+            <tr><td>GPU / 资源</td><td>每会话一个模型 ~3GB,第 2 会话 CUDA OOM</td><td>单例 daemon 多项目多会话共享,占用恒定 ~3GB</td></tr>
+            <tr><td>上下文 / token</td><td>大段 Markdown / 代码全塞进上下文</td><td>预索引按需 top-k;BM25 + 向量 RRF + rerank 提准</td></tr>
+            <tr><td>AI 记忆</td><td>偏好 / 约定每次重教,跨会话失忆</td><td>四作用域记忆持久化 + 召回注入,记得住、按身份隔离</td></tr>
+            <tr><td>主动能力</td><td>只能人在 IDE 里手调 MCP</td><td>常驻 Agent 服务,多模型可插拔,可被前端 / CLI / 会话调用</td></tr>
+            <tr><td>接入成本</td><td>拷代码 + 配规则 + 调 daemon,半天</td><td><code>init</code> + 2 个 <code>sync</code>,5 分钟</td></tr>
+            <tr><td>演进负债</td><td>要么过度设计、要么频繁返工</td><td><strong>留接缝不预建</strong>(读写分离 / 向量召回 / RBAC),真痛点才上</td></tr>
+            <tr><td>故障 / 所有权</td><td>运行时寄生业务仓,故障域耦合</td><td>运行时(<code>.venv</code> / <code>data/</code>)归本仓自包含,业务仓纯消费者</td></tr>
+          </table>
+          <div class="ok">
+            ✅ 收益随项目数放大:1 个项目时是过度设计;多项目时"改一处全仓生效 + 资源共享 + AI 查/记/主动干 + 5 分钟接入"叠加,基建成本被摊薄,边际接入近乎免费。
+          </div>
+          <div class="warning">
+            ⚠️ 边界:平台只持有<strong>跨项目通用</strong>基建(代码 / 规则 / 技能 / 配置 / 记忆框架),业务领域内容(投研逻辑 / 策略 / 数据)留各业务仓;权限(RBAC)与认证在多人 / 多组织真到来前只留接缝,不预建。
           </div>
         </section>
 
