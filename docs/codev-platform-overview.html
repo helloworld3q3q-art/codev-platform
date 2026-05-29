@@ -155,7 +155,7 @@
 
         <section id="map">
           <h2>一图总览</h2>
-          <p><strong>顶部带</strong>:codev-platform 真值源仓(本仓提供什么)。<strong>下方 6 泳道</strong>:AI 工具链运行时管道(原 ai-dev-architecture-map 的数据源 → 触发 → 索引器 → 存储 → MCP → 会话)。紫色实线表示<strong>真值源 → 运行时</strong>的供给关系:本仓代码经 pip -e 软链成为索引器(泳道 3)和 MCP 服务(泳道 5)的实现;规则 / skill 经 sync 进入业务仓数据源(泳道 1)。最右泳道展开 3 个业务仓项目。</p>
+          <p><strong>顶部带</strong>:codev-platform 真值源仓(本仓提供什么)。<strong>中部 6 泳道</strong>:AI 工具链运行时管道(原 ai-dev-architecture-map 的数据源 → 触发 → 索引器 → 存储 → MCP → 会话)。<strong>底部紫色带 = 今日新增</strong>:Agent 服务 + Memory 基建(常驻 Agent + 四作用域分层记忆 + 数据库持久化 + 多租户隔离),关键点见图。紫色实线表示<strong>真值源 → 运行时</strong>的供给关系:本仓代码经 pip -e 软链成为索引器(泳道 3)和 MCP 服务(泳道 5)的实现;规则 / skill 经 sync 进入业务仓数据源(泳道 1)。最右泳道展开 3 个业务仓项目。</p>
           <div class="legend">
             <span class="pill"><span class="dot violet"></span>codev-platform 真值源</span>
             <span class="pill"><span class="dot"></span>数据源</span>
@@ -164,13 +164,14 @@
             <span class="pill"><span class="dot green"></span>本地存储</span>
             <span class="pill"><span class="dot cyan"></span>MCP 服务</span>
             <span class="pill"><span class="dot red"></span>会话 / 验证 / 隔离</span>
+            <span class="pill"><span class="dot violet"></span>★ 今日新增 Agent + Memory</span>
           </div>
           <div class="map-actions">
             <button class="fullscreen-btn" type="button" data-fullscreen-target="platform-map">全屏查看</button>
           </div>
 
           <div class="map-wrap" id="platform-map">
-            <svg class="map" viewBox="0 0 1480 1080" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
+            <svg class="map" viewBox="0 0 1480 1280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 架构图">
               <defs>
                 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                   <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
@@ -192,7 +193,7 @@
                 </filter>
               </defs>
 
-              <rect x="18" y="20" width="1444" height="1040" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
+              <rect x="18" y="20" width="1444" height="1240" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
 
               <!-- ========== TOP BAND: codev-platform 真值源仓 ========== -->
               <rect x="40" y="50" width="1400" height="150" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
@@ -524,10 +525,47 @@
               <path class="edge-dashed" d="M1215 651 L1255 639"/>
               <path class="edge-dashed" d="M1215 651 C1240 680 1245 700 1255 715"/>
 
+              <!-- ========== 今日新增:Agent 服务 + Memory 基建 ========== -->
+              <rect x="40" y="1014" width="1400" height="184" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+              <text class="lane-title" x="58" y="1042" fill="#5b21b6">★ 今日新增:Agent 服务 + Memory 基建(从"被动检索"走向"主动 Agent + 分层记忆")</text>
+              <g filter="url(#shadow)">
+                <rect x="58" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="223" y="1082" text-anchor="middle">常驻 Agent 服务</text>
+                <text class="node-sub" x="223" y="1104" text-anchor="middle">多模型可插拔(按协议族接入)</text>
+                <text class="node-sub" x="223" y="1124" text-anchor="middle">加新厂商多数零代码 / 一行</text>
+                <text class="node-sub" x="223" y="1144" text-anchor="middle">自带只读工具 + 防空转护栏</text>
+                <text class="node-sub" x="223" y="1164" text-anchor="middle">问答按组织 / 用户 / 项目路由</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="408" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="573" y="1082" text-anchor="middle">分层记忆(四作用域)</text>
+                <text class="node-sub" x="573" y="1104" text-anchor="middle">组织 · 团队 · 项目 · 个人</text>
+                <text class="node-sub" x="573" y="1124" text-anchor="middle">召回时跨作用域合并</text>
+                <text class="node-sub" x="573" y="1144" text-anchor="middle">冲突消解:红线最高不可配</text>
+                <text class="node-sub" x="573" y="1164" text-anchor="middle">个人偏好可盖团队默认(可配)</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="758" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="923" y="1082" text-anchor="middle">数据库持久化</text>
+                <text class="node-sub" x="923" y="1104" text-anchor="middle">会话 + 记忆跨重启不丢</text>
+                <text class="node-sub" x="923" y="1124" text-anchor="middle">平台独立库(不与业务库同库)</text>
+                <text class="node-sub" x="923" y="1144" text-anchor="middle">读写分离接缝(副本可选)</text>
+                <text class="node-sub" x="923" y="1164" text-anchor="middle">连接池上限可调 · 消息自增定序</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1108" y="1056" width="330" height="128" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="1273" y="1082" text-anchor="middle">生命周期 + 多租户隔离</text>
+                <text class="node-sub" x="1273" y="1104" text-anchor="middle">到期归档 · 压缩融合(留痕)</text>
+                <text class="node-sub" x="1273" y="1124" text-anchor="middle">改写留旧值(可回溯)</text>
+                <text class="node-sub" x="1273" y="1144" text-anchor="middle">读写都带组织 / 用户维度</text>
+                <text class="node-sub" x="1273" y="1164" text-anchor="middle">个人记忆只能读本人 · 维护单实例锁</text>
+              </g>
+
               <!-- ========== bottom narration ========== -->
-              <rect x="40" y="1014" width="1400" height="36" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
-              <text class="node-title" x="58" y="1037">★ codev-platform 供给关系:</text>
-              <text class="node-sub" x="270" y="1037">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
+              <rect x="40" y="1212" width="1400" height="48" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
+              <text class="node-title" x="58" y="1232">★ codev-platform 供给关系:</text>
+              <text class="node-sub" x="270" y="1232">codev_platform/* 经 pip -e 软链成为索引器(L3)与 MCP(L5)的实现 · rules/skills 经 sync 进入业务仓数据源(L1) · platform_meta + config 注入 L2/L4 · 业务仓 L6 反过来消费整条管道。</text>
+              <text class="node-sub" x="58" y="1252">★ 今日新增 Agent + Memory(紫色带):同一份核心代码新长出"主动 Agent 服务 + 分层记忆",身份按组织 / 用户 / 项目三元组路由,数据落平台独立库,多租户物理隔离。</text>
             </svg>
           </div>
         </section>
@@ -890,6 +928,26 @@
               <td>本仓 codev-platform 自身改动</td>
               <td>不允许并发改 + 同时 daemon 持旧。</td>
               <td>改完 commit + push + 各业务仓重启 daemon(<code>Stop-Process</code> port 18083)。</td>
+            </tr>
+            <tr>
+              <td>会话 / 记忆持久化(数据库)★今日</td>
+              <td>读可并发,写走短事务。</td>
+              <td>读写分离接缝(只读副本可选,不预建);连接池上限可调;主键带组织 + 用户维度物理隔离。</td>
+            </tr>
+            <tr>
+              <td>会话消息顺序(多窗口)★今日</td>
+              <td>多窗口可并发写同一会话。</td>
+              <td>数据库自增序号定序,不在应用层算序号(免并发竞态);消息按序号读回。</td>
+            </tr>
+            <tr>
+              <td>记忆维护任务(到期归档 / 压缩融合)★今日</td>
+              <td>不允许并发跑同一主题。</td>
+              <td>数据库会话级单实例锁(抢不到即跳过),防并发压同主题写出重复摘要。</td>
+            </tr>
+            <tr>
+              <td>多租户记忆访问 ★今日</td>
+              <td>跨组织 / 用户读可并发。</td>
+              <td>所有读写带组织 + 用户维度;个人记忆只能读本人(召回 ≠ 直接读);授权层接缝留待多人期。</td>
             </tr>
           </table>
         </section>
