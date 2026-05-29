@@ -100,6 +100,28 @@ cd <codev-platform 仓> && codegraph init -i   # 建本仓 .codegraph/codegraph.
 
 ---
 
+## 日常使用 / 维护
+
+配好后正常用 Claude Code 即可,它会自动调这三套工具:
+
+| 你想查的 | Claude 用 |
+|---|---|
+| 项目规则 / 设计 / 事故文档 | **platform-docs** `search_docs` |
+| 接口 ↔ 表 ↔ 代码 跨层链路 | **cross-link** |
+| 符号 / 调用链 / 改动影响面 | **codegraph** |
+
+> Mac 上 chroma server 是**每个 Claude 会话起一个 stdio 子进程**(加载模型 ~1.1G),无常驻 18083 daemon。所以"重启 daemon" = **Cmd+Q 重开 VSCode**。
+
+**改了代码 / 文档后重建索引**(否则 Claude 查到的是旧的):
+
+```bash
+cd <codev-platform 仓> && source .venv/bin/activate
+python -m codev_platform.chroma.indexer --force   # 文档/规则改了 → 重建 chroma 索引
+codegraph sync                                     # 代码改了 → 更新代码图谱(增量; 全量用 codegraph index)
+```
+
+---
+
 ## 排错
 
 | 现象 | 原因 / 处理 |
