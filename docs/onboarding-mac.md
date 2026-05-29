@@ -122,6 +122,30 @@ codegraph sync                                     # 代码改了 → 更新代�
 
 ---
 
+## 日常使用
+
+三套 MCP 由 Claude **自动调用**,你正常提问即可:
+
+| 想干的事 | Claude 会用 |
+|---|---|
+| 查规则 / 设计 / 事故文档 | platform-docs `search_docs` |
+| 查接口↔表↔代码 全栈链路 | cross-link |
+| 查符号 / 调用链 / 影响面 | codegraph |
+
+改了代码 / 文档后**重建索引**(否则 Claude 查到的是旧的):
+
+```bash
+cd <codev-platform 仓> && source .venv/bin/activate
+python -m codev_platform.chroma.indexer --force   # 文档/规则改了 → chroma
+codegraph sync                                     # 代码改了 → 代码图谱(增量, 快)
+```
+
+> 已装 git `post-commit` hook(`codev-platform install-hooks`)→ commit 时按改动类型自动重建,多数时候不用手动跑。
+
+Mac 上 chroma server 是**每个 Claude 会话起一个 stdio 子进程**(非常驻 daemon),所以"重启服务" = **Cmd+Q 重开 VSCode**。
+
+---
+
 ## 排错
 
 | 现象 | 原因 / 处理 |
