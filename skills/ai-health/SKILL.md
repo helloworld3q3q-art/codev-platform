@@ -1,12 +1,15 @@
-﻿---
+---
 name: ai-health
-description: 检查本地 AI 工具栈状态 —— 12 项体检 (ai-health) + 工作树索引一致性 (dirty-check)。支持 health / dirty / both 三档,用于排查 MCP 召回怪/索引滞后/重启电脑后验栈/升级模型后确认生效
+description: 检查本地 AI 工具栈状态 —— 当前仓体检 (health) + 工作树索引一致性 (dirty-check) + 平台全局视图 (health --all,所有项目 x 三库 + 记忆)。用于排查 MCP 召回怪 / 索引滞后 / 重启电脑后验栈 / 升级模型后确认生效 / 看全平台各项目库规模
 ---
 
 # AI 工具栈体检
 
+> 运维已是跨平台 CLI:`codev-platform health` / `dirty-check` / `reindex`(Win/Mac/Linux 通用,机器路径走 `~/.codev-platform/config.json`)。旧 `tools/dev/*.ps1` 仅 Windows 薄 shim,转调 CLI。
+
 **触发场景**:
 - 用户问 "AI 工具有没有挂" / "MCP 工具状态" / "三个库还好吗" / "Qwen3 生效了吗"
+- "看全平台 / 每个项目的库用了多少 / 三个项目 memory 串没串" → `health --all`
 - 重启电脑 / 升级模型 / 改 hook 配置后想确认基础设施正常
 - AI 召回质量怪,先排除"工具栈本身坏了"
 - 改了一堆代码没 commit,想问 AI 决策前先确认 MCP 索引是否同步
@@ -17,87 +20,92 @@ description: 检查本地 AI 工具栈状态 —— 12 项体检 (ai-health) + �
 
 | 选项 | 含义 | 适用场景 |
 |---|---|---|
-| `health` (工具栈体检) | 跑 ai-health.ps1 — 12 项检查 (Qwen3 模型 / Chroma chunks / CodeGraph db / GPU / git) | 重启 / 升级后,怀疑底层 |
-| `dirty` (索引一致性) | 跑 dirty-index-check.ps1 — 列工作树命中索引范围的 dirty 文件 | 改了没 commit,要让 AI 决策前 |
-| `both` (推荐) | 两个都跑 — 完整体检 + 索引一致性 | 不确定时默认 |
+| `health` (当前仓体检) | `codev-platform health` — 当前仓 ~17 项检查 (Qwen3 模型 / Chroma chunks / CodeGraph db / GPU / daemon / git / 使用率) | 重启 / 升级后,怀疑底层 |
+| `health --all` (平台全局) | `codev-platform health --all` — 所有已注册项目 x 三库(chroma / codegraph / cross-link)+ 记忆作用域,一张矩阵 | 看全平台规模 / 各项目对比 / 记忆隔离 |
+| `dirty` (索引一致性) | `codev-platform dirty-check` — 列工作树命中索引范围的 dirty 文件 | 改了没 commit,要让 AI 决策前 |
+| `both` (推荐) | health + dirty 都跑 | 不确定时默认 |
 
 直接信号词:
 - "工具栈坏了 / 模型加载了吗 / GPU 有没有用" → `health`
+- "全平台 / 每个项目 / 三个项目对比 / memory 串没串" → `health --all`
 - "MCP 看到我刚改的代码吗 / 索引滞后吗 / 没 commit 的会怎样" → `dirty`
 - "整体看一下" / 没说清 → `both`
 
 ## 用法
 
-```powershell
-# health 体检 — 12 项,~5 秒
-tools\dev\ai-health.ps1
+```bash
+# 当前仓体检 — 默认 full(~15s,含模型/GPU 探针);light 跳过重探针更快
+codev-platform health
+codev-platform health --mode light
 
-# dirty 检查 — 列受影响文件 + 兜底建议
-tools\dev\dirty-index-check.ps1
+# 平台全局视图 — 所有项目 x 三库 + 记忆(不限当前仓)
+codev-platform health --all
 
-# dirty 给脚本 / AI 调
-tools\dev\dirty-index-check.ps1 -Json
+# 工作树索引一致性 — 列受影响文件 + 兜底建议
+codev-platform dirty-check
+codev-platform dirty-check --json   # 给脚本 / AI 调
 
-# dirty 只看退出码 (CI 用)
-tools\dev\dirty-index-check.ps1 -Quiet
+# 写健康快照 JSON(widget 读):省略路径=platform_meta/health/<pid>.json
+codev-platform health --json-out
 ```
 
 ## 输出解读
 
-### ai-health 关键项
+### health(当前仓)关键项
 
 | 项 | 看什么 |
 |---|---|
-| `embed model` | Qwen3-Embedding-0.6B 路径 + 11 个文件齐全 |
-| `embed load` | dim=1024 / max_seq=32768 / query_prompt=True (instruction-aware 已激活) |
-| `torch cuda` | cuda=True + GPU 名 (GPU 没识别 → 模型走 CPU,慢 10×) |
-| `chroma collection` | chunks 数 / 维度 / 模型名匹配 |
+| `embed model` / `embed load` | Qwen3-Embedding-0.6B 在 + dim=1024 / query_prompt=True(instruction-aware 已激活)|
+| `torch cuda` | cuda=True + GPU 名(cuda=False → 模型走 CPU,慢 10×)|
+| `chroma collection` | 当前仓 chunks 数 / 维度 / 模型名 |
 | `chroma freshness` | 索引比最新 .md 新 → 不滞后 |
-| `codegraph db` | nodes / edges 数变化反映代码改动 |
-| `codegraph-api` | jar 已编译 (没 jar → mvn package 一次) |
-| `hook missed?` | HEAD commit 在 reindex.log 找到 → OK;命中索引但没记录 → WARN 提示重跑 |
+| `platform-docs daemon` | :18083 daemon 活着 + 模型/reranker 已 loaded |
+| `cross_layer` | 全栈仓才有(configured/not built/nodes 数)|
+| `codegraph db` | nodes / edges + integrity=ok + WAL |
+| `hook missed?` | HEAD commit 命中索引但没进 reindex.log → WARN 提示重跑 |
+| `usage stats` | search_recall 命中率 / reindex 7d / platform-docs 采纳率 / cross-link 调用 |
 
-**退出码**:全 OK → 0 / 任一 WARN → 2 / 任一 FAIL → 1
+**退出码**:全 OK → 0 / 任一 WARN → 2 / 任一 FAIL → 1。
+**注意**:exit 2 是 WARN 不是失败,harness 会标"Error"但工具栈正常,看 SUMMARY 行为准。
 
-**注意**:exit 2 是 WARN 等级不是失败,Claude Code harness 会标"Error"但其实工具栈正常,看 SUMMARY 行才是真相。
+### health --all(平台全局)每项目一块
+
+```
+[<project_id>]
+    chroma 文档 = N chunks
+    codegraph 代码 = nodes=N edges=N        # 每仓 .codegraph,经 config.projects.<id>.repo_path 定位
+    cross-link 链路 = nodes=N / 未建        # 仅全栈仓建
+    memory 项目专属 = N 条  (+ org 共享 M)  # project 作用域,只该项目召回
+合计: chroma 全项目总数 ; memory M org + K project
+```
+
+- **chroma / cross-link / memory** 中心化(`data/` + PG 一个库),`--all` 直接全看到。
+- **codegraph** 是每仓 `.codegraph`(散在各业务仓),靠 `~/.codev-platform/config.json` 的 `projects.<id>.repo_path` 定位;没配的项目标 "仓路径未登记"。
+- **org 共享记忆**全项目通用(有意共享);**project 记忆**只该项目召回(隔离),`--all` 一眼看出谁有几条、串没串。
 
 ### dirty-check 输出
-
-```
-WARN: dirty files in AI index scope - MCP results may be STALE
-[CodeGraph] N 文件:  ...
-[cross-link] N 文件:  ...
-[Chroma   ] N 文件:  ...
-
-Next steps:
-  1. allow grep/read fallback for affected files
-  2. or commit + let post-commit hook reindex
-  3. or run tools/dev/update-local-ai.ps1 manually
-```
-
-**退出码**:索引干净 → 0 / 命中索引范围 → 1 / 非 git 仓库 → 2
+列 `[CodeGraph] / [cross-link] / [Chroma]` 命中索引范围的 dirty 文件。**退出码**:干净→0 / 命中→1 / 非 git→2。命中时:允许 grep/read 兜底,或 commit 让 post-commit hook 重建。
 
 ## 故障应对速查
 
 | 症状 | 处理 |
 |---|---|
-| `embed model` 路径错 / 文件不全 | 检查 `D:\models\Qwen3-Embedding-0.6B` 是否完整 |
+| `embed model` 路径错 / 文件不全 | 检查 `config.models.embed_path` 指向的目录是否完整 |
 | `torch cuda` cuda=False | 显卡驱动 / torch CUDA 版本不匹配,需重装 |
-| `chroma freshness` lag > 7d | 跑 `tools\dev\update-local-ai.ps1 -SkipCodeGraph` |
-| `codegraph db` nodes 数比上次少很多 | 索引出错,跑 `tools\dev\update-local-ai.ps1 -SkipChroma` |
-| `codegraph-api no jar` | `mvn -f apps\codegraph-api\pom.xml package -DskipTests` |
-| `hook missed?` WARN | 跑 `powershell -File tools/dev/post-commit.ps1` 补触发 |
+| `chroma freshness` lag > 7d | `codev-platform reindex --chroma` |
+| `codegraph db` nodes 骤降 | 索引出错,`codegraph sync` / `codegraph init -i` 重建 |
+| `hook missed?` WARN | `codev-platform post-commit` 补触发 |
+| `--all` 某项目 codegraph "仓路径未登记" | 在 `~/.codev-platform/config.json` 配 `projects.<id>.repo_path` |
 | dirty 命中 CodeGraph / cross-link | 允许 grep/read 兜底,或 commit 让 hook 跑 |
-| dirty 命中 Chroma | 同上,文档场景影响小,可先用 MCP |
 
 ## 相关规则
 
-- 工具栈架构:`docs/ai-toolchain-guide.html` (完整说明 + SVG 节点图)
-- 触发指南:`.claude/rules/ai-tools-mcp.md` (CodeGraph / Chroma / cross-link 何时用)
-- 重建逻辑:`tools/dev/update-local-ai.ps1` + `tools/dev/post-commit.ps1`
+- 触发指南:`.claude/rules/ai-tools-mcp.md`(CodeGraph / Chroma / cross-link 何时用)
+- 平台总览:`docs/codev-platform-overview.html`(平面分层架构图 + 三库 + 记忆)
+- 重建:`codev-platform reindex`(四档:all / chroma / codegraph / cross-link)+ `post-commit`(提交后台重建)
 
 ## 5 视角
 
-- **架构**:基础设施健康直接影响 AI 输出质量,需要可观测
+- **架构**:基础设施健康直接影响 AI 输出质量,需要可观测;`--all` 让平台方一眼看全各项目库规模
 - **工程**:dirty-check 防止"AI 用过时索引误导决策",特别是关键路径改动
-- **维护**:重启 / 升级后 5 秒确认所有组件在位,避免长时间盲跑
+- **维护**:重启 / 升级后几秒确认所有组件在位,避免长时间盲跑

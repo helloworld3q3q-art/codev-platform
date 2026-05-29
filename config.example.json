@@ -55,5 +55,11 @@
     "_comment": "memory 持久化用的平台独立 PG 库 (codev_platform_memory)。pg_dsn=主库(写); pg_dsn_read=只读副本(读,预留,留空=读写同库)。安全红线: 含密码, 真值只写本机 config 或 env (CODEV_PLATFORM_MEMORY_DSN / _READ), 绝不进仓; 严禁复用业务库 DSN (见 memory plan §3.2b)。null = 不启用 memory PG, 会话仅内存。",
     "pg_dsn": null,
     "pg_dsn_read": null
+  },
+
+  "projects": {
+    "_comment": "各业务仓在本机的 clone 路径 (机器相关, 故放 config 不进 git)。codev-platform 自身无需登记 (用包所在仓根)。`codev-platform health --all` 用它定位每个项目的 .codegraph 做全平台视图; 不配的项目 codegraph 会标 '仓路径未登记'。",
+    "openclaw-stock": { "repo_path": "~/WorkSpace/platform" },
+    "codev-platform-widget": { "repo_path": "~/WorkSpace/codev-platform-widget" }
   }
 }

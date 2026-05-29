@@ -862,6 +862,8 @@ def _usage_cross_link(r: Report, cl_usage: Path) -> None:
 # main command
 # ----------------------------------------------------------------------
 def cmd_health(args: argparse.Namespace) -> int:
+    if getattr(args, "all", False):
+        return cmd_health_all(args)
     light = (args.mode == "light")
     cfg = load_cfg()
     cdv_root = codev_root()
@@ -994,10 +996,147 @@ def _write_json_snapshot(r: Report, path: Path, project_id: str | None, mode: st
         out(f"[json] WARN failed to write {path}: {exc}")
 
 
+# ----------------------------------------------------------------------
+# platform-wide aggregate (--all): all registered projects x 3 DBs + memory
+# ----------------------------------------------------------------------
+def _sqlite_counts(db: Path, *tables: str) -> dict[str, int]:
+    """count(*) per table (stdlib sqlite3); -1 if table absent, {} on error."""
+    res: dict[str, int] = {}
+    try:
+        conn = sqlite3.connect(str(db))
+        cur = conn.cursor()
+        names = {x[0] for x in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for t in tables:
+            res[t] = cur.execute(f"SELECT count(*) FROM {t}").fetchone()[0] if t in names else -1
+        conn.close()
+    except Exception:  # noqa: BLE001 - aggregate is best-effort
+        pass
+    return res
+
+
+def _probe_chroma_memory(chroma_py: Path | None, chroma_data: Path) -> dict:
+    """Run one probe in the chroma venv: list all chroma collections + memory PG
+    scope counts (both need heavy deps). Returns {'chroma':[[name,count]],
+    'memory':[[scope,ref,n]], 'err':[...]}.
+    """
+    if not (chroma_py and chroma_py.exists()):
+        return {"chroma": [], "memory": [], "err": ["chroma venv python missing (config runtime.chroma_venv)"]}
+    code = (
+        "import json\n"
+        "res={'chroma':[],'memory':[],'err':[]}\n"
+        "try:\n"
+        "    import chromadb\n"
+        f"    c=chromadb.PersistentClient(path=r'''{chroma_data}''')\n"
+        "    for col in c.list_collections(): res['chroma'].append([col.name, col.count()])\n"
+        "except Exception as e: res['err'].append('chroma:'+repr(e))\n"
+        "try:\n"
+        "    from codev_platform.core.config import load_config, env_or_config\n"
+        "    import psycopg\n"
+        "    cfg=load_config(); dsn=env_or_config('CODEV_PLATFORM_MEMORY_DSN',cfg,'memory.pg_dsn')\n"
+        "    if dsn:\n"
+        "        with psycopg.connect(dsn) as con:\n"
+        "            q=\"SELECT scope,scope_ref,count(*) FROM memory_entries WHERE status='active' GROUP BY scope,scope_ref ORDER BY scope,scope_ref\"\n"
+        "            res['memory']=[list(r) for r in con.execute(q)]\n"
+        "    else: res['err'].append('memory:pg_dsn 未配')\n"
+        "except Exception as e: res['err'].append('memory:'+repr(e))\n"
+        "print(json.dumps(res))\n"
+    )
+    rc, o = _run_py(chroma_py, code, timeout=120)
+    for ln in reversed(o.splitlines()):
+        ln = ln.strip()
+        if ln.startswith("{"):
+            try:
+                return json.loads(ln)
+            except json.JSONDecodeError:
+                break
+    return {"chroma": [], "memory": [], "err": [f"probe failed rc={rc}: {o[:200]}"]}
+
+
+def _project_repo(cfg: dict, cdv: Path, pid: str, self_pid: str | None) -> Path | None:
+    """Resolve a project's repo root: codev-platform itself = cdv root; others from
+    machine config projects.<pid>.repo_path (machine paths live in user config, not git)."""
+    if self_pid and pid == self_pid:
+        return cdv
+    rp = cfg_get(f"projects.{pid}.repo_path", cfg=cfg)
+    if rp:
+        p = Path(str(rp)).expanduser()
+        return p if p.exists() else None
+    return None
+
+
+def cmd_health_all(args: argparse.Namespace) -> int:
+    """Platform-wide view: every registered project x (chroma / codegraph / cross-link)
+    + memory scopes. Centralized stores (chroma/cross-link/memory) need no repo path;
+    codegraph is per-repo, resolved via config.projects.<id>.repo_path."""
+    cfg = load_cfg()
+    cdv = codev_root()
+    chroma_data = cdv / "data" / "chroma"
+    self_pid = project_id_of(cdv)
+    reg = cdv / "platform_meta" / "projects"
+    registered = sorted(p.name for p in reg.iterdir() if p.is_dir()) if reg.is_dir() else []
+
+    probe = _probe_chroma_memory(chroma_python(), chroma_data)
+    chroma_pid: dict[str, int] = {}
+    for name, cnt in probe.get("chroma", []):
+        if name.endswith("__platform_docs"):
+            chroma_pid[name[: -len("__platform_docs")]] = cnt
+
+    mem_proj: dict[str, int] = {}
+    mem_org = 0
+    for scope, ref, n in probe.get("memory", []):
+        if scope == "org":
+            mem_org += n
+        elif scope == "project":
+            mem_proj[ref] = mem_proj.get(ref, 0) + n
+
+    pids = sorted(set(registered) | set(chroma_pid))
+
+    out("=== codev-platform health --all (平台全局视图) ===")
+    out(f"data root: {cdv / 'data'}")
+    out(f"registered projects: {len(registered)}  |  org 共享记忆: {mem_org} 条(全项目通用)")
+    out("")
+
+    tot_chroma = 0
+    missing_repo: list[str] = []
+    for pid in pids:
+        ch = chroma_pid.get(pid, 0)
+        tot_chroma += ch
+        repo = _project_repo(cfg, cdv, pid, self_pid)
+        if repo is None:
+            cg = "?(仓路径未登记)"
+            missing_repo.append(pid)
+        else:
+            db = repo / ".codegraph" / "codegraph.db"
+            if db.is_file():
+                c = _sqlite_counts(db, "nodes", "edges")
+                cg = f"nodes={c.get('nodes', 0)} edges={c.get('edges', 0)}"
+            else:
+                cg = "无 .codegraph db"
+        xdb = cdv / "data" / "codegraph_ext" / pid / "cross_layer.sqlite"
+        xl = f"nodes={_sqlite_counts(xdb, 'nodes').get('nodes', 0)}" if xdb.is_file() else "未建(不适用/未建)"
+        mp = mem_proj.get(pid, 0)
+        reg_tag = "" if pid in registered else "  (未注册 platform_meta)"
+        out(f"[{pid}]{reg_tag}")
+        out(f"    chroma 文档 = {ch} chunks")
+        out(f"    codegraph 代码 = {cg}")
+        out(f"    cross-link 链路 = {xl}")
+        out(f"    memory 项目专属 = {mp} 条  (+ org 共享 {mem_org})")
+        out("")
+
+    out(f"合计: chroma {tot_chroma} chunks / {len(pids)} 项目 ; memory {mem_org} org + {sum(mem_proj.values())} project")
+    for e in probe.get("err", []):
+        out(f"[WARN] {e}")
+    if missing_repo:
+        out(f"[INFO] codegraph 仓路径未登记: {', '.join(missing_repo)}")
+        out("       在 ~/.codev-platform/config.json 配 projects.<id>.repo_path 后即可纳入全局视图")
+    return 0
+
+
 def register(subparsers) -> None:
     sp = subparsers.add_parser("health", help="工具栈体检")
     sp.add_argument("--repo")
     sp.add_argument("--project")
+    sp.add_argument("--all", action="store_true", help="平台全局视图: 所有项目 x 三库 + 记忆(不限当前仓)")
     sp.add_argument("--mode", choices=["light", "full"], default="full")
     # --json-out: write a widget-readable snapshot. Bare flag => canonical path
     # platform_meta/health/<project_id>.json; explicit path => that file.
