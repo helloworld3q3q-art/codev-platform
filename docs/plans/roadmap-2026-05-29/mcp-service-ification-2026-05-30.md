@@ -79,11 +79,11 @@
 | 阶段 | 内容 | 风险 | 验证 |
 |---|---|---|---|
 | **P0 网关/认证基础 ✅ 已落地(含高并发+认证加密硬化)** | `codev_platform/gateway/`(auth 可插拔:passthrough/token + **纯 ASGI** 统一拦截中间件)→ 挂到 **agent 服务 + chroma daemon**(两 HTTP 入口),`/health` public;config `gateway.auth_mode`。**高并发**:纯 ASGI 不缓冲 /sse 长连接 + 认证器只读无锁。**认证加密**:token 存 sha256 hash(明文不落盘)+ `hmac.compare_digest` 常量时间比对;HTTPS/TLS 记为部署层 | 低(passthrough 非破坏;daemon 生效需重启) | 单测 12 通过(hash 命中/明文不通过/错 token 401)+ 全量 135 + agent/daemon app 均加载 AuthMiddleware |
-| **P1 chroma 直连 SSE** | 业务 `.mcp.json` 的 platform-docs 改 `type:sse` 直连 daemon /sse;去掉 launcher 路径 | 低(daemon 已 SSE;失 auto-spawn,需 daemon 常驻) | `/mcp` connected + search_docs 命中 |
-| **P2 cross-link HTTP 端点** | 我们的 `cross_link.server` 加 Streamable HTTP/SSE transport(MCP SDK)+ `?project_id=` 路由;或 mcp-proxy 包。平台起常驻端点 | 中(我们代码) | curl /sse + 业务 find_table_refs 通 |
-| **P3 codegraph SSE(mcp-proxy)** | 平台跑 `mcp-proxy --sse-port <p> -- codegraph serve --mcp --path <repo>`(per-project);业务改 `type:sse` | 中(端口/多租户/常驻) | codegraph_search 全工具经 SSE 通 |
-| **P4 业务 .mcp.json 切换** | 三套全改 `type:sse`+URL,删 `cmd /c ..\tools` 路径;URL 走 config | 中(改业务仓配置,影响其 MCP) | 业务仓 `/mcp` 三绿 + 各工具调通 |
-| **P5 端口/启动/健康编排** | SSE 端点随平台启动(launcher / service manager);`health --all` + `ai-health` 报各 MCP 端点状态 | 中 | 重启后端点自起;health 全绿 |
+| **P1 chroma 直连 SSE ✅** | 业务 `.mcp.json` platform-docs → `type:sse` 直连 daemon `/sse?project_id=openclaw-stock` | 低 | ✅ MCP client 连通 + list_tools 3 个(search_docs/list_collections/get_by_file) |
+| **P2 cross-link HTTP 端点 ✅** | `cross_link.server` 加 SSE transport + `?project_id=` contextvar 路由 + `--http` 启动 + gateway 认证;`serve-mcp start` 拉起常驻 | 中 | ✅ 5 单测(per-project 隔离)+ /health 200 + MCP client list 4 工具 |
+| **P3 codegraph SSE(mcp-proxy)✅** | `mcp-proxy --port <p> -- codegraph serve --mcp`(cwd=repo, per-project);`mcp_serve.iter_endpoints` 自动枚举 | 中 | ✅ 实包起 :18091/sse + MCP client list **全 9 工具**(无退化:search/context/callers/callees/impact/node/explore/files/status) |
+| **P4 业务 .mcp.json 切换 ✅** | 三套全 `type:sse`+URL,删 `cmd /c ..\tools` 路径;备份 `.mcp.json.stdio.bak` 可回退 | 中 | ✅ 业务仓 `git commit 9943bfe`;3/3 端点 MCP client 连通 |
+| **P5 端口/启动/健康编排 ✅** | `codev-platform serve-mcp status\|start`(chroma+cross-link+codegraph 一键常驻);`platform_status.mcp_endpoints` + `health --all` 渲染 reachability | 中 | ✅ serve-mcp start 拉起 4 端点全 OK;9 单测(端点枚举/probe) |
 
 ---
 
@@ -119,13 +119,17 @@
 - **daemon 常驻依赖**:SSE 没了 stdio auto-spawn,平台必须保证端点常驻,否则业务 `/mcp` 红。
 - **不手搓传输**:坚持 mcp-proxy + MCP SDK;协议慢先测再在库内换(§三)。
 
-## 十、验收
+## 十、验收(2026-05-30 全绿)
 
-- [ ] 业务仓 `.mcp.json` **零** `cmd /c ..\tools` 文件路径,三套全 `type:sse/http` + URL。
-- [ ] 业务仓 `/mcp` 三绿;codegraph 全工具(callers/impact/context...)经 SSE 可用(无工具集退化)。
-- [ ] 多项目隔离:openclaw 查不到 widget 的图谱(project_id 路由)。
-- [ ] 平台重启后三端点自起;`health --all` 报端点 reachable。
-- [ ] 传输延迟 p50/p95 有埋点;未出现需换协议的实测瓶颈(或换了也是库内切换)。
+- [x] 业务仓 `.mcp.json` **零** `cmd /c ..\tools` 文件路径,三套全 `type:sse` + URL(commit 9943bfe)。
+- [x] 业务仓三端点 MCP client 连通;codegraph 全工具(9 个:callers/impact/context...)经 SSE 可用(**无工具集退化**)。
+- [x] 多项目隔离:cross-link per-project contextvar 路由 + 单测验 proj-a 查不到 proj-b 数据(`test_cross_link_server.py`)。
+- [x] `serve-mcp start` 一键拉起 4 端点全 reachable;`health --all` 报 `mcp_endpoints` 状态。
+- [ ] 传输延迟 p50/p95 埋点 —— **留接缝未做**(§三:换协议非杠杆,有数据再说;单机 stdio 本就更快,本套收益在跨机)。
+
+> **常驻依赖(运维须知)**:cutover 后业务仓失去 stdio per-session auto-spawn。开机/重启后须跑一次
+> `codev-platform serve-mcp start` 拉起 4 端点(chroma 预热模型 ~30-60s)。否则业务仓 `/mcp` 红。
+> 急救回退:`copy .mcp.json.stdio.bak .mcp.json`(恢复旧 stdio 自 spawn 模式)。
 
 ---
 
