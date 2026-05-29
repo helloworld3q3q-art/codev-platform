@@ -48,7 +48,11 @@ class AgentLoop:
         self.registry = registry
         self.max_steps = max_steps
 
-    def run(self, question: str, history: list[Message] | None = None, trace: Trace | None = None) -> AgentResult:
+    def run(self, question: str, history: list[Message] | None = None, trace: Trace | None = None,
+            system: str | None = None) -> AgentResult:
+        # system 默认基础 prompt;ChatService 会传入注入了 (org/user/project) 上下文的版本,
+        # 让模型"知道自己在为谁、在哪个项目工作"(否则问"哪个项目"会照写死 prompt 瞎猜)。
+        system_prompt = system or CODE_UNDERSTANDING_SYSTEM
         messages: list[Message] = list(history or [])
         messages.append(Message(role="user", content=question))
         specs = self.registry.specs()
@@ -57,7 +61,7 @@ class AgentLoop:
         seen_calls: set[str] = set()  # 硬护栏:记录已执行过的 (tool, args) 指纹
 
         for n in range(1, self.max_steps + 1):
-            turn: AssistantTurn = self.provider.chat(CODE_UNDERSTANDING_SYSTEM, messages, specs)
+            turn: AssistantTurn = self.provider.chat(system_prompt, messages, specs)
             for k in ("input_tokens", "output_tokens"):
                 total_usage[k] = total_usage.get(k, 0) + int(turn.usage.get(k, 0) or 0)
 

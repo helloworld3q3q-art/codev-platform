@@ -23,3 +23,30 @@ CODE_UNDERSTANDING_SYSTEM = """你是 codev-platform 的只读代码理解 agent
 7. **同一个子问题最多换 2-3 种查法**;若仍无果,**立刻用已掌握的证据给出部分答案**,并说明"哪部分查不到 / 受索引限制",绝不为一个细节反复查到耗尽步数。多跳间接调用(经辅助函数中转)codegraph 可能连不起来,属已知限制。
 8. 一个问题含多个子问题时,**已解决的部分先答**,未解决的标注清楚,不要因一个子问题卡住而放弃整个回答。
 """
+
+
+def build_code_understanding_system(
+    project_id: str | None = None,
+    user_id: str | None = None,
+    org_id: str | None = None,
+) -> str:
+    """在基础 prompt 前注入当前请求上下文 (org/user/project),让模型"知道自己在为谁、
+    在哪个组织/项目工作"。工具已按 project_id 路由(查对应项目的库),本注入让模型的
+    自我认知与之一致 —— 否则问"现在哪个项目"会照写死 prompt 瞎猜。也是权限的认知地基。
+    """
+    if not (project_id or user_id or org_id):
+        return CODE_UNDERSTANDING_SYSTEM
+    ctx_lines = ["【当前会话上下文】"]
+    if org_id:
+        ctx_lines.append(f"- 组织(org):{org_id}")
+    if user_id:
+        ctx_lines.append(f"- 用户(user):{user_id}")
+    if project_id:
+        ctx_lines.append(
+            f"- 项目(project):{project_id}"
+            "(你的检索工具已绑定到此项目,所有 codegraph/cross_link/search_docs"
+            "查的都是这个项目的数据;问'现在哪个项目'就答它)"
+        )
+    else:
+        ctx_lines.append("- 项目:未指定(工具按进程默认仓)")
+    return "\n".join(ctx_lines) + "\n\n" + CODE_UNDERSTANDING_SYSTEM

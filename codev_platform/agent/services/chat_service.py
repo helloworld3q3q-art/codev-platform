@@ -11,6 +11,7 @@ from typing import Callable
 
 from codev_platform.agent.brain.base import LLMProvider, Message
 from codev_platform.agent.loop import AgentLoop, AgentResult
+from codev_platform.agent.prompts import build_code_understanding_system
 from codev_platform.agent.session import SessionStore
 from codev_platform.agent.tools.base import ToolRegistry
 from codev_platform.agent.trace import Trace
@@ -50,9 +51,11 @@ class ChatService:
         history = self._sessions.get(sid, user_id)
 
         registry = self._registry_factory(project_id)  # 工具按 project_id 路由
+        # 把上下文注入 system prompt,让模型"知道"自己在哪个项目 / 为谁(认知与工具路由一致)
+        system = build_code_understanding_system(project_id=project_id, user_id=user_id)
         loop = AgentLoop(provider, registry, max_steps=max_steps or self._default_max_steps())
         trace = Trace(sid, provider.name, provider.model)
-        result = loop.run(question, history=history, trace=trace)
+        result = loop.run(question, history=history, trace=trace, system=system)
 
         self._sessions.append(
             sid, user_id,
