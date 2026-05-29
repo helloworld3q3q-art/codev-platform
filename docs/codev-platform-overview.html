@@ -410,8 +410,6 @@
               <path class="edge-violet" d="M400 184 C400 200 430 235 455 254"/>
               <path class="edge-violet" d="M1086 184 C1086 210 1150 240 1180 272"/>
               <path class="edge-violet" d="M856 184 C856 360 1120 560 1160 662" stroke-dasharray="5 4"/>
-              <text class="node-sub" x="470" y="248" text-anchor="middle" fill="#6d28d9">pip -e 供给</text>
-              <text class="node-sub" x="1250" y="248" text-anchor="middle" fill="#6d28d9">schema/代码供给</text>
 
               <!-- ② 本地数据 → ④ 检索服务读;③ 记忆 → ④ Agent 读写 -->
               <path class="edge-green" d="M470 606 C470 615 360 645 300 662"/>
@@ -419,9 +417,8 @@
               <path class="edge-blue" d="M1180 606 C1180 630 1170 645 1160 662"/>
               <text class="node-sub" x="1250" y="624" text-anchor="middle" fill="#0e7490">Agent 读写记忆</text>
 
-              <!-- ④ Agent → 检索 MCP(同层调用)-->
+              <!-- ④ Agent → 检索 MCP(同层调用;关系见 Agent 节点内"复用左侧 MCP")-->
               <path class="edge" d="M898 712 L882 712"/>
-              <text class="node-sub" x="880" y="700" text-anchor="end" fill="#475569">Agent 调 MCP 工具</text>
 
               <!-- ④ 服务 → ⑤ 消费者 -->
               <path class="edge-blue" d="M508 782 L508 814"/>
