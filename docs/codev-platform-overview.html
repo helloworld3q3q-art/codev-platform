@@ -327,7 +327,7 @@
               <g filter="url(#shadow)">
                 <rect x="58" y="662" width="300" height="120" rx="8" fill="#cffafe" stroke="#0891b2"/>
                 <text class="node-title" x="208" y="688" text-anchor="middle">文档检索 daemon</text>
-                <text class="node-sub" x="208" y="712" text-anchor="middle">多租户 · :18083</text>
+                <text class="node-sub" x="208" y="712" text-anchor="middle">多租户 · <tspan class="kw">:18083/sse</tspan></text>
                 <text class="node-sub" x="208" y="734" text-anchor="middle">向量 + 词法 <tspan class="kw">RRF</tspan></text>
                 <text class="node-sub" x="208" y="756" text-anchor="middle">GPU 信号量 · 暖模型</text>
               </g>
@@ -335,15 +335,15 @@
                 <rect x="378" y="662" width="240" height="120" rx="8" fill="#cffafe" stroke="#0891b2"/>
                 <text class="node-title" x="498" y="688" text-anchor="middle">代码图谱 MCP</text>
                 <text class="node-sub" x="498" y="712" text-anchor="middle">符号 / 调用 / 影响面</text>
-                <text class="node-sub" x="498" y="734" text-anchor="middle">每会话 stdio</text>
-                <text class="node-sub" x="498" y="756" text-anchor="middle">多读 / 重建锁</text>
+                <text class="node-sub" x="498" y="734" text-anchor="middle"><tspan class="kw">mcp-proxy</tspan> 包 SSE · 每项目端口</text>
+                <text class="node-sub" x="498" y="756" text-anchor="middle">serve-mcp 编排常驻</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="638" y="662" width="240" height="120" rx="8" fill="#cffafe" stroke="#0891b2"/>
                 <text class="node-title" x="758" y="688" text-anchor="middle">跨层链路 MCP</text>
                 <text class="node-sub" x="758" y="712" text-anchor="middle">端点 / 表引用 / 链路</text>
-                <text class="node-sub" x="758" y="734" text-anchor="middle">节点搜索 / 统计</text>
-                <text class="node-sub" x="758" y="756" text-anchor="middle">临时库发布</text>
+                <text class="node-sub" x="758" y="734" text-anchor="middle">SSE · <tspan class="kw">:18086</tspan> · per-project</text>
+                <text class="node-sub" x="758" y="756" text-anchor="middle">节点搜索 / 统计</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="898" y="662" width="524" height="120" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
@@ -773,7 +773,7 @@
 
         <section id="mcp">
           <h2>MCP 与索引</h2>
-          <p>三套 MCP 服务的代码全在 <code>codev_platform/</code>,业务仓只放 shim re-export。</p>
+          <p>三套 MCP 服务的代码全在 <code>codev_platform/</code>,业务仓只放 shim re-export。<strong>2026-05-30 服务化后:三套都是平台 SSE 服务,业务仓 <code>.mcp.json</code> 走 <code>type:sse</code> 连服务地址(不再 stdio 文件路径)</strong>,由 <code>codev-platform serve-mcp start</code> 编排常驻;单机可用 <code>.mcp.json.stdio.bak</code> 回退 stdio 自 spawn。</p>
           <table>
             <tr>
               <th>组件</th>
@@ -783,21 +783,21 @@
             </tr>
             <tr>
               <td>platform-docs</td>
-              <td>stdio proxy → shared HTTP daemon;Hybrid:Qwen3-Embedding 向量 + BM25 词法 RRF 融合后 Qwen3-Reranker 精排</td>
+              <td><strong>平台 SSE 服务</strong> <code>:18083/sse?project_id=</code>(daemon,多租户 contextvar);Hybrid:Qwen3-Embedding 向量 + BM25 词法 RRF 融合后 Qwen3-Reranker 精排</td>
               <td><code>codev_platform/chroma/server.py</code> (870 行) + <code>bm25.py</code></td>
-              <td>spawn lock、health endpoint、listener PID + GPU PID 检查、Chroma reindex lock、DOC_PATTERNS 子目录覆盖 audit (pre-push gate 6/6)、jieba/rank_bm25 缺失自动降级纯向量。</td>
+              <td>spawn lock、health endpoint、listener PID + GPU PID 检查、Chroma reindex lock、DOC_PATTERNS 子目录覆盖 audit (pre-push gate 6/6)、jieba/rank_bm25 缺失自动降级纯向量、网关认证拦截。</td>
             </tr>
             <tr>
               <td>codegraph</td>
-              <td>每会话 stdio server (外部工具)</td>
-              <td>外部 codegraph 包(本仓不持有)</td>
-              <td>rebuild lock、DB integrity 检查、WAL 检查、多会话只提示 INFO。</td>
+              <td><strong>平台 SSE 服务</strong>(<code>mcp-proxy</code> 包 <code>codegraph serve --mcp</code> → <code>:&lt;每项目端口&gt;/sse</code>,保全 9 工具,不退化成 codegraph-api REST)</td>
+              <td>外部 codegraph 包 + 本仓 <code>mcp_serve.py</code> 编排为平台端点</td>
+              <td>serve-mcp 编排常驻、端口防撞(跳显式端口)、rebuild lock、DB integrity 检查、TCP reachability 探测。</td>
             </tr>
             <tr>
               <td>cross-link</td>
-              <td>每会话 stdio server</td>
-              <td><code>codev_platform/cross_link/{schema,server,query}.py</code></td>
-              <td>临时库构建、SQLite backup 发布、freshness 检查、多会话链路观测。</td>
+              <td><strong>平台 SSE 服务</strong> <code>:18086/sse?project_id=</code>(<code>server --http</code>,per-project contextvar 路由,防串库)</td>
+              <td><code>codev_platform/cross_link/{schema,server,query}.py</code> + <code>mcp_serve.py</code></td>
+              <td>per-project 隔离、缺库瞬时重查(不永久缓存)、网关认证、freshness 检查、SQLite backup 发布。</td>
             </tr>
             <tr>
               <td>dirty-index</td>
@@ -978,7 +978,7 @@
             <tr><td>chunk 策略</td><td>target 1000 / max 1500 字符,三级(heading → paragraph → hard)</td><td>由 <code>codev_platform/chroma</code> 提供,所有项目统一策略。</td></tr>
             <tr><td>BM25 倒排</td><td>每 collection 独立 ~2.1s 重建</td><td>daemon 启动 + chroma 重建时同步构建,中英混合分词。</td></tr>
             <tr><td>GPU 占用</td><td>恒定 ~3GB (Qwen3-Embedding-0.6B)</td><td>所有项目所有会话共享同一 daemon。没这个共享每会话 ~3GB → 第 2 会话 OOM。</td></tr>
-            <tr><td>daemon 端口</td><td>18083 (HTTP/SSE)</td><td>所有 stdio proxy 连同一 daemon。</td></tr>
+            <tr><td>daemon 端口</td><td>18083 (HTTP/SSE)</td><td>所有会话经 SSE(<code>type:sse</code>)连同一 daemon。</td></tr>
             <tr><td>pre-push audit gates</td><td>6 项 (业务仓 openclaw)</td><td>parity / null cast / sanity test / fetcher registry / frontend grep / DOC_PATTERNS。silent failure 转 loud failure。</td></tr>
           </table>
         </section>
