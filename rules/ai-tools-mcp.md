@@ -18,6 +18,35 @@
 
 ---
 
+## 一 b、MCP 接入方式 —— 平台 SSE 服务地址(2026-05-30 服务化)
+
+三套 MCP 现在**都是平台 SSE 服务**,业务仓 `.mcp.json` 走 `type:sse` 连**服务地址**(不再 stdio 文件路径 launcher),支撑多用户 / 多机共享同一平台。
+
+| 平台 MCP 服务 | 端点(默认端口) | 起法 |
+|---|---|---|
+| **platform-docs**(chroma) | `http://127.0.0.1:18083/sse?project_id=<id>` | daemon,`serve-mcp start` 拉起(预热 Qwen ~30-60s) |
+| **cross-link** | `http://127.0.0.1:18086/sse?project_id=<id>` | `serve-mcp start` 拉起 |
+| **codegraph** | `http://127.0.0.1:<per-project 端口>/sse` | mcp-proxy 包 `codegraph serve --mcp`,`serve-mcp start` 拉起(每项目一端口) |
+
+> **codegraph 也是平台服务**:它本是外部 stdio-only 工具,用 mcp-proxy 包成 SSE,**保全 9 个工具**(callers/impact/context...,不退化成 codegraph-api REST)。codegraph-api(:18082)只承担平台 status/统计的 HTTP 面,**不**承担 AI 的 MCP 查询。
+
+**🚨 常驻依赖(运维必读)**:SSE 失去 stdio 的 per-session auto-spawn → **开机 / 重启电脑后必须跑一次**:
+
+```powershell
+codev-platform serve-mcp start     # 一键拉起 4 端点(chroma 预热 ~30-60s)
+codev-platform serve-mcp status    # 确认全 OK(或 health --all 的 MCP 端点段)
+```
+
+不跑 → 业务仓 `/mcp` 三套全红(连不上端点)。**急救回退到旧 stdio 自 spawn 模式**:
+
+```powershell
+copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json   # 覆盖即恢复, 重启 Claude Code
+```
+
+端口配在 `~/.codev-platform/config.json`(`mcp.cross_link_sse_port` / `projects.<id>.codegraph_sse_port`;业务仓连固定 URL 须显式 pin,防自动分配漂移)。单机图省事也可直接用 `.stdio.bak` 退回文件路径模式(略快 + 自动拉起);本套收益在**跨机共享**。
+
+---
+
 ## 二、强制规则
 
 ### 2.1 优先 MCP,允许 grep+Read 兜底（4 种场景）
@@ -76,6 +105,9 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 
 | 现象 | 第一步处理 |
 |---|---|
+| **业务仓 `/mcp` 三套全红**(切 SSE 后,连不上 18083/18086/codegraph 端口) | 平台端点没常驻 —— 跑 `codev-platform serve-mcp start` 拉起 4 端点,`serve-mcp status` 确认全 OK。**重启电脑后必跑一次**(§一 b 常驻依赖) |
+| **单独 codegraph SSE 红**(platform-docs/cross-link 正常) | mcp-proxy 没起 / `codegraph` 命令缺。看 `codev_platform/mcp_serve_logs/codegraph_<pid>.log`;`serve-mcp start` 重拉。确认 venv 有 `mcp-proxy.exe`(`ai-health` 的 `mcp-proxy` 行) |
+| **想退回旧 stdio 文件路径模式** | `copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json` → 重启 Claude Code,恢复 per-session 自 spawn(单机略快,无需 serve-mcp start) |
 | `codegraph database is locked` | 看 `.codegraph/codegraph.db.lock` stale(0 字节 + 数小时未变)即删 |
 | platform-docs 召回质量差 | `update-local-ai.ps1 -SkipCodeGraph -SkipCrossLink`(只重建 Chroma) |
 | platform-docs **第一次 search_docs 超时** | 冷启动模型加载(embedding + reranker 各 ~15-30s)。已加 `PLATFORM_DOCS_PREWARM=true` + reranker 显式 prewarm 应消除,若仍超时:不要凭超时下"索引没数据"结论 → 等 30-60s 重试一次再判断 |
