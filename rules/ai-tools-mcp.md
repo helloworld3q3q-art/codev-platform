@@ -45,6 +45,12 @@ copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json   # 覆盖即恢复, 
 
 端口配在 `~/.codev-platform/config.json`(`mcp.cross_link_sse_port` / `projects.<id>.codegraph_sse_port`;业务仓连固定 URL 须显式 pin,防自动分配漂移)。单机图省事也可直接用 `.stdio.bak` 退回文件路径模式(略快 + 自动拉起);本套收益在**跨机共享**。
 
+**codegraph 索引数据也已集中到平台**(2026-05-30,与 cross-link 对称):
+- 数据物理在 `data/codegraph_ext/<pid>/codegraph/`(与 `cross_layer.sqlite` 并排),业务仓 `<repo>/.codegraph` 是 **junction/symlink** 指向平台 —— 第三方 codegraph 工具透明无感。
+- **读 / 服务 / 更新都走平台**:serve-mcp 的 codegraph 端点(cwd=repo)经 junction 读平台;`reindex --codegraph` 跑的 `codegraph sync` 写穿 junction 落平台。
+- 命令:`codev-platform codegraph status|link|unlink`(`link --all` 把所有项目索引搬进平台 + 建联接,幂等)。
+- **junction 是本机状态(不进 git)**:换机器 / 重 clone 业务仓后,跑一次 `codev-platform codegraph link --all` 重建联接(数据还在平台就只补联接,秒级)。
+
 ---
 
 ## 二、强制规则
