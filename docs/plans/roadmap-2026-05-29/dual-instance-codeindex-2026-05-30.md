@@ -109,6 +109,27 @@
 - WSL 实例自己的 `~/.codev-platform/config.json`(Linux 路径、自己的 `data_root`、codegraph/cross-link 端口 :1909x;`platform.url` 的 docs 指向那个唯一 daemon)。
 - 验证:`codev-platform setup --auto`(已跨平台)在 WSL 内跑。
 
+### 6.1 两种部署形态(同软件,config 决定;别把"共用一份"写死)
+
+"docs 共用一份"**只是本机开发期(WSL+Windows 同卡 8GB)的省卡做法**。真实部署时平台服务器有**自己的显卡** → 就该**跑自己的 docs daemon、加载自己的模型**,不再共用本地的。两形态靠 config 切换,**零改代码**:
+
+| 维度 | 本机开发(WSL co-located) | 生产部署(平台独立服务器) |
+|---|---|---|
+| docs daemon | **一个**,跑 Windows :18083,WSL 共用 | 平台服务器**自己一个**(自己的 GPU);开发者本机各自一个 |
+| GPU | 同一块 8GB,只加载一份模型 | 平台用**服务器自己的卡**;本机用本机卡,互不相干 |
+| 模型文件 | 共用一份(WSL 走 /mnt/d) | 各机器各自一份(各自磁盘) |
+| `embed_device` | `cuda`(共用)/ `cpu`(WSL 不抢卡时) | 平台服务器 `cuda`(自己的卡);无卡机器 `cpu`/`mps` |
+| docs 来源 | `.mcp.json` 的 docs URL 指那个唯一 daemon | 各连各自的 docs daemon URL |
+
+**必须预留的配置空间(全已 config 驱动,本计划只是显式确认 + 别写死)**:
+- `models.embed_path` / `reranker_path` —— 每实例各自指(本机 D:\models / 服务器自己的路径)。
+- `models.embed_device` —— 每实例各自定(`cuda`/`cpu`/`mps`),平台服务器走自己的卡。
+- `search.gpu_concurrency` —— 按该机显存定(8GB=1;服务器大卡可调高)。
+- `daemon.port` / `platform.url` / 各 MCP 端口 —— 每实例独立,客户端按 URL 连对应 daemon。
+- `data.platform_data_dir` —— 每实例自己的 data 根。
+
+> 红线:代码里**不得假设"全局只有一个 docs daemon"或"共用某台的卡"**。共用是开发期 config 的一种取值,不是写死的架构。生产部署改 config(平台 `embed_device=cuda` 指自己的卡 + 自己的 daemon)即成立。
+
 ---
 
 ## 七、复用 vs 新建
@@ -140,7 +161,7 @@
 
 ## 九、风险与"现在不做"
 
-- **GPU 不再是阻塞**(原以为是):docs 单份共享、模型只加载一次 → 8GB 够。唯一红线 = **别误起两个 docs daemon**(那才双载 OOM)。要分两份的 codegraph/cross-link 不吃 GPU(§二/§六)。
+- **GPU 不再是阻塞**(原以为是):**同机同卡(开发期)**docs 共用一份、模型只加载一次 → 8GB 够,红线是别在同一块卡上起两个 docs daemon。**生产部署平台服务器用自己的卡、自己的 daemon**(不同机器不抢,§6.1)。代码不得写死"全局一个 daemon / 共用某卡"——共用是 config 取值非架构(§6.1 配置空间)。
 - **平台必须能拿到源码**:webhook 只通知,索引要源码 → 平台 `git pull`,需凭据 + 磁盘。单机 WSL 阶段:直接 clone 一份到 WSL。
 - **"一致"是收敛不是恒等**:本地永远比平台多"你未提交"的部分,这是 feature 不是 bug(§五)。
 - **不做**:不上 k8s / 不分布式 / 不多 GPU 编排 —— 现阶段单机 WSL 验证架构即可,真服务器再谈伸缩。
