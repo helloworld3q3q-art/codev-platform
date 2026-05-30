@@ -80,9 +80,19 @@ def chroma_collection_name(project_id: str, base: str) -> str:
 
 
 def codegraph_db_path(project_id: str) -> Path:
-    """第三方 codegraph MCP server 走 .codegraph/codegraph.db, 天然 per-repo。
-    本函数保留, 供未来 server 化时改为统一目录。"""
-    return data_root() / "codegraph" / project_id / "codegraph.db"
+    """codegraph 索引集中到平台后的 per-project 路径 (与 cross_layer.sqlite 并排)。
+
+    2026-05-30 起: 业务仓 `.codegraph` 做成 junction 指向这里 (`codev-platform codegraph link`),
+    索引数据物理落平台 data/, 平台经 SSE 服务 + reindex 写穿 junction 也落这里。
+    第三方 codegraph 工具仍以为 `.codegraph` 在仓内 (junction 透明)。
+    """
+    return codegraph_index_dir(project_id) / "codegraph.db"
+
+
+def codegraph_index_dir(project_id: str) -> Path:
+    """codegraph 索引目录 (junction target)。与 cross_link_db_path 同父, 平台集中存放。
+    例: data/codegraph_ext/<project_id>/codegraph/ (含 codegraph.db + config.json + wal)。"""
+    return data_root() / "codegraph_ext" / project_id / "codegraph"
 
 
 def cross_link_db_path(project_id: str) -> Path:
