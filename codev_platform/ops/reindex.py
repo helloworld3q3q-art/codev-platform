@@ -152,91 +152,132 @@ def _git_out(repo: Path | None, *git_args: str) -> tuple[int, str]:
     return cp.returncode, cp.stdout.strip()
 
 
-def cmd_post_commit(args: argparse.Namespace) -> int:
-    """Git post-commit hook entry: diff the just-made commit, classify changed
-    files into doc/cross_link/codegraph scopes, and trigger the matching reindex.
+def classify_scopes(changed: list[str], pats: dict) -> dict[str, list[str]]:
+    """把改动文件按 doc/cross_link/codegraph 三 scope 归类(纯函数, 可单测)。
 
-    NEVER fails the commit -- always exits 0 (mirrors post-commit.ps1).
-    By default spawns the reindex in the background; --foreground runs inline.
+    返回 {scope: [matched paths]}, 只含命中的 scope。空 dict = 无需 reindex。
+    """
+    buckets = {
+        "chroma": [p for p in changed if C.matches_any(p, pats["doc"])],
+        "cross_link": [p for p in changed if C.matches_any(p, pats["cross_link"])],
+        "codegraph": [p for p in changed if C.matches_any(p, pats["codegraph"])],
+    }
+    return {k: v for k, v in buckets.items() if v}
+
+
+def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
+                      trigger_line: str, banner: str) -> int:
+    """共享: 按改动文件分 scope → 写 log header → spawn 对应 reindex + 健康快照刷新。
+
+    post-commit / post-merge / post-checkout 三个 hook 复用本体, 只是 changed 算法 +
+    trigger_line + banner 不同。无命中则静默 no-op。NEVER raise(hook 永不 fail)。
+    """
+    pid = C.project_id_of(repo)
+    pats = C.reindex_patterns(C.meta_health(pid))
+    scoped = classify_scopes(changed, pats)
+    if not scoped:
+        return 0  # silent no-op
+    scopes = list(scoped.keys())
+    log_file = _reindex_log(repo)
+    all_matched = sorted({p for paths in scoped.values() for p in paths})
+    header = "\n".join(
+        ["", f"===== reindex started at {_now()} =====", trigger_line,
+         f"scopes:         {', '.join(scopes)}", "matched paths:"] + all_matched
+    ) + "\n"
+    _append_log(log_file, header)
+
+    C.out(f"[{banner}] {'+'.join(scopes)} changed, spawning reindex...")
+    C.out(f"[{banner}] index updates run (~30-90s); MCP results lag until it finishes")
+
+    py = sys.executable or "python"
+    reindex_cmd = [py, "-m", "codev_platform.cli", "reindex", "--repo", str(repo)]
+    if "chroma" in scopes:
+        reindex_cmd.append("--chroma")
+    if "cross_link" in scopes:
+        reindex_cmd.append("--cross-link")
+    if "codegraph" in scopes:
+        reindex_cmd.append("--codegraph")
+    health_cmd = [py, "-m", "codev_platform.cli", "health",
+                  "--mode", "light", "--repo", str(repo), "--json-out"]
+
+    if foreground:
+        self_rc = _run_logged_foreground(reindex_cmd, log_file)
+        _finish_log(log_file, self_rc)
+        _run_health_refresh(health_cmd, log_file)
+    else:
+        _spawn_background(reindex_cmd, log_file, health_cmd)
+    return 0
+
+
+def cmd_post_commit(args: argparse.Namespace) -> int:
+    """Git post-commit hook: diff 刚做的 commit → 按 scope reindex。NEVER fail commit。"""
+    try:
+        rc, top = _git_out(None, "rev-parse", "--show-toplevel")
+        if rc != 0 or not top:
+            return 0
+        repo = Path(top).resolve()
+        rc, changed_raw = _git_out(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+        if rc != 0 or not changed_raw:
+            return 0
+        changed = [ln.strip() for ln in changed_raw.splitlines() if ln.strip()]
+        _rc, commit_sha = _git_out(repo, "rev-parse", "HEAD")
+        # "trigger commit: <sha>" 格式被 wait-for-reindex grep, 不要改
+        return _dispatch_reindex(repo, changed, foreground=args.foreground,
+                                 trigger_line=f"trigger commit: {commit_sha}", banner="post-commit")
+    except Exception as exc:  # never fail the commit
+        C.err(f"[post-commit] hook error (commit succeeded): {exc}")
+        return 0
+
+
+def cmd_post_merge(args: argparse.Namespace) -> int:
+    """Git post-merge hook(pull / merge 后): diff ORIG_HEAD..HEAD → reindex 拉进来的改动。
+
+    本地索引在"获取别人代码"后也更新, 不只自己 commit 时。NEVER fail。
     """
     try:
         rc, top = _git_out(None, "rev-parse", "--show-toplevel")
         if rc != 0 or not top:
             return 0
         repo = Path(top).resolve()
-
-        rc, changed_raw = _git_out(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+        # ORIG_HEAD = merge/pull 前的 HEAD(git 自动设); 无则首次/无可比, 静默退出
+        rc, _ = _git_out(repo, "rev-parse", "--verify", "ORIG_HEAD")
+        if rc != 0:
+            return 0
+        rc, changed_raw = _git_out(repo, "diff", "--name-only", "ORIG_HEAD", "HEAD")
         if rc != 0 or not changed_raw:
             return 0
         changed = [ln.strip() for ln in changed_raw.splitlines() if ln.strip()]
-
-        pid = C.project_id_of(repo)
-        health = C.meta_health(pid)
-        pats = C.reindex_patterns(health)
-
-        doc_matched = [p for p in changed if C.matches_any(p, pats["doc"])]
-        cross_matched = [p for p in changed if C.matches_any(p, pats["cross_link"])]
-        cg_matched = [p for p in changed if C.matches_any(p, pats["codegraph"])]
-
-        if not doc_matched and not cross_matched and not cg_matched:
-            return 0  # silent no-op
-
-        scopes: list[str] = []
-        if doc_matched:
-            scopes.append("chroma")
-        if cross_matched:
-            scopes.append("cross_link")
-        if cg_matched:
-            scopes.append("codegraph")
-
-        _rc, commit_sha = _git_out(repo, "rev-parse", "HEAD")
-        log_file = _reindex_log(repo)
-
-        # Sync header lands before background output (mirrors post-commit.ps1)
-        all_matched = sorted(set(doc_matched + cross_matched + cg_matched))
-        header = "\n".join(
-            [
-                "",
-                f"===== reindex started at {_now()} =====",
-                f"trigger commit: {commit_sha}",
-                f"scopes:         {', '.join(scopes)}",
-                "matched paths:",
-            ]
-            + all_matched
-        ) + "\n"
-        _append_log(log_file, header)
-
-        C.out(f"[post-commit] {'+'.join(scopes)} changed, spawning reindex...")
-        C.out("[post-commit] index updates run (~30-90s); MCP results lag until it finishes")
-        C.out("[post-commit]   wait:   codev-platform wait-for-reindex")
-        C.out("[post-commit]   verify: codev-platform health  (see hook missed? line)")
-
-        # Build the `reindex` argv with only the matched scopes selected.
-        py = sys.executable or "python"
-        reindex_cmd = [py, "-m", "codev_platform.cli", "reindex", "--repo", str(repo)]
-        if "chroma" in scopes:
-            reindex_cmd.append("--chroma")
-        if "cross_link" in scopes:
-            reindex_cmd.append("--cross-link")
-        if "codegraph" in scopes:
-            reindex_cmd.append("--codegraph")
-
-        # After reindex, refresh the widget health snapshot so "commit -> see
-        # fresh data" holds without depending on the widget's own poll timer.
-        # Light mode (~1-2s), --json-out bare => canonical platform_meta/health/<pid>.json.
-        health_cmd = [py, "-m", "codev_platform.cli", "health",
-                      "--mode", "light", "--repo", str(repo), "--json-out"]
-
-        if args.foreground:
-            self_rc = _run_logged_foreground(reindex_cmd, log_file)
-            _finish_log(log_file, self_rc)
-            _run_health_refresh(health_cmd, log_file)
-        else:
-            _spawn_background(reindex_cmd, log_file, health_cmd)
-
+        return _dispatch_reindex(repo, changed, foreground=args.foreground,
+                                 trigger_line="trigger merge/pull: ORIG_HEAD..HEAD", banner="post-merge")
+    except Exception as exc:
+        C.err(f"[post-merge] hook error: {exc}")
         return 0
-    except Exception as exc:  # never fail the commit
-        C.err(f"[post-commit] hook error (commit succeeded): {exc}")
+
+
+def cmd_post_checkout(args: argparse.Namespace) -> int:
+    """Git post-checkout hook(切分支后): diff prev..new → reindex。
+
+    git 传 3 个位置参: prev_head new_head branch_flag(1=切分支 / 0=单文件 checkout)。
+    只在切分支(flag=1)时 reindex; 单文件 checkout 跳过。NEVER fail。
+    """
+    try:
+        prev, new, flag = args.prev, args.new, args.flag
+        if flag != "1":
+            return 0  # 单文件 checkout, 非切分支, 跳过
+        if not prev or not new or prev == new:
+            return 0
+        rc, top = _git_out(None, "rev-parse", "--show-toplevel")
+        if rc != 0 or not top:
+            return 0
+        repo = Path(top).resolve()
+        rc, changed_raw = _git_out(repo, "diff", "--name-only", prev, new)
+        if rc != 0 or not changed_raw:
+            return 0
+        changed = [ln.strip() for ln in changed_raw.splitlines() if ln.strip()]
+        return _dispatch_reindex(repo, changed, foreground=args.foreground,
+                                 trigger_line=f"trigger checkout: {prev[:7]}..{new[:7]}", banner="post-checkout")
+    except Exception as exc:
+        C.err(f"[post-checkout] hook error: {exc}")
         return 0
 
 
@@ -522,6 +563,24 @@ def register(subparsers) -> None:
     )
     pc.add_argument("--foreground", action="store_true", help="前台跑 (默认后台 detached)")
     pc.set_defaults(func=cmd_post_commit)
+
+    pm = subparsers.add_parser(
+        "post-merge",
+        help="git post-merge hook: pull/merge 后 diff ORIG_HEAD..HEAD 触发 reindex",
+    )
+    pm.add_argument("--foreground", action="store_true", help="前台跑 (默认后台 detached)")
+    pm.add_argument("ignored", nargs="*", help="git 传的 is-squash 参数, 忽略")
+    pm.set_defaults(func=cmd_post_merge)
+
+    po = subparsers.add_parser(
+        "post-checkout",
+        help="git post-checkout hook: 切分支后 diff prev..new 触发 reindex",
+    )
+    po.add_argument("prev", nargs="?", default="", help="git 传: 切换前 HEAD")
+    po.add_argument("new", nargs="?", default="", help="git 传: 切换后 HEAD")
+    po.add_argument("flag", nargs="?", default="", help="git 传: 1=切分支 / 0=单文件 checkout")
+    po.add_argument("--foreground", action="store_true", help="前台跑 (默认后台 detached)")
+    po.set_defaults(func=cmd_post_checkout)
 
     dc = subparsers.add_parser(
         "dirty-check",

@@ -14,9 +14,14 @@ from pathlib import Path
 from codev_platform.ops._common import out, err, resolve_repo
 
 
-# Portable post-commit stub. Pure LF -- CRLF makes sh.exe choke. Hooks run from
-# the repo root, and `codev-platform` (pip console script) is on PATH on all OSes.
+# Portable hook stubs. Pure LF -- CRLF makes sh.exe choke. Hooks run from the repo
+# root, and `codev-platform` (pip console script) is on PATH on all OSes.
+# post-commit: 自己提交后更新本地索引。
+# post-merge / post-checkout: pull/merge/切分支"获取新代码"后也更新本地索引(双实例 plan P0)。
+# "$@" 透传 git 传给 hook 的位置参(post-merge=is-squash; post-checkout=prev new flag)。
 POST_COMMIT_STUB = b"#!/bin/sh\nexec codev-platform post-commit\n"
+POST_MERGE_STUB = b'#!/bin/sh\nexec codev-platform post-merge "$@"\n'
+POST_CHECKOUT_STUB = b'#!/bin/sh\nexec codev-platform post-checkout "$@"\n'
 
 # pre-push stub still routes to the repo's own .ps1 audit (openclaw-specific gates).
 PRE_PUSH_STUB = (
@@ -54,9 +59,14 @@ def cmd_install_hooks(args) -> int:
     out(f"Installing git hooks into: {repo}")
 
     installed = 0
-    dst = _write_hook(hooks_dir, "post-commit", POST_COMMIT_STUB)
-    out(f"  installed: post-commit -> {dst}")
-    installed += 1
+    for name, stub in (
+        ("post-commit", POST_COMMIT_STUB),
+        ("post-merge", POST_MERGE_STUB),
+        ("post-checkout", POST_CHECKOUT_STUB),
+    ):
+        dst = _write_hook(hooks_dir, name, stub)
+        out(f"  installed: {name} -> {dst}")
+        installed += 1
 
     if (repo / "tools" / "dev" / "pre-push-audit.ps1").is_file():
         dst = _write_hook(hooks_dir, "pre-push", PRE_PUSH_STUB)
