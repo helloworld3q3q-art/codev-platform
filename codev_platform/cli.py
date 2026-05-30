@@ -253,6 +253,22 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         _print()
         _print("提示: codegraph 端点需 ~2-5s 起来; 再跑 `codev-platform serve-mcp status` 确认。")
         return 0
+    if args.action == "install-systemd":
+        # 以普通用户跑: 按 config 生成 systemd unit(端口/路径都来自 iter_endpoints),
+        # 写到 ~/codev-systemd/, 再打印唯一一条 sudo 命令装进 /etc/systemd/system 并 enable。
+        # 不在此直接 sudo —— 普通用户跑能读对用户的 config(sudo 会切到 root 的 HOME/config)。
+        import getpass
+        user = getattr(args, "user", None) or os.environ.get("SUDO_USER") or getpass.getuser()
+        r = mcp_serve.install_systemd(cfg, user)
+        _print(f"生成 {len(r['units'])} 个 unit 到 {r['dir']} (User={user}):")
+        for u in r["units"]:
+            _print(f"  - {u}")
+        _print()
+        _print("装上 + 开机自起(enable),跑这一条(需 root):")
+        _print(f"  {r['sudo_cmd']}")
+        _print()
+        _print("装完验证: systemctl is-active " + " ".join(s[:-8] for s in r["units"]))
+        return 0
     _eprint(f"unknown action: {args.action}")
     return 1
 
@@ -577,8 +593,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp_dae.add_argument("action", choices=["status", "stop"], help="status=查 /health / stop=按 pid 结束")
     sp_dae.set_defaults(func=cmd_daemon)
 
-    sp_mcp = sub.add_parser("serve-mcp", help="平台 MCP 端点编排 (status 探测 / start 拉起 cross-link + codegraph)")
-    sp_mcp.add_argument("action", choices=["status", "start"], help="status=探测所有端点 / start=幂等拉起")
+    sp_mcp = sub.add_parser("serve-mcp", help="平台 MCP 端点编排 (status 探测 / start 拉起 / install-systemd 装常驻服务)")
+    sp_mcp.add_argument("action", choices=["status", "start", "install-systemd"],
+                        help="status=探测 / start=幂等拉起 / install-systemd=按 config 生成 systemd unit(开机自起)")
+    sp_mcp.add_argument("--user", default=None, help="install-systemd: 服务运行用户 (默认 SUDO_USER / 当前用户)")
     sp_mcp.set_defaults(func=cmd_serve_mcp)
 
     # Cross-platform ops subcommands (health / reindex / post-commit / dirty-check /

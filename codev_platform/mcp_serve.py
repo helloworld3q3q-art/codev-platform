@@ -251,3 +251,68 @@ def ensure_serving(cfg: dict | None = None) -> list[dict[str, Any]]:
         results.append({"name": ep.name, "action": "spawned", "status": "starting",
                         "pid": pid, "note": note})
     return results
+
+
+# ----------------------------------------------------------------------
+# systemd 常驻 (Linux): 按 config 生成 unit, 开机自起 + 挂了自动重启。
+# 复用 iter_endpoints 的 cmd/cwd, 路径/端口全来自 config —— 任意 Linux 部署可复现。
+# chroma 是 GPU daemon, 默认不纳入 (另管); 只为 cross-link + codegraph 生成。
+# ----------------------------------------------------------------------
+SYSTEMD_KINDS = ("cross_link", "codegraph")
+
+
+def systemd_unit_name(ep: MCPEndpoint) -> str:
+    return "codev-mcp-" + ep.name.replace(":", "-")
+
+
+def render_systemd_units(cfg: dict, user: str, *, kinds=SYSTEMD_KINDS) -> dict[str, str]:
+    """生成 {unit文件名: 内容}。ExecStart/WorkingDirectory 直接取自 iter_endpoints。"""
+    import shlex
+    venv_bin = str(_resolve_venv_scripts(cfg))
+    home = str(Path.home())
+    units: dict[str, str] = {}
+    for ep in iter_endpoints(cfg):
+        if ep.kind not in kinds or not ep.cmd:
+            continue
+        execstart = " ".join(shlex.quote(c) for c in ep.cmd)
+        units[f"{systemd_unit_name(ep)}.service"] = (
+            "[Unit]\n"
+            f"Description=codev MCP endpoint {ep.name} (port {ep.port})\n"
+            "After=network.target\n\n"
+            "[Service]\n"
+            "Type=simple\n"
+            f"User={user}\n"
+            f"WorkingDirectory={ep.cwd or home}\n"
+            f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+            f"ExecStart={execstart}\n"
+            "Restart=always\n"
+            "RestartSec=3\n\n"
+            "[Install]\n"
+            "WantedBy=multi-user.target\n"
+        )
+    return units
+
+
+def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
+    """以普通用户生成 unit 到 ~/codev-systemd/(config 读对), 返回唯一一条 sudo 安装命令。
+
+    不在此直接 sudo: sudo 会切到 root 的 HOME → 读错 config。生成归生成(用户态),
+    装到 /etc/systemd/system + enable 归 root(打印命令让用户跑)。
+    """
+    units = render_systemd_units(cfg, user)
+    out_dir = Path.home() / "codev-systemd"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for fname, content in units.items():
+        p = out_dir / fname
+        p.write_text(content, encoding="utf-8")
+        paths.append(p)
+    svc_names = [p.name for p in paths]
+    cp_src = " ".join(str(p) for p in paths)
+    enable = " ".join(p.stem for p in paths)
+    sudo_cmd = (
+        f"sudo cp {cp_src} /etc/systemd/system/ && "
+        f"sudo systemctl daemon-reload && "
+        f"sudo systemctl enable --now {enable}"
+    ) if paths else "(无可安装的端点: 检查 config.projects 是否配了 repo_path)"
+    return {"dir": str(out_dir), "units": svc_names, "sudo_cmd": sudo_cmd}
