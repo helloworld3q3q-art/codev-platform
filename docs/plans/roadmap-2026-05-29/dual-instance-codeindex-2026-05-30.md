@@ -16,27 +16,35 @@
 
 ---
 
-## 二、架构:一套软件,两处部署
+## 二、架构:吃 GPU 的共享一份,要分本地/平台的恰好不吃 GPU
+
+关键洞察(2026-05-30):**模型是编码器,与编码哪份数据无关 → 一份模型(一个 daemon)能服务所有 collection。** 而真正需要"本地 vs 平台两份"的 codegraph/cross-link 是纯 sqlite,不吃 GPU。所以不是"双实例全套各一份",而是:
 
 ```
-┌───────────────────────────── 同一台开发机 ──────────────────────────────┐
-│                                                                          │
-│  Windows 主机 = 本地实例(活跃层)        WSL2 Linux = 平台基线实例(共享层) │
-│  ┌────────────────────────┐             ┌────────────────────────────┐  │
-│  │ chroma/codegraph/cross  │             │ chroma/codegraph/cross      │  │
-│  │ 索引 = 你的 working tree │             │ 索引 = GitLab HEAD          │  │
-│  │ data/ 在 Windows         │             │ data/ 在 WSL                │  │
-│  │ 触发: post-commit +      │             │ 触发: GitLab webhook        │  │
-│  │       post-merge(pull)   │             │       (push 后服务端 pull)  │  │
-│  │ MCP SSE :1808x (本地)    │             │ MCP SSE :1909x (平台)       │  │
-│  └────────────────────────┘             └────────────────────────────┘  │
-│        ▲ 默认连这个                              ▲ 用户可切换连这个        │
-│        └──────── Claude Code (.mcp.json URL 二选一 / 可切换) ─────────────┘
-└──────────────────────────────────────────────────────────────────────────┘
-   未来真有团队服务器: 平台基线实例原样搬到服务器, WSL 只是它的本机替身。
+┌──────────────────────── 同一台开发机(8GB GPU)────────────────────────┐
+│                                                                        │
+│  ┌── chroma/docs daemon ── 只一个, 模型加载一次 ~3GB, 文档索引共享 ──┐ │
+│  │   ▲ Windows + WSL 都连它(docs 本地/HEAD 差异小, 无需分两份)      │ │
+│  └──────────────────────────────────────────────────────────────────┘ │
+│                                                                        │
+│  Windows = 本地代码实例(无 GPU)       WSL2 = 平台基线代码实例(无 GPU) │
+│  ┌────────────────────────┐           ┌────────────────────────────┐  │
+│  │ codegraph + cross-link  │           │ codegraph + cross-link      │  │
+│  │ = 你的 working tree     │           │ = GitLab HEAD               │  │
+│  │ data/ 在 Windows        │           │ data/ 在 WSL                │  │
+│  │ 触发: post-commit       │           │ 触发: GitLab webhook        │  │
+│  │     + post-merge(pull)  │           │     (push 后服务端 pull)    │  │
+│  │ SSE :1808x              │           │ SSE :1909x                  │  │
+│  └────────────────────────┘           └────────────────────────────┘  │
+│        ▲ 默认连本地                          ▲ 用户可切换连平台          │
+│        └────── Claude Code (.mcp.json: docs 连共享 daemon;             │
+│                 codegraph/cross-link 连本地或平台, 用户可切)───────────┘
+└────────────────────────────────────────────────────────────────────────┘
+   未来真有团队服务器: 平台基线实例(codegraph/cross-link + 可选 docs)原样搬服务器, WSL 只是本机替身。
 ```
 
-**两实例各有独立 `data/`,物理隔离,互不污染。** 本地写本地,平台只 webhook 写。
+- **chroma/docs**:单份共享 daemon(模型只加载一次)→ **8GB 卡永不双载, OOM 风险消失**。文档在 working tree 与 HEAD 间差异小,共享一份够用。
+- **codegraph + cross-link**:本地(working tree)+ 平台(HEAD)两份,**纯 sqlite 零 GPU 成本**,各自独立 `data/`,互不污染。本地写本地,平台只 webhook 写。
 
 ---
 
@@ -80,28 +88,26 @@
 
 ---
 
-## 六、无服务器现实:WSL2 当平台基线实例(关键节)
+## 六、无服务器现实:WSL2 当平台基线实例(GPU 顾虑已化解)
 
-**结论:能。** WSL2 跑得了整套(Python + config 驱动跨平台),且能直通 Windows NVIDIA 卡(CUDA-on-WSL2),无需独立显卡服务器。
+**结论:能,且 8GB 卡够用** —— 因为吃 GPU 的 docs 只一份共享,要分两份的代码索引不吃 GPU(§二)。
 
-**GPU 8GB 硬约束**(必须遵守,否则 OOM):
-- chroma 的 Qwen embedding(~3GB)+ reranker → **不能 Windows 本地 + WSL 平台同时各加载一份**(总和超 8GB)。
-- codegraph / cross-link = 纯 sqlite,**不吃 GPU**,WSL 里随便跑。
+**模型共用一份(两层都共用)**:
+1. **磁盘文件**:WSL `embed_path` 指 `/mnt/d/models/Qwen3-Embedding-0.6B`(直读 Windows 那份),**不再下载/拷贝**。模型加载是启动一次性读,`/mnt` 慢点无所谓(不像索引 IO 频繁);想更快才拷进 WSL fs(那是第二份,放弃"共用")。
+2. **显存模型**:**只跑一个 chroma/docs daemon**(模型加载一次 ~3GB),Windows 与 WSL 的客户端都连它。模型是编码器、与数据无关,一份能服务所有 collection → **永不双载,无 OOM**。
 
-**落地策略(三选一,按需)**:
-| 方案 | chroma(GPU) | 适用 |
-|---|---|---|
-| A. 时间错开 | 同一时刻只一个实例加载 Qwen | 单人验证 / 不同时用两边 docs |
-| B. WSL chroma 走 CPU | WSL 平台实例 `embed_device=cpu`(慢但不占 GPU) | 平台 docs 召回不频繁时 |
-| C. WSL 用 MiniLM fallback | 仓内 `paraphrase-multilingual-MiniLM`(小、CPU 可) | 基线 docs 够用即可 |
+**docs daemon 跑哪边?** 二选一,都行(只起一个):
+- 跑 **Windows**(沿用现状 :18083):WSL 平台实例的 docs 也连 Windows :18083。
+- 跑 **WSL**(:18083 in WSL):Windows 客户端连 WSL。
+- 起步沿用现状(Windows daemon),零改动。
 
-> 起步建议 **A 或 C**:WSL 平台实例先把 **codegraph + cross-link**(无 GPU)跑通验证整套部署 + webhook,chroma 基线用 CPU/MiniLM 或暂缓。验证完再谈 GPU 编排。
+**WSL 上只需起无 GPU 的 codegraph + cross-link 平台实例**(端口 :1909x),验证整套"双实例 + 切换 + webhook",完全不碰 GPU。
 
 **WSL 接入要点**:
-- `wsl --install`(Ubuntu);仓 clone 进 WSL 原生 fs(别走 `/mnt/d`,git/IO 慢)。
-- WSL 装 NVIDIA CUDA-on-WSL(Windows 侧装好驱动即可),`torch.cuda.is_available()` 在 WSL 内应为 True。
-- WSL 实例自己的 `~/.codev-platform/config.json`(Linux 路径、自己的 `data_root`、端口错开 Windows 的 :1808x → 用 :1909x)。
-- 验证:`codev-platform setup --auto`(我们已做跨平台)在 WSL 内跑。
+- `wsl --install`(Ubuntu);**代码仓 clone 进 WSL 原生 fs**(`~/...`,别放 `/mnt/d`——git/索引 IO 在 DrvFs 上慢);**模型文件反而走 `/mnt/d` 共用**(只读一次,可接受)。
+- 若 WSL 也想跑 docs(一般不必,共用 Windows 的即可):装 CUDA-on-WSL(Windows 驱动装好即可),但**别和 Windows docs daemon 同时各起一个**(那才双载)。
+- WSL 实例自己的 `~/.codev-platform/config.json`(Linux 路径、自己的 `data_root`、codegraph/cross-link 端口 :1909x;`platform.url` 的 docs 指向那个唯一 daemon)。
+- 验证:`codev-platform setup --auto`(已跨平台)在 WSL 内跑。
 
 ---
 
@@ -127,14 +133,14 @@
 | **P2 GitLab webhook reindex** | 平台 HTTP 收 webhook(验签 via gateway)→ `git pull` + reindex;GitLab project→project_id 映射(config) | push → 平台基线自动更新;`health` 报 webhook 触发记录 |
 | **P3 源码获取 + 凭据** | 平台侧持有/拉取业务仓源码(deploy token/SSH key 进 config secret) | 平台能 clone+pull 业务仓 |
 | **P4 可切换源** | `mcp-source local\|platform` 切换 `.mcp.json`;文档化"何时用哪个" | 一键切换,两边都连得通 |
-| **P5 chroma 基线 GPU 编排** | WSL chroma 走 CPU/MiniLM 或与 Windows 实例时间错开;`ai-health` 报双实例 GPU 占用 | 不 OOM;基线 docs 可召回 |
+| **P5 docs 单份共享确认** | 全程只起**一个** docs daemon(沿用 Windows :18083),WSL 平台实例 docs 指向它;`ai-health` 确认模型只加载一份 | 只一个 docs daemon;8GB 不 OOM |
 | **P6(团队上线前)单写者 + diff 兜底** | 平台实例禁本地写;dirty-check 基准切 origin/HEAD;规则补"多人禁本地写平台" | 多人不互相清洗 |
 
 ---
 
 ## 九、风险与"现在不做"
 
-- **GPU 8GB 是硬天花板**:双实例 chroma 不能同时占卡。先 codegraph/cross-link 验证,chroma 基线后置(§六)。
+- **GPU 不再是阻塞**(原以为是):docs 单份共享、模型只加载一次 → 8GB 够。唯一红线 = **别误起两个 docs daemon**(那才双载 OOM)。要分两份的 codegraph/cross-link 不吃 GPU(§二/§六)。
 - **平台必须能拿到源码**:webhook 只通知,索引要源码 → 平台 `git pull`,需凭据 + 磁盘。单机 WSL 阶段:直接 clone 一份到 WSL。
 - **"一致"是收敛不是恒等**:本地永远比平台多"你未提交"的部分,这是 feature 不是 bug(§五)。
 - **不做**:不上 k8s / 不分布式 / 不多 GPU 编排 —— 现阶段单机 WSL 验证架构即可,真服务器再谈伸缩。
@@ -148,7 +154,7 @@
 - [ ] WSL 平台实例 codegraph + cross-link 跑通;Windows 客户端切到 WSL URL 能查到 GitLab HEAD 基线。
 - [ ] GitLab push → 平台基线实例自动 reindex(webhook 链路通)。
 - [ ] `mcp-source local|platform` 一键切换,两实例数据各自独立(本地含未提交,平台=HEAD)。
-- [ ] 8GB GPU 不 OOM(双实例 chroma 不同时占卡)。
+- [ ] 全程只一个 docs daemon(模型加载一份),8GB GPU 不 OOM;模型文件 Windows/WSL 共用一份(WSL 走 /mnt/d)。
 - [ ] (团队前)平台实例不被本地 reindex 污染;本地分歧走 diff 兜底。
 
 ---
