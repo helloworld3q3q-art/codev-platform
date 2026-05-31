@@ -101,6 +101,43 @@ def build_cross_link_cmd(python: str | Path, port: int) -> list[str]:
     return [str(python), "-m", "codev_platform.cross_link.server", "--http", "--port", str(port)]
 
 
+# ----------------------------------------------------------------------
+# 客户端可切换源 (双实例): 业务仓 .mcp.json 的 URL 指向哪个实例。
+#   local    = 本机本地实例 (索引 working tree, 含未提交; 默认 18xxx)
+#   platform = 平台基线服务器 (索引 HEAD, 跨项目/团队共享; 默认 19xxx, 远程则改 host)
+# config.mcp_sources.<target> 覆盖 host + 各 tool 端口 —— 换远程平台只改 host, 不改代码。
+# 详见 docs/plans/roadmap-2026-05-29/dual-instance-codeindex-2026-05-30.md §四。
+# ----------------------------------------------------------------------
+MCP_SOURCE_TOOLS = ("platform-docs", "cross-link", "codegraph")
+DEFAULT_MCP_SOURCES: dict[str, dict[str, Any]] = {
+    "local": {
+        "host": "127.0.0.1", "platform-docs": DEFAULT_CHROMA_PORT,
+        "cross-link": DEFAULT_CROSS_LINK_PORT, "codegraph": DEFAULT_CODEGRAPH_PORT,
+    },
+    "platform": {
+        "host": "127.0.0.1", "platform-docs": 19083, "cross-link": 19086, "codegraph": 19091,
+    },
+}
+
+
+def mcp_source_endpoint(cfg: dict, target: str, tool: str) -> tuple[str, int]:
+    """(host, port) for 源 target + tool; config.mcp_sources.<target> 覆盖默认。"""
+    src = dict(DEFAULT_MCP_SOURCES.get(target) or {})
+    override = _cfg_get(cfg, f"mcp_sources.{target}") or {}
+    if isinstance(override, dict):
+        src.update(override)
+    port = src.get(tool)
+    if port is None:
+        raise ValueError(f"源 '{target}' 未定义 tool '{tool}' 的端口 (config.mcp_sources.{target}.{tool})")
+    return str(src.get("host", "127.0.0.1")), int(port)
+
+
+def mcp_source_url(cfg: dict, target: str, tool: str, project_id: str) -> str:
+    """业务仓 .mcp.json 用的 SSE URL (三套均多租户 ?project_id=)。"""
+    host, port = mcp_source_endpoint(cfg, target, tool)
+    return f"http://{host}:{port}/sse?project_id={project_id}"
+
+
 def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     """从 config 枚举应常驻的 MCP 端点 (纯函数, 不 spawn)。
 

@@ -74,6 +74,12 @@
     "codegraph_sse_port": 18091
   },
 
+  "mcp_sources": {
+    "_comment": "客户端可切换的两个实例源 (双实例: 本地活跃 + 平台基线), 给 `codev-platform mcp-source local|platform [tools...]` 改写业务仓 .mcp.json 用。local=本机本地实例(索引 working tree 含未提交); platform=平台基线服务器(索引 HEAD, 跨项目/团队共享)。单机开发期两者同主机不同端口(local 18xxx / platform 19xxx); 真团队部署把 platform.host 改成远程平台 IP 即可, 零改代码。缺省即下方端口, 整块可省。",
+    "local":    { "host": "127.0.0.1", "platform-docs": 18083, "cross-link": 18086, "codegraph": 18091 },
+    "platform": { "host": "127.0.0.1", "platform-docs": 19083, "cross-link": 19086, "codegraph": 19091 }
+  },
+
   "projects": {
     "_comment": "(平台服务端配置) 每个项目登记 repo_path(codegraph 代理据此找该项目 .codegraph + cross-link/chroma 按 project_id 隔离)。codegraph_api_url —— 该项目 codegraph-api(Java HTTP, 默认 :18082, 只读 .codegraph)地址, 配了就走 HTTP 取**统计**(平台 status 用); 没配才退回读本机 repo_path 下 .codegraph sqlite。注: codegraph 已改多租户单端点(见 mcp.codegraph_sse_port), per-project codegraph_sse_port 已废弃, 不再需要。repo_path 机器相关故放 config 不进 git。codev-platform 自身无需登记。客户端不碰此项 — 只 GET 平台服务地址。",
     "openclaw-stock": { "repo_path": "~/WorkSpace/platform", "codegraph_api_url": "http://127.0.0.1:18082" },

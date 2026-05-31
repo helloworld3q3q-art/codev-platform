@@ -273,6 +273,68 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_mcp_source(args: argparse.Namespace) -> int:
+    """切换业务仓 .mcp.json 各 MCP 的源 (local 本机本地实例 / platform 平台基线服务器)。
+
+    可统一切 (默认全部 3 套) 或只切指定 tool。host/port 来自 config.mcp_sources.<target>
+    (缺省 local=18xxx / platform=19xxx)。project_id 取自 <repo>/.claude/project.json。
+    """
+    from codev_platform.core.config import load_config
+    from codev_platform import mcp_serve
+    repo = Path(args.repo).expanduser().resolve() if args.repo else Path.cwd()
+    mcp_json = repo / ".mcp.json"
+    if not mcp_json.is_file():
+        _eprint(f"FATAL: 未找到 {mcp_json} (在业务仓根跑, 或 --repo 指定)")
+        return 1
+    pj = repo / CONFIG_RELPATH
+    if not pj.is_file():
+        _eprint(f"FATAL: 未找到 {pj} (先 codev-platform init)")
+        return 1
+    try:
+        pid = validate(json.loads(pj.read_text(encoding="utf-8")).get("project_id"))
+    except (json.JSONDecodeError, ProjectIdError) as exc:
+        _eprint(f"FATAL: 解析 project_id 失败: {exc!s}")
+        return 1
+
+    alias = {
+        "docs": "platform-docs", "chromadb": "platform-docs", "chroma": "platform-docs",
+        "platform-docs": "platform-docs", "cross-link": "cross-link", "crosslink": "cross-link",
+        "codegraph": "codegraph",
+    }
+    cfg = load_config()
+    try:
+        data = json.loads(mcp_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        _eprint(f"FATAL: {mcp_json} 解析失败: {exc!s}")
+        return 1
+    servers = data.get("mcpServers", {})
+    sel = [alias.get(t, t) for t in args.tools] if args.tools else list(mcp_serve.MCP_SOURCE_TOOLS)
+
+    changed: list[tuple[str, str]] = []
+    for tool in sel:
+        if tool not in servers:
+            _print(f"  跳过 {tool} (.mcp.json 无此项)")
+            continue
+        try:
+            url = mcp_serve.mcp_source_url(cfg, args.target, tool, pid)
+        except ValueError as exc:
+            _eprint(f"FATAL: {exc!s}")
+            return 1
+        servers[tool]["type"] = "sse"
+        servers[tool]["url"] = url
+        changed.append((tool, url))
+    if not changed:
+        _print("无改动 (选中的 tool 都不在 .mcp.json)")
+        return 0
+    mcp_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _print(f"OK: {mcp_json}  ->  源 = {args.target}  (project_id={pid})")
+    for tool, url in changed:
+        _print(f"  {tool.ljust(14)} {url}")
+    _print()
+    _print("提示: 重启 Claude Code 让新 .mcp.json 生效。")
+    return 0
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from codev_platform import __version__
     _print(f"codev-platform {__version__}")
@@ -598,6 +660,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="status=探测 / start=幂等拉起 / install-systemd=按 config 生成 systemd unit(开机自起)")
     sp_mcp.add_argument("--user", default=None, help="install-systemd: 服务运行用户 (默认 SUDO_USER / 当前用户)")
     sp_mcp.set_defaults(func=cmd_serve_mcp)
+
+    sp_msrc = sub.add_parser("mcp-source", help="切换业务仓 .mcp.json 各 MCP 的源 (local 本机 / platform 服务器)")
+    sp_msrc.add_argument("target", choices=["local", "platform"],
+                         help="local=本机本地实例(working tree) / platform=平台基线服务器(HEAD/共享)")
+    sp_msrc.add_argument("tools", nargs="*",
+                         help="要切的 tool: docs / cross-link / codegraph (可多个); 不给=全部 3 套统一切")
+    sp_msrc.add_argument("--repo", default=None, help="业务仓路径 (默认 cwd)")
+    sp_msrc.set_defaults(func=cmd_mcp_source)
 
     # Cross-platform ops subcommands (health / reindex / post-commit / dirty-check /
     # install-hooks / wait-for-reindex). Each ops submodule self-registers; missing
