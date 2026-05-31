@@ -22,8 +22,18 @@ def _build_session_store() -> SessionStore:
     backend = acfg.get(cfg, "agent.session_backend", "memory")
     if backend == "pg":
         import sys
+        # 严格运行时模式(默认 False=dev 友好):backend=pg 但 DSN 缺 / 构造失败时,
+        # strict=True → raise 让启动暴露(生产 fail-loud,与 config #6 同思路);
+        # strict=False → 维持回退 InMemory + 警告(dev 不变)。
+        strict = acfg.get(cfg, "agent.strict_runtime", False)
         dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN", cfg, "memory.pg_dsn")
         if not dsn:
+            if strict:
+                raise RuntimeError(
+                    "session_backend=pg 但 memory.pg_dsn / CODEV_PLATFORM_MEMORY_DSN 未配; "
+                    "agent.strict_runtime=true 拒绝静默回退 InMemory(生产会话不持久)。"
+                    "请配置 DSN 或设 agent.strict_runtime=false 走 dev 回退。"
+                )
             print("[agent.deps] session_backend=pg 但 memory.pg_dsn 未配, 回退 memory", file=sys.stderr)
             return InMemorySessionStore()
         # 读写分离扩展口(预留):配了只读副本 DSN 则读走它,否则读写同库
@@ -33,6 +43,12 @@ def _build_session_store() -> SessionStore:
             from codev_platform.agent.session_pg import SqlSessionStore
             return SqlSessionStore(dsn, read_dsn=read_dsn, max_size=pool_max)  # schema 首次操作幂等建
         except Exception as e:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 回退内存,不挂服务
+            if strict:
+                raise RuntimeError(
+                    f"session_backend=pg 且 agent.strict_runtime=true,但 PG 会话存储构造失败"
+                    f"({type(e).__name__}: {e}); 拒绝静默回退 InMemory。"
+                    f"请修复 DSN / 安装 psycopg,或设 agent.strict_runtime=false 走 dev 回退。"
+                ) from e
             print(f"[agent.deps] PG 会话存储不可用({type(e).__name__}: {e}), 回退 memory", file=sys.stderr)
             return InMemorySessionStore()
     return InMemorySessionStore()

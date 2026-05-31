@@ -23,6 +23,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from codev_platform.core.project_id import validate as _validate_project_id
+
 
 _DATA_DIR_ENV = "PLATFORM_DATA_DIR"
 COLLECTION_SEP = "__"  # chroma collection 前缀分隔符
@@ -76,6 +78,7 @@ def chroma_dir() -> Path:
 
 def chroma_collection_name(project_id: str, base: str) -> str:
     """带 project_id 前缀的 collection 名。例 (openclaw-stock, platform_docs) -> 'openclaw-stock__platform_docs'。"""
+    project_id = _validate_project_id(project_id)  # 防 collection 名污染 (任意 caller)
     return f"{project_id}{COLLECTION_SEP}{base}"
 
 
@@ -92,6 +95,7 @@ def codegraph_db_path(project_id: str) -> Path:
 def codegraph_index_dir(project_id: str) -> Path:
     """codegraph 索引目录 (junction target)。与 cross_link_db_path 同父, 平台集中存放。
     例: data/codegraph_ext/<project_id>/codegraph/ (含 codegraph.db + config.json + wal)。"""
+    project_id = _validate_project_id(project_id)  # 防路径穿越 (../outside 等)
     return data_root() / "codegraph_ext" / project_id / "codegraph"
 
 
@@ -100,6 +104,7 @@ def cross_link_db_path(project_id: str) -> Path:
     legacy 路径: data/codegraph_ext/cross_layer.sqlite (无 project_id 子目录)
     新路径:      data/codegraph_ext/<project_id>/cross_layer.sqlite
     """
+    project_id = _validate_project_id(project_id)  # 防路径穿越 (../outside 等)
     return data_root() / "codegraph_ext" / project_id / "cross_layer.sqlite"
 
 

@@ -124,7 +124,8 @@ def open_db(path: Path | None = None, *, fresh: bool = False) -> sqlite3.Connect
         conn.execute("PRAGMA foreign_keys = OFF")
         rows = list(conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"))
         for (name,) in rows:
-            conn.execute(f"DROP TABLE IF EXISTS {name}")
+            quoted = '"' + name.replace('"', '""') + '"'
+            conn.execute(f"DROP TABLE IF EXISTS {quoted}")
         conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA_SQL)
     conn.commit()

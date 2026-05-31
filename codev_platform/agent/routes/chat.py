@@ -10,6 +10,7 @@ from codev_platform.agent import deps
 from codev_platform.agent.schemas import ChatRequest, ChatResponse, StepOut
 from codev_platform.agent.services.chat_service import ChatOutcome
 from codev_platform.core import identity
+from codev_platform.core.project_id import ProjectIdError, validate as validate_project_id
 
 router = APIRouter()
 
@@ -27,12 +28,22 @@ def _to_response(outcome: ChatOutcome) -> ChatResponse:
 
 
 def _resolve_project_id(req: ChatRequest, request: Request) -> str | None:
-    """X-Project-Id 头 > body.project_id > None(工具回退 cwd,单项目兼容)。"""
+    """X-Project-Id 头 > body.project_id > None(工具回退 cwd,单项目兼容)。
+
+    非空值必须过 validate()(防路径穿越 / chroma collection 污染);
+    非法抛 ProjectIdError, 由 chat() 转 400。空值仍返 None 保留 cwd 回退。
+    """
+    raw: str | None = None
     for key in ("X-Project-Id", "x-project-id", "X-PROJECT-ID"):
         v = request.headers.get(key)
         if v:
-            return v.strip()
-    return req.project_id
+            raw = v.strip()
+            break
+    if raw is None:
+        raw = req.project_id
+    if raw is None or not str(raw).strip():
+        return None
+    return validate_project_id(raw)
 
 
 def _resolve_identity(request: Request) -> tuple[str, str]:
@@ -54,7 +65,10 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
         user_id, org_id = _resolve_identity(request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    project_id = _resolve_project_id(req, request)  # X-Project-Id > body > None(cwd)
+    try:  # 非法 project_id(路径穿越 / 格式违规)→ 400,而非 500
+        project_id = _resolve_project_id(req, request)  # X-Project-Id > body > None(cwd)
+    except ProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     try:
         outcome = deps.get_chat_service().ask(
             req.question, req.session_id, req.max_steps,
