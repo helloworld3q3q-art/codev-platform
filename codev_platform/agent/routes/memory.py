@@ -13,6 +13,8 @@ from codev_platform.agent import deps
 from codev_platform.agent.memory_store import MemoryEntry, SCOPES
 from codev_platform.agent.schemas import MemoryEntryOut, MemoryWriteRequest
 from codev_platform.core import identity
+from codev_platform.core.acl import can_access
+from codev_platform.core.config import load_config
 
 router = APIRouter()
 
@@ -53,6 +55,10 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     # 不信任 client 传的 scope_ref,杜绝"以别人名义写个人记忆"。其它作用域用 client 给的 ref。
     # ⚠️ M5 前无 ACL:除 personal 外,任何 caller 可写任意 org/team/project 作用域。
     scope_ref = user_id if req.scope == "personal" else req.scope_ref
+    if req.scope == "project":  # 项目 ACL 闸:token 越权写该 project 记忆 → 403(与 personal 闸正交)
+        _ident = getattr(request.state, "identity", None)
+        if not can_access(load_config(), _ident, scope_ref).allowed:
+            raise HTTPException(status_code=403, detail="forbidden: project access denied")
     entry = MemoryEntry(
         id="", scope=req.scope, scope_ref=scope_ref, owner_user_id=user_id,
         content=req.content, org_id=org_id, kind=req.kind, topic_key=req.topic_key,
@@ -85,6 +91,10 @@ def list_memory(
         raise HTTPException(status_code=400, detail=str(e)) from e
     if scope == "personal" and scope_ref != user_id:
         raise HTTPException(status_code=403, detail="personal 记忆只能读本人")
+    if scope == "project":  # 项目 ACL 闸:token 越权读该 project 记忆 → 403(与 personal 闸正交)
+        _ident = getattr(request.state, "identity", None)
+        if not can_access(load_config(), _ident, scope_ref).allowed:
+            raise HTTPException(status_code=403, detail="forbidden: project access denied")
     try:
         entries = store.list_scope(scope, scope_ref, org_id=org_id, limit=limit)
     except Exception as e:  # noqa: BLE001 — 同 write:完整异常只进 server 日志

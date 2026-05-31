@@ -10,6 +10,8 @@ from codev_platform.agent import deps
 from codev_platform.agent.schemas import ChatRequest, ChatResponse, StepOut
 from codev_platform.agent.services.chat_service import ChatOutcome
 from codev_platform.core import identity
+from codev_platform.core.acl import can_access
+from codev_platform.core.config import load_config
 from codev_platform.core.project_id import ProjectIdError, validate as validate_project_id
 
 router = APIRouter()
@@ -69,6 +71,10 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
         project_id = _resolve_project_id(req, request)  # X-Project-Id > body > None(cwd)
     except ProjectIdError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if project_id is not None:  # 项目 ACL 闸:token 越权访问该 project → 403
+        _ident = getattr(request.state, "identity", None)
+        if not can_access(load_config(), _ident, project_id).allowed:
+            raise HTTPException(status_code=403, detail="forbidden: project access denied")
     try:
         outcome = deps.get_chat_service().ask(
             req.question, req.session_id, req.max_steps,

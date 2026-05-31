@@ -313,6 +313,13 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
             except Exception as exc:  # noqa: BLE001
                 _flog(f"[sse] reject invalid project_id {pid_raw!r}: {exc!s}")
                 return
+        # 项目级 ACL 闸: passthrough(dev) 放行 / token 越权 403。
+        from codev_platform.core.acl import can_access
+        _ident = getattr(request.state, "identity", None)
+        _dec = can_access(load_config(), _ident, pid)
+        if not _dec.allowed:
+            _flog(f"[sse] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
+            return JSONResponse({"error": "forbidden"}, status_code=403)
         token = _current_project_id.set(pid)
         _flog(f"[sse] session start project_id={pid}")
         try:

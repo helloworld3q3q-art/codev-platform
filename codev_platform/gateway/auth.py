@@ -31,10 +31,17 @@ class Unauthorized(Exception):
 
 @dataclass(frozen=True)
 class Identity:
-    """请求级身份(认证结果)。org 是租户根,user 是主体,via 标认证方式(审计用)。"""
+    """请求级身份(认证结果)。org 是租户根,user 是主体,via 标认证方式(审计用)。
+
+    projects / all_projects 是 token 模式的 project 白名单(ACL 闸2 真值, 见 core/acl.py):
+    all_projects=True 时无视 projects 放行全部;否则仅 project_id ∈ projects 放行。
+    passthrough 模式 dev 信任, all_projects=True。
+    """
     user_id: str
     org_id: str
     via: str  # passthrough | token
+    projects: frozenset[str] = frozenset()
+    all_projects: bool = False
 
 
 @runtime_checkable
@@ -68,7 +75,8 @@ class PassthroughAuthenticator:
             org_id = _identity.resolve_org_from_request(headers)
         except ValueError as exc:
             raise Unauthorized(f"非法身份头: {exc}") from exc
-        return Identity(user_id=user_id, org_id=org_id, via="passthrough")
+        # dev 信任: passthrough 不验签, 给全 project 放行(ACL 走 advisory allow)。
+        return Identity(user_id=user_id, org_id=org_id, via="passthrough", all_projects=True)
 
 
 class TokenAuthenticator:
@@ -95,10 +103,24 @@ class TokenAuthenticator:
                 ident = meta
         if ident is None:
             raise Unauthorized("无效 token")
+        # project 白名单解析(ACL 闸2 真值): "*"/["*"]=全部; list/tuple=显式白名单;
+        # 缺省/其它=无权(安全默认, 不给空 token 越权访问所有项目)。
+        raw = ident.get("projects")
+        if raw == "*" or raw == ["*"]:
+            all_projects = True
+            projects: frozenset[str] = frozenset()
+        elif isinstance(raw, (list, tuple)):
+            projects = frozenset(str(p) for p in raw)
+            all_projects = False
+        else:
+            projects = frozenset()
+            all_projects = False
         return Identity(
             user_id=str(ident.get("user_id") or "unknown"),
             org_id=str(ident.get("org_id") or "default"),
             via="token",
+            projects=projects,
+            all_projects=all_projects,
         )
 
 

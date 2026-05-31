@@ -979,6 +979,14 @@ async def _run_http(port: int) -> None:
             _flog(f"[sse] reject: cannot load project {pid}: {err}")
             return
 
+        # 项目级 ACL 闸: passthrough(dev) 放行 / token 越权 403。
+        from codev_platform.core.acl import can_access
+        _ident = getattr(request.state, "identity", None)
+        _dec = can_access(load_config(), _ident, pid)
+        if not _dec.allowed:
+            _flog(f"[sse] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+
         global _sse_sessions
         token = _current_project_id.set(pid)
         _sse_sessions += 1

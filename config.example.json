@@ -65,7 +65,8 @@
   "gateway": {
     "_comment": "HTTP 入口统一认证拦截 (codev_platform.gateway, 纯 ASGI 中间件, SSE 安全 + 高并发)。auth_mode: passthrough(默认, 单人/开发期, 信任 X-User-Id/X-Org-Id 明文头, 不验签) | token(多人/对外, 验 Authorization: Bearer)。认证加密: tokens 的 key 是 token 的 sha256 hash(明文不落盘), 生成 python -c \"import hashlib;print(hashlib.sha256(b'你的token').hexdigest())\"; 真表走 PG, 绝不进仓。传输加密(HTTPS/TLS)是部署层: 远程平台 url 用 https, TLS 在反代/uvicorn 终结。",
     "auth_mode": "passthrough",
-    "tokens": { "<token-sha256-hex>": { "user_id": "alice", "org_id": "default" } }
+    "_comment_tokens": "tokens.<hash>.projects 是该 token 的 project 白名单(ACL 闸2, 见 core/acl.py): [\"openclaw-stock\"] 显式白名单 | \"*\" 全部项目 | 缺省=无权(安全默认, 不给空 token 越权)。org_id 是身份所属 org(闸1: 须 == 目标 project 的 org_id 才放行)。",
+    "tokens": { "<token-sha256-hex>": { "user_id": "alice", "org_id": "default", "projects": ["openclaw-stock"] } }
   },
 
   "mcp": {
@@ -93,8 +94,8 @@
   },
 
   "projects": {
-    "_comment": "(平台服务端配置) 每个项目登记 repo_path(codegraph 代理据此找该项目 .codegraph + cross-link/chroma 按 project_id 隔离)。codegraph_api_url —— 该项目 codegraph-api(Java HTTP, 默认 :18082, 只读 .codegraph)地址, 配了就走 HTTP 取**统计**(平台 status 用); 没配才退回读本机 repo_path 下 .codegraph sqlite。webhook_repo —— 该项目在 VCS 的 owner/name (如 helloworld3q3q/platform), webhook 接收器据此把 push 映射回 project_id。注: codegraph 已改多租户单端点(见 mcp.codegraph_sse_port), per-project codegraph_sse_port 已废弃。repo_path 机器相关故放 config 不进 git。codev-platform 自身无需登记。客户端不碰此项 — 只 GET 平台服务地址。",
-    "openclaw-stock": { "repo_path": "~/WorkSpace/platform", "codegraph_api_url": "http://127.0.0.1:18082", "webhook_repo": "your-org/platform" },
-    "codev-platform-widget": { "repo_path": "~/WorkSpace/codev-platform-widget" }
+    "_comment": "(平台服务端配置) 每个项目登记 repo_path(codegraph 代理据此找该项目 .codegraph + cross-link/chroma 按 project_id 隔离)。org_id —— 该项目所属 org(ACL 闸1, 见 core/acl.py): 缺省=公开(任何已认证身份可访问), 多 org 时填真实 org 后仅同 org 身份可访问。codegraph_api_url —— 该项目 codegraph-api(Java HTTP, 默认 :18082, 只读 .codegraph)地址, 配了就走 HTTP 取**统计**(平台 status 用); 没配才退回读本机 repo_path 下 .codegraph sqlite。webhook_repo —— 该项目在 VCS 的 owner/name (如 helloworld3q3q/platform), webhook 接收器据此把 push 映射回 project_id。注: codegraph 已改多租户单端点(见 mcp.codegraph_sse_port), per-project codegraph_sse_port 已废弃。repo_path 机器相关故放 config 不进 git。codev-platform 自身无需登记。客户端不碰此项 — 只 GET 平台服务地址。",
+    "openclaw-stock": { "repo_path": "~/WorkSpace/platform", "org_id": "default", "codegraph_api_url": "http://127.0.0.1:18082", "webhook_repo": "your-org/platform" },
+    "codev-platform-widget": { "repo_path": "~/WorkSpace/codev-platform-widget", "org_id": "default" }
   }
 }
