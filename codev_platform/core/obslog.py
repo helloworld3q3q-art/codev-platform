@@ -36,9 +36,16 @@ _VALID_MODES = ("dev", "prod")
 
 
 def logging_mode(cfg: dict[str, Any] | None = None) -> str:
-    """解析当前日志模式: env CODEV_PLATFORM_LOG_MODE > config.logging.mode > "dev"。
+    """解析当前日志模式: env CODEV_PLATFORM_LOG_MODE > config.logging.mode > 自动推断。
 
-    任何非 "prod" 值都归一为 "dev" (fail-open 到全量, 避免误配把日志静默清空)。
+    自动推断 (mode 未显式设置 / 缺省 / "auto"):
+    - gateway.auth_mode == "token" → "prod" (对外认证场景默认脱敏, 不漏 query 原文)。
+    - 否则 → "dev" (本机 passthrough, 全量便于排查)。
+
+    显式 logging.mode (env 或 config) 一律尊重:
+    - "dev" → 即使 token 模式也保留全量 (调试逃生口)。
+    - "prod" → 强制脱敏。
+    任何其它非法值归一到自动推断 (避免误配把日志静默清空)。
     cfg 缺省时只看 env (调用方通常已 load_config() 后传入, 这里不强制加载避免开销)。
     """
     raw = os.environ.get("CODEV_PLATFORM_LOG_MODE")
@@ -47,8 +54,15 @@ def logging_mode(cfg: dict[str, Any] | None = None) -> str:
             section = cfg.get("logging")
             if isinstance(section, dict):
                 raw = section.get("mode")
-    mode = str(raw).strip().lower() if raw else "dev"
-    return mode if mode in _VALID_MODES else "dev"
+    mode = str(raw).strip().lower() if raw else ""
+    if mode in _VALID_MODES:
+        return mode
+    # 未显式设置 / "auto" / 非法 → 按 auth_mode 自动推断 (安全默认: token → prod)。
+    if isinstance(cfg, dict):
+        gateway = cfg.get("gateway")
+        if isinstance(gateway, dict) and str(gateway.get("auth_mode") or "").strip().lower() == "token":
+            return "prod"
+    return "dev"
 
 
 def _sha8(s: str) -> str:

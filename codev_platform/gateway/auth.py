@@ -15,6 +15,7 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 
 from codev_platform.core import identity as _identity
 from codev_platform.core.config import get as _cfg_get
+from codev_platform.core.project_id import ProjectIdError, validate as _validate_pid
 
 _log = logging.getLogger("codev_platform.gateway")
 
@@ -110,7 +111,17 @@ class TokenAuthenticator:
             all_projects = True
             projects: frozenset[str] = frozenset()
         elif isinstance(raw, (list, tuple)):
-            projects = frozenset(str(p) for p in raw)
+            # 逐个过 project_id 格式校验: 合法保留, 非法跳过 + warning。
+            # 不 raise —— 一条脏配置不应炸掉整个认证, 只剔除该项 (安全侧: 剔除即少放行)。
+            valid: set[str] = set()
+            for p in raw:
+                try:
+                    valid.add(_validate_pid(p))
+                except ProjectIdError as exc:
+                    _log.warning(
+                        "[gateway] token 白名单含非法 project_id %r, 已跳过: %s", p, exc,
+                    )
+            projects = frozenset(valid)
             all_projects = False
         else:
             projects = frozenset()

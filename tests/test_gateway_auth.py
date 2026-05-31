@@ -165,3 +165,61 @@ def test_middleware_token_mode_gates():
     assert _run_asgi(app, "/who", {"Authorization": "Bearer bad"}) == 401        # 错 token → 401
     assert _run_asgi(app, "/who", {"Authorization": "Bearer good"}) == 200       # 对 token(hash 命中)
     assert cap["identity"].user_id == "bob" and cap["identity"].via == "token"
+
+
+# ---- #6 token projects 白名单格式校验(非法跳过, 合法保留)----
+
+def test_token_projects_filters_illegal_keeps_valid(caplog):
+    import logging
+    # "bad_id" 含下划线非法, "Up Per" 含空格非法; "good-1" / "GOOD2"(归一小写)合法
+    a = TokenAuthenticator({token_hash("t"): {
+        "user_id": "u", "projects": ["good-1", "bad_id", "Up Per", "good2"]}})
+    with caplog.at_level(logging.WARNING, logger="codev_platform.gateway"):
+        idt = a.authenticate({"Authorization": "Bearer t"})
+    assert idt.projects == frozenset({"good-1", "good2"})  # 非法剔除, 合法保留(归一小写)
+    assert idt.all_projects is False
+    msgs = " ".join(r.message for r in caplog.records)
+    assert "bad_id" in msgs and "Up Per" in msgs  # 非法项各发一条 warning
+
+
+def test_token_projects_star_unaffected():
+    # "*" 分支不走校验, 仍 all_projects=True
+    a = TokenAuthenticator({token_hash("t"): {"user_id": "u", "projects": "*"}})
+    idt = a.authenticate({"Authorization": "Bearer t"})
+    assert idt.all_projects is True and idt.projects == frozenset()
+
+
+def test_token_projects_all_illegal_yields_empty():
+    a = TokenAuthenticator({token_hash("t"): {"user_id": "u", "projects": ["a_b", "c d"]}})
+    idt = a.authenticate({"Authorization": "Bearer t"})
+    assert idt.projects == frozenset() and idt.all_projects is False  # 全非法 → 无权
+
+
+# ---- #5 obslog logging_mode: token→prod / 显式 dev 尊重 / passthrough→dev ----
+
+def test_logging_mode_token_defaults_prod(monkeypatch):
+    from codev_platform.core.obslog import logging_mode
+    monkeypatch.delenv("CODEV_PLATFORM_LOG_MODE", raising=False)
+    assert logging_mode({"gateway": {"auth_mode": "token"}}) == "prod"
+
+
+def test_logging_mode_token_auto_defaults_prod(monkeypatch):
+    from codev_platform.core.obslog import logging_mode
+    monkeypatch.delenv("CODEV_PLATFORM_LOG_MODE", raising=False)
+    # 显式 "auto"(非 dev/prod)仍按 token 推断 → prod
+    assert logging_mode({"gateway": {"auth_mode": "token"}, "logging": {"mode": "auto"}}) == "prod"
+
+
+def test_logging_mode_explicit_dev_respected_under_token(monkeypatch):
+    from codev_platform.core.obslog import logging_mode
+    monkeypatch.delenv("CODEV_PLATFORM_LOG_MODE", raising=False)
+    # 显式 dev 留调试逃生口, token 模式也尊重
+    assert logging_mode({"gateway": {"auth_mode": "token"}, "logging": {"mode": "dev"}}) == "dev"
+
+
+def test_logging_mode_passthrough_defaults_dev(monkeypatch):
+    from codev_platform.core.obslog import logging_mode
+    monkeypatch.delenv("CODEV_PLATFORM_LOG_MODE", raising=False)
+    assert logging_mode({"gateway": {"auth_mode": "passthrough"}}) == "dev"
+    assert logging_mode({}) == "dev"
+    assert logging_mode(None) == "dev"

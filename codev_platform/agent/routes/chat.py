@@ -72,12 +72,12 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
         project_id = _resolve_project_id(req, request)  # X-Project-Id > body > None(cwd)
     except ProjectIdError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if project_id is not None:  # 项目 ACL 闸:token 越权访问该 project → 403
-        _ident = getattr(request.state, "identity", None)
-        _dec = can_access(load_config(), _ident, project_id)
-        audit_access("agent-chat", _ident, project_id, _dec)
-        if not _dec.allowed:
-            raise HTTPException(status_code=403, detail="forbidden: project access denied")
+    # 项目 ACL 闸(恒查):token 越权 / token 模式无显式 project_id → 403;passthrough 放行
+    _ident = getattr(request.state, "identity", None)
+    _dec = can_access(load_config(), _ident, project_id)  # project_id 可能 None
+    audit_access("agent-chat", _ident, project_id, _dec)
+    if not _dec.allowed:
+        raise HTTPException(status_code=403, detail="forbidden: project access denied")
     try:
         outcome = deps.get_chat_service().ask(
             req.question, req.session_id, req.max_steps,

@@ -20,6 +20,7 @@ from codev_platform.core.config import get as _cfg_get, load_config
 
 _LOG_FILE = Path(__file__).resolve().parent / "webhook.log"
 DEFAULT_WEBHOOK_PORT = 18099
+_MAX_BODY = 1 * 1024 * 1024  # 1MB 请求体上限, 防超大 payload 拖垮 reindex 队列 / OOM
 
 
 def _log(msg: str) -> None:
@@ -54,24 +55,33 @@ def webhook_port(cfg: dict | None = None) -> int:
     return int(_cfg_get(cfg if cfg is not None else load_config(), "webhook.port") or DEFAULT_WEBHOOK_PORT)
 
 
-async def run_http(port: int | None = None) -> None:
+def build_app():
+    """构建 Starlette app (路由 + handler), 与 serve 解耦 —— 便于 TestClient 测 413/验签等分支。"""
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Route
-    import uvicorn
 
     from codev_platform.webhook import providers
     from codev_platform.reindex import open_default_queue
-
-    if port is None:
-        port = webhook_port()
 
     async def handle(request):
         name = request.path_params["provider"]
         prov = providers.get_provider(name)
         if prov is None:
             return JSONResponse({"error": f"unknown provider '{name}'"}, status_code=404)
+        # 请求体大小上限 (fail-closed): 先看 Content-Length 头早拒; 无头时读 body 后再校验长度。
+        clen = request.headers.get("content-length")
+        if clen is not None:
+            try:
+                if int(clen) > _MAX_BODY:
+                    _log(f"[{name}] 请求体 Content-Length={clen} 超上限 {_MAX_BODY}, 拒绝")
+                    return JSONResponse({"error": "payload too large"}, status_code=413)
+            except ValueError:
+                return JSONResponse({"error": "bad content-length"}, status_code=400)
         body = await request.body()
+        if len(body) > _MAX_BODY:
+            _log(f"[{name}] 请求体 {len(body)} 字节超上限 {_MAX_BODY}, 拒绝")
+            return JSONResponse({"error": "payload too large"}, status_code=413)
         cfg = load_config()
         secret = str(_cfg_get(cfg, "webhook.secret") or "")
         allow_insecure = bool(_cfg_get(cfg, "webhook.allow_insecure") or False)
@@ -108,10 +118,20 @@ async def run_http(port: int | None = None) -> None:
     async def health(_request):
         return JSONResponse({"status": "ok", "service": "webhook", "providers": list(providers.names())})
 
-    app = Starlette(routes=[
+    return Starlette(routes=[
         Route("/health", health, methods=["GET"]),
         Route("/{provider}", handle, methods=["POST"]),
     ])
+
+
+async def run_http(port: int | None = None) -> None:
+    import uvicorn
+
+    from codev_platform.webhook import providers
+
+    if port is None:
+        port = webhook_port()
+    app = build_app()
     _log(f"[http] webhook receiver starting on 127.0.0.1:{port} (providers: {', '.join(providers.names())})")
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()

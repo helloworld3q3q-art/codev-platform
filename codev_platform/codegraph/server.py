@@ -304,16 +304,16 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
 
     async def handle_sse(request):
         pid_raw = request.query_params.get("project_id")
-        if not pid_raw:
-            pid = PROJECT_ID
-            _flog(f"[sse] no ?project_id=, fallback default {pid}")
-        else:
+        if pid_raw:
             try:
                 pid = _pid_validate(pid_raw)
             except Exception as exc:  # noqa: BLE001
                 _flog(f"[sse] reject invalid project_id {pid_raw!r}: {exc!s}")
                 return
-        # 项目级 ACL 闸: passthrough(dev) 放行 / token 越权 403。
+        else:
+            # 缺显式 project_id: 先置 None 过 ACL(token 模式 deny), 放行后再回退默认。
+            pid = None
+        # 项目级 ACL 闸(在回退默认 *之前*): passthrough(dev) 放行 / token 越权或无显式 project → 403。
         from codev_platform.core.acl import can_access
         from codev_platform.core.audit import audit_access
         _ident = getattr(request.state, "identity", None)
@@ -322,6 +322,10 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
         if not _dec.allowed:
             _flog(f"[sse] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
             return JSONResponse({"error": "forbidden"}, status_code=403)
+        # ACL 放行后才回退默认(仅 passthrough; token 无显式 project 已被拒)
+        if pid is None:
+            pid = PROJECT_ID
+            _flog(f"[sse] no ?project_id=, fallback default {pid}")
         token = _current_project_id.set(pid)
         _flog(f"[sse] session start project_id={pid}")
         try:

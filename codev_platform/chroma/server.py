@@ -960,26 +960,19 @@ async def _run_http(port: int) -> None:
         # MCP SSE 双向流: GET /sse?project_id=<pid> 建立 stream + 绑定 project_id 到 contextvar
         # multi-tenant: 同一 daemon 服务多个 project_id, 每 session 独立路由
         pid_raw = request.query_params.get("project_id")
-        if not pid_raw:
-            # backward compat: legacy launcher 不传 ?project_id= 时 fallback 启动默认
-            pid = PROJECT_ID
-            _flog(f"[sse] no ?project_id= in query, fallback to default {pid}")
-        else:
+        if pid_raw:
             try:
                 from codev_platform.core.project_id import validate as _pid_validate
                 pid = _pid_validate(pid_raw)
             except Exception as exc:  # noqa: BLE001
                 _flog(f"[sse] reject: invalid project_id {pid_raw!r}: {exc!s}")
                 return  # SSE connect 中止
+        else:
+            # 缺显式 project_id: 先置 None 过 ACL —— token 模式 can_access(None)=deny;
+            # passthrough 放行后才回退默认 PROJECT_ID(向后兼容)。防 token 省略 project_id 静默命中默认项目。
+            pid = None
 
-        # eager load 让 SSE 建立前发现 collection 缺失类问题
-        state = _ensure_project(pid)
-        if state is None or state.collection is None:
-            err = (state.init_error if state else None) or "project init failed"
-            _flog(f"[sse] reject: cannot load project {pid}: {err}")
-            return
-
-        # 项目级 ACL 闸: passthrough(dev) 放行 / token 越权 403。
+        # 项目级 ACL 闸(在回退默认 *之前*): passthrough(dev) 放行 / token 越权或无显式 project → 403。
         from codev_platform.core.acl import can_access
         from codev_platform.core.audit import audit_access
         _ident = getattr(request.state, "identity", None)
@@ -988,6 +981,18 @@ async def _run_http(port: int) -> None:
         if not _dec.allowed:
             _flog(f"[sse] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
             return JSONResponse({"error": "forbidden"}, status_code=403)
+
+        # ACL 放行后再回退默认(仅 passthrough 会到这; token 无显式 project 已被拒)
+        if pid is None:
+            pid = PROJECT_ID
+            _flog(f"[sse] no ?project_id= in query, fallback to default {pid}")
+
+        # eager load 让 SSE 建立前发现 collection 缺失类问题
+        state = _ensure_project(pid)
+        if state is None or state.collection is None:
+            err = (state.init_error if state else None) or "project init failed"
+            _flog(f"[sse] reject: cannot load project {pid}: {err}")
+            return
 
         global _sse_sessions
         token = _current_project_id.set(pid)
