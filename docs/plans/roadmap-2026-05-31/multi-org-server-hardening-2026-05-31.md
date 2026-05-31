@@ -60,13 +60,18 @@
 真正卡多组织上线 = A 组(尤其 A1 + A3)。B/C = 多人用起来后会被坑的健壮性。D/E/F = 体验/扩展。
 ```
 
-| 序 | 阶段 | 内容 | 本轮 |
+| 序 | 阶段 | 内容 | 状态 |
 |---|---|---|---|
-| 1 | **P1** | **A1 项目 ACL**(本文档 §三详细设计) | ✅ 现在开发 |
-| 2 | P2 | A2 token 模式启用 + A5 审计日志 | 紧随 |
-| 3 | P3 | A3 TLS 反代(nginx/caddy 前置 + 文档) | 紧随 |
-| 4 | P4 | B6 PG 持久化收尾 + B7 备份脚本 | 后续 |
-| 5 | P5 | B8/B9/B10 可靠性 + D13/D14/D15 体验 + 余项 | backlog |
+| 1 | **P1** | **A1 项目 ACL**(本文档 §三详细设计) | ✅ 已落地+推送(`25101a9`) |
+| 2 | P2 | A2 token 模式启用(`token-add --projects` + runbook)+ A5 越权审计日志 | ✅ 已落地+推送(`dcf16a1`/`59edc48`) |
+| — | 审计修复 | 7 项审计(token 强制项目上下文 / 入口集成测试 / prod 日志 / 白名单校验 / webhook 限流 / memory 作用域闸)+ SSE 回退顺序 blocker | ✅ 已落地+推送(`5ee329b`) |
+| 3 | P3 | A3 TLS 反代(caddy runbook + `client-url` 远程地址重写)+ A4 health 拆分(`/healthz` public / `/platform/status` 鉴权) | ✅ 已落地+推送(`66c1c15`) |
+| 4 | P4 | B6 PG 持久化收尾 + B7 备份脚本 | ⏳ 后续 |
+| 5 | P5 | B8/B9/B10 可靠性 + D13/D14/D15 体验 + 余项 | ⏳ backlog |
+
+> **A 组(多组织上线必须)基本闭环**:A1 ACL ✅ / A2 token+审计 ✅ / A3 TLS 反代 ✅ / A4 health ✅ / A5 审计日志 ✅。剩 A4 的 `/platform/status` 鉴权已随 P3 落地。测试基线随各轮升至 **218 passed / 6 skipped**。
+>
+> **明确留后**:#2 memory **org/team 完整 RBAC** = M5(需 PG `org_members`/`team_members`,见 `../roadmap-2026-05-29/memory-permission-model-2026-05-29.md`);本轮仅 interim(token 模式 org/team 默认拒)。
 
 ---
 
@@ -182,9 +187,30 @@ token 元数据来源:`config.gateway.tokens.<sha256>.{org_id, projects}`(token 
 
 ## 五、验收(P1)
 
-- [ ] `core/acl.py:can_access` 落地 + 纯函数单测全绿
-- [ ] `Identity.projects` + TokenAuthenticator 读 token 元数据
-- [ ] 3 MCP + agent + memory 五执行点接入,token 模式越权 403 / passthrough 放行
-- [ ] config.example + token CLI 文档同步
-- [ ] 165 现有测试不降 + 新增 ACL 测试通过
-- [ ] 审计兄弟核查:零 if-else 堆叠 / 与 memory §3.4 同源 / dev-prod 双模式正确
+- [x] `core/acl.py:can_access` 落地 + 纯函数单测全绿
+- [x] `Identity.projects` + TokenAuthenticator 读 token 元数据
+- [x] 3 MCP + agent + memory 五执行点接入,token 模式越权 403 / passthrough 放行
+- [x] config.example + token CLI 文档同步
+- [x] 165 现有测试不降 + 新增 ACL 测试通过(当前 218 passed / 6 skipped)
+- [x] 审计兄弟核查:零 if-else 堆叠 / 与 memory §3.4 同源 / dev-prod 双模式正确
+
+---
+
+## 六、进度记录(2026-06-01)
+
+按 P1→P2→审计修复→P3 推进,全部提交并推送 Gitea(`dev`),测试 165→218 passed。
+
+| 轮次 | commit | 关键交付 | 备注 |
+|---|---|---|---|
+| P1 ACL | `25101a9`(+`61f1f45` 设计) | `can_access` 单一真值源 + Identity 白名单 + 五执行点 + dev/prod 双模式 | — |
+| P2 token+审计 | `dcf16a1` + `59edc48` runbook | `token-add --projects` / `core/audit.py` 越权日志(deny 必记/token allow 留痕/dev 不记) | — |
+| 审计 7 项 + blocker | `5ee329b` | token 强制项目上下文(can_access(None)→deny + chat 恒查 + **SSE 回退挪到 ACL 后**)/ `memory_scope_access` / 入口集成测试 / token→prod 日志 / 白名单 validate / webhook 1MB 限流 | SSE 回退顺序 blocker 由审计抓出 |
+| P3 远程访问 | `66c1c15` | health 拆分(`/healthz` public + `/platform/status` 鉴权,堵 #4)/ `gateway client-url --base` 远程地址重写 / caddy+TLS runbook | runbook 端口统一为 config 驱动(`client-url` 打印真实值) |
+
+**关联交付文档**:
+- `token-auth-enablement-2026-06-01.md` —— token 模式启用 runbook
+- `remote-access-reverse-proxy-2026-06-01.md` —— caddy 反代 + TLS runbook
+
+**未做(留后续轮次)**:
+- **#2 memory org/team 完整 RBAC** → M5(PG 角色表);现 interim(token 模式 org/team 默认拒)。
+- **P4** B6 PG 持久化收尾 + B7 备份脚本;**P5** B8/B9/B10 可靠性 + D13/D14/D15 体验(D15 换机一键 bootstrap)+ E16/F18。
