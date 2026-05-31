@@ -342,6 +342,35 @@ def render_reindex_unit(cfg: dict, user: str) -> tuple[str, str]:
     return "codev-reindex.service", content
 
 
+def render_webhook_unit(cfg: dict, user: str) -> tuple[str, str]:
+    """webhook 接收器 (codev-webhook) 的 systemd unit —— 非 MCP 端点, 单独生成。
+
+    收 VCS push → enqueue reindex (push 即触发); 开机自起 + 崩溃重启。绑 127.0.0.1
+    (本机 Gitea 可达); 远程 VCS 需自行反代 + 配 webhook.secret 验签。
+    """
+    import shlex
+    venv_py = _venv_python(cfg)
+    venv_bin = str(_resolve_venv_scripts(cfg))
+    home = str(Path.home())
+    execstart = f"{shlex.quote(str(venv_py))} -m codev_platform.cli webhook serve"
+    content = (
+        "[Unit]\n"
+        "Description=codev webhook receiver (VCS push -> enqueue reindex)\n"
+        "After=network.target\n\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"User={user}\n"
+        f"WorkingDirectory={home}\n"
+        f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        f"ExecStart={execstart}\n"
+        "Restart=always\n"
+        "RestartSec=3\n\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+    return "codev-webhook.service", content
+
+
 def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
     """以普通用户生成 unit 到 ~/codev-systemd/(config 读对), 返回唯一一条 sudo 安装命令。
 
@@ -350,9 +379,9 @@ def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
     """
     import shlex
     units = render_systemd_units(cfg, user)
-    # reindex worker: 非 MCP 端点, 单独并入 (开机自起 + 串行消费写队列)
-    rname, rcontent = render_reindex_unit(cfg, user)
-    units[rname] = rcontent
+    # 非 MCP 端点的常驻服务, 单独并入: reindex worker (串行消费写队列) + webhook 接收器 (push 触发)
+    for _rname, _rcontent in (render_reindex_unit(cfg, user), render_webhook_unit(cfg, user)):
+        units[_rname] = _rcontent
     out_dir = Path.home() / "codev-systemd"
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
