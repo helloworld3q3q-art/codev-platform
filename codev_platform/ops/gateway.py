@@ -51,13 +51,27 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         h = token_hash(tok)
         cfg = load_config()
         toks = cfg.setdefault("gateway", {}).setdefault("tokens", {})
-        toks[h] = {"user_id": args.arg, "org_id": args.org}
+        # projects 白名单 (ACL 闸2 真值, 见 core/acl.py + gateway/auth.py):
+        # "*" -> 全部; "pid1,pid2" -> list; 缺省/空 -> 不写 (安全默认: 无任何项目权)。
+        raw = args.projects
+        projects = None
+        if raw is None or raw.strip() == "":
+            _out("WARN: 未指定 --projects: token 模式下此 token 无任何项目访问权 "
+                 "(用 --projects pid1,pid2 或 --projects '*')")
+        elif raw.strip() == "*":
+            projects = "*"
+        else:
+            projects = [p.strip() for p in raw.split(",") if p.strip()]
+        entry = {"user_id": args.arg, "org_id": args.org}
+        if projects is not None:
+            entry["projects"] = projects
+        toks[h] = entry
         save_config(cfg)
         _out("token 已生成 (明文只显示这一次, 存好):")
         _out("")
         _out(f"    {tok}")
         _out("")
-        _out(f"  user_id={args.arg}  org_id={args.org}  hash={h[:12]}...")
+        _out(f"  user_id={args.arg}  org_id={args.org}  projects={projects if projects is not None else '(无项目权)'}  hash={h[:12]}...")
         _out("  客户端: export PLATFORM_TOKEN='<上面 token>'  +  codev-platform gateway client-auth")
         return 0
 
@@ -68,7 +82,9 @@ def cmd_gateway(args: argparse.Namespace) -> int:
             return 0
         _out(f"已配 {len(toks)} 个 token:")
         for h, meta in toks.items():
-            _out(f"  user={meta.get('user_id')}  org={meta.get('org_id')}  hash={h[:12]}...")
+            proj = meta.get("projects")
+            proj_disp = proj if proj is not None and proj != "" else "(无项目权)"
+            _out(f"  user={meta.get('user_id')}  org={meta.get('org_id')}  projects={proj_disp}  hash={h[:12]}...")
         return 0
 
     if args.action == "token-rm":
@@ -129,6 +145,8 @@ def register(subparsers) -> None:
     gw.add_argument("action", choices=["mode", "token-add", "token-list", "token-rm", "client-auth"])
     gw.add_argument("arg", nargs="?", default=None, help="mode: passthrough|token; token-add/rm: user")
     gw.add_argument("--org", default="default", help="token-add: org_id (默认 default)")
+    gw.add_argument("--projects", default=None,
+                    help="token-add: 可访问项目, 逗号分隔 pid1,pid2 或 '*' 全部; 缺省=无权")
     gw.add_argument("--repo", default=None, help="client-auth: 业务仓路径 (默认 cwd)")
     gw.add_argument("--env", default="PLATFORM_TOKEN", help="client-auth: header 引用的 env 变量名")
     gw.add_argument("--remove", action="store_true", help="client-auth: 移除 Authorization header")
