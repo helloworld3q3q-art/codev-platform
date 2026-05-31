@@ -83,6 +83,7 @@ async def run_http(port: int | None = None) -> None:
             return JSONResponse({"error": "bad json"}, status_code=400)
         event = prov.parse(request.headers, payload)
         if event is None:
+            _log(f"[{name}] 非 push 事件, 跳过")
             return JSONResponse({"ok": True, "skipped": "non-push event"})
         pid = _project_for_repo(cfg, event.repo)
         if pid is None:
@@ -90,6 +91,7 @@ async def run_http(port: int | None = None) -> None:
             return JSONResponse({"ok": True, "skipped": f"unmapped repo {event.repo}"})
         scopes = _scopes_for(pid, event.changed_files)
         if not scopes:
+            _log(f"[{name}] {event.repo} -> {pid}: {len(event.changed_files)} 文件改动但无 reindex scope 命中, 跳过")
             return JSONResponse({"ok": True, "project_id": pid, "skipped": "no scope match"})
         q = open_default_queue()
         for kind in scopes:
