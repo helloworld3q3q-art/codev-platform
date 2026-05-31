@@ -69,13 +69,14 @@
   },
 
   "mcp": {
-    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。cross_link_sse_port: cross-link HTTP(SSE)端点端口(默认 18086)。codegraph 端口 per-project 配在 projects.<id>.codegraph_sse_port(默认从 18090 按注册顺序自动分配, 但业务仓 .mcp.json 要连固定 URL 时建议显式 pin)。",
-    "cross_link_sse_port": 18086
+    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。三套均多租户单端点 + ?project_id= 路由。cross_link_sse_port: cross-link 端口(默认 18086)。codegraph_sse_port: codegraph 多租户代理端口(默认 18091, 方案 B 平台自写代理, 按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` 后端并转发; 不再 per-project 一个端口/一个 mcp-proxy)。",
+    "cross_link_sse_port": 18086,
+    "codegraph_sse_port": 18091
   },
 
   "projects": {
-    "_comment": "(平台服务端配置) 每个项目的 codegraph 数据怎么取 + MCP 端口。codegraph_api_url —— 该项目 codegraph-api(Java HTTP, 默认 :18082, 只读 .codegraph)地址, 配了就走 HTTP 取**统计**(POST /v1/codegraph/stats, 平台 status 用); 没配才退回读本机 repo_path 下 .codegraph sqlite。codegraph_sse_port —— serve-mcp 用 mcp-proxy 把该项目 `codegraph serve --mcp` 包成 SSE 的端口(业务仓 .mcp.json 连它取**全 MCP 工具集**, 区别于 codegraph_api 只给统计)。repo_path 机器相关故放 config 不进 git。codev-platform 自身无需登记。客户端不碰此项 — 只 GET 平台服务地址。",
-    "openclaw-stock": { "repo_path": "~/WorkSpace/platform", "codegraph_api_url": "http://127.0.0.1:18082", "codegraph_sse_port": 18091 },
-    "codev-platform-widget": { "repo_path": "~/WorkSpace/codev-platform-widget", "codegraph_sse_port": 18090 }
+    "_comment": "(平台服务端配置) 每个项目登记 repo_path(codegraph 代理据此找该项目 .codegraph + cross-link/chroma 按 project_id 隔离)。codegraph_api_url —— 该项目 codegraph-api(Java HTTP, 默认 :18082, 只读 .codegraph)地址, 配了就走 HTTP 取**统计**(平台 status 用); 没配才退回读本机 repo_path 下 .codegraph sqlite。注: codegraph 已改多租户单端点(见 mcp.codegraph_sse_port), per-project codegraph_sse_port 已废弃, 不再需要。repo_path 机器相关故放 config 不进 git。codev-platform 自身无需登记。客户端不碰此项 — 只 GET 平台服务地址。",
+    "openclaw-stock": { "repo_path": "~/WorkSpace/platform", "codegraph_api_url": "http://127.0.0.1:18082" },
+    "codev-platform-widget": { "repo_path": "~/WorkSpace/codev-platform-widget" }
   }
 }

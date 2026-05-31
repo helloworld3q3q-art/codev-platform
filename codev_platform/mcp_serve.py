@@ -33,16 +33,16 @@ from codev_platform.core.config import get as _cfg_get, load_config
 # 默认端口 (config 可覆盖)。chroma 沿用 daemon.port;cross-link / codegraph 走 mcp.*。
 DEFAULT_CHROMA_PORT = 18083
 DEFAULT_CROSS_LINK_PORT = 18086
-DEFAULT_CODEGRAPH_BASE_PORT = 18090  # 自动分配时的起始端口 (项目无显式端口时按序分配)
+DEFAULT_CODEGRAPH_PORT = 18091  # codegraph 多租户代理端点 (单端点, mcp.codegraph_sse_port 覆盖)
 
 
 @dataclass
 class MCPEndpoint:
     """一个 MCP 服务端点 (平台侧拉起 + 业务侧连接)。"""
-    name: str                       # 展示名: platform-docs / cross-link / codegraph:<pid>
+    name: str                       # 展示名: platform-docs / cross-link / codegraph
     kind: str                       # chroma | cross_link | codegraph
     port: int
-    project_id: str | None = None   # codegraph 是 per-project;chroma/cross-link 多租户为 None
+    project_id: str | None = None   # 三套均多租户单端点, 统一为 None (业务仓走 ?project_id=)
     cmd: list[str] | None = None    # spawn 命令 (None = 自 spawn / 外部托管, 如 chroma daemon)
     cwd: str | None = None
     self_spawned: bool = False      # True = 不由本编排器 spawn (chroma 由 launcher 按会话拉起)
@@ -53,14 +53,13 @@ class MCPEndpoint:
 
     @property
     def sse_url(self) -> str:
-        base = f"http://{self.host}:{self.port}/sse"
-        # chroma / cross-link 多租户需 ?project_id=;codegraph 端口即项目, 不带
-        return base
+        # 三套均多租户: 业务仓 .mcp.json 在此基址后接 ?project_id=<id>
+        return f"http://{self.host}:{self.port}/sse"
 
     @property
     def health_url(self) -> str | None:
-        # chroma / cross-link 自带 /health;codegraph 经 mcp-proxy 无 /health → 用 TCP 探
-        return None if self.kind == "codegraph" else f"http://{self.host}:{self.port}/health"
+        # 三套均自带 /health (codegraph 改平台自写多租户代理后也有, 见 codegraph.server)
+        return f"http://{self.host}:{self.port}/health"
 
 
 def _resolve_venv_scripts(cfg: dict) -> Path:
@@ -88,14 +87,13 @@ def _mcp_proxy_exe(cfg: dict) -> Path:
     return scripts / ("mcp-proxy.exe" if sys.platform == "win32" else "mcp-proxy")
 
 
-def build_codegraph_proxy_cmd(mcp_proxy: str | Path, port: int) -> list[str]:
-    """构造 mcp-proxy server 模式命令: 把 `codegraph serve --mcp` 包成 SSE。
+def build_codegraph_cmd(python: str | Path, port: int) -> list[str]:
+    """构造 codegraph 多租户代理 HTTP 端点启动命令 (方案 B, 平台自写, 不再用 mcp-proxy)。
 
-    `--` 分隔符让 argparse 把后续当 stdio 命令的位置参数 (否则 --mcp 被当 proxy 自己的选项)。
-    cwd 由调用方设为项目 repo (codegraph 据此找 .codegraph)。
+    代理内部按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` stdio 后端并转发,
+    与 cross-link / chroma 同构 (单端点多租户)。repo_path 由代理从 config.projects 解析。
     """
-    return [str(mcp_proxy), "--port", str(port), "--host", "127.0.0.1",
-            "--pass-environment", "--", "codegraph", "serve", "--mcp"]
+    return [str(python), "-m", "codev_platform.codegraph.server", "--http", "--port", str(port)]
 
 
 def build_cross_link_cmd(python: str | Path, port: int) -> list[str]:
@@ -108,11 +106,9 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
 
     - chroma: daemon.port (self-spawned, 不由本编排器拉起)
     - cross-link: mcp.cross_link_sse_port
-    - codegraph: 每个 projects.<id> 配了 codegraph_sse_port 且 repo_path 存在的项目一个端点;
-      未显式配端口的项目, 从 DEFAULT_CODEGRAPH_BASE_PORT 按注册顺序自动分配。
+    - codegraph: mcp.codegraph_sse_port (单端点多租户代理, 内部按 project_id 路由 per-repo 后端)
     """
     venv_py = _venv_python(cfg)
-    mcp_proxy = _mcp_proxy_exe(cfg)
     out: list[MCPEndpoint] = []
 
     # chroma daemon。业务仓 .mcp.json 走 type:sse 直连后, 失去 launcher 的 per-session
@@ -130,40 +126,12 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     out.append(MCPEndpoint(name="cross-link", kind="cross_link", port=cl_port,
                            cmd=build_cross_link_cmd(venv_py, cl_port)))
 
-    # codegraph per-project。auto 分配端口时跳过所有显式端口 + chroma/cross-link 端口, 防撞
-    # (审计 Concern 4: 显式 18090 与 auto base 18090 会撞)。注: auto 端口随"有几个 repo 存在"
-    # 浮动 → 业务仓 .mcp.json 要连固定 URL 必须显式 pin codegraph_sse_port(config.example 已说明)。
-    projects = _cfg_get(cfg, "projects") or {}
-    reserved: set[int] = {chroma_port, cl_port}
-    for p in projects:
-        pc = projects.get(p)
-        if isinstance(pc, dict) and pc.get("codegraph_sse_port"):
-            reserved.add(int(pc["codegraph_sse_port"]))
-    auto_port = DEFAULT_CODEGRAPH_BASE_PORT
-
-    def _next_auto() -> int:
-        nonlocal auto_port
-        while auto_port in reserved:
-            auto_port += 1
-        p = auto_port
-        reserved.add(p)
-        auto_port += 1
-        return p
-
-    for pid in sorted(p for p in projects if isinstance(projects.get(p), dict)):
-        pconf = projects[pid]
-        repo = pconf.get("repo_path")
-        explicit_port = pconf.get("codegraph_sse_port")
-        if not repo:
-            continue
-        repo_path = Path(repo).expanduser()
-        if not repo_path.exists():
-            continue
-        port = int(explicit_port) if explicit_port else _next_auto()
-        out.append(MCPEndpoint(
-            name=f"codegraph:{pid}", kind="codegraph", port=port, project_id=pid,
-            cmd=build_codegraph_proxy_cmd(mcp_proxy, port), cwd=str(repo_path),
-        ))
+    # codegraph 多租户单端点 (方案 B): 平台自写代理, 按 ?project_id= 懒启动 per-repo 后端 +
+    # 转发。端口固定 mcp.codegraph_sse_port (不再 per-project 浮动); repo_path 由代理自行
+    # 从 config.projects 解析。一个进程 / 一个 systemd unit (codev-mcp-codegraph) 服务所有项目。
+    cg_port = int(_cfg_get(cfg, "mcp.codegraph_sse_port") or DEFAULT_CODEGRAPH_PORT)
+    out.append(MCPEndpoint(name="codegraph", kind="codegraph", port=cg_port,
+                           cmd=build_codegraph_cmd(venv_py, cg_port)))
     return out
 
 
