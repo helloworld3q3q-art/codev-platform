@@ -18,6 +18,8 @@ from codev_platform.reindex import runners as _runners
 from codev_platform.reindex.queue import Job, JobQueue
 
 _LOG_FILE = Path(__file__).resolve().parent / "worker.log"
+_RETRY_RC = 2          # reindex 返回 2 = 锁占用 / db busy (暂时性) → 保留重试, 不丢
+_PERIODIC_SEC = 60.0   # 周期兜底再 drain (重试 rc=2 的 job + 补漏 watch 事件)
 
 
 def _log(msg: str) -> None:
@@ -51,36 +53,79 @@ class ReindexWorker:
         self._cfg = cfg
 
     def drain_once(self) -> int:
-        """跑完当前所有 pending (串行)。返回处理 job 数。"""
+        """跑完当前所有 pending (串行)。返回处理 job 数。
+
+        跑完后按 project 刷一次 ai-health 快照 (与旧 hook 行为对齐: reindex 后快照新鲜)。
+        """
         n = 0
+        touched: dict[str, Path] = {}
         for job in self._q.pending():
-            self._run_job(job)
+            repo = self._run_job(job)
+            if repo is not None:
+                touched[job.project_id] = repo
             n += 1
+        for pid, repo in touched.items():
+            self._refresh_health(pid, repo)
         return n
 
-    def _run_job(self, job: Job) -> None:
+    def _run_job(self, job: Job) -> Path | None:
+        """跑一个 job; 返回 repo (供 drain 收集刷 health), 跳过/丢弃返回 None。"""
         runner = _runners.get_runner(job.kind)
         if runner is None:
             _log(f"未知 kind '{job.kind}' ({job.key}) — 丢弃")
             self._q.complete(job)
-            return
+            return None
         repo = _repo_for(self._cfg, job.project_id)
         if repo is None:
             _log(f"project '{job.project_id}' 无 repo_path 或不存在 — 丢弃 {job.key}")
             self._q.complete(job)
-            return
+            return None
         _log(f"reindex 开始 {job.key} (repo={repo})")
         try:
             rc = runner.run(job.project_id, repo, self._cfg)
         except Exception as exc:  # noqa: BLE001 — 单 job 失败不拖垮 worker
             _log(f"reindex 异常 {job.key}: {exc!s} — 丢弃避免死循环")
             self._q.complete(job)
-            return
+            return None
+        # rc==2 = .reindex.lock 被占 / db busy (暂时性, 与 codegraph sync rc=2 同约定):
+        # 不 complete, 保留 job 下轮重试 (不丢这次 reindex)。常态下 worker 是唯一写者,
+        # 锁不会被占; 此路径仅兜底"误手动 reindex 撞 worker"的罕见并发。
+        if rc == _RETRY_RC:
+            _log(f"reindex {job.key} 锁占用/db busy (rc=2) — 保留重试, 不丢")
+            return None
+        # 其它 rc!=0 = 真失败: complete 丢弃避免死循环 (错误已在 reindex 日志, ai-health 可见)
         dirty = not self._q.complete(job)
-        _log(f"reindex 完成 {job.key} rc={rc}" + (" (运行期又有新触发, 已重排)" if dirty else ""))
+        if rc != 0:
+            _log(f"reindex 失败 {job.key} rc={rc} — 丢弃避免死循环 (查 reindex.log)")
+            return None
+        _log(f"reindex 完成 {job.key} rc=0" + (" (运行期又有新触发, 已重排)" if dirty else ""))
+        return repo
+
+    def _refresh_health(self, project_id: str, repo: Path) -> None:
+        """best-effort: reindex 后刷该 project 的 ai-health light 快照 (失败静默)。"""
+        import subprocess
+        from codev_platform.mcp_serve import _venv_python
+        try:
+            subprocess.run(
+                [str(_venv_python(self._cfg)), "-m", "codev_platform.cli", "health",
+                 "--mode", "light", "--repo", str(repo), "--json-out"],
+                timeout=120,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     async def run_forever(self) -> None:
+        import asyncio
         _log(f"worker 启动, 监视队列 ({type(self._q).__name__})")
         self.drain_once()
+
+        async def _periodic() -> None:
+            # 周期兜底: 重试 rc=2 保留的 job + 补漏 watch 事件 (drain_once 同步阻塞,
+            # 与 watch 触发的 drain 天然串行, 单线程不会重入)。
+            while True:
+                await asyncio.sleep(_PERIODIC_SEC)
+                self.drain_once()
+
+        asyncio.create_task(_periodic())
         async for _ in self._q.watch():
             self.drain_once()

@@ -186,26 +186,21 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
     ) + "\n"
     _append_log(log_file, header)
 
-    C.out(f"[{banner}] {'+'.join(scopes)} changed, spawning reindex...")
-    C.out(f"[{banner}] index updates run (~30-90s); MCP results lag until it finishes")
-
-    py = sys.executable or "python"
-    reindex_cmd = [py, "-m", "codev_platform.cli", "reindex", "--repo", str(repo)]
-    if "chroma" in scopes:
-        reindex_cmd.append("--chroma")
-    if "cross_link" in scopes:
-        reindex_cmd.append("--cross-link")
-    if "codegraph" in scopes:
-        reindex_cmd.append("--codegraph")
-    health_cmd = [py, "-m", "codev_platform.cli", "health",
-                  "--mode", "light", "--repo", str(repo), "--json-out"]
+    # 写侧走队列: hook 只 enqueue 即返回, 常驻 codev-reindex worker 串行消费 (合并/不丢尾/
+    # 不并发写)。worker 跑完会刷 ai-health 快照, 故此处不再 spawn reindex / health。
+    # scoped 的 key (chroma/cross_link/codegraph) 即 runner kind, 直接入队。
+    from codev_platform.reindex import open_default_queue
+    q = open_default_queue()
+    for kind in scopes:
+        q.enqueue(pid, kind)
+    _append_log(log_file, f"enqueued -> codev-reindex worker: {pid} -> {', '.join(scopes)}\n")
+    C.out(f"[{banner}] {'+'.join(scopes)} changed → 入队 (codev-reindex worker 串行消费)")
 
     if foreground:
-        self_rc = _run_logged_foreground(reindex_cmd, log_file)
-        _finish_log(log_file, self_rc)
-        _run_health_refresh(health_cmd, log_file)
-    else:
-        _spawn_background(reindex_cmd, log_file, health_cmd)
+        # 前台调用 (手动 / 调试): 当场串行 drain, 不依赖常驻 worker
+        from codev_platform.core.config import load_config
+        from codev_platform.reindex import ReindexWorker
+        ReindexWorker(q, load_config()).drain_once()
     return 0
 
 
