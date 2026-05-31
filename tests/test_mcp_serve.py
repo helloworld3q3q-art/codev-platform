@@ -9,13 +9,10 @@ from codev_platform import mcp_serve as ms
 from codev_platform.mcp_serve import MCPEndpoint
 
 
-def test_build_codegraph_proxy_cmd_has_separator_and_mcp():
-    cmd = ms.build_codegraph_proxy_cmd("mcp-proxy", 18091)
-    assert cmd[:5] == ["mcp-proxy", "--port", "18091", "--host", "127.0.0.1"]
-    # `--` 分隔后才是 stdio 命令, 否则 --mcp 被 argparse 当 proxy 选项吃掉
-    assert "--" in cmd
-    sep = cmd.index("--")
-    assert cmd[sep + 1:] == ["codegraph", "serve", "--mcp"]
+def test_build_codegraph_cmd():
+    # codegraph 已从 mcp-proxy 包 stdio 改为平台自写多租户 HTTP 代理 (codev_platform.codegraph.server)
+    cmd = ms.build_codegraph_cmd("py", 18091)
+    assert cmd == ["py", "-m", "codev_platform.codegraph.server", "--http", "--port", "18091"]
 
 
 def test_build_cross_link_cmd():
@@ -23,14 +20,15 @@ def test_build_cross_link_cmd():
     assert cmd == ["py", "-m", "codev_platform.cross_link.server", "--http", "--port", "18086"]
 
 
-def test_endpoint_health_url_only_for_http_kinds():
+def test_endpoint_health_url_for_all_kinds():
     chroma = MCPEndpoint(name="platform-docs", kind="chroma", port=18083)
     cl = MCPEndpoint(name="cross-link", kind="cross_link", port=18086)
-    cg = MCPEndpoint(name="codegraph:x", kind="codegraph", port=18090)
+    cg = MCPEndpoint(name="codegraph", kind="codegraph", port=18091)
     assert chroma.health_url.endswith(":18083/health")
     assert cl.health_url.endswith(":18086/health")
-    assert cg.health_url is None  # mcp-proxy 无 /health → TCP 探
-    assert cg.sse_url == "http://127.0.0.1:18090/sse"
+    # codegraph 改平台自写多租户代理后也自带 /health (不再 mcp-proxy 无 health → TCP)
+    assert cg.health_url.endswith(":18091/health")
+    assert cg.sse_url == "http://127.0.0.1:18091/sse"
 
 
 def test_iter_endpoints_always_has_chroma_and_cross_link(tmp_path):
@@ -44,54 +42,33 @@ def test_iter_endpoints_always_has_chroma_and_cross_link(tmp_path):
     assert kinds["cross_link"].port == 18086 and kinds["cross_link"].cmd is not None
 
 
-def test_iter_endpoints_codegraph_per_project_with_existing_repo(tmp_path):
-    repo_a = tmp_path / "repo_a"
-    repo_a.mkdir()
+def test_iter_endpoints_codegraph_single_multitenant(tmp_path):
+    # codegraph 已从 per-project 多端点改为单端点多租户代理 (按 ?project_id= 路由 per-repo 后端)
     cfg = {
         "daemon": {"port": 18083},
+        "mcp": {"codegraph_sse_port": 18095},
         "projects": {
-            "proj-a": {"repo_path": str(repo_a), "codegraph_sse_port": 18095},
-            "proj-missing": {"repo_path": str(tmp_path / "nope")},  # 仓不存在 → 跳过
-            "proj-norepo": {"codegraph_api_url": "http://x"},        # 无 repo_path → 跳过
+            "proj-a": {"repo_path": str(tmp_path / "repo_a")},
+            "proj-b": {"repo_path": str(tmp_path / "repo_b")},
         },
     }
     eps = ms.iter_endpoints(cfg)
     cg = [e for e in eps if e.kind == "codegraph"]
+    # 不管几个项目, 只产出一个 codegraph 端点
     assert len(cg) == 1
-    assert cg[0].project_id == "proj-a"
-    assert cg[0].port == 18095
-    assert cg[0].cwd == str(repo_a)
-    assert cg[0].name == "codegraph:proj-a"
+    assert cg[0].project_id is None          # 多租户单端点, 业务仓走 ?project_id=
+    assert cg[0].port == 18095               # config mcp.codegraph_sse_port 覆盖默认
+    assert cg[0].cwd is None                 # repo_path 由代理内部从 config.projects 解析
+    assert cg[0].name == "codegraph"
+    assert "codev_platform.codegraph.server" in cg[0].cmd
 
 
-def test_iter_endpoints_auto_assigns_port_when_unset(tmp_path):
-    r1 = tmp_path / "r1"; r1.mkdir()
-    r2 = tmp_path / "r2"; r2.mkdir()
-    cfg = {"projects": {
-        "p1": {"repo_path": str(r1)},   # 无显式端口 → auto base
-        "p2": {"repo_path": str(r2)},   # 无显式端口 → auto base+1
-    }}
+def test_iter_endpoints_codegraph_default_port(tmp_path):
+    # 未配 mcp.codegraph_sse_port → 落 DEFAULT_CODEGRAPH_PORT
+    cfg = {"daemon": {"port": 18083}, "projects": {}}
     cg = [e for e in ms.iter_endpoints(cfg) if e.kind == "codegraph"]
-    ports = sorted(e.port for e in cg)
-    assert ports == [ms.DEFAULT_CODEGRAPH_BASE_PORT, ms.DEFAULT_CODEGRAPH_BASE_PORT + 1]
-
-
-def test_auto_port_skips_explicit_and_reserved(tmp_path):
-    # 审计 Concern 4: auto 端口不得撞显式端口或 chroma/cross-link 端口
-    r1 = tmp_path / "r1"; r1.mkdir()
-    r2 = tmp_path / "r2"; r2.mkdir()
-    cfg = {
-        "daemon": {"port": 18083},
-        "mcp": {"cross_link_sse_port": 18086},
-        "projects": {
-            "p-explicit": {"repo_path": str(r1), "codegraph_sse_port": ms.DEFAULT_CODEGRAPH_BASE_PORT},
-            "p-auto": {"repo_path": str(r2)},  # 不能拿到 DEFAULT_CODEGRAPH_BASE_PORT(被 explicit 占)
-        },
-    }
-    cg = {e.project_id: e.port for e in ms.iter_endpoints(cfg) if e.kind == "codegraph"}
-    assert cg["p-explicit"] == ms.DEFAULT_CODEGRAPH_BASE_PORT
-    assert cg["p-auto"] != cg["p-explicit"]          # 无撞
-    assert cg["p-auto"] not in {18083, 18086}        # 不撞 chroma/cross-link
+    assert len(cg) == 1
+    assert cg[0].port == ms.DEFAULT_CODEGRAPH_PORT
 
 
 def test_probe_http_kind_uses_health(monkeypatch):
@@ -101,11 +78,12 @@ def test_probe_http_kind_uses_health(monkeypatch):
     assert ms.probe(ep) == "ok"
 
 
-def test_probe_codegraph_uses_tcp(monkeypatch):
-    monkeypatch.setattr(ms, "_http_health", lambda url, timeout=2.0: True)  # 不应被调用
-    monkeypatch.setattr(ms, "_tcp_open", lambda h, p, timeout=2.0: False)
-    ep = MCPEndpoint(name="codegraph:x", kind="codegraph", port=18090)
-    assert ms.probe(ep) == "down"
+def test_probe_codegraph_uses_health(monkeypatch):
+    # codegraph 改平台自写代理后自带 /health, probe 走 _http_health (不再 TCP)
+    monkeypatch.setattr(ms, "_http_health", lambda url, timeout=2.0: True)
+    monkeypatch.setattr(ms, "_tcp_open", lambda h, p, timeout=2.0: False)  # 不应被调用
+    ep = MCPEndpoint(name="codegraph", kind="codegraph", port=18091)
+    assert ms.probe(ep) == "ok"
 
 
 def test_probe_all_shape(monkeypatch):

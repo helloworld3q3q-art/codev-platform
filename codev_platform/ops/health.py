@@ -56,6 +56,7 @@ from codev_platform.ops._common import (
     resolve_repo,
     run,
 )
+from codev_platform.core.paths import chroma_dir
 
 
 # ----------------------------------------------------------------------
@@ -878,7 +879,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     health = meta_health(args.project or project_id_of(repo))
 
     chroma_py = chroma_python()
-    chroma_data = cdv_root / "data" / "chroma"
+    chroma_data = chroma_dir()
     chroma_pkg = cdv_root / "codev_platform" / "chroma"
 
     out(f"=== codev-platform health (mode={args.mode}) ===")

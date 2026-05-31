@@ -13,9 +13,10 @@ from pathlib import Path
 
 
 def resolve_project_id(explicit: str | None) -> str:
-    """explicit 优先;否则从 cwd 推导(单项目兼容)。"""
+    """explicit 优先(同样走 validate 校验,防路径穿越);否则从 cwd 推导(单项目兼容)。"""
     if explicit:
-        return explicit
+        from codev_platform.core.project_id import validate
+        return validate(explicit)
     from codev_platform.core.project_id import resolve_local
     return resolve_local()
 

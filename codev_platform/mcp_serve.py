@@ -189,7 +189,7 @@ def _tcp_open(host: str, port: int, timeout: float = 2.0) -> bool:
 
 
 def probe(ep: MCPEndpoint) -> str:
-    """探一个端点: 'ok' / 'down'。chroma/cross-link 用 /health, codegraph 用 TCP。"""
+    """探一个端点: 'ok' / 'down'。三套均自带 /health(走 _http_health);无 health_url 才退回 TCP。"""
     if ep.health_url:
         return "ok" if _http_health(ep.health_url) else "down"
     return "ok" if _tcp_open(ep.host, ep.port) else "down"
@@ -208,12 +208,18 @@ def probe_all(cfg: dict | None = None) -> list[dict[str, Any]]:
     return rows
 
 
-def _spawn_detached(cmd: list[str], cwd: str | None, log_path: Path) -> int:
-    """detached spawn (会话关了仍活), 复用 chroma launcher 的 Windows creationflags。"""
+def _spawn_detached(cmd: list[str], cwd: str | None, log_path: Path,
+                    env: dict[str, str] | None = None) -> int:
+    """detached spawn (会话关了仍活), 复用 chroma launcher 的 Windows creationflags。
+
+    env=None → 继承 os.environ.copy(); 传入则用调用方覆盖后的环境 (如 chroma 注入
+    PLATFORM_DOCS_DAEMON_PORT, 与 systemd unit 对齐)。
+    """
     if sys.platform == "win32":
         creationflags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
     else:
         creationflags = 0
+    spawn_env = env if env is not None else os.environ.copy()
     log_handle = open(log_path, "ab", buffering=0)
     try:
         # Linux: start_new_session=True (setsid) 让子进程脱离当前会话, 避免拉起它的
@@ -221,7 +227,7 @@ def _spawn_detached(cmd: list[str], cwd: str | None, log_path: Path) -> int:
         proc = subprocess.Popen(
             cmd, cwd=cwd, stdin=subprocess.DEVNULL,
             stdout=log_handle, stderr=log_handle,
-            creationflags=creationflags, close_fds=False, env=os.environ.copy(),
+            creationflags=creationflags, close_fds=False, env=spawn_env,
             start_new_session=(sys.platform != "win32"),
         )
         return proc.pid
@@ -254,7 +260,15 @@ def ensure_serving(cfg: dict | None = None) -> list[dict[str, Any]]:
             results.append({"name": ep.name, "action": "fail", "status": "down",
                             "error": f"可执行不存在: {exe}"})
             continue
-        pid = _spawn_detached(ep.cmd, ep.cwd, log_dir / f"{ep.name.replace(':', '_')}.log")
+        # chroma: server.py 只认 env PLATFORM_DOCS_DAEMON_PORT (不读 config.daemon.port),
+        # 须显式注入 ep.port, 否则配了 daemon.port=19083 时 spawn 的 chroma 仍绑默认 18083 →
+        # 探测 ep.port 报 down。prewarm 让 daemon 起来即加载模型 (与 systemd unit 对齐)。
+        spawn_env = None
+        if ep.kind == "chroma":
+            spawn_env = {**os.environ, "PLATFORM_DOCS_DAEMON_PORT": str(ep.port),
+                         "PLATFORM_DOCS_PREWARM": "true"}
+        pid = _spawn_detached(ep.cmd, ep.cwd, log_dir / f"{ep.name.replace(':', '_')}.log",
+                              env=spawn_env)
         note = "chroma daemon 预热模型 ~30-60s" if ep.kind == "chroma" else ""
         results.append({"name": ep.name, "action": "spawned", "status": "starting",
                         "pid": pid, "note": note})

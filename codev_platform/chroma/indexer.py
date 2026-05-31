@@ -87,7 +87,10 @@ from codev_platform.chroma.chunking import (  # noqa: E402
 
 # manifest schema version — 改 chunk 策略 / metadata 结构时升级,自动触发 full rebuild
 MANIFEST_VERSION = 1
-MANIFEST_PATH = PERSIST_DIR / "index_manifest.json"
+# per-project manifest：COLLECTION_NAME 是 <project_id>__platform_docs，manifest 也必须按 project 隔离，
+# 否则多项目轮流 reindex 会互相覆盖同一份全局 manifest，导致增量退化 / 留孤儿。
+# 旧全局 index_manifest.json 自然废弃（首次 per-project reindex 重建，留着无害）。
+MANIFEST_PATH = PERSIST_DIR / f"index_manifest.{PROJECT_ID}.json"
 
 logging.basicConfig(
     level=logging.INFO,
