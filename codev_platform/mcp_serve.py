@@ -211,10 +211,13 @@ def _spawn_detached(cmd: list[str], cwd: str | None, log_path: Path) -> int:
         creationflags = 0
     log_handle = open(log_path, "ab", buffering=0)
     try:
+        # Linux: start_new_session=True (setsid) 让子进程脱离当前会话, 避免拉起它的
+        # shell / wsl 调用退出时 SIGHUP 连带杀掉 daemon (Windows 用 creationflags 已脱离)。
         proc = subprocess.Popen(
             cmd, cwd=cwd, stdin=subprocess.DEVNULL,
             stdout=log_handle, stderr=log_handle,
             creationflags=creationflags, close_fds=False, env=os.environ.copy(),
+            start_new_session=(sys.platform != "win32"),
         )
         return proc.pid
     finally:
@@ -256,9 +259,10 @@ def ensure_serving(cfg: dict | None = None) -> list[dict[str, Any]]:
 # ----------------------------------------------------------------------
 # systemd 常驻 (Linux): 按 config 生成 unit, 开机自起 + 挂了自动重启。
 # 复用 iter_endpoints 的 cmd/cwd, 路径/端口全来自 config —— 任意 Linux 部署可复现。
-# chroma 是 GPU daemon, 默认不纳入 (另管); 只为 cross-link + codegraph 生成。
+# chroma 也纳入 (GPU daemon): server.py 端口走 PLATFORM_DOCS_DAEMON_PORT env, prewarm
+# 让 systemd 起来即加载模型 —— 两者由 render_systemd_units 按 ep.kind=='chroma' 注入。
 # ----------------------------------------------------------------------
-SYSTEMD_KINDS = ("cross_link", "codegraph")
+SYSTEMD_KINDS = ("chroma", "cross_link", "codegraph")
 
 
 def systemd_unit_name(ep: MCPEndpoint) -> str:
@@ -275,6 +279,18 @@ def render_systemd_units(cfg: dict, user: str, *, kinds=SYSTEMD_KINDS) -> dict[s
         if ep.kind not in kinds or not ep.cmd:
             continue
         execstart = " ".join(shlex.quote(c) for c in ep.cmd)
+        env_lines = f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        workdir = ep.cwd or home
+        # chroma daemon 的监听端口走 PLATFORM_DOCS_DAEMON_PORT env (server.py 不读
+        # config.daemon.port, 见 server.py:main); prewarm 让 unit 起来即加载 GPU 模型,
+        # 避免业务仓首个 search_docs 冷启动 60s 超时。端口仍来自 config (ep.port)。
+        # 启动时 server.py resolve_local() 需解析 project_id; systemd 默认 cwd(home)无
+        # .claude/project.json → 把 WorkingDirectory 指到平台仓根(本包上一级, 该处 project.json
+        # = codev-platform), daemon 以此为 home 项目, 业务仓仍按 ?project_id= 多租户路由。
+        if ep.kind == "chroma":
+            env_lines += f"Environment=PLATFORM_DOCS_DAEMON_PORT={ep.port}\n"
+            env_lines += "Environment=PLATFORM_DOCS_PREWARM=true\n"
+            workdir = ep.cwd or str(Path(__file__).resolve().parent.parent)
         units[f"{systemd_unit_name(ep)}.service"] = (
             "[Unit]\n"
             f"Description=codev MCP endpoint {ep.name} (port {ep.port})\n"
@@ -282,8 +298,8 @@ def render_systemd_units(cfg: dict, user: str, *, kinds=SYSTEMD_KINDS) -> dict[s
             "[Service]\n"
             "Type=simple\n"
             f"User={user}\n"
-            f"WorkingDirectory={ep.cwd or home}\n"
-            f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+            f"WorkingDirectory={workdir}\n"
+            f"{env_lines}"
             f"ExecStart={execstart}\n"
             "Restart=always\n"
             "RestartSec=3\n\n"
@@ -299,6 +315,7 @@ def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
     不在此直接 sudo: sudo 会切到 root 的 HOME → 读错 config。生成归生成(用户态),
     装到 /etc/systemd/system + enable 归 root(打印命令让用户跑)。
     """
+    import shlex
     units = render_systemd_units(cfg, user)
     out_dir = Path.home() / "codev-systemd"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -308,11 +325,23 @@ def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
         p.write_text(content, encoding="utf-8")
         paths.append(p)
     svc_names = [p.name for p in paths]
-    cp_src = " ".join(str(p) for p in paths)
-    enable = " ".join(p.stem for p in paths)
-    sudo_cmd = (
-        f"sudo cp {cp_src} /etc/systemd/system/ && "
-        f"sudo systemctl daemon-reload && "
-        f"sudo systemctl enable --now {enable}"
-    ) if paths else "(无可安装的端点: 检查 config.projects 是否配了 repo_path)"
+    stems = [p.stem for p in paths]
+    # 同时写一个 install.sh: 单条 `sudo bash <dir>/install.sh` 即可装, 避免长命令多行
+    # 粘贴在终端被换行拆断 (cp 多文件 + && 链很容易折行)。用 restart 而非 enable --now,
+    # 这样重复执行 / unit 内容变更时能真正重启生效; enable(不带 --now)只设开机自起。
+    if paths:
+        lines = ["#!/usr/bin/env bash", "set -e"]
+        lines += [f"cp {shlex.quote(str(p))} /etc/systemd/system/" for p in paths]
+        lines.append("systemctl daemon-reload")
+        lines.append("systemctl enable " + " ".join(stems))
+        # reset-failed 清掉可能的 start-limit (崩溃重启过多会进 failed 态, 否则 restart 被拒)
+        lines.append("systemctl reset-failed " + " ".join(stems) + " 2>/dev/null || true")
+        lines.append("systemctl restart " + " ".join(stems))
+        lines.append('echo "[install.sh] done"')
+        install_sh = out_dir / "install.sh"
+        install_sh.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        install_sh.chmod(0o755)
+        sudo_cmd = f"sudo bash {install_sh}"
+    else:
+        sudo_cmd = "(无可安装的端点: 检查 config.projects 是否配了 repo_path)"
     return {"dir": str(out_dir), "units": svc_names, "sudo_cmd": sudo_cmd}
