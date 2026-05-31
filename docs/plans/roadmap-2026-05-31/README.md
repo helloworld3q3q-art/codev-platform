@@ -12,6 +12,7 @@
 |---|---|---|
 | [multi-org-server-hardening-2026-05-31.md](multi-org-server-hardening-2026-05-31.md) | 全量现状盘点(A 安全/B 可靠/C 运维/D 体验/E agent/F 索引)+ 优先级路线 + **ACL 项目隔离(模型 C)详细设计** + 后续阶段 backlog | 🚧 ACL 开发中 |
 | [token-auth-enablement-2026-06-01.md](token-auth-enablement-2026-06-01.md) | Token 模式启用 runbook —— dev passthrough → prod token 完整操作流(项目登记 org / 建 token / 切模式 / 重启服务 / 客户端注入)+ 验证 / 回退 / 审计日志字段说明 | ✅ |
+| [remote-access-reverse-proxy-2026-06-01.md](remote-access-reverse-proxy-2026-06-01.md) | Caddy 反代 + TLS runbook(远程多机访问)—— 拓扑 + Caddyfile 路径前缀路由(与 `gateway client-url` 前缀严格一致) + 客户端 client-url/client-auth 操作 + health 探针 + 安全清单 | ✅ |
 
 ## 关联
 

@@ -442,7 +442,10 @@ def _daemon_port(cfg: dict) -> str:
 
 
 def _check_daemon(r: Report, port: str) -> None:
-    url = f"http://127.0.0.1:{port}/health"
+    # 审计 #4: PUBLIC /healthz 只给最小存活/就绪 (200 ready / 503 prewarming);
+    # 详情 (model/reranker/collection/project) 在鉴权后的 /platform/health
+    # (passthrough 模式本机 ai-health 可直读; token 模式无 Bearer 会 401 → 退回最小存活展示)。
+    url = f"http://127.0.0.1:{port}/platform/health"
     try:
         with urllib.request.urlopen(url, timeout=2) as resp:
             body = resp.read().decode("utf-8", "replace")
@@ -455,6 +458,10 @@ def _check_daemon(r: Report, port: str) -> None:
         if e.code == 503:
             r.line("platform-docs daemon", "INFO",
                    f"port={port} starting (prewarming Qwen models, 30-60s typical)")
+        elif e.code == 401:
+            # token 模式: 详情面需鉴权, ai-health 不带 token → 退回 PUBLIC /healthz 探存活。
+            r.line("platform-docs daemon", "OK",
+                   f"port={port} up (detail /platform/health needs auth in token mode)")
         else:
             r.line("platform-docs daemon", "INFO", f"port={port} http {e.code}")
     except Exception:

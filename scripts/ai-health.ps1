@@ -397,12 +397,12 @@ if (Test-Path $ChromaData) {
 }
 
 # 4b2. platform-docs daemon (multi-session GPU sharing, 2026-05-24)
-# Detects: HTTP daemon health (/health endpoint) + duplicate mcp_server processes.
-# Daemon mode is the only viable path on 8GB GPU where per-session stdio mcp_server
-# would CUDA OOM at the 2nd session.
+# Audit #4: public /healthz returns minimal liveness only; detail (model/reranker/
+# collection/project) moved to authenticated /platform/health (passthrough mode lets
+# local ai-health read it; token mode without Bearer returns 401 -> show liveness only).
 $DaemonPort = if ($env:PLATFORM_DOCS_DAEMON_PORT) { $env:PLATFORM_DOCS_DAEMON_PORT } elseif (Get-CfgPath 'daemon.port') { Get-CfgPath 'daemon.port' } else { '18083' }
 try {
-    $req = [System.Net.WebRequest]::Create('http://127.0.0.1:' + $DaemonPort + '/health')
+    $req = [System.Net.WebRequest]::Create('http://127.0.0.1:' + $DaemonPort + '/platform/health')
     $req.Timeout = 2000
     $req.Method = 'GET'
     $resp = $req.GetResponse()
@@ -418,8 +418,11 @@ try {
     }
 } catch {
     $we = $_.Exception
-    if ($we.InnerException -and $we.InnerException.Response -and ([int]$we.InnerException.Response.StatusCode) -eq 503) {
+    $code = if ($we.InnerException -and $we.InnerException.Response) { [int]$we.InnerException.Response.StatusCode } else { 0 }
+    if ($code -eq 503) {
         Line 'platform-docs daemon' 'INFO' ('port=' + $DaemonPort + ' starting (prewarming Qwen models, 30-60s typical)')
+    } elseif ($code -eq 401) {
+        Line 'platform-docs daemon' 'OK' ('port=' + $DaemonPort + ' up (detail /platform/health needs auth in token mode)')
     } else {
         Line 'platform-docs daemon' 'INFO' ('port=' + $DaemonPort + ' not running (auto-spawn on first Claude Code session via launcher)')
     }

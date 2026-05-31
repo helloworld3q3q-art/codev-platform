@@ -1,7 +1,7 @@
 """codev_platform.ops.webhook —— webhook 接收器 CLI 薄壳。
 
   webhook serve [--port N]   跑接收器 (systemd codev-webhook 常驻)
-  webhook status             查 /health
+  webhook status             查 /healthz
 
 只调 codev_platform.webhook.server, 不含逻辑。
 """
@@ -30,7 +30,7 @@ def cmd_webhook(args: argparse.Namespace) -> int:
         import urllib.request
         port = args.port or _server.webhook_port()
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3) as r:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=3) as r:
                 _out(f"webhook: OK :{port}  {r.read().decode('utf-8')}")
                 return 0
         except Exception as exc:  # noqa: BLE001

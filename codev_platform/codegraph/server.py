@@ -337,7 +337,13 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
             _current_project_id.reset(token)
             _flog(f"[sse] session end project_id={pid}")
 
-    async def health(_request):
+    async def healthz(_request):
+        # PUBLIC 存活探针: 仅最小信息, 不泄敏 (审计 #4 — 旧 /health 泄露
+        # default_project_id / live_backends)。详情走鉴权的 /platform/status。
+        return JSONResponse({"status": "ok", "service": "codegraph"})
+
+    async def platform_status(_request):
+        # 鉴权后详情面 (不在 public_paths): 报默认 project + 活跃后端。
         return JSONResponse({
             "status": "ok",
             "service": "codegraph",
@@ -348,7 +354,9 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
     app = Starlette(
         debug=False,
         routes=[
-            Route("/health", health, methods=["GET"]),
+            Route("/healthz", healthz, methods=["GET"]),
+            Route("/health", healthz, methods=["GET"]),  # backward-compat public alias (最小)
+            Route("/platform/status", platform_status, methods=["GET"]),  # 鉴权: 详情
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],
@@ -356,7 +364,7 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
             Middleware(
                 AuthMiddleware,
                 authenticator=build_authenticator(load_config()),
-                public_paths={"/health"},
+                public_paths={"/healthz", "/health"},
             ),
         ],
     )

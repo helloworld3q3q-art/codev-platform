@@ -6,6 +6,8 @@
   gateway token-rm <user|hash前缀>     删 token
   gateway client-auth [--repo] [--remove] [--env PLATFORM_TOKEN]
                                        给业务仓 .mcp.json 各 server 注入/移除 Authorization header
+  gateway client-url --base https://host [--repo]
+                                       把 .mcp.json 各 sse server 的 url 重写成远程反代地址 (按服务名做路径前缀)
 
 服务端逻辑复用 gateway/auth.py (token_hash + TokenAuthenticator); 本模块只做 config 管理 + .mcp.json 改写。
 """
@@ -136,18 +138,64 @@ def cmd_gateway(args: argparse.Namespace) -> int:
             _out(f"  客户端 shell: export {args.env}='<token>' (gateway token-add 拿到的明文), 再重启 Claude Code")
         return 0
 
+    if args.action == "client-url":
+        from urllib.parse import urlsplit, urlunsplit
+
+        base = (args.base or "").strip()
+        if not (base.startswith("http://") or base.startswith("https://")):
+            _err("FATAL: client-url 需 --base https://host (必须 http(s):// 开头)")
+            return 1
+        base = base.rstrip("/")
+        repo = Path(args.repo).expanduser().resolve() if args.repo else Path.cwd()
+        mcp_json = repo / ".mcp.json"
+        if not mcp_json.is_file():
+            _err(f"FATAL: 未找到 {mcp_json}")
+            return 1
+        data = json.loads(mcp_json.read_text(encoding="utf-8"))
+        servers = data.get("mcpServers", {})
+        changed = 0
+        for name, conf in servers.items():
+            if not isinstance(conf, dict) or conf.get("type") != "sse":
+                continue
+            old_url = conf.get("url", "")
+            # 按 server 名做路径前缀 (最稳, 不依赖原 url path 解析):
+            #   platform-docs -> {base}/platform-docs/sse, cross-link -> {base}/cross-link/sse ...
+            # 保留原 query (?project_id=...)。
+            query = urlsplit(old_url).query if old_url else ""
+            new_url = urlunsplit(("", "", f"{base}/{name}/sse", query, ""))
+            conf["url"] = new_url
+            _out(f"  {name}:")
+            _out(f"    旧 {old_url or '(无)'}")
+            _out(f"    新 {new_url}")
+            changed += 1
+        mcp_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _out(f"OK: {mcp_json}  重写 {changed} 个 sse server url -> {base}/<server>/sse")
+        # 反代端口取自 config (非写死), 任何机器自洽: 默认 18xxx, 本机若改过 (如 19xxx) 这里如实打印。
+        _cfg = load_config()
+        _ports = {
+            "platform-docs": get(_cfg, "daemon.port", 18083),
+            "cross-link": get(_cfg, "mcp.cross_link_sse_port", 18086),
+            "codegraph": get(_cfg, "mcp.codegraph_sse_port", 18091),
+            "webhook": get(_cfg, "webhook.port", 18099),
+        }
+        _out("  反代须按同前缀路由到对应本机端口 (取自你的 config; 见反代 runbook):")
+        for _n, _p in _ports.items():
+            _out(f"    /{_n}/* -> 127.0.0.1:{_p}")
+        return 0
+
     _err(f"unknown action: {args.action}")
     return 1
 
 
 def register(subparsers) -> None:
-    gw = subparsers.add_parser("gateway", help="gateway 鉴权管理 (mode / token-add / token-list / token-rm / client-auth)")
-    gw.add_argument("action", choices=["mode", "token-add", "token-list", "token-rm", "client-auth"])
+    gw = subparsers.add_parser("gateway", help="gateway 鉴权管理 (mode / token-add / token-list / token-rm / client-auth / client-url)")
+    gw.add_argument("action", choices=["mode", "token-add", "token-list", "token-rm", "client-auth", "client-url"])
     gw.add_argument("arg", nargs="?", default=None, help="mode: passthrough|token; token-add/rm: user")
     gw.add_argument("--org", default="default", help="token-add: org_id (默认 default)")
     gw.add_argument("--projects", default=None,
                     help="token-add: 可访问项目, 逗号分隔 pid1,pid2 或 '*' 全部; 缺省=无权")
-    gw.add_argument("--repo", default=None, help="client-auth: 业务仓路径 (默认 cwd)")
+    gw.add_argument("--repo", default=None, help="client-auth/client-url: 业务仓路径 (默认 cwd)")
+    gw.add_argument("--base", default=None, help="client-url: 远程反代基地址 (https://host)")
     gw.add_argument("--env", default="PLATFORM_TOKEN", help="client-auth: header 引用的 env 变量名")
     gw.add_argument("--remove", action="store_true", help="client-auth: 移除 Authorization header")
     gw.set_defaults(func=cmd_gateway)

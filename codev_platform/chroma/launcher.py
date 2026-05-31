@@ -38,7 +38,9 @@ from codev_platform.core.project_id import ProjectIdError, resolve_local
 
 DAEMON_PORT = int(os.getenv("PLATFORM_DOCS_DAEMON_PORT", "18083"))
 DAEMON_URL = f"http://127.0.0.1:{DAEMON_PORT}"
-DAEMON_HEALTH_URL = f"{DAEMON_URL}/health"
+# 审计 #4: 探活/就绪走 PUBLIC /healthz (最小, 不泄敏, token 模式也无需 Bearer)。
+# /healthz 仍返回 200(ready) / 503(prewarming) + tenant_mode(非敏感常量), 满足 launcher 就绪门控。
+DAEMON_HEALTH_URL = f"{DAEMON_URL}/healthz"
 # DAEMON_SSE_URL 在 main() 里按 resolved project_id 拼 ?project_id= (multi-tenant)
 DAEMON_SSE_URL_BASE = f"{DAEMON_URL}/sse"
 DAEMON_READY_TIMEOUT = float(os.getenv("PLATFORM_DOCS_DAEMON_READY_TIMEOUT", "90"))

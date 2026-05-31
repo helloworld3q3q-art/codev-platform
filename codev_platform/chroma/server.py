@@ -1008,8 +1008,26 @@ async def _run_http(port: int) -> None:
             _sse_sessions = max(0, _sse_sessions - 1)
             _flog(f"[sse] session end project_id={pid} (active={_sse_sessions})")
 
+    async def healthz(_request):
+        # PUBLIC 存活/就绪探针: 仅最小信息, 不泄敏 (审计 #4 — /health 旧版泄露
+        # default_project_id / loaded_projects / backends)。launcher 仅需就绪状态码
+        # (200 ready / 503 starting) + tenant_mode (非敏感常量); 详情走鉴权的
+        # /platform/health。
+        model_ready = _model is not None
+        any_collection_ready = any(p.collection is not None for p in _projects.values())
+        all_ready = model_ready and any_collection_ready
+        return JSONResponse(
+            {
+                "status": "ok" if all_ready else "starting",
+                "service": "platform-docs",
+                "tenant_mode": "multi",
+            },
+            status_code=200 if all_ready else 503,
+        )
+
     async def health(_request):
-        # daemon ready 判定: launcher 用此判定是否需要等模型加载完
+        # 鉴权后详情面 (挂 /platform/health, 不在 public_paths): 报所有 loaded projects +
+        # 默认 project_id + stats + GPU。token 模式需 Bearer; passthrough 模式本机放行。
         # multi-tenant: 报告所有 loaded projects + 默认 project_id (向后兼容字段保留)
         model_ready = _model is not None
         loaded = []
@@ -1096,14 +1114,17 @@ async def _run_http(port: int) -> None:
 
     # 统一认证拦截: 复用 gateway 的纯 ASGI 中间件 (SSE 安全 + 高并发, 不缓冲 /sse 长连接)。
     # passthrough 模式非破坏 (无身份头 → local/default); token 模式对外按 Bearer 鉴权。
-    # /health 留 public 作存活探针 (ai-health / 子应用健康检查不带 token 也能探)。
+    # public_paths 仅 /healthz (最小存活探针, 不泄敏); 详情面 /platform/health + /platform/status
+    # 受鉴权保护 (审计 #4)。/health 保留为 /healthz 的 public 别名 (老探针向后兼容, 同样最小)。
     from starlette.middleware import Middleware
     from codev_platform.gateway import AuthMiddleware, build_authenticator
 
     app = Starlette(
         debug=False,
         routes=[
-            Route("/health", health, methods=["GET"]),
+            Route("/healthz", healthz, methods=["GET"]),
+            Route("/health", healthz, methods=["GET"]),  # backward-compat public alias (最小)
+            Route("/platform/health", health, methods=["GET"]),  # 鉴权: daemon 详情
             Route("/platform/status", platform_status, methods=["GET"]),
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
@@ -1112,7 +1133,7 @@ async def _run_http(port: int) -> None:
             Middleware(
                 AuthMiddleware,
                 authenticator=build_authenticator(load_config()),
-                public_paths={"/health"},
+                public_paths={"/healthz", "/health"},
             ),
         ],
     )

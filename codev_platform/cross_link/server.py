@@ -566,8 +566,13 @@ async def run_http(port: int = _CL_SSE_PORT) -> None:
             _current_project_id.reset(token)
             _flog(f"[sse] session end project_id={pid}")
 
-    async def health(_request):
-        # 存活探针: 报已加载 project 的连接状态 (不强制任何 project 可用)。
+    async def healthz(_request):
+        # PUBLIC 存活探针: 仅最小信息, 不泄敏 (审计 #4 — 旧 /health 泄露
+        # default_project_id / loaded_projects / init_errors)。详情走鉴权的 /platform/status。
+        return JSONResponse({"status": "ok", "service": "cross-link"})
+
+    async def platform_status(_request):
+        # 鉴权后详情面 (不在 public_paths): 报已加载 project 的连接状态 + 错误细节。
         seen = set(list(_conns) + list(_init_errors) + list(_missing_db))
         loaded = {pid: (pid in _conns) for pid in seen}
         return JSONResponse({
@@ -582,7 +587,9 @@ async def run_http(port: int = _CL_SSE_PORT) -> None:
     app = Starlette(
         debug=False,
         routes=[
-            Route("/health", health, methods=["GET"]),
+            Route("/healthz", healthz, methods=["GET"]),
+            Route("/health", healthz, methods=["GET"]),  # backward-compat public alias (最小)
+            Route("/platform/status", platform_status, methods=["GET"]),  # 鉴权: 详情
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],
@@ -590,7 +597,7 @@ async def run_http(port: int = _CL_SSE_PORT) -> None:
             Middleware(
                 AuthMiddleware,
                 authenticator=build_authenticator(load_config()),
-                public_paths={"/health"},
+                public_paths={"/healthz", "/health"},
             ),
         ],
     )

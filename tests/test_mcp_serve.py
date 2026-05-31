@@ -24,10 +24,11 @@ def test_endpoint_health_url_for_all_kinds():
     chroma = MCPEndpoint(name="platform-docs", kind="chroma", port=18083)
     cl = MCPEndpoint(name="cross-link", kind="cross_link", port=18086)
     cg = MCPEndpoint(name="codegraph", kind="codegraph", port=18091)
-    assert chroma.health_url.endswith(":18083/health")
-    assert cl.health_url.endswith(":18086/health")
-    # codegraph 改平台自写多租户代理后也自带 /health (不再 mcp-proxy 无 health → TCP)
-    assert cg.health_url.endswith(":18091/health")
+    # 审计 #4: 探活改打 PUBLIC /healthz (最小, 不泄敏); 详情面 /platform/status 改鉴权
+    assert chroma.health_url.endswith(":18083/healthz")
+    assert cl.health_url.endswith(":18086/healthz")
+    # codegraph 改平台自写多租户代理后也自带 /healthz (不再 mcp-proxy 无 health → TCP)
+    assert cg.health_url.endswith(":18091/healthz")
     assert cg.sse_url == "http://127.0.0.1:18091/sse"
 
 

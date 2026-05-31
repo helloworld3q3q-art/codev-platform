@@ -58,8 +58,9 @@ class MCPEndpoint:
 
     @property
     def health_url(self) -> str | None:
-        # 三套均自带 /health (codegraph 改平台自写多租户代理后也有, 见 codegraph.server)
-        return f"http://{self.host}:{self.port}/health"
+        # 三套均自带 PUBLIC /healthz 最小存活探针 (审计 #4: 详情面 /platform/status 改鉴权)。
+        # 探活只需 200, 不带 token 也能打 (codegraph 改平台自写多租户代理后也有, 见 codegraph.server)。
+        return f"http://{self.host}:{self.port}/healthz"
 
 
 def _resolve_venv_scripts(cfg: dict) -> Path:
@@ -189,7 +190,7 @@ def _tcp_open(host: str, port: int, timeout: float = 2.0) -> bool:
 
 
 def probe(ep: MCPEndpoint) -> str:
-    """探一个端点: 'ok' / 'down'。三套均自带 /health(走 _http_health);无 health_url 才退回 TCP。"""
+    """探一个端点: 'ok' / 'down'。三套均自带 PUBLIC /healthz(走 _http_health);无 health_url 才退回 TCP。"""
     if ep.health_url:
         return "ok" if _http_health(ep.health_url) else "down"
     return "ok" if _tcp_open(ep.host, ep.port) else "down"

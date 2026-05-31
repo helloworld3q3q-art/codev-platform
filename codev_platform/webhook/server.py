@@ -115,11 +115,20 @@ def build_app():
         _log(f"[{name}] {event.repo} -> {pid} enqueue {scopes} ({len(event.changed_files)} files changed)")
         return JSONResponse({"ok": True, "project_id": pid, "enqueued": scopes})
 
-    async def health(_request):
+    async def healthz(_request):
+        # PUBLIC 存活探针: 仅最小信息 (审计 #4 — 与三套 MCP 对齐, 不在存活面暴露
+        # 已配 provider 清单)。provider 清单移到 /platform/status。
+        return JSONResponse({"status": "ok", "service": "webhook"})
+
+    async def platform_status(_request):
+        # 详情面: 报已注册 provider 清单。webhook 无 gateway 鉴权中间件 (验签走
+        # provider.verify), 故此路径与 /healthz 一样可公开访问, 仅作清单分离用。
         return JSONResponse({"status": "ok", "service": "webhook", "providers": list(providers.names())})
 
     return Starlette(routes=[
-        Route("/health", health, methods=["GET"]),
+        Route("/healthz", healthz, methods=["GET"]),
+        Route("/health", healthz, methods=["GET"]),  # backward-compat alias (最小)
+        Route("/platform/status", platform_status, methods=["GET"]),
         Route("/{provider}", handle, methods=["POST"]),
     ])
 
