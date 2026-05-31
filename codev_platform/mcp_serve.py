@@ -314,6 +314,34 @@ def render_systemd_units(cfg: dict, user: str, *, kinds=SYSTEMD_KINDS) -> dict[s
     return units
 
 
+def render_reindex_unit(cfg: dict, user: str) -> tuple[str, str]:
+    """reindex worker (codev-reindex) 的 systemd unit —— 非 MCP 端点 (无端口/health), 单独生成。
+
+    写队列的常驻串行消费者 (写侧串行化, 读并发不受影响); 开机自起 + 崩溃重启。
+    """
+    import shlex
+    venv_py = _venv_python(cfg)
+    venv_bin = str(_resolve_venv_scripts(cfg))
+    home = str(Path.home())
+    execstart = f"{shlex.quote(str(venv_py))} -m codev_platform.cli reindex-queue worker"
+    content = (
+        "[Unit]\n"
+        "Description=codev reindex worker (写队列串行消费者)\n"
+        "After=network.target\n\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"User={user}\n"
+        f"WorkingDirectory={home}\n"
+        f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        f"ExecStart={execstart}\n"
+        "Restart=always\n"
+        "RestartSec=3\n\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+    return "codev-reindex.service", content
+
+
 def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
     """以普通用户生成 unit 到 ~/codev-systemd/(config 读对), 返回唯一一条 sudo 安装命令。
 
@@ -322,6 +350,9 @@ def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
     """
     import shlex
     units = render_systemd_units(cfg, user)
+    # reindex worker: 非 MCP 端点, 单独并入 (开机自起 + 串行消费写队列)
+    rname, rcontent = render_reindex_unit(cfg, user)
+    units[rname] = rcontent
     out_dir = Path.home() / "codev-systemd"
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []

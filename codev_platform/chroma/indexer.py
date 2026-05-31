@@ -358,6 +358,8 @@ def index(force: bool = False) -> tuple[int, int]:
 
     PERSIST_DIR.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(PERSIST_DIR))
+    from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁 (chromadb 默认 delete 模式会独占)
+    ensure_wal(PERSIST_DIR)
 
     if force:
         try:

@@ -13,7 +13,7 @@ def register_all(subparsers) -> None:
     Missing/in-progress submodules are skipped gracefully so partial work doesn't
     break the CLI during the parallel build.
     """
-    for modname in ("reindex", "health", "hooks", "agent", "codegraph"):
+    for modname in ("reindex", "reindex_queue", "health", "hooks", "agent", "codegraph"):
         try:
             mod = __import__(f"codev_platform.ops.{modname}", fromlist=["register"])
         except Exception:

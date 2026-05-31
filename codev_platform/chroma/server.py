@@ -366,6 +366,8 @@ def _get_client():
     global _client
     if _client is None:
         _client = chromadb.PersistentClient(path=str(DATA_DIR))
+        from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁 (默认 delete 模式会独占)
+        ensure_wal(DATA_DIR)
     return _client
 
 
