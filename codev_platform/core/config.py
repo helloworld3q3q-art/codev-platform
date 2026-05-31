@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -101,7 +102,10 @@ def config_path() -> Path:
 def load_config() -> dict[str, Any]:
     """读 config 文件, merge 进 defaults (浅合并: 顶级 key 不覆盖, 子字段合并)。
 
-    文件不存在或损坏 -> 全部走 defaults, 不抛异常 (保证调用方不需要 try)。
+    文件不存在 -> 全部走 defaults, 不抛异常 (这是支持的 "没配就默认")。
+    文件存在但 JSON 解析失败 / 读取失败 -> 默认 fail-loud (logging.error + raise),
+        避免配置损坏时静默退回默认/空配置带病运行 (如 token 鉴权静默失效)。
+        逃生阀: 设 CODEV_CONFIG_IGNORE_ERRORS=1 才降级为 stderr 警告 + 返默认。
     """
     cfg = {k: dict(v) if isinstance(v, dict) else v for k, v in DEFAULTS.items()}
     p = config_path()
@@ -116,11 +120,19 @@ def load_config() -> dict[str, Any]:
                 cfg[section].update(fields)
             else:
                 cfg[section] = fields
-    except (json.JSONDecodeError, OSError):
-        # 容错: 损坏的 config 不破坏 daemon, stderr 警告即可
+    except (json.JSONDecodeError, OSError) as exc:
+        # 文件存在但损坏/不可读: 默认 fail-loud, 不静默退回默认 (防鉴权等关键配置静默失效)。
+        ignore = os.environ.get("CODEV_CONFIG_IGNORE_ERRORS", "").strip().lower() in ("1", "true", "yes")
+        if not ignore:
+            logging.error(
+                "[codev_platform.config] config 文件存在但损坏/不可读: %s (%s). "
+                "拒绝带病运行; 设 CODEV_CONFIG_IGNORE_ERRORS=1 才降级返默认。",
+                p, exc,
+            )
+            raise
         import sys
         print(
-            f"[codev_platform.config] WARN: {p} 损坏或不可读, 全用默认值",
+            f"[codev_platform.config] WARN: {p} 损坏或不可读, CODEV_CONFIG_IGNORE_ERRORS 已设, 全用默认值",
             file=sys.stderr, flush=True,
         )
     return cfg

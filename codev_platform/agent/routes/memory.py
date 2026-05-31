@@ -17,6 +17,19 @@ from codev_platform.core import identity
 router = APIRouter()
 
 
+def _resolve_identity(request: Request) -> tuple[str, str]:
+    """(org_id, user_id):优先用 gateway 中间件认证后写入 request.state.identity 的可信身份,
+    没挂 gateway(dev 单机)才回退裸 header 解析。防 token 鉴权下持合法 token 者伪造他人 user/org。"""
+    ident = getattr(request.state, "identity", None)
+    if ident is not None:
+        return ident.org_id, ident.user_id
+    # 无中间件(dev 单机):回退 header(X-Org-Id > 'default' / X-User-Id > env > 'local')
+    return (
+        identity.resolve_org_from_request(request.headers),
+        identity.resolve_from_request(request.headers),
+    )
+
+
 def _to_out(e: MemoryEntry) -> MemoryEntryOut:
     return MemoryEntryOut(
         id=e.id, scope=e.scope, scope_ref=e.scope_ref, owner_user_id=e.owner_user_id,
@@ -33,8 +46,7 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     if req.scope not in SCOPES:
         raise HTTPException(status_code=400, detail=f"scope 须为 {SCOPES}")
     try:  # 非法 X-Org-Id / X-User-Id → 400
-        org_id = identity.resolve_org_from_request(request.headers)
-        user_id = identity.resolve_from_request(request.headers)
+        org_id, user_id = _resolve_identity(request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     # personal 作用域的 scope_ref 恒为写入者 user_id(plan §3.2 语义)——强制对齐,
@@ -68,8 +80,7 @@ def list_memory(
     # personal 隐私:只能读自己的(scope_ref==自己 user_id),不得读他人个人记忆(recall ≠ read)。
     # ⚠️ M5 前无 ACL:org/team/project 作用域暂不拦,任何 caller 可读。
     try:  # 非法 X-Org-Id / X-User-Id → 400
-        org_id = identity.resolve_org_from_request(request.headers)
-        user_id = identity.resolve_from_request(request.headers)
+        org_id, user_id = _resolve_identity(request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if scope == "personal" and scope_ref != user_id:

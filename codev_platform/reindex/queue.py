@@ -64,8 +64,33 @@ class FileSpoolQueue:
     def location(self) -> Path:
         return self._dir
 
+    @staticmethod
+    def _validate(project_id: str, kind: str) -> tuple[str, str]:
+        """底层兜底校验: project_id 强制 slug, kind 限定已知集合。
+
+        防上层入口出脏数据 / 路径穿越 (project_id 含 / 或 .. → 写到 spool 外)。
+        runners import 放函数内, 避免 import 环 (runners → mcp_serve → ...)。
+        非法: project_id 抛 ProjectIdError, kind 抛 ValueError。
+        """
+        from codev_platform.core.project_id import validate as _validate_pid
+
+        pid = _validate_pid(project_id)
+
+        from codev_platform.reindex.runners import kinds as _kinds
+
+        known = _kinds()
+        if known and kind not in known:
+            raise ValueError(
+                f"未知 reindex kind: {kind!r} (允许: {sorted(known)})"
+            )
+        # known 为空 (runner 未注册 / 极端情况) 时仍兜底挡路径穿越
+        if any(sep in str(kind) for sep in ("/", "\\", "..", _SEP)):
+            raise ValueError(f"非法 reindex kind: {kind!r} (含路径分隔符)")
+        return pid, kind
+
     def _path(self, project_id: str, kind: str) -> Path:
-        return self._dir / f"{project_id}{_SEP}{kind}"
+        pid, kind = self._validate(project_id, kind)
+        return self._dir / f"{pid}{_SEP}{kind}"
 
     def enqueue(self, project_id: str, kind: str) -> None:
         # touch: 不存在则建, 存在则刷新 mtime (= 重新触发, 供 dirty 重入)

@@ -27,7 +27,8 @@ class WebhookProvider(Protocol):
     name: str  # URL 路径段 + registry key: gitea / gitlab / github
 
     def verify(self, headers: Mapping[str, str], body: bytes, secret: str) -> bool:
-        """验签。secret 为空 = 跳过校验 (本机信任; 对外务必配 secret)。"""
+        """纯验签 (各 VCS 机制不同)。secret 空时 fail-closed (HMAC/token 比对自然失败 → False);
+        放行策略 (本机信任 opt-out) 在 server 层 (webhook.allow_insecure), provider 不做策略。"""
         ...
 
     def parse(self, headers: Mapping[str, str], payload: dict) -> "PushEvent | None":
@@ -71,8 +72,6 @@ class GiteaProvider:
     name = "gitea"
 
     def verify(self, headers: Mapping[str, str], body: bytes, secret: str) -> bool:
-        if not secret:
-            return True
         sig = _hdr(headers, "X-Gitea-Signature") or ""
         mac = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(mac, sig)
@@ -95,8 +94,6 @@ class GitlabProvider:
     name = "gitlab"
 
     def verify(self, headers: Mapping[str, str], body: bytes, secret: str) -> bool:
-        if not secret:
-            return True
         token = _hdr(headers, "X-Gitlab-Token") or ""
         return hmac.compare_digest(token, secret)
 

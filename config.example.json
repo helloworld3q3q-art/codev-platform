@@ -80,10 +80,16 @@
     "platform": { "host": "127.0.0.1", "platform-docs": 19083, "cross-link": 19086, "codegraph": 19091 }
   },
 
+  "logging": {
+    "_comment": "可观测日志粒度: dev(默认, 全量, 便于排查) | prod(脱敏: query/工具参数/召回文件路径 等自由文本换成 <redacted:len=N:sha8>, 结构字段 project_id/tool/计数/耗时 保留)。env CODEV_PLATFORM_LOG_MODE 覆盖。非 prod 值一律归 dev(误配不会静默清空日志)。",
+    "mode": "dev"
+  },
+
   "webhook": {
-    "_comment": "VCS webhook 接收器 (codev-platform webhook serve, systemd codev-webhook 常驻)。收 push → 按 projects.<pid>.webhook_repo 映射 project → 分 scope → enqueue reindex (push 即触发, 与本地 hook 同源走写队列)。port 默认 18099; secret 是验签密钥, 必须与 VCS webhook 配置里的一致 (Gitea=HMAC body / GitLab=明文 token); 空 secret = 跳过验签 (仅本机信任, 对外务必配)。绑 127.0.0.1, 远程 VCS 需反代。",
+    "_comment": "VCS webhook 接收器 (codev-platform webhook serve, systemd codev-webhook 常驻)。收 push → 按 projects.<pid>.webhook_repo 映射 project → 分 scope → enqueue reindex (push 即触发, 与本地 hook 同源走写队列)。port 默认 18099; secret 是验签密钥, 必须与 VCS webhook 配置里的一致 (Gitea=HMAC body / GitLab=明文 token)。安全: 空 secret 默认 **fail-closed 拒绝** (防反代后被伪造触发 reindex); 仅本机信任可设 allow_insecure=true 跳过验签。绑 127.0.0.1, 远程 VCS 需反代。",
     "port": 18099,
-    "secret": ""
+    "secret": "",
+    "allow_insecure": false
   },
 
   "projects": {

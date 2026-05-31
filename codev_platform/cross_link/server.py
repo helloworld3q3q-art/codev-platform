@@ -38,6 +38,11 @@ from mcp.types import TextContent, Tool
 # CROSS_LINK_DB 环境变量可显式覆盖, 否则按 project_id 解析。
 from codev_platform.core.project_id import ProjectIdError, resolve_local
 from codev_platform.core.paths import cross_link_db_path
+from codev_platform.core.config import load_config as _load_config
+from codev_platform.core.obslog import logging_mode, redact_args
+
+# dev (默认全量) / prod (脱敏) —— 见 core.obslog。模块加载时解析一次。
+_LOG_MODE = logging_mode(_load_config())
 
 # CROSS_LINK_DB 显式覆盖所有 project (stdio 调试用); 否则按 project_id 解析 per-project DB。
 # Per-project DB only. NO legacy unprefixed fallback: the unprefixed cross_layer.sqlite
@@ -314,11 +319,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return result
     finally:
         _ms = (_t.perf_counter() - _t0) * 1000
+        # args 值可能含 query / table / api 名等自由文本 -> prod 脱敏 (dev 原样)。
+        # 结构字段 (project_id/tool/ok/result_chars/elapsed) 不脱敏。
+        _trunc_args = {k: str(v)[:80] for k, v in (args or {}).items()}
         _log_usage({
             "ts": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             "project_id": _active_pid(),
             "tool": name,
-            "args": {k: str(v)[:80] for k, v in (args or {}).items()},
+            "args": redact_args(_trunc_args, _LOG_MODE),
             "ok": ok,
             "result_chars": sum(len(c.text) for c in result) if result else 0,
             "elapsed_ms": round(_ms, 1),

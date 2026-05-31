@@ -74,7 +74,13 @@ async def run_http(port: int | None = None) -> None:
         body = await request.body()
         cfg = load_config()
         secret = str(_cfg_get(cfg, "webhook.secret") or "")
-        if not prov.verify(request.headers, body, secret):
+        allow_insecure = bool(_cfg_get(cfg, "webhook.allow_insecure") or False)
+        if not secret:
+            if not allow_insecure:
+                _log(f"[{name}] webhook.secret 未配置, fail-closed 拒绝; 本机信任可设 webhook.allow_insecure=true")
+                return JSONResponse({"error": "webhook secret not configured"}, status_code=401)
+            _log(f"[{name}] webhook.secret 未配置, 但 webhook.allow_insecure=true, 跳过验签放行 (仅限本机信任)")
+        elif not prov.verify(request.headers, body, secret):
             _log(f"[{name}] 验签失败 (检查 webhook.secret 与 VCS 配置一致)")
             return JSONResponse({"error": "invalid signature"}, status_code=401)
         try:

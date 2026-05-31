@@ -67,8 +67,11 @@ LEGACY_COLLECTION_NAME = "platform_docs"  # 字面量明示, 与历史不带 pro
 # 优先级: env var > ~/.codev-platform/config.json > 代码默认.
 # 不再 hardcode D:\models\... 路径 — 用户跑 `codev-platform config init` 生成 config 文件.
 from codev_platform.core.config import load_config, env_or_config  # noqa: E402
+from codev_platform.core.obslog import logging_mode, redact_text  # noqa: E402
 
 _CFG = load_config()
+# dev (默认全量) / prod (脱敏) —— 见 core.obslog。模块加载时解析一次。
+_LOG_MODE = logging_mode(_CFG)
 EMBED_MODEL = str(Path(env_or_config("PLATFORM_EMBED_MODEL_PATH", _CFG, "models.embed_path")).expanduser().resolve())
 EMBED_DEVICE = env_or_config("PLATFORM_EMBED_DEVICE", _CFG, "models.embed_device", "cuda")
 
@@ -831,16 +834,19 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
             _ms = (time.perf_counter() - _t0) * 1000
             top1 = (metas[0] or {}).get("file") if metas else None
+            top1 = redact_text(top1, _LOG_MODE)  # prod 脱敏召回路径 (dev 原样)
             top1_d = dists[0] if dists else None
             top1_rs = rerank_scores_arr[0] if rerank_scores_arr else None
             _flog(f"[search_docs] hit={len(out)} top1={top1} dist={top1_d} rerank={rerank_used} top1_score={top1_rs} took={_ms:.1f}ms")
             # JSONL 召回日志:记录 top-5 完整 metadata + distance + rerank_score
             import datetime as _dt
+            # prod 下: query 原文 + 召回 file 路径脱敏 (路径暴露仓库结构, 算敏感);
+            # category/module/chunk_index/distance/rerank_score 是结构标量, 保留。
             top5 = []
             for i in range(min(5, len(out))):
                 m = metas[i] if i < len(metas) else {}
                 entry = {
-                    "file": (m or {}).get("file"),
+                    "file": redact_text((m or {}).get("file"), _LOG_MODE),
                     "category": (m or {}).get("category"),
                     "module": (m or {}).get("module"),
                     "chunk_index": (m or {}).get("chunk_index"),
@@ -852,7 +858,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             _log_recall({
                 "ts": _dt.datetime.now().isoformat(timespec="seconds"),
                 "project_id": pid,
-                "query": query,
+                "query": redact_text(query, _LOG_MODE),
                 "k": k,
                 "category": category,
                 "module": module,

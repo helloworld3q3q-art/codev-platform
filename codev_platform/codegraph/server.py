@@ -33,10 +33,49 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import TextContent, Tool
 
 from codev_platform.core.config import get as _cfg_get, load_config
+from codev_platform.core.obslog import logging_mode, redact_args
 from codev_platform.core.project_id import ProjectIdError, resolve_local
 
-_CODEGRAPH_CMD = os.getenv("CODEGRAPH_CMD", "codegraph")
+
+def _resolve_codegraph_cmd() -> str:
+    """校验 CODEGRAPH_CMD (服务化后收紧 spawn 入口)。
+
+    只允许两种形态:
+      1. 裸命令名 "codegraph" (走 PATH 查找, 默认);
+      2. 一个**绝对路径且文件存在**的可执行 (显式 pin)。
+    含 shell 元字符 / 相对路径 (非裸 "codegraph") / 不存在的绝对路径 -> 拒绝, 回退默认
+    "codegraph" + stderr 警告 (不 raise, 避免 import 期炸掉整个 server)。
+    """
+    default = "codegraph"
+    raw = os.getenv("CODEGRAPH_CMD")
+    if not raw:
+        return default
+    cmd = raw.strip()
+    if cmd == default:
+        return default
+    # shell 元字符黑名单 (spawn 用 list args 本不过 shell, 但收紧防误配 / 注入意图)
+    if any(ch in cmd for ch in (";", "&", "|", "$", "`", ">", "<", "\n", "\r", "*", "?", "(", ")", '"', "'", " ")):
+        print(
+            f"[codegraph.server] WARN: CODEGRAPH_CMD {raw!r} 含非法字符, 回退默认 'codegraph'",
+            file=sys.stderr, flush=True,
+        )
+        return default
+    p = Path(cmd)
+    if p.is_absolute() and p.is_file():
+        return str(p)
+    print(
+        f"[codegraph.server] WARN: CODEGRAPH_CMD {raw!r} 既非裸名 'codegraph' 也非存在的绝对路径文件, "
+        f"回退默认 'codegraph'",
+        file=sys.stderr, flush=True,
+    )
+    return default
+
+
+_CODEGRAPH_CMD = _resolve_codegraph_cmd()
 _CG_SSE_PORT = int(os.getenv("CODEGRAPH_SSE_PORT", "18091"))
+
+# dev (默认全量) / prod (脱敏) —— 见 core.obslog。模块加载时解析一次。
+_LOG_MODE = logging_mode(load_config())
 
 _LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
 _USAGE_LOG = Path(__file__).resolve().parent / "codegraph_usage.jsonl"
@@ -234,11 +273,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         return content
     finally:
         ms = (datetime.datetime.now() - t0).total_seconds() * 1000
+        # args 值可能含 query / symbol / 路径等自由文本 -> prod 脱敏 (dev 原样)。
+        # 结构字段 (project_id/tool/ok/elapsed) 不脱敏。
+        _trunc_args = {k: str(v)[:80] for k, v in (args or {}).items()}
         _log_usage({
             "ts": t0.strftime("%Y-%m-%dT%H:%M:%S"),
             "project_id": pid,
             "tool": name,
-            "args": {k: str(v)[:80] for k, v in (args or {}).items()},
+            "args": redact_args(_trunc_args, _LOG_MODE),
             "ok": ok,
             "elapsed_ms": round(ms, 1),
         })

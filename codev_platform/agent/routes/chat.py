@@ -35,11 +35,23 @@ def _resolve_project_id(req: ChatRequest, request: Request) -> str | None:
     return req.project_id
 
 
+def _resolve_identity(request: Request) -> tuple[str, str]:
+    """(user_id, org_id):优先用 gateway 中间件认证后写入 request.state.identity 的可信身份,
+    没挂 gateway(dev 单机)才回退裸 header 解析。防 token 鉴权下持合法 token 者伪造他人 user/org。"""
+    ident = getattr(request.state, "identity", None)
+    if ident is not None:
+        return ident.user_id, ident.org_id
+    # 无中间件(dev 单机):回退 header(X-User-Id > env > 'local' / X-Org-Id > 'default')
+    return (
+        identity.resolve_from_request(request.headers),
+        identity.resolve_org_from_request(request.headers),
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, request: Request) -> ChatResponse:
     try:  # 非法 X-User-Id / X-Org-Id(含非法字符)→ 400,而非未捕获 500
-        user_id = identity.resolve_from_request(request.headers)  # X-User-Id > env > 'local'
-        org_id = identity.resolve_org_from_request(request.headers)  # X-Org-Id > 'default'(plan §3.4)
+        user_id, org_id = _resolve_identity(request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     project_id = _resolve_project_id(req, request)  # X-Project-Id > body > None(cwd)
