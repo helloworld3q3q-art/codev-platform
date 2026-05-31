@@ -97,6 +97,32 @@ def get_memory_store():
     return _memory_store
 
 
+_rbac_store_built = False
+_rbac_store = None  # type: ignore[var-annotated]
+
+
+def get_rbac_store():
+    """RBAC 作用域存储(memory M5)。未配 memory.pg_dsn / 缺 psycopg → None(回退 interim ACL)。
+    单例懒建(同 get_memory_store 范式);调用方据 None 优雅回退,不 raise / 不自动建库。
+    """
+    global _rbac_store_built, _rbac_store
+    if not _rbac_store_built:
+        _rbac_store_built = True
+        cfg = acfg.agent_cfg()
+        dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN", cfg, "memory.pg_dsn")
+        if dsn:
+            read_dsn = acfg.env_or_config("CODEV_PLATFORM_MEMORY_DSN_READ", cfg, "memory.pg_dsn_read")
+            pool_max = acfg.get(cfg, "memory.pool_max_size", 10)
+            try:
+                from codev_platform.agent.rbac_store_pg import RbacStore
+                _rbac_store = RbacStore(dsn, read_dsn=read_dsn, max_size=pool_max)
+            except Exception as e:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 回退 interim ACL,不挂服务
+                import sys
+                print(f"[agent.deps] rbac store 不可用({type(e).__name__}: {e})", file=sys.stderr)
+                _rbac_store = None
+    return _rbac_store
+
+
 _recall_built = False
 _recall_service = None  # type: ignore[var-annotated]
 
@@ -116,7 +142,9 @@ def get_recall_service():
             policy = acfg.get(cfg, "memory.conflict_policy", "personal_first")
             if backend == "local":
                 from codev_platform.agent.recall_service import LocalRecallService
-                _recall_service = LocalRecallService(store, default_policy=policy)
+                _recall_service = LocalRecallService(
+                    store, default_policy=policy, rbac_store=get_rbac_store()
+                )
             else:
                 import sys
                 print(f"[agent.deps] memory.recall_backend={backend!r} 暂未接(仅 'local' 可用), "

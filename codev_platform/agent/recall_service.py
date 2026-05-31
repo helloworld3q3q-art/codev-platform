@@ -23,6 +23,7 @@ from abc import ABC, abstractmethod
 
 from codev_platform.agent.memory_recall import DEFAULT_POLICY, resolve_conflicts
 from codev_platform.agent.memory_store import MemoryEntry, MemoryStore
+from codev_platform.core.rbac import compute_visible_scopes
 
 
 def visible_scopes(org_id: str, user_id: str | None, project_id: str | None) -> list[tuple[str, str]]:
@@ -70,19 +71,23 @@ class LocalRecallService(RecallService):
     """直查 PG 的本地实现:跨可见作用域取 active → 冲突消解 → query 排序 → top-N。"""
 
     def __init__(self, store: MemoryStore, *, default_policy: str = DEFAULT_POLICY,
-                 per_scope_limit: int = 50) -> None:
+                 per_scope_limit: int = 50, rbac_store=None) -> None:
         self._store = store
         self._policy = default_policy
         self._per_scope_limit = per_scope_limit
+        self._rbac_store = rbac_store
 
     def _visible_scopes(self, org_id: str, user_id: str | None,
                         project_id: str | None) -> list[tuple[str, str]]:
         """该 user 可 recall 的 (scope, scope_ref) 集合。
 
-        M5 接缝:现委托模块级 `visible_scopes`(无 ACL,返回 org+project+personal)。
-        M5 起在子类 / 此处覆写为查 org_members / team_members / project_access(可访问 self._store),
-        recall() 调用点不变(plan §3.9 上层零改)。
+        M5:rbac_store 非 None → 查真实 Membership 经 compute_visible_scopes(org_members /
+        team_members / project_access 真实角色)。否则回退模块级 `visible_scopes` 桩
+        (无 ACL 期,返回 org+project+personal,现有行为不变)。recall() 调用点不变(plan §3.9)。
         """
+        if self._rbac_store is not None and user_id:
+            m = self._rbac_store.fetch_membership(org_id, user_id, project_id)
+            return compute_visible_scopes(org_id, user_id, project_id, m)
         return visible_scopes(org_id, user_id, project_id)
 
     def recall(self, *, org_id: str, user_id: str | None, project_id: str | None,

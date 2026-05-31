@@ -13,11 +13,24 @@ from codev_platform.agent import deps
 from codev_platform.agent.memory_store import MemoryEntry, SCOPES
 from codev_platform.agent.schemas import MemoryEntryOut, MemoryWriteRequest
 from codev_platform.core import identity
-from codev_platform.core.acl import memory_scope_access
+from codev_platform.core.acl import AccessDecision, memory_scope_access
 from codev_platform.core.audit import audit_access
 from codev_platform.core.config import load_config
+from codev_platform.core.rbac import memory_scope_decision
 
 router = APIRouter()
+
+
+def _scope_decision(org_id: str, user_id: str, scope: str, scope_ref: str | None,
+                    ident) -> AccessDecision:
+    """作用域访问判定:有 RBAC store → 查真实 Membership 走 core.rbac.memory_scope_decision;
+    否则回退 interim core.acl.memory_scope_access(token 模式 org/team 拒)。personal 两路同源。
+    """
+    store = deps.get_rbac_store()
+    if store is not None:
+        m = store.fetch_membership(org_id, user_id, scope_ref if scope == "project" else None)
+        return memory_scope_decision(scope, scope_ref, user_id, m)
+    return memory_scope_access(load_config(), ident, scope, scope_ref)
 
 
 def _resolve_identity(request: Request) -> tuple[str, str]:
@@ -58,7 +71,7 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     # ACL 统一闸 (单一真值源 core/acl.py): personal/project/org/team 全走 memory_scope_access,
     # 不再对 project 单独 can_access (避免双重判定)。personal 数据归一已在上行完成。
     _ident = getattr(request.state, "identity", None)
-    _dec = memory_scope_access(load_config(), _ident, req.scope, scope_ref)
+    _dec = _scope_decision(org_id, user_id, req.scope, scope_ref, _ident)
     audit_access("agent-memory", _ident, scope_ref, _dec)
     if not _dec.allowed:
         raise HTTPException(status_code=403, detail="forbidden: memory scope access denied")
@@ -93,7 +106,7 @@ def list_memory(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     _ident = getattr(request.state, "identity", None)
-    _dec = memory_scope_access(load_config(), _ident, scope, scope_ref)
+    _dec = _scope_decision(org_id, user_id, scope, scope_ref, _ident)
     audit_access("agent-memory", _ident, scope_ref, _dec)
     if not _dec.allowed:
         raise HTTPException(status_code=403, detail="forbidden: memory scope access denied")
