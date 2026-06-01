@@ -219,7 +219,7 @@ token 元数据来源:`config.gateway.tokens.<sha256>.{org_id, projects}`(token 
 - `scripts/verify_rbac_pg.py` —— M5 RBAC 真 PG 验证脚本
 
 **未做(留后续轮次)**:
-- **M5 运行态验证**:代码 + `verify_rbac_pg.py` 已就绪,需用户在真 PG 上跑 verify 验证 RBAC 查询/计算(本机 venv 无 psycopg)。
+- ~~**M5 运行态验证**~~ ✅ **已验**(2026-06-01):WSL 本地 PG(`localhost:5432/codev_platform_memory`,独立于 Windows PG)上 `verify_rbac_pg.py` + `verify_memory_pg.py` 全绿 —— 七表幂等 / fetch_membership(直授+team+跨org隔离)/ compute_visible_scopes / role_allows / memory supersede·forget·召回·TTL·压缩·会话持久化 全通过。psycopg 装入平台 .venv,`memory.pg_dsn` 配在 WSL `~/.codev-platform/config.json`。
 - **B8** WSL 时钟重同步:WSL 内重同步不可靠,暂靠 `wsl --shutdown`,自动 timer 待评估。
 - **E16** agent 常驻 systemd:需 fastapi 依赖,暂非常驻。
 - **F18** webhook 自动 link codegraph:暂手动 `link --all`。
