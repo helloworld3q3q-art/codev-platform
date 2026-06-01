@@ -390,10 +390,29 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
-# codev-platform 仓内的 rules / skills 源
-_CODEV_PKG_ROOT = Path(__file__).resolve().parent.parent  # codev-platform/
-_RULES_SRC = _CODEV_PKG_ROOT / "rules"
-_SKILLS_SRC = _CODEV_PKG_ROOT / "skills"
+# codev-platform 的 rules / skills 真值源 —— 现位于包内 codev_platform/resources/
+# (relocate: 进包后 wheel 也带得走, 普通 pip 安装的 sync-rules/sync-skills 才能工作)。
+_CODEV_PKG_ROOT = Path(__file__).resolve().parent.parent  # codev-platform/ (legacy 仓根 fallback)
+
+
+def _resource_src(name: str) -> Path:
+    """定位真值源资源目录 (rules / skills)。
+
+    优先包内 `codev_platform/resources/<name>`(importlib.resources —— editable 与 wheel 均在);
+    找不到才回退仓根旧布局 `<repo>/<name>`(老 clone / 迁移期兜底)。
+    """
+    try:
+        from importlib.resources import files as _res_files
+        p = Path(str(_res_files("codev_platform") / "resources" / name))
+        if p.is_dir():
+            return p
+    except Exception:  # noqa: BLE001 — 资源定位失败回退仓根, 不让 CLI 炸
+        pass
+    return _CODEV_PKG_ROOT / name
+
+
+_RULES_SRC = _resource_src("rules")
+_SKILLS_SRC = _resource_src("skills")
 
 
 def _sync_dir(src: Path, dst: Path, kind: str, dry_run: bool) -> int:

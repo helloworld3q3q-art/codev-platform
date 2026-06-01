@@ -47,12 +47,16 @@ codev_platform/
 └── __init__.py
 
 platform_meta/projects/   各 project 登记表 (meta.json)
-rules/                    跨项目通用规则 (11 条, 真值源)
-skills/                   跨项目通用 skill (3 个, 真值源)
+codev_platform/resources/rules/    跨项目通用规则 (真值源;2026-06-01 relocate 进包, wheel 可交付)
+codev_platform/resources/skills/   跨项目通用 skill (真值源;同上)
 docs/plans/               team-deploy 系列 design / pr-body / 原 plan
-config.example.json       用户级 config 样板 + 字段说明
-pyproject.toml            pip 包定义
+config.example.json       用户级 config 样板 + 字段说明 (仍在仓根, 纯样本)
+pyproject.toml            pip 包定义 (package-data 含 resources/**)
 ```
+
+> **2026-06-01 relocate(audit #2)**:`rules/` `skills/` 从仓根移入 `codev_platform/resources/`,
+> 使普通 `pip install`(非 editable)的 wheel 也带得走 → `sync-rules`/`sync-skills` 在客户机可用。
+> CLI 经 `importlib.resources` 定位(editable + wheel 通用),旧仓根布局仍作 fallback。
 
 ---
 
@@ -70,10 +74,10 @@ pyproject.toml            pip 包定义
 
 ## 四、规则 + Skill 同步策略
 
-`.claude/rules/` 和 `.claude/skills/` 是 sync 后副本(真值源在仓根 `rules/` 和 `skills/`)。
+`.claude/rules/` 和 `.claude/skills/` 是 sync 后副本(真值源在 `codev_platform/resources/rules/` 和 `codev_platform/resources/skills/`,2026-06-01 relocate 进包)。
 
 改规则 / skill 时:
-1. **改真值源** — 改 `rules/<name>.md` 或 `skills/<name>/SKILL.md`
+1. **改真值源** — 改 `codev_platform/resources/rules/<name>.md` 或 `codev_platform/resources/skills/<name>/SKILL.md`
 2. **本仓 sync** — `codev-platform sync-rules` + `sync-skills` 重生 `.claude/` 副本
 3. **推送其它业务仓** — 各业务仓跑同样 sync 命令 / 或后续机制(submodule / chroma 双扫)
 
