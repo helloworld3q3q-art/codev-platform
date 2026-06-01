@@ -198,7 +198,7 @@ token 元数据来源:`config.gateway.tokens.<sha256>.{org_id, projects}`(token 
 
 ## 六、进度记录(2026-06-01)
 
-按 P1→P2→审计修复→P3→P4→P5→M5 推进,全部提交并推送 Gitea(`dev`),测试 **165→287 passed**。
+按 P1→P2→审计修复→P3→P4→P5→M5→A4→C11→2026-06-01 审计整改→relocate→GPU 配置化→阶段1-2 交付 推进,全部提交并推送 Gitea(`dev`),测试 **165→345 passed**。memory/RBAC 已在 WSL 本地真 PG 验证。
 
 | 轮次 | commit | 关键交付 | 备注 |
 |---|---|---|---|
@@ -209,20 +209,29 @@ token 元数据来源:`config.gateway.tokens.<sha256>.{org_id, projects}`(token 
 | P4 持久化+备份 | `685bc48` | **B7** `codev-platform backup`(pg_dump + data_root + gitea,plan/prune 纯函数 + 保留 N + `_redact_dsn` 密码脱敏)/ **B6** `memory init-db`/`doctor`(幂等建表,不建库)/ runbook | 审计抓出 manifest/dry-run 密码泄漏 blocker 已修 |
 | M5 org/team RBAC | (本轮) | `core/rbac.py` 纯逻辑(`Membership`/`compute_visible_scopes`/`role_allows` 矩阵/`memory_scope_decision`,零 psycopg)/ `rbac_store_pg.py` 7 表 DDL+`fetch_membership`/ `ops/org.py` D13 管理 CLI / wire recall+memory(无 store 优雅回退)/ `verify_rbac_pg.py` | 运行态需真 PG 验(纯逻辑已单测;287 passed) |
 | A4 速率限制 | `49eb89d` | `core/ratelimit.py` 纯滑窗(now 入参可测)+ `RateLimitMiddleware`(挂 Auth 后, 按身份/IP, 超限 429, 豁免 healthz)+ `maybe_rate_limit_middleware` 工厂(默认关, prod 开)+ 4 服务+agent 挂载 | 默认关不破 dev;比反代 per-IP 细(per-token/org) |
-| P5 部分 | `ba90fd4` | **D15** 换机一键 `codev-platform bootstrap`(venv check → serve-mcp start → codegraph link --all → memory init-db,plan 纯函数 + fail-soft)+ onboarding runbook;**B9** 自愈核验:systemd units 早含 `Restart=always`/`RestartSec=3`,本轮补断言锁测;**B10** cross-link 重建已有 `reindex --cross-link`(+ reindex 队列),规则"重建脚本待补"是旧话;**D14** token 注入 `.mcp.json` 由 P2 `client-auth` + P3 `client-url` 覆盖 | D15/B9/B10/D14 闭环;余项见下 |
+| P5 部分 | `ba90fd4` | **D15** 换机一键 `codev-platform bootstrap`(venv check → serve-mcp start → codegraph link --all → memory init-db,plan 纯函数 + fail-soft)+ onboarding runbook;**B9** 自愈核验:systemd units 早含 `Restart=always`/`RestartSec=3`,本轮补断言锁测;**B10** cross-link 重建已有 `reindex --cross-link`(+ reindex 队列),规则"重建脚本待补"是旧话;**D14** token 注入 `.mcp.json` 由 P2 `client-auth` + P3 `client-url` 覆盖 | D15/B9/B10/D14 闭环 |
+| C11 指标 | `edb58d4` | `codev-platform metrics` 聚合 usage/audit jsonl(parse/aggregate/check_alerts 纯函数)+ 告警阈值 | 缺日志优雅, 不泄敏 |
+| M5 真 PG 验证 | (本机) | psycopg 装入平台 .venv + WSL 本地 PG `codev_platform_memory` + `verify_rbac_pg.py`/`verify_memory_pg.py` 全绿 | 独立于 Windows PG(用户要"区分") |
+| 审计整改(2026-06-01 报告) | `8397dde` | #1 chroma lazy/无 import 期 exit · #3 healthz→health 探针兼容 · #4 per-proj reload stamp · #5 health 用 cross_link_db_path · #6 deployment.mode prod fail-fast · #7 config redact · #10 非法 pid 400 | 9/10 整改;详见 `docs/audits/audit-0601-remediation-status.md` |
+| 边缘项 | `8a3c878` | **B8** clock-resync timer(hwclock best-effort)· **E16** agent 常驻 unit · **F18** codegraph reindex 自动 ensure-link · **C12** `codev-platform logs` 集中日志 | — |
+| #2 relocate | `01ab0c5` | rules/skills 真值源移入 `codev_platform/resources/` + importlib.resources + package-data → wheel 可交付 | — |
+| GPU 配置化 | `d7e6e20` | reranker `.cuda()`→`.to(device)`(支持 cuda:N/cpu)· `models.reranker_dtype`(auto/fp16/bf16/fp32)· `models.embed_batch_size` | 换显卡只改 config |
+| 阶段1-2 交付 | `5a2211a` | clean wheel install 测试(真 build+装空 venv 实测 PASS)· demo 项目+数据 · `docs/QUICKSTART.md` · 只读 Web playground | 审计阶段1 全达成 + 阶段2 大头 |
 
 **关联交付文档**:
 - `token-auth-enablement-2026-06-01.md` —— token 模式启用 runbook
 - `remote-access-reverse-proxy-2026-06-01.md` —— caddy 反代 + TLS runbook
 - `persistence-backup-2026-06-01.md` —— PG 持久化 + 备份/恢复 runbook
 - `onboarding-bootstrap-2026-06-01.md` —— 换机一键 bootstrap onboarding
-- `scripts/verify_rbac_pg.py` —— M5 RBAC 真 PG 验证脚本
+- `docs/QUICKSTART.md` —— install→config→index→serve→test query 一键流程
+- `docs/playground/index.html` —— 只读 Web 问答 playground(需 agent serve)
+- `demo/` —— 自包含 demo 项目 + 数据(无真实仓也能试检索)
+- `docs/audits/audit-0601-remediation-status.md` —— 2026-06-01 审计整改状态(9/10)
+- `scripts/verify_rbac_pg.py` / `scripts/verify_clean_install.sh` —— M5 真 PG 验证 / wheel 可交付验证
 
-**未做(留后续轮次)**:
-- ~~**M5 运行态验证**~~ ✅ **已验**(2026-06-01):WSL 本地 PG(`localhost:5432/codev_platform_memory`,独立于 Windows PG)上 `verify_rbac_pg.py` + `verify_memory_pg.py` 全绿 —— 七表幂等 / fetch_membership(直授+team+跨org隔离)/ compute_visible_scopes / role_allows / memory supersede·forget·召回·TTL·压缩·会话持久化 全通过。psycopg 装入平台 .venv,`memory.pg_dsn` 配在 WSL `~/.codev-platform/config.json`。
-- **B8** WSL 时钟重同步:WSL 内重同步不可靠,暂靠 `wsl --shutdown`,自动 timer 待评估。
-- **E16** agent 常驻 systemd:需 fastapi 依赖,暂非常驻。
-- **F18** webhook 自动 link codegraph:暂手动 `link --all`。
-- **C11/C12** 指标采集+告警 / 集中日志:可观测性,未启动。
+**未做(都已用户拍板押后)**:
+- **#8 Docker compose** 部署闭环 —— 本机无 docker,验不了(用户:后面做)。
+- **阶段3 商业化** —— 二进制化/容器镜像、License/U盘授权、客户项目插件化(Java/Node/.NET/...)、源码加密(用户:后面做)。
+- **Web playground 实跑** —— 静态页已交付,真演示需 `agent serve`(装 fastapi/uvicorn + provider key)。
 
-> #2 memory org/team RBAC、D13 org 管理 CLI **M5 已落地**;**A4 速率限制 A4 commit 已落地**(平台侧按身份,反代 caddy 可叠加 IP 层)。A 组(A1-A5)全闭环,从未做清单移除。
+> **里程碑(2026-06-01)**:A 组安全(A1-A5)全闭环;memory M1-M5 + RBAC 真 PG 验证;2026-06-01 审计 9/10 整改;rules/skills relocate 使 wheel 可交付;GPU 参数全配置化。B8/E16/F18/C11/C12 边缘项均已落地。平台从"单人 editable" 推进到"可在干净 venv 交付 + 可演示"。
