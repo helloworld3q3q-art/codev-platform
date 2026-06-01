@@ -46,6 +46,21 @@ except ImportError as _bm25_imp_err:
     _BM25_IMPORT_OK = False
     _BM25_IMPORT_ERR = str(_bm25_imp_err)
 
+# 2026-06-02 拆包 (file-discipline §1): 日志 / 统计 / 纯 helper / tool schema 抽到 sibling
+# 模块, server.py 保留有状态核心 (model/client/projects/reranker/transport)。这些 import
+# 同时作向后兼容 re-export (tests 用 server.retry_delays / server._stats / server._torch_dtype 等)。
+from codev_platform.chroma._obslog import _flog, _log_recall  # noqa: E402
+from codev_platform.chroma._stats import (  # noqa: E402
+    _stats, _record_stat, _record_stat_error, _process_info,
+)
+from codev_platform.chroma._helpers import (  # noqa: E402
+    _torch_dtype, retry_delays, should_retry, _load_with_retry,
+    _is_gpu_error, _gpu_free_info, _gpu_memory_mb, _to_iso,
+)
+from codev_platform.chroma._schema import (  # noqa: E402
+    tool_definitions, _err, _ok, _build_where,
+)
+
 
 # ----------------------------------------------------------------------
 # 全局：Chroma 客户端 + collection（lazy init，启动失败也不挂 server）
@@ -89,17 +104,6 @@ RERANKER_DEVICE = env_or_config("PLATFORM_RERANKER_DEVICE", _CFG, "models.rerank
 RERANKER_DTYPE = env_or_config("PLATFORM_RERANKER_DTYPE", _CFG, "models.reranker_dtype", "auto")
 
 
-def _torch_dtype(name: str, device: str):
-    """dtype 名 → torch dtype。auto: cuda 系→fp16, 否则 fp32(兼容旧行为)。"""
-    import torch
-    n = (name or "auto").strip().lower()
-    if n == "auto":
-        return torch.float16 if str(device).startswith("cuda") else torch.float32
-    return {
-        "float16": torch.float16, "fp16": torch.float16,
-        "bfloat16": torch.bfloat16, "bf16": torch.bfloat16,
-        "float32": torch.float32, "fp32": torch.float32,
-    }.get(n, torch.float32)
 _rer_enabled_raw = env_or_config("PLATFORM_RERANKER_ENABLED", _CFG, "models.reranker_enabled", True)
 RERANKER_ENABLED = (
     _rer_enabled_raw.lower() in ("true", "1", "yes")
@@ -127,57 +131,8 @@ RRF_K_CONST = int(env_or_config("PLATFORM_RRF_K_CONST", _CFG, "search.rrf_k_cons
 GPU_CONCURRENCY = int(env_or_config("PLATFORM_GPU_CONCURRENCY", _CFG, "search.gpu_concurrency", 1))
 _gpu_sem: "asyncio.Semaphore | None" = None  # lazy init in event loop
 
-# 额外把启动 / 每次 query 日志写到固定文件，便于"观察模型起作用"
-_LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
-# 召回质量分析日志:每次 search_docs 一行 JSON,后续可 jq 分析 top-5 distance 漂移
-_RECALL_LOG = Path(__file__).resolve().parent / "search_recall.jsonl"
-
-
-_LOG_MAX_BYTES = int(os.getenv("PLATFORM_LOG_MAX_BYTES", str(5 * 1024 * 1024)))  # 5 MiB
-
-
-def _maybe_rotate_log() -> None:
-    """日志超过 _LOG_MAX_BYTES 时滚动到 .1 (单备份, 防长跑 daemon 撑爆磁盘)。失败静默。"""
-    try:
-        if _LOG_FILE.exists() and _LOG_FILE.stat().st_size > _LOG_MAX_BYTES:
-            bak = _LOG_FILE.with_suffix(_LOG_FILE.suffix + ".1")
-            try:
-                if bak.exists():
-                    bak.unlink()
-            except Exception:
-                pass
-            _LOG_FILE.replace(bak)
-    except Exception:
-        pass
-
-
-def _flog(msg: str) -> None:
-    """同时写文件 + stderr。文件路径：tools/chroma/mcp_server.log"""
-    import datetime
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {msg}"
-    try:
-        _maybe_rotate_log()
-        with _LOG_FILE.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
-    # Windows MCP clients may close or replace stderr during startup. Logging
-    # must never poison model initialization or stdio protocol handling.
-    try:
-        print(line, file=sys.stderr, flush=True)
-    except Exception:
-        pass
-
-
-def _log_recall(record: dict) -> None:
-    """JSONL 召回日志:每行一个 query。失败静默(不阻塞查询)。"""
-    try:
-        import json as _json
-        with _RECALL_LOG.open("a", encoding="utf-8") as f:
-            f.write(_json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+# 日志 helper (_flog / _log_recall / _maybe_rotate_log) + 路径常量已抽到 _obslog.py
+# (见上方 import re-export)。
 
 import contextvars
 from dataclasses import dataclass, field
@@ -209,155 +164,14 @@ class _ProjectState:
 _projects: dict[str, _ProjectState] = {}
 
 
-# 全局 stats 累加器 (跨 project 共享 GPU model, 全部 project 调用一起统计)
-_stats: dict[str, dict[str, Any]] = {
-    "embedding": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None, "load_retries": 0},
-    "reranker": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None, "load_retries": 0},
-}
-
-# daemon 进程启动时刻 (uptime 计算) + 当前活跃 SSE session 数 (widget 观测连接泄漏)
-_DAEMON_START = time.time()
+# stats 累加器 + _record_stat / _record_stat_error / _process_info / _DAEMON_START 已抽到
+# _stats.py (上方 import re-export)。_sse_sessions 仍在 server: handle_sse 内 rebind (+= / -=),
+# 跨模块 rebind 会读到 stale, 故留本模块 (handle_sse 也在本模块)。
 _sse_sessions = 0
 
 
-def _record_stat(kind: str, elapsed_ms: float) -> None:
-    """累加调用次数 + 总耗时。 kind: embedding / reranker.
-
-    Notes:
-    - _stats 是 in-memory, daemon 重启归零 (不持久化, widget 仅做实时观测用)
-    - 线程安全: 仅在 asyncio event loop 单线程操作 (encode/rerank 都在 coroutine 内直调).
-      若未来改 asyncio.to_thread 把 GPU 跑后台线程, 必须加 threading.Lock 保护
-    """
-    s = _stats.get(kind)
-    if s is None:
-        return
-    s["calls"] += 1
-    s["ms_total"] += elapsed_ms
-
-
-def _record_stat_error(kind: str, exc: BaseException) -> None:
-    """记录一次 GPU 推理失败 (embedding / reranker), widget 显错误率 + last_error。"""
-    s = _stats.get(kind)
-    if s is None:
-        return
-    s["errors"] = int(s.get("errors", 0)) + 1
-    s["last_error"] = f"{type(exc).__name__}: {exc}"[:200]
-
-
-def _process_info() -> dict[str, Any]:
-    """daemon 进程 RSS / uptime / pid。psutil 缺失时 rss_mb=None (uptime/pid 仍可)。"""
-    rss_mb: float | None = None
-    try:
-        import psutil  # type: ignore
-        rss_mb = round(psutil.Process().memory_info().rss / (1024 * 1024), 1)
-    except Exception:
-        pass
-    return {
-        "pid": os.getpid(),
-        "uptime_sec": int(time.time() - _DAEMON_START),
-        "rss_mb": rss_mb,
-    }
-
-
-def retry_delays(attempts: int, base: float = 0.5, cap: float = 2.0) -> list[float]:
-    """退避序列 (纯函数, 可测): 指数增长 base*2^i, 各项 clamp 到 cap。
-
-    返回 len == max(0, attempts - 1) 个 sleep 间隔 (n 次尝试之间 n-1 次 sleep)。
-    例: retry_delays(3, 0.5, 2.0) -> [0.5, 1.0]; retry_delays(4) -> [0.5, 1.0, 2.0]。
-    总退避有上限 (sum)，不会无限阻塞。
-    """
-    if attempts <= 1:
-        return []
-    out: list[float] = []
-    for i in range(attempts - 1):
-        out.append(min(base * (2.0 ** i), cap))
-    return out
-
-
-def should_retry(attempt: int, max_attempts: int, exc: BaseException) -> bool:
-    """是否再试: 未到 max_attempts 且异常看起来是瞬时 (GPU busy / transient OOM)。
-
-    attempt 从 1 计数 (第 1 次尝试 attempt=1)。非瞬时错误 (如路径不存在 / import 失败)
-    不重试 —— 重试也不会变好, 直接进降级。
-    """
-    if attempt >= max_attempts:
-        return False
-    return _is_gpu_error(exc)
-
-
-def _load_with_retry(label: str, loader, max_attempts: int = 3,
-                     base: float = 0.5, cap: float = 2.0):
-    """有界重试包装 GPU 模型懒加载。
-
-    loader: 无参 callable, 成功返回非 None 结果, 失败抛异常。
-    瞬时失败 (GPU busy / transient OOM) 按 retry_delays 退避重试; 非瞬时 / 耗尽 → 抛最后异常。
-    记重试次数进 _stats[label]['load_retries'] 供 health 观测。
-    note: 同步 sleep, 但总退避 <= sum(retry_delays) (默认 1.5s), 不长阻塞事件循环。
-    """
-    delays = retry_delays(max_attempts, base, cap)
-    last_exc: BaseException | None = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            return loader()
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
-            if not should_retry(attempt, max_attempts, exc):
-                raise
-            s = _stats.get(label)
-            if s is not None:
-                s["load_retries"] = int(s.get("load_retries", 0)) + 1
-            delay = delays[attempt - 1] if attempt - 1 < len(delays) else cap
-            _flog(f"[{label}] load attempt {attempt}/{max_attempts} failed "
-                  f"({type(exc).__name__}: {exc}); transient, retry in {delay}s")
-            time.sleep(delay)
-    assert last_exc is not None
-    raise last_exc
-
-
-def _is_gpu_error(exc: BaseException) -> bool:
-    """粗判异常是否 CUDA 显存 / 设备类错误 (用于 CPU 降级决策)。"""
-    text = f"{type(exc).__name__}: {exc}".lower()
-    return any(
-        kw in text
-        for kw in ("cuda", "out of memory", "oom", "device-side", "no kernel image", "nvml")
-    )
-
-
-def _gpu_free_info() -> dict[str, Any] | None:
-    """整卡 free / 本进程外占用 (MiB)。非 CUDA / 不可用返回 None。
-
-    free_mb = 整卡空闲; allocated_other_mb = 整卡已用 - 本进程已分配 (粗估其它进程占用)。
-    """
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            return None
-        free_b, total_b = torch.cuda.mem_get_info()
-        free_mb = round(free_b / (1024 * 1024), 1)
-        used_total_mb = round((total_b - free_b) / (1024 * 1024), 1)
-        self_mb = round(torch.cuda.memory_allocated() / (1024 * 1024), 1)
-        return {
-            "free_mb": free_mb,
-            "allocated_other_mb": round(max(0.0, used_total_mb - self_mb), 1),
-        }
-    except Exception:
-        return None
-
-
-def _gpu_memory_mb() -> float | None:
-    """返回 CUDA 当前已分配显存 (MiB), 不可用 / 非 CUDA 返回 None。
-
-    口径限制: 仅统计 daemon 当前 Python 进程 — 不含其它进程 (cross-link MCP / 别的占用).
-    用于 widget 观测 daemon 自身负载, 不等同整卡占用. 整卡 free/used 走
-    torch.cuda.mem_get_info(), 后续 Phase 2 可暴露。
-    """
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            return None
-        return round(torch.cuda.memory_allocated() / (1024 * 1024), 1)
-    except Exception:
-        return None
+# retry_delays / should_retry / _load_with_retry / _is_gpu_error / _gpu_free_info /
+# _gpu_memory_mb 已抽到 _helpers.py (上方 import re-export, tests 仍用 server.<name>)。
 
 
 def _project_last_indexed_iso(project_id: str) -> str | None:
@@ -385,14 +199,7 @@ def _project_last_indexed_iso(project_id: str) -> str | None:
         return None
 
 
-def _to_iso(epoch_sec: float | None) -> str | None:
-    if epoch_sec is None:
-        return None
-    try:
-        from datetime import datetime, timezone
-        return datetime.fromtimestamp(epoch_sec, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
-    except Exception:
-        return None
+# _to_iso 已抽到 _helpers.py (上方 import re-export)。
 
 # contextvar 把 SSE session 跟 project_id 绑定; tool handler 通过它路由
 _current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextVar(
@@ -690,88 +497,11 @@ def _rerank_scores(query: str, docs: list[str]) -> list[float] | None:
 server: Server = Server("platform-docs")
 
 
-CATEGORIES = ["rule", "incident", "tooling_incident", "design", "operations", "claude_md", "skill", "doc", "tool_doc", "memory", "dev_log", "all"]
-MODULES = ["platform", "stock-admin-api", "stock-admin-web", "stock-pipeline", "all"]
-
-
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    return [
-        Tool(
-            name="search_docs",
-            description=(
-                "语义搜索平台 markdown 文档（规则 / 事故 / 设计 / 运维 / CLAUDE.md / skill）。"
-                "返回 top-k 相关 chunk，可按 category / module 过滤。"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "自然语言查询"},
-                    "k": {
-                        "type": "integer",
-                        "default": 5,
-                        "minimum": 1,
-                        "maximum": 20,
-                        "description": "返回 chunk 数",
-                    },
-                    "category": {
-                        "type": "string",
-                        "enum": CATEGORIES,
-                        "default": "all",
-                        "description": "文档类别过滤",
-                    },
-                    "module": {
-                        "type": "string",
-                        "enum": MODULES,
-                        "default": "all",
-                        "description": "子模块过滤",
-                    },
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="list_collections",
-            description="查看 Chroma 知识库统计（总文档数 / 各 category 数 / 各 module 数）",
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="get_by_file",
-            description="按文件路径精确获取该文件的所有 chunks（用于读全文，非语义检索）",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "description": "如 '.claude/rules/pct-sign-convention.md'（相对仓库根路径）",
-                    },
-                },
-                "required": ["file"],
-            },
-        ),
-    ]
-
-
-def _err(msg: str) -> list[TextContent]:
-    return [TextContent(type="text", text=json.dumps({"error": msg}, ensure_ascii=False))]
-
-
-def _ok(payload: Any) -> list[TextContent]:
-    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
-
-
-def _build_where(category: str, module: str) -> dict | None:
-    """构造 Chroma where 过滤（单字段直传，多字段用 $and）。"""
-    clauses: list[dict] = []
-    if category and category != "all":
-        clauses.append({"category": category})
-    if module and module != "all":
-        clauses.append({"module": module})
-    if not clauses:
-        return None
-    if len(clauses) == 1:
-        return clauses[0]
-    return {"$and": clauses}
+    # tool 定义 + CATEGORIES / MODULES + _err / _ok / _build_where 已抽到 _schema.py
+    # (上方 import re-export)。
+    return tool_definitions()
 
 
 @server.call_tool()
