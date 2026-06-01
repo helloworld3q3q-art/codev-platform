@@ -17,6 +17,7 @@ from codev_platform.core.acl import AccessDecision, can_access, memory_scope_acc
 from codev_platform.core.audit import audit_access
 from codev_platform.core.config import load_config
 from codev_platform.core.rbac import memory_scope_decision
+from codev_platform.gateway.auth import Identity
 
 router = APIRouter()
 
@@ -53,6 +54,19 @@ def _resolve_identity(request: Request) -> tuple[str, str]:
     )
 
 
+def _effective_identity(request: Request, org_id: str, user_id: str):
+    """返回用于 ACL 的身份对象。
+
+    gateway 中间件存在时使用可信 identity；dev 单机未挂 gateway 时，按
+    PassthroughAuthenticator 语义合成 advisory identity。否则 personal memory
+    会因为 identity=None 而把"本人访问本人"误判成 403。
+    """
+    ident = getattr(request.state, "identity", None)
+    if ident is not None:
+        return ident
+    return Identity(user_id=user_id, org_id=org_id, via="passthrough", all_projects=True)
+
+
 def _to_out(e: MemoryEntry) -> MemoryEntryOut:
     return MemoryEntryOut(
         id=e.id, scope=e.scope, scope_ref=e.scope_ref, owner_user_id=e.owner_user_id,
@@ -77,7 +91,7 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     scope_ref = user_id if req.scope == "personal" else req.scope_ref
     # ACL 统一闸 (单一真值源 core/acl.py): personal/project/org/team 全走 memory_scope_access,
     # 不再对 project 单独 can_access (避免双重判定)。personal 数据归一已在上行完成。
-    _ident = getattr(request.state, "identity", None)
+    _ident = _effective_identity(request, org_id, user_id)
     _dec = _scope_decision(org_id, user_id, req.scope, scope_ref, _ident)
     audit_access("agent-memory", _ident, scope_ref, _dec)
     if not _dec.allowed:
@@ -112,7 +126,7 @@ def list_memory(
         org_id, user_id = _resolve_identity(request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    _ident = getattr(request.state, "identity", None)
+    _ident = _effective_identity(request, org_id, user_id)
     _dec = _scope_decision(org_id, user_id, scope, scope_ref, _ident)
     audit_access("agent-memory", _ident, scope_ref, _dec)
     if not _dec.allowed:

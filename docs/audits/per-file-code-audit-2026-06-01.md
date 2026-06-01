@@ -288,6 +288,27 @@
 - `tests/test_codegraph_link.py`: 可接受，发布前复核命令边界；风险命中: 递归删除
 - `tests/test_reindex_pull.py`: 可接受，发布前复核命令边界；风险命中: subprocess
 
+## 边界 bug 专项追加
+
+本轮继续按边界输入审计，发现并修复一个 dev 单机模式下的真实 ACL 误判：`/memory` 未挂 gateway 中间件时，路由能解析 `X-User-Id`，但 ACL 使用的 identity 为 `None`，导致 personal memory “本人写本人”返回 403。
+
+修复位置：
+
+- `codev_platform/agent/routes/memory.py`: 增加 `_effective_identity()`，gateway 存在时使用可信 identity；dev 单机时合成 passthrough advisory identity。
+- `tests/test_agent_memory_route_acl.py`: 增加 `test_write_personal_self_allowed_without_gateway`。
+
+验证：
+
+- ACL/Memory 边界专项测试: `31 passed, 1 warning`
+- 全量测试: `428 passed, 5 skipped, 1 warning`
+
+剩余边界风险：
+
+- `health --mode full` 与 `serve-mcp status` 语义不完全一致，后续建议加 `health --require-services`。
+- `SqlMemoryStore.forget/archive` 未来开放 HTTP 删除/归档端点前，必须补 `org_id/user_id` 权限闸。
+- webhook `/platform/status` 当前公开 provider 清单，正式部署建议鉴权或继续最小信息化。
+- 核心链路 `except Exception` 仍较多，需逐步收窄，避免边界错误被 fail-soft 掩盖。
+
 ## 最终判断
 
 逐文件扫描没有发现直接阻断当前本机运行和测试的代码问题。当前主要风险不是某个文件已经坏掉，而是平台型项目自然形成的复杂度集中、后台进程治理、Docker 私有化交付、授权升级机制和真实客户项目插件化适配。

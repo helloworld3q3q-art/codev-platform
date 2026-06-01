@@ -219,6 +219,36 @@
 - 配置治理: 本机 provider key 能脱敏，但正式交付应迁移到环境变量、密钥文件或客户侧密钥管理。
 - 产品配置一致性: Agent health 当前能返回 200，但 provider/model 的命名组合需要再核对，避免演示时出现“provider 与模型名不一致”的理解成本。
 
+### 边界 bug 专项审计
+
+本轮按“边界输入是否会打穿系统”复核了项目 ID、路径穿越、权限、请求体大小、服务在线状态、后台队列和 fail-soft 分支。
+
+已验证:
+
+- `project_id` 走 slug 校验，非法值会转 400 或抛明确错误。
+- public path 使用段边界匹配，`/healthcheck-evil`、`/health/../chat` 这类绕过已防护。
+- webhook 请求体有 1MB 上限，超限返回 413。
+- token 过期、项目白名单、限流、健康详情面鉴权已有专项测试。
+- `FileSpoolQueue` 对 `project_id` 和 `kind` 做底层校验，避免 reindex 队列路径穿越。
+
+发现并修复:
+
+- `/memory` 在未挂 gateway 中间件的 dev 单机模式下，会从 `X-User-Id` 正确解析出用户，但 ACL 判定拿到的 identity 为 `None`，导致 personal memory “本人写本人”被误判为 403。
+- 修复方式: `agent/routes/memory.py` 增加 `_effective_identity()`。gateway 存在时继续用可信 identity；dev 单机未挂 gateway 时合成 passthrough advisory identity。
+- 回归测试: `tests/test_agent_memory_route_acl.py::test_write_personal_self_allowed_without_gateway`。
+
+验证结果:
+
+- 边界专项测试: `31 passed, 1 warning`
+- 全量测试: `428 passed, 5 skipped, 1 warning`
+
+仍需后续治理:
+
+- `health --mode full` 和 `serve-mcp status` 语义不完全一致。`health` 可以 all green，但 MCP 服务未常驻时 `serve-mcp status` 可能为 DOWN。建议增加 `health --require-services`。
+- `SqlMemoryStore.forget/archive` 当前按 `entry_id` 操作，没有 `org_id/user_id` 参数。当前未暴露 HTTP 删除端点，暂不是立即漏洞；开放 `DELETE /memory/{id}` 前必须补权限闸。
+- webhook `/platform/status` 目前公开 provider 清单，风险低；正式部署建议放到鉴权后或继续保持最小信息。
+- 核心链路仍有较多 `except Exception`，需要逐步收窄异常类型，避免边界错误被过度 fail-soft 掩盖。
+
 ## 3. 当前主要风险
 
 ### P1: Docker 私有化部署未验证

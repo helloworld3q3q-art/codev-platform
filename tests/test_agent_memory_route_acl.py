@@ -45,6 +45,18 @@ def _client(monkeypatch, *, identity, token_mode=True):
     return TestClient(app)
 
 
+def _client_without_gateway(monkeypatch):
+    """dev 单机形态:未挂 AuthMiddleware,路由从 header 回退解析身份。"""
+    monkeypatch.setattr(memory_route.deps, "get_memory_store", lambda: _FakeStore())
+    monkeypatch.setattr(memory_route.deps, "get_rbac_store", lambda: None)
+    cfg = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
+    monkeypatch.setattr(memory_route, "load_config", lambda: cfg)
+
+    app = FastAPI()
+    app.include_router(memory_route.router)
+    return TestClient(app)
+
+
 def _ident(*, via="token", org_id="orgA", user_id="userA",
            projects=frozenset(), all_projects=False):
     return SimpleNamespace(via=via, org_id=org_id, user_id=user_id,
@@ -80,6 +92,13 @@ def test_write_project_not_in_allowlist_denied(monkeypatch):
 
 def test_write_personal_self_allowed(monkeypatch):
     c = _client(monkeypatch, identity=_ident(user_id="userA"))
+    r = c.post("/memory", headers=_hdrs(uid="userA"),
+               json={"scope": "personal", "scope_ref": "userA", "content": "x"})
+    assert r.status_code == 200
+
+
+def test_write_personal_self_allowed_without_gateway(monkeypatch):
+    c = _client_without_gateway(monkeypatch)
     r = c.post("/memory", headers=_hdrs(uid="userA"),
                json={"scope": "personal", "scope_ref": "userA", "content": "x"})
     assert r.status_code == 200
