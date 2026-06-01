@@ -4,7 +4,7 @@
 
 2026-05-20 09:10 早盘跑批 NotNullViolation 全 batch 失败 — Flyway 加 `position_sizing_mode SET NOT NULL`,但 `_build_forward_update` 未透传该字段,dict 中 `position_sizing_mode=None`,PG 在 INSERT 阶段(不等 ON CONFLICT)检查 NOT NULL 直接报错。**UPDATE 路径的 COALESCE 救不了 INSERT 时就 NULL 的场景**。
 
-→ 完整复盘 + 3 道防线 + Flyway checksum 禁手动登记:[`docs/operations/incident-2026-05-20-position-sizing-mode-notnull.md`](../../docs/operations/incident-2026-05-20-position-sizing-mode-notnull.md)
+→ 完整复盘 + 3 道防线 + Flyway checksum 禁手动登记见引入本规则的源仓事故归档(规则随分发,具体事故文档不分发)。
 
 ## 1. 加 NOT NULL 约束的强制流程
 

@@ -9,7 +9,7 @@
 
 N12(2026-05-23)— L1 agent 在前端 `apps/stock-admin-web/src/pages/dataintegrity/utils.ts` 落地硬编码 `FETCHER_GROUP_MAP`,把"DB 表名 → fetcher 分组"业务标识符当成 UI 常量发明真值。用户当场否决:"py / sql / java / 前端 字段值最好都能从源头保持一致"。延期 1.5-2 天重做四层联动。
 
-→ 完整复盘 + 修复 Phase 1-4 + parity 工具:[`docs/dev-evolution/incidents/2026-05-23-n12-fetcher-enum.md`](../../docs/dev-evolution/incidents/2026-05-23-n12-fetcher-enum.md)
+→ 完整复盘 + 修复 Phase 1-4 + parity 工具见引入本规则的源仓事故归档(规则随分发,具体事故文档不分发)。
 
 ---
 
