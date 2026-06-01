@@ -143,6 +143,57 @@ def aggregate(sources: dict[str, list[dict]]) -> MetricsSummary:
     return MetricsSummary(per_source=per_source, totals=totals)
 
 
+def _prom_escape(value: str) -> str:
+    """Prometheus label value escaping: backslash / quote / newline。"""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def to_prometheus(summary: MetricsSummary) -> str:
+    """把 summary 转 Prometheus 文本曝光格式 (供 node_exporter textfile / cron 抓)。
+
+    纯字符串, 无 IO, 可测。每个 metric 带 # HELP / # TYPE。
+    """
+    lines: list[str] = []
+
+    def metric(name: str, mtype: str, help_text: str, samples: list[tuple[str, float]]):
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} {mtype}")
+        for labels, val in samples:
+            suffix = "{" + labels + "}" if labels else ""
+            v = int(val) if float(val).is_integer() else val
+            lines.append(f"{name}{suffix} {v}")
+
+    audit = summary.per_source.get("audit", {})
+    metric("codev_audit_requests_total", "gauge", "audit log entries in window", [
+        (f'result="allowed"', audit.get("allowed", 0)),
+        (f'result="denied"', audit.get("denied", 0)),
+    ])
+    metric("codev_audit_deny_rate", "gauge", "audit deny rate in window",
+           [("", audit.get("deny_rate", 0.0))])
+    for reason, cnt in audit.get("deny_by_reason", {}).items():
+        lines.append(f'codev_audit_deny_by_reason{{reason="{_prom_escape(reason)}"}} {cnt}')
+
+    call_samples: list[tuple[str, float]] = []
+    err_samples: list[tuple[str, float]] = []
+    rate_samples: list[tuple[str, float]] = []
+    for src in ("chroma", "cross-link", "codegraph"):
+        s = summary.per_source.get(src, {})
+        label = f'service="{_prom_escape(src)}"'
+        call_samples.append((label, s.get("total", 0)))
+        if "error_rate" in s:
+            err_samples.append((label, s.get("errors", 0)))
+            rate_samples.append((label, s.get("error_rate", 0.0)))
+    metric("codev_mcp_calls_total", "gauge", "MCP calls per service in window", call_samples)
+    metric("codev_mcp_errors_total", "gauge", "MCP errors per service in window", err_samples)
+    metric("codev_mcp_error_rate", "gauge", "MCP error rate per service in window", rate_samples)
+
+    if summary.flags:
+        metric("codev_alert", "gauge", "active alert flags (1=firing)",
+               [(f'name="{_prom_escape(str(f))}"', 1) for f in summary.flags])
+
+    return "\n".join(lines) + "\n"
+
+
 def check_alerts(summary: MetricsSummary, thresholds: dict | None) -> list[str]:
     """简单阈值告警。thresholds 缺省 / 空 -> 不告警 (宽松)。"""
     alerts: list[str] = []
@@ -159,6 +210,34 @@ def check_alerts(summary: MetricsSummary, thresholds: dict | None) -> list[str]:
             if rate > err_max:
                 alerts.append(f"{src} error_rate {rate:.2%} > {err_max:.2%}")
     return alerts
+
+
+def deliver_alerts(alerts: list[str], cfg) -> None:
+    """投递告警: ① 每条永远 _log 一条 WARN; ② config metrics.alert_webhook 非空则 POST。
+
+    webhook POST 是 IO 薄层: urllib + 短超时, 任何失败静默 (不阻塞巡检主流程)。
+    无告警 -> 直接返回。
+    """
+    if not alerts:
+        return
+    import logging
+    log = logging.getLogger("codev_platform.ops.metrics")
+    for msg in alerts:
+        log.warning("metrics alert: %s", msg)
+
+    from codev_platform.core.config import get
+    webhook = get(cfg, "metrics.alert_webhook")
+    if not webhook:
+        return
+    try:
+        import urllib.request
+        payload = json.dumps({"alerts": alerts}).encode("utf-8")
+        req = urllib.request.Request(
+            webhook, data=payload,
+            headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req, timeout=3).close()
+    except Exception:  # noqa: BLE001 -- 投递失败不阻塞巡检
+        log.warning("metrics alert webhook delivery failed (ignored)")
 
 
 # --------------------------------------------------------------------------
@@ -225,7 +304,8 @@ def _print_human(summary: MetricsSummary, alerts: list[str], since: str | None) 
             print(f"  ! {msg}")
 
 
-def run_metrics(cfg, since: str | None, as_json: bool) -> int:
+def run_metrics(cfg, since: str | None, as_json: bool,
+                as_prometheus: bool = False) -> int:
     since_sec = parse_since(since)
     now_ts = datetime.now(timezone.utc).timestamp()
     sources = load_sources(now_ts, since_sec)
@@ -234,8 +314,13 @@ def run_metrics(cfg, since: str | None, as_json: bool) -> int:
     from codev_platform.core.config import get
     thresholds = get(cfg, "metrics.alerts")
     alerts = check_alerts(summary, thresholds)
+    summary.flags = alerts
 
-    if as_json:
+    deliver_alerts(alerts, cfg)
+
+    if as_prometheus:
+        print(to_prometheus(summary), end="")
+    elif as_json:
         payload = {
             "since": since,
             "per_source": summary.per_source,
@@ -251,7 +336,7 @@ def run_metrics(cfg, since: str | None, as_json: bool) -> int:
 def cmd_metrics(args: argparse.Namespace) -> int:
     from codev_platform.core.config import load_config
     try:
-        return run_metrics(load_config(), args.since, args.json)
+        return run_metrics(load_config(), args.since, args.json, args.prometheus)
     except ValueError as exc:
         print(f"metrics: 参数错误: {exc}", file=sys.stderr, flush=True)
         return 2
@@ -263,4 +348,6 @@ def register(subparsers) -> None:
     mp.add_argument("--since", default=None,
                     help="时间窗口 (如 30m / 2h / 1d / 90s; 默认全量)")
     mp.add_argument("--json", action="store_true", help="输出 JSON 而非人类可读表")
+    mp.add_argument("--prometheus", action="store_true",
+                    help="输出 Prometheus 曝光文本 (供 node_exporter textfile / cron 抓)")
     mp.set_defaults(func=cmd_metrics)

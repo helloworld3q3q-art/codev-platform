@@ -103,8 +103,9 @@
   },
 
   "metrics": {
-    "_comment": "可观测指标采集 (codev-platform metrics) 的告警阈值。聚合 audit/access.jsonl + 三套 MCP 使用 jsonl 后, deny_rate 超 deny_rate_max / 各 MCP error_rate 超 error_rate_max 即在输出末尾告警并以退出码 1 返回 (供巡检脚本判失败)。缺省 / 空 = 不告警 (宽松, 只出统计)。",
-    "alerts": { "deny_rate_max": 0.2, "error_rate_max": 0.1 }
+    "_comment": "可观测指标采集 (codev-platform metrics) 的告警阈值。聚合 audit/access.jsonl + 三套 MCP 使用 jsonl 后, deny_rate 超 deny_rate_max / 各 MCP error_rate 超 error_rate_max 即在输出末尾告警并以退出码 1 返回 (供巡检脚本判失败)。缺省 / 空 = 不告警 (宽松, 只出统计)。alert_webhook 非空时, 告警额外 POST 到该 URL (urllib, 短超时, 失败静默不阻塞); 默认空 = 只记 WARN 日志。--prometheus 输出曝光文本供 node_exporter textfile collector / cron 抓。",
+    "alerts": { "deny_rate_max": 0.2, "error_rate_max": 0.1 },
+    "alert_webhook": ""
   },
 
   "projects": {

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, runtime_checkable
 
@@ -27,7 +28,34 @@ def token_hash(token: str) -> str:
 
 
 class Unauthorized(Exception):
-    """认证失败(缺/坏 token、身份非法)。中间件转 401。"""
+    """认证失败(缺/坏 token、身份非法、token 过期)。中间件转 401。"""
+
+
+def token_expired(meta: Mapping[str, Any], now_epoch: float) -> bool:
+    """token 是否过期(纯函数, now 入参保可测)。
+
+    判定:
+      - meta 无 "expires_at" → 永不过期(返回 False)。
+      - expires_at 为 epoch 秒(int/float)或可解析 ISO 字符串, 且 < now → 过期(True)。
+      - 解析失败(坏值) → 按**已过期**(True), 安全默认拒绝(不让脏配置变成永久有效)。
+    """
+    raw = meta.get("expires_at")
+    if raw is None or raw == "":
+        return False  # 无 expires_at = 永久 token
+    try:
+        if isinstance(raw, bool):
+            raise TypeError("bool 不是合法 expires_at")
+        if isinstance(raw, (int, float)):
+            exp = float(raw)
+        else:
+            from datetime import datetime
+            s = str(raw).strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            exp = datetime.fromisoformat(s).timestamp()
+    except Exception:  # noqa: BLE001 坏值按已过期(安全默认)
+        return True
+    return exp < now_epoch
 
 
 @dataclass(frozen=True)
@@ -104,6 +132,9 @@ class TokenAuthenticator:
                 ident = meta
         if ident is None:
             raise Unauthorized("无效 token")
+        # 过期判定放命中后(不破坏遍历的常量时间特性: 过期 check 不依赖输入字符差异)。
+        if token_expired(ident, time.time()):
+            raise Unauthorized("token 已过期")
         # project 白名单解析(ACL 闸2 真值): "*"/["*"]=全部; list/tuple=显式白名单;
         # 缺省/其它=无权(安全默认, 不给空 token 越权访问所有项目)。
         raw = ident.get("projects")

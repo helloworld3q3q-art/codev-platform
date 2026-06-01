@@ -211,8 +211,8 @@ _projects: dict[str, _ProjectState] = {}
 
 # 全局 stats 累加器 (跨 project 共享 GPU model, 全部 project 调用一起统计)
 _stats: dict[str, dict[str, Any]] = {
-    "embedding": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None},
-    "reranker": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None},
+    "embedding": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None, "load_retries": 0},
+    "reranker": {"calls": 0, "ms_total": 0.0, "errors": 0, "last_error": None, "load_retries": 0},
 }
 
 # daemon 进程启动时刻 (uptime 计算) + 当前活跃 SSE session 数 (widget 观测连接泄漏)
@@ -257,6 +257,61 @@ def _process_info() -> dict[str, Any]:
         "uptime_sec": int(time.time() - _DAEMON_START),
         "rss_mb": rss_mb,
     }
+
+
+def retry_delays(attempts: int, base: float = 0.5, cap: float = 2.0) -> list[float]:
+    """退避序列 (纯函数, 可测): 指数增长 base*2^i, 各项 clamp 到 cap。
+
+    返回 len == max(0, attempts - 1) 个 sleep 间隔 (n 次尝试之间 n-1 次 sleep)。
+    例: retry_delays(3, 0.5, 2.0) -> [0.5, 1.0]; retry_delays(4) -> [0.5, 1.0, 2.0]。
+    总退避有上限 (sum)，不会无限阻塞。
+    """
+    if attempts <= 1:
+        return []
+    out: list[float] = []
+    for i in range(attempts - 1):
+        out.append(min(base * (2.0 ** i), cap))
+    return out
+
+
+def should_retry(attempt: int, max_attempts: int, exc: BaseException) -> bool:
+    """是否再试: 未到 max_attempts 且异常看起来是瞬时 (GPU busy / transient OOM)。
+
+    attempt 从 1 计数 (第 1 次尝试 attempt=1)。非瞬时错误 (如路径不存在 / import 失败)
+    不重试 —— 重试也不会变好, 直接进降级。
+    """
+    if attempt >= max_attempts:
+        return False
+    return _is_gpu_error(exc)
+
+
+def _load_with_retry(label: str, loader, max_attempts: int = 3,
+                     base: float = 0.5, cap: float = 2.0):
+    """有界重试包装 GPU 模型懒加载。
+
+    loader: 无参 callable, 成功返回非 None 结果, 失败抛异常。
+    瞬时失败 (GPU busy / transient OOM) 按 retry_delays 退避重试; 非瞬时 / 耗尽 → 抛最后异常。
+    记重试次数进 _stats[label]['load_retries'] 供 health 观测。
+    note: 同步 sleep, 但总退避 <= sum(retry_delays) (默认 1.5s), 不长阻塞事件循环。
+    """
+    delays = retry_delays(max_attempts, base, cap)
+    last_exc: BaseException | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return loader()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if not should_retry(attempt, max_attempts, exc):
+                raise
+            s = _stats.get(label)
+            if s is not None:
+                s["load_retries"] = int(s.get("load_retries", 0)) + 1
+            delay = delays[attempt - 1] if attempt - 1 < len(delays) else cap
+            _flog(f"[{label}] load attempt {attempt}/{max_attempts} failed "
+                  f"({type(exc).__name__}: {exc}); transient, retry in {delay}s")
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
 
 
 def _is_gpu_error(exc: BaseException) -> bool:
@@ -365,12 +420,15 @@ def _ensure_model():
 
         from sentence_transformers import SentenceTransformer
         try:
-            _model = SentenceTransformer(EMBED_MODEL, device=EMBED_DEVICE)
+            # 瞬时 GPU 失败 (busy / transient OOM) 先在 GPU 上有界重试退避; 耗尽再降级 CPU。
+            _model = _load_with_retry(
+                "embedding", lambda: SentenceTransformer(EMBED_MODEL, device=EMBED_DEVICE)
+            )
         except Exception as gpu_exc:  # noqa: BLE001
             # F5: GPU 被其它进程抢占 (OOM / device busy) → 降级 CPU 重试一次, 不硬挂 daemon。
             # CPU 推理慢但可用, 避免整卡满时检索功能完全不可用。
             if EMBED_DEVICE != "cpu" and _is_gpu_error(gpu_exc):
-                _flog(f"[init] WARN: GPU load failed ({gpu_exc!s}), fallback to CPU (slower)")
+                _flog(f"[init] WARN: GPU load failed after retries ({gpu_exc!s}), fallback to CPU (slower)")
                 _model = SentenceTransformer(EMBED_MODEL, device="cpu")
             else:
                 raise
@@ -574,9 +632,14 @@ def _ensure_reranker():
         _reranker_tok = AutoTokenizer.from_pretrained(RERANKER_MODEL, padding_side="left")
         import torch
         dtype = _torch_dtype(RERANKER_DTYPE, RERANKER_DEVICE)
-        m = AutoModelForCausalLM.from_pretrained(RERANKER_MODEL, dtype=dtype)
-        m = m.to(RERANKER_DEVICE)  # 尊重配置 device(cuda / cuda:N / cpu), 不再写死 .cuda()
-        m = m.eval()
+
+        def _load_reranker_model():
+            mm = AutoModelForCausalLM.from_pretrained(RERANKER_MODEL, dtype=dtype)
+            mm = mm.to(RERANKER_DEVICE)  # 尊重配置 device(cuda / cuda:N / cpu), 不再写死 .cuda()
+            return mm.eval()
+
+        # 瞬时 GPU 失败 (busy / transient OOM) 有界重试; 耗尽 → 抛 → 既有 except 进降级。
+        m = _load_with_retry("reranker", _load_reranker_model)
         _reranker_model = m
         _reranker_yes_id = _reranker_tok.convert_tokens_to_ids("yes")
         _reranker_no_id = _reranker_tok.convert_tokens_to_ids("no")
@@ -1104,12 +1167,14 @@ async def _run_http(port: int) -> None:
                 "ms_avg": round(emb["ms_total"] / emb["calls"], 2) if emb["calls"] else None,
                 "errors": int(emb.get("errors", 0)),
                 "last_error": emb.get("last_error"),
+                "load_retries": int(emb.get("load_retries", 0)),
             },
             "reranker": {
                 "calls": int(rer["calls"]),
                 "ms_avg": round(rer["ms_total"] / rer["calls"], 2) if rer["calls"] else None,
                 "errors": int(rer.get("errors", 0)),
                 "last_error": rer.get("last_error"),
+                "load_retries": int(rer.get("load_retries", 0)),
             },
             "gpu_memory_mb": _gpu_memory_mb(),
         }

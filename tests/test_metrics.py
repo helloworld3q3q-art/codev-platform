@@ -100,3 +100,80 @@ def test_check_alerts_error_rate():
     alerts = m.check_alerts(s, {"error_rate_max": 0.1})
     assert any("codegraph" in a for a in alerts)
     assert not m.check_alerts(s, {"error_rate_max": 0.9})
+
+
+def test_to_prometheus_exposition_format():
+    s = m.aggregate({
+        "audit": [
+            {"allowed": True, "reason": "ok"},
+            {"allowed": False, "reason": 'bad "quote"'},
+        ],
+        "codegraph": [{"tool": "x", "ok": False}, {"tool": "y", "ok": True}],
+    })
+    s.flags = ['codegraph error_rate 50.00% > 10.00%']
+    text = m.to_prometheus(s)
+    # HELP / TYPE 头
+    assert "# HELP codev_audit_requests_total" in text
+    assert "# TYPE codev_audit_requests_total gauge" in text
+    # 带 label 的样本行
+    assert 'codev_audit_requests_total{result="allowed"} 1' in text
+    assert 'codev_audit_requests_total{result="denied"} 1' in text
+    assert 'codev_mcp_calls_total{service="codegraph"} 2' in text
+    assert 'codev_mcp_errors_total{service="codegraph"} 1' in text
+    # 告警 flag = 1
+    assert "codev_alert{name=" in text
+    assert text.endswith("\n")
+    # label value 转义双引号
+    assert '\\"quote\\"' in text
+
+
+def test_deliver_alerts_no_webhook_only_logs(monkeypatch, caplog):
+    import logging
+    called = {"n": 0}
+
+    def fake_urlopen(*a, **k):  # 不应被调用
+        called["n"] += 1
+        raise AssertionError("urlopen should not be called without webhook")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    cfg = {"metrics": {"alert_webhook": ""}}
+    with caplog.at_level(logging.WARNING):
+        m.deliver_alerts(["deny too high"], cfg)
+    assert called["n"] == 0
+    assert any("deny too high" in r.message for r in caplog.records)
+
+
+def test_deliver_alerts_no_alerts_noop(monkeypatch):
+    def fake_urlopen(*a, **k):
+        raise AssertionError("should not POST when no alerts")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    m.deliver_alerts([], {"metrics": {"alert_webhook": "http://x"}})  # no raise
+
+
+def test_deliver_alerts_posts_to_webhook(monkeypatch):
+    captured = {}
+
+    class FakeResp:
+        def close(self):
+            pass
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["data"] = req.data
+        captured["timeout"] = timeout
+        return FakeResp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    cfg = {"metrics": {"alert_webhook": "http://hook.local/x"}}
+    m.deliver_alerts(["a1", "a2"], cfg)
+    assert captured["url"] == "http://hook.local/x"
+    assert b"a1" in captured["data"] and b"a2" in captured["data"]
+    assert captured["timeout"] == 3
+
+
+def test_deliver_alerts_webhook_failure_silent(monkeypatch):
+    def boom(*a, **k):
+        raise OSError("network down")
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    cfg = {"metrics": {"alert_webhook": "http://hook.local/x"}}
+    m.deliver_alerts(["a1"], cfg)  # 失败静默, 不抛
