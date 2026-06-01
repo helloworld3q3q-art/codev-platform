@@ -1,8 +1,10 @@
-# 插件化全链路 AI 平台落地 Plan(2026-06-01)
+# 模块化核心 + 插件化扩展全链路 AI 平台落地 Plan(2026-06-01)
 
-> 定位: 把 codev-platform 从固定工具集合升级为私有化部署的插件化全链路 AI 平台。
+> 定位: 把 codev-platform 从固定工具集合升级为私有化部署的“模块化核心 + 插件化扩展”全链路 AI 平台。
 >
 > 核心判断: 商业价值不在“又一个 Agent”，而在私有环境中稳定回答“改一个接口、字段、页面、需求会影响哪里”。
+
+> 2026-06-02 补充决策: 不把所有东西都叫插件化。平台内部能力先模块化，客户差异能力再插件化。详见 `modular-core-plugin-extension-decision-2026-06-02.md`。
 
 ## 一、目标
 
@@ -19,22 +21,33 @@ Vue/React 页面
 -> Agent 影响分析报告
 ```
 
-平台核心只做:
+平台核心先做模块化:
 
-- 项目 / 租户 / 权限
-- 索引调度
-- 文档 RAG
-- 统一图谱存储
-- Agent 编排
-- MCP / HTTP 查询接口
-- 审计日志
-- 部署与健康检查
+- auth: 项目 / 租户 / 用户 / token / 权限。
+- audit: 访问审计、召回审计、插件执行审计。
+- scheduler: 索引调度、增量触发、失败重试。
+- graph: 统一图谱存储、节点、边、证据。
+- retrieval: 文档 RAG、BM25、RRF、rerank、权限过滤。
+- memory: Agent Memory、生命周期、遗忘、压缩、任务记忆。
+- agent: Agent 编排、工具调用、上下文组装。
+- report: 影响分析报告、证据聚合、置信度和风险输出。
+- ops: MCP / HTTP 查询接口、部署、健康检查、日志。
 
-技术栈能力全部插件化:
+客户差异能力插件化:
 
-- CodeGraphPlugin: 语言内部结构，函数、类、组件、调用、引用。
-- CrossLinkPlugin: 跨层关系，页面 -> API -> 后端 -> DB。
-- ConnectorPlugin: 外部系统，Git / Wiki / 飞书 / Jira / Confluence。
+- FrontendPlugin: Vue / React / qiankun / 路由 / 组件 / 页面 API 调用。
+- BackendPlugin: Java / Node / Python / .NET 的 endpoint、service、function、ORM。
+- DatabasePlugin: SQL、表、字段、读写关系、迁移脚本。
+- ConnectorPlugin: Git / Wiki / 飞书 / Jira / Confluence / CI。
+- CodeGraphAdapter: 语言内部结构扫描器，函数、类、组件、调用、引用。
+- CrossLinkAdapter: 框架级跨层规则，页面 -> API -> 后端 -> DB。
+
+边界原则:
+
+- 平台核心模块不轻易让客户替换，重点是稳定、可测、可维护。
+- 插件只负责客户差异能力，必须输出统一 `Node / Edge / Evidence / Finding`。
+- 插件失败不能拖垮核心服务，必须有错误码、日志和降级结果。
+- 插件可以按客户购买、启用、禁用、升级。
 
 ## 二、决策前提
 
@@ -42,9 +55,11 @@ Vue/React 页面
 - 公开 demo 只使用假项目和假业务数据。
 - 第一阶段先做 Vue/React + Java/Spring + Python/FastAPI，Node/.NET/Django/Flask 后续以插件扩展。
 - 先保留 SQLite 图谱存储，不急于引入 Neo4j/Postgres 图数据库。
-- codegraph 与 cross-link 都要插件化，二者不是替代关系:
-  - codegraph = 语言内部结构图。
-  - cross-link = 跨系统 / 跨层业务关系图。
+- codegraph 与 cross-link 采用“核心能力 + 插件适配”模式，二者不是替代关系:
+  - codegraph 核心 = 符号图谱存储、查询和统一输出协议。
+  - codegraph 插件 = Java / Python / Node / .NET 等语言 parser/indexer。
+  - cross-link 核心 = 跨层关系模型、证据聚合、影响分析查询。
+  - cross-link 插件 = Vue / React / Spring / Express / ORM / SQL 识别规则。
 
 ## 三、Phase 划分
 
