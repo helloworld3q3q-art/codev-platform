@@ -7,11 +7,13 @@
   },
 
   "models": {
-    "_comment": "GPU 模型路径 (Qwen3-Embedding-0.6B / Qwen3-Reranker-0.6B). 跨项目共享单实例避免 8GB VRAM OOM。模型自备放此路径; 缺 embed 时走仓内 paraphrase-multilingual-MiniLM fallback。",
+    "_comment": "GPU 模型路径 + 显卡参数。换机器(本地小卡 vs 服务器大卡)只改本段, 代码不动。device 支持 cuda / cuda:N(多卡 pin)/ cpu。reranker_dtype: auto(cuda→fp16/否则fp32) | float16 | bfloat16(Ampere+ 服务器卡更优) | float32。embed_batch_size 显存敏感, 大卡可调大提索引吞吐。缺 embed 时走仓内 MiniLM fallback。",
     "embed_path": "~/models/Qwen3-Embedding-0.6B",
     "embed_device": "cuda",
+    "embed_batch_size": 16,
     "reranker_path": "~/models/Qwen3-Reranker-0.6B",
     "reranker_device": "cuda",
+    "reranker_dtype": "auto",
     "reranker_enabled": true
   },
 

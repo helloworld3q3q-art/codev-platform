@@ -54,8 +54,9 @@ _MINILM_INREPO = PLATFORM_ROOT / "models" / "paraphrase-multilingual-MiniLM-L12-
 DEFAULT_EMBEDDING_MODEL = _shared if _shared.exists() else _MINILM_INREPO
 EMBEDDING_MODEL = str(Path(os.getenv("PLATFORM_EMBED_MODEL_PATH", str(DEFAULT_EMBEDDING_MODEL))).expanduser().resolve())
 EMBEDDING_DEVICE = os.getenv("PLATFORM_EMBED_DEVICE", _cfg_get(_cfg, "models.embed_device", "cuda"))
-# 索引侧批大小 — Qwen3-0.6B 在 RTX 5060 上 batch=16 较稳;MiniLM 可以更大
-EMBEDDING_BATCH_SIZE = int(os.getenv("PLATFORM_EMBED_BATCH_SIZE", "16"))
+# 索引侧批大小 — 显存敏感(本地小卡 16;服务器大显存可调大提吞吐)。
+# env > config models.embed_batch_size > 16(换机器只改 config, 代码不动)。
+EMBEDDING_BATCH_SIZE = int(os.getenv("PLATFORM_EMBED_BATCH_SIZE", str(_cfg_get(_cfg, "models.embed_batch_size", 16))))
 
 # DEFAULT_DOC_PATTERNS: 任何项目通用的 markdown 位置 (不含业务专属路径).
 # 业务专属路径 (apps/stock-admin-* / python/stock-pipeline 等) 走各业务仓

@@ -84,6 +84,22 @@ EMBED_DEVICE = env_or_config("PLATFORM_EMBED_DEVICE", _CFG, "models.embed_device
 # ---------- Reranker config (Qwen3-Reranker-0.6B chat-template + yes/no logits) ----------
 RERANKER_MODEL = env_or_config("PLATFORM_RERANKER_MODEL_PATH", _CFG, "models.reranker_path", "")
 RERANKER_DEVICE = env_or_config("PLATFORM_RERANKER_DEVICE", _CFG, "models.reranker_device", "cuda")
+# 精度配置化: 不同显卡最优 dtype 不同(消费卡 fp16 / Ampere+ 服务器卡 bf16 / 大显存或 CPU fp32)。
+# auto = 老行为(cuda 系 fp16, 否则 fp32)。env > config models.reranker_dtype > auto。
+RERANKER_DTYPE = env_or_config("PLATFORM_RERANKER_DTYPE", _CFG, "models.reranker_dtype", "auto")
+
+
+def _torch_dtype(name: str, device: str):
+    """dtype 名 → torch dtype。auto: cuda 系→fp16, 否则 fp32(兼容旧行为)。"""
+    import torch
+    n = (name or "auto").strip().lower()
+    if n == "auto":
+        return torch.float16 if str(device).startswith("cuda") else torch.float32
+    return {
+        "float16": torch.float16, "fp16": torch.float16,
+        "bfloat16": torch.bfloat16, "bf16": torch.bfloat16,
+        "float32": torch.float32, "fp32": torch.float32,
+    }.get(n, torch.float32)
 _rer_enabled_raw = env_or_config("PLATFORM_RERANKER_ENABLED", _CFG, "models.reranker_enabled", True)
 RERANKER_ENABLED = (
     _rer_enabled_raw.lower() in ("true", "1", "yes")
@@ -557,10 +573,9 @@ def _ensure_reranker():
         _flog(f"[reranker] loading {RERANKER_MODEL} device={RERANKER_DEVICE}")
         _reranker_tok = AutoTokenizer.from_pretrained(RERANKER_MODEL, padding_side="left")
         import torch
-        dtype = torch.float16 if RERANKER_DEVICE == "cuda" else torch.float32
+        dtype = _torch_dtype(RERANKER_DTYPE, RERANKER_DEVICE)
         m = AutoModelForCausalLM.from_pretrained(RERANKER_MODEL, dtype=dtype)
-        if RERANKER_DEVICE == "cuda":
-            m = m.cuda()
+        m = m.to(RERANKER_DEVICE)  # 尊重配置 device(cuda / cuda:N / cpu), 不再写死 .cuda()
         m = m.eval()
         _reranker_model = m
         _reranker_yes_id = _reranker_tok.convert_tokens_to_ids("yes")
@@ -591,8 +606,8 @@ def _rerank_scores(query: str, docs: list[str]) -> list[float] | None:
             for d in docs
         ]
         inputs = tok(prompts, padding=True, truncation=True, return_tensors="pt", max_length=4096)
-        if RERANKER_DEVICE == "cuda":
-            inputs = {k: v.cuda() for k, v in inputs.items()}
+        if str(RERANKER_DEVICE) != "cpu":
+            inputs = {k: v.to(RERANKER_DEVICE) for k, v in inputs.items()}  # 尊重配置 device(cuda / cuda:N)
         _t0 = time.perf_counter()
         with torch.no_grad():
             logits = model(**inputs).logits[:, -1, :]
