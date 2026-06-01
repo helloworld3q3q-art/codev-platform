@@ -28,6 +28,9 @@ class _FakeStore:
 
 def _client(monkeypatch, *, identity, token_mode=True):
     monkeypatch.setattr(memory_route.deps, "get_memory_store", lambda: _FakeStore())
+    # 隔离: org/team 走确定的 interim 路径(不依赖本机是否配了真 PG / RBAC store);
+    # project 走 can_access(用下面 mock 的 cfg)。两者均不碰真库, 测试可复现。
+    monkeypatch.setattr(memory_route.deps, "get_rbac_store", lambda: None)
     cfg = {"gateway": {"auth_mode": "token" if token_mode else "passthrough"}, "projects": {}}
     monkeypatch.setattr(memory_route, "load_config", lambda: cfg)
 

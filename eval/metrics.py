@@ -74,3 +74,13 @@ def aggregate_mrr(per_query: Sequence[tuple[Sequence[str], Iterable[str]]]) -> f
     if not per_query:
         return 0.0
     return sum(mrr(r, rel) for r, rel in per_query) / len(per_query)
+
+
+def accuracy(correct: int, total: int) -> float:
+    """正确数 / 总数。total<=0 返回 0.0(无样本约定不算满分)。
+
+    分类 / 裁决类任务用 (如 memory 冲突消解 "胜出条是否等于期望")。
+    """
+    if total <= 0:
+        return 0.0
+    return correct / total

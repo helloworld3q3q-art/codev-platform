@@ -13,7 +13,7 @@ from codev_platform.agent import deps
 from codev_platform.agent.memory_store import MemoryEntry, SCOPES
 from codev_platform.agent.schemas import MemoryEntryOut, MemoryWriteRequest
 from codev_platform.core import identity
-from codev_platform.core.acl import AccessDecision, memory_scope_access
+from codev_platform.core.acl import AccessDecision, can_access, memory_scope_access
 from codev_platform.core.audit import audit_access
 from codev_platform.core.config import load_config
 from codev_platform.core.rbac import memory_scope_decision
@@ -23,12 +23,19 @@ router = APIRouter()
 
 def _scope_decision(org_id: str, user_id: str, scope: str, scope_ref: str | None,
                     ident) -> AccessDecision:
-    """作用域访问判定:有 RBAC store → 查真实 Membership 走 core.rbac.memory_scope_decision;
-    否则回退 interim core.acl.memory_scope_access(token 模式 org/team 拒)。personal 两路同源。
+    """作用域访问判定:
+    - **project**: 由 P1 项目闸 `can_access`(token allowlist + org)决定 —— project memory 是项目资源,
+      与全栈 project 门禁同源;**不叠加 M5 RBAC project_role**(避免 allowlist 与 RBAC 双重门禁打架,
+      见 test_agent_memory_route_acl)。
+    - **org/team**: 有 RBAC store → 查真实 Membership 走 core.rbac.memory_scope_decision(角色制);
+      否则回退 interim core.acl.memory_scope_access(token 模式 org/team 拒)。
+    - **personal**: 两路均做 owner==本人 自校验,同源。
     """
+    if scope == "project":
+        return can_access(load_config(), ident, scope_ref)
     store = deps.get_rbac_store()
     if store is not None:
-        m = store.fetch_membership(org_id, user_id, scope_ref if scope == "project" else None)
+        m = store.fetch_membership(org_id, user_id, None)
         return memory_scope_decision(scope, scope_ref, user_id, m)
     return memory_scope_access(load_config(), ident, scope, scope_ref)
 
