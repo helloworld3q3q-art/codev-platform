@@ -42,6 +42,13 @@ pip install -r requirements-runtime.txt
 codev-platform --version
 ```
 
+打 wheel 发布(交付到别的机器):统一用 `pip wheel`,**不要用 `python -m build`**(后者在部分环境/无 `build` 包时不可用):
+
+```bash
+python -m pip wheel . -w dist --no-deps        # 产出 dist/codev_platform-*.whl
+bash scripts/verify_clean_install.sh           # 干净 venv 装 wheel + 冒烟验证
+```
+
 ---
 
 ## 2. 配 (~3 min)

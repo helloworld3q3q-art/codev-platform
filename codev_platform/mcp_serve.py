@@ -206,16 +206,196 @@ def probe(ep: MCPEndpoint) -> str:
     return "ok" if _tcp_open(ep.host, ep.port) else "down"
 
 
-def probe_all(cfg: dict | None = None) -> list[dict[str, Any]]:
-    """探测所有登记端点, 返回 [{name, kind, port, status, sse_url, project_id}]。P5 健康用。"""
+def probe_all(cfg: dict | None = None, *, diagnose: bool = False) -> list[dict[str, Any]]:
+    """探测所有登记端点, 返回 [{name, kind, port, status, sse_url, project_id}]。P5 健康用。
+
+    diagnose=True 时对每个 DOWN 端点补一列 reason (调 collect_facts + diagnose_down),
+    供 status 命令多打"原因"列。OK 端点 reason=""(不浪费 IO 探依赖/db)。
+    """
     cfg = cfg if cfg is not None else load_config()
     rows: list[dict[str, Any]] = []
     for ep in iter_endpoints(cfg):
-        rows.append({
+        status = probe(ep)
+        row = {
             "name": ep.name, "kind": ep.kind, "port": ep.port,
-            "project_id": ep.project_id, "status": probe(ep),
+            "project_id": ep.project_id, "status": status,
             "sse_url": ep.sse_url, "self_spawned": ep.self_spawned,
-        })
+        }
+        if diagnose and status != "ok":
+            facts = collect_facts(ep, cfg)
+            row["reason"] = diagnose_down(ep, **facts)
+        rows.append(row)
+    return rows
+
+
+# ----------------------------------------------------------------------
+# DOWN 原因诊断 (P1, fullchain-audit-2026-06-01): status 不再只报 OK/DOWN,
+# 而是对 DOWN 端点给**具体原因**。纯函数 diagnose_down 按已探测事实线性 early-return,
+# 事实采集 collect_facts 是 IO 薄层 (探 port / healthz / systemctl / 依赖 / db)。
+# ----------------------------------------------------------------------
+
+# 每 kind 缺依赖时的人类可读提示 (diagnose_down dep_ok=False 用)。
+_DEP_HINT = {
+    "chroma": "chromadb + 模型 (Qwen embedding/reranker)",
+    "codegraph": "codegraph 命令 + mcp-proxy",
+    "cross_link": "sqlglot",
+}
+# 每 kind 缺数据时的人类可读提示 (diagnose_down db_present=False 用)。
+_DB_HINT = {
+    "chroma": "chroma collection",
+    "codegraph": "codegraph 索引",
+    "cross_link": "cross_layer.sqlite (项目未注册?)",
+}
+
+
+def diagnose_down(
+    ep: MCPEndpoint,
+    *,
+    port_open: bool,
+    healthz_ok: bool,
+    unit_active: bool | None = None,
+    dep_ok: bool | None = None,
+    db_present: bool | None = None,
+) -> str:
+    """按已探测到的事实给 DOWN 的**具体原因** (纯函数, 零 IO, 线性 early-return)。
+
+    入参皆为"已经探到的事实", 本函数不做任何探测。返回空串 = 其实是 OK。
+    优先解释最根因: 端口未监听 (进程没起) > 依赖缺 > 数据缺 > healthz 异常。
+    """
+    if not port_open:
+        if unit_active is False:
+            return "进程未启动 (systemd unit 未 active)"
+        if unit_active is True:
+            return "unit active 但端口未监听 (启动中 / 崩溃重启中)"
+        return "端口未监听 (进程未起 / 未 serve-mcp start)"
+    # port 已开: 进程在跑, 但可能依赖/数据/预热问题
+    if dep_ok is False:
+        return f"依赖缺失 ({_DEP_HINT.get(ep.kind, ep.kind)})"
+    if db_present is False:
+        return f"数据缺失 ({_DB_HINT.get(ep.kind, ep.kind)})"
+    if not healthz_ok:
+        return "端口在但 /healthz 异常 (可能预热中)"
+    return ""  # 都正常, 其实是 OK
+
+
+def _systemctl_is_active(unit_name: str) -> bool | None:
+    """systemctl is-active <unit> -> True/False; 非 systemd 环境 (无 systemctl) 返回 None。"""
+    try:
+        proc = subprocess.run(
+            ["systemctl", "is-active", unit_name],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return None
+    return proc.stdout.strip() == "active"
+
+
+def _dep_ok(ep: MCPEndpoint, cfg: dict) -> bool:
+    """该 kind 的关键依赖是否可用 (best-effort, 失败即视为缺)。"""
+    if ep.kind == "cross_link":
+        # cross-link server 本身只用 sqlite3 (server.py 注释); sqlglot 仅建索引时用。
+        # 这里探 sqlglot 作"完整链路"指示 (重建依赖)。
+        import importlib.util
+        return importlib.util.find_spec("sqlglot") is not None
+    if ep.kind == "chroma":
+        import importlib.util
+        return importlib.util.find_spec("chromadb") is not None
+    if ep.kind == "codegraph":
+        import shutil
+        return shutil.which("codegraph") is not None and _mcp_proxy_exe(cfg).exists()
+    return True
+
+
+def _db_present(ep: MCPEndpoint, cfg: dict) -> bool:
+    """该 kind 的数据是否就绪 (cross_layer.sqlite / chroma collection / codegraph 索引)。
+
+    多租户单端点 → 按 config.projects 任一项目有数据即视为 present (端点本身可服务)。
+    """
+    try:
+        from codev_platform.core.paths import (
+            cross_link_db_path, codegraph_db_path, chroma_dir,
+        )
+    except Exception:
+        return True  # 解析失败不误报数据缺
+    projects = _cfg_get(cfg, "projects") or {}
+    pids = list(projects.keys()) if isinstance(projects, dict) else []
+    if ep.kind == "cross_link":
+        return any(cross_link_db_path(p).exists() for p in pids)
+    if ep.kind == "codegraph":
+        return any(codegraph_db_path(p).exists() for p in pids)
+    if ep.kind == "chroma":
+        try:
+            return chroma_dir().exists()
+        except Exception:
+            return True
+    return True
+
+
+def collect_facts(ep: MCPEndpoint, cfg: dict | None = None) -> dict[str, Any]:
+    """IO 薄层: 采集 diagnose_down 所需事实 (探 port / healthz / systemctl / 依赖 / db)。
+
+    纯探测, 不下结论 (结论交给 diagnose_down 纯函数)。返回的 dict 直接 **facts 传 diagnose_down。
+    """
+    cfg = cfg if cfg is not None else load_config()
+    port_open = _tcp_open(ep.host, ep.port)
+    healthz_ok = _http_health(ep.health_url) if ep.health_url else False
+    unit_active = _systemctl_is_active(systemd_unit_name(ep) + ".service")
+    return {
+        "port_open": port_open,
+        "healthz_ok": healthz_ok,
+        "unit_active": unit_active,
+        "dep_ok": _dep_ok(ep, cfg),
+        "db_present": _db_present(ep, cfg),
+    }
+
+
+# ----------------------------------------------------------------------
+# start --wait: 拉起后有界轮询直到全 OK 或超时。
+# 轮询判定抽成纯函数 should_keep_waiting 便于单测。
+# ----------------------------------------------------------------------
+def should_keep_waiting(elapsed: float, timeout: float, all_ok: bool) -> bool:
+    """是否继续轮询: 未全 OK 且未超时才继续 (纯函数)。"""
+    if all_ok:
+        return False
+    return elapsed < timeout
+
+
+def wait_until_serving(
+    cfg: dict | None = None, *, timeout: float = 60.0, interval: float = 2.0,
+) -> list[dict[str, Any]]:
+    """有界轮询所有端点直到全 OK 或超时 (总时长 <= timeout)。
+
+    返回每端点 {name, kind, port, status, reason?}: status=ok / timeout。
+    超时的端点带 reason (调 collect_facts + diagnose_down)。
+    """
+    import time
+
+    cfg = cfg if cfg is not None else load_config()
+    endpoints = iter_endpoints(cfg)
+    start = time.monotonic()
+    statuses: dict[str, str] = {ep.name: "down" for ep in endpoints}
+    while True:
+        all_ok = True
+        for ep in endpoints:
+            if statuses[ep.name] == "ok":
+                continue
+            if probe(ep) == "ok":
+                statuses[ep.name] = "ok"
+            else:
+                all_ok = False
+        elapsed = time.monotonic() - start
+        if not should_keep_waiting(elapsed, timeout, all_ok):
+            break
+        time.sleep(min(interval, max(0.0, timeout - elapsed)))
+    rows: list[dict[str, Any]] = []
+    for ep in endpoints:
+        ok = statuses[ep.name] == "ok"
+        row = {"name": ep.name, "kind": ep.kind, "port": ep.port,
+               "status": "ok" if ok else "timeout"}
+        if not ok:
+            facts = collect_facts(ep, cfg)
+            row["reason"] = diagnose_down(ep, **facts)
+        rows.append(row)
     return rows
 
 

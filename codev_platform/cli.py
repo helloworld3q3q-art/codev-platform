@@ -272,16 +272,17 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
     from codev_platform import mcp_serve
     cfg = load_config()
     if args.action == "status":
-        rows = mcp_serve.probe_all(cfg)
-        _print(f"{'endpoint'.ljust(22)} {'kind'.ljust(11)} {'port'.ljust(6)} status   sse_url")
+        rows = mcp_serve.probe_all(cfg, diagnose=True)
+        _print(f"{'endpoint'.ljust(22)} {'kind'.ljust(11)} {'port'.ljust(6)} status   reason / sse_url")
         _print("-" * 90)
         any_down = False
         for r in rows:
             mark = "OK  " if r["status"] == "ok" else "DOWN"
             if r["status"] != "ok" and not r["self_spawned"]:
                 any_down = True
+            tail = r["sse_url"] if r["status"] == "ok" else (r.get("reason") or r["sse_url"])
             _print(f"{r['name'].ljust(22)} {r['kind'].ljust(11)} {str(r['port']).ljust(6)} "
-                   f"{mark}     {r['sse_url']}")
+                   f"{mark}     {tail}")
         return 1 if any_down else 0
     if args.action == "start":
         results = mcp_serve.ensure_serving(cfg)
@@ -290,6 +291,18 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
             pid = f" pid={r['pid']}" if r.get("pid") else ""
             _print(f"  {r['name'].ljust(22)} {r['action']}{pid}  {extra}")
         _print()
+        if getattr(args, "wait", False):
+            timeout = float(getattr(args, "timeout", 60) or 60)
+            _print(f"等待端点就绪 (--wait, 超时 {int(timeout)}s) ...")
+            waited = mcp_serve.wait_until_serving(cfg, timeout=timeout)
+            any_timeout = False
+            for w in waited:
+                if w["status"] == "ok":
+                    _print(f"  {w['name'].ljust(22)} OK")
+                else:
+                    any_timeout = True
+                    _print(f"  {w['name'].ljust(22)} 超时  {w.get('reason') or ''}")
+            return 1 if any_timeout else 0
         _print("提示: codegraph 端点需 ~2-5s 起来; 再跑 `codev-platform serve-mcp status` 确认。")
         return 0
     if args.action == "install-systemd":
@@ -741,6 +754,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp_mcp.add_argument("action", choices=["status", "start", "install-systemd"],
                         help="status=探测 / start=幂等拉起 / install-systemd=按 config 生成 systemd unit(开机自起)")
     sp_mcp.add_argument("--user", default=None, help="install-systemd: 服务运行用户 (默认 SUDO_USER / 当前用户)")
+    sp_mcp.add_argument("--wait", action="store_true",
+                        help="start: 拉起后有界轮询直到全 OK 或超时 (退出码 0=全 OK, 非 0=有超时)")
+    sp_mcp.add_argument("--timeout", type=int, default=60, help="start --wait: 轮询总超时秒数 (默认 60)")
     sp_mcp.set_defaults(func=cmd_serve_mcp)
 
     sp_msrc = sub.add_parser("mcp-source", help="切换业务仓 .mcp.json 各 MCP 的源 (local 本机 / platform 服务器)")
