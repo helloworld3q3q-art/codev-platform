@@ -1,0 +1,350 @@
+r"""codev_platform.ops.health -- cross-platform tool-stack health check.
+
+Port of scripts/ai-health.ps1 to a config-driven, cross-platform Python CLI
+subcommand (`codev-platform health`). All machine-specific paths come from
+~/.codev-platform/config.json via codev_platform.ops._common / core (no hardcoded
+D:\models etc). Windows-only PowerShell plumbing (CIM process probes, nvidia-smi
+parsing) is reimplemented portably or degraded to INFO on non-supported platforms.
+
+2026-06-02 拆包 (file-discipline §1: 单文件 ≤600 行): 原单文件 health.py 拆为
+  - _util.py   Report + 文件/进程/git/jsonl helper
+  - _checks.py 各项 _check_* 体检
+  - _usage.py  近 7 天使用率统计
+  - __init__.py (本文件) cmd_health / cmd_health_all / register + re-export 全部原名
+对外行为零变更: `from codev_platform.ops import health; health.register(sub)` 与
+`health.Report` / `health._check_*` 等引用全部沿用 (本文件顶部 re-export)。
+
+Checks (parity with the .ps1):
+  - chroma venv python present
+  - embed model dir + load probe (Full only)
+  - reranker model dir
+  - torch + CUDA probe (Full only)
+  - chroma data dir + collection probe (Full) / .last_build stamp (Light)
+  - chroma index freshness vs latest docs/rules mtime
+  - platform-docs daemon /health (HTTP)
+  - platform-docs server process count
+  - mcp-proxy presence
+  - rules vs incident freshness
+  - cross_layer KG freshness (project-namespaced)
+  - cross-link mcp process diagnostics
+  - codegraph db (integrity + journal_mode + counts) + locks
+  - codegraph-api jar
+  - post-commit hook missed-fire detection
+  - git tools/ status
+  - usage stats: search_recall / reindex 7d / platform-docs usage+adopt /
+    cross-link usage / codegraph usage
+
+ExitCode: 0 all green / 2 only WARN / 1 any FAIL (same as .ps1).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+
+from codev_platform.ops._common import (
+    cfg_get,
+    chroma_python,
+    codev_root,
+    config as load_cfg,
+    meta_health,
+    out,
+    project_id_of,
+    resolve_repo,
+)
+from codev_platform.core.paths import chroma_dir
+
+# re-export 全部原 module 级符号 (向后兼容: 外部/测试 `health.<name>` 沿用)
+from ._util import (  # noqa: F401
+    Report,
+    _count_files,
+    _expand,
+    _git,
+    _iter_jsonl,
+    _latest_mtime,
+    _list_processes,
+    _parse_dt,
+    _run_py,
+)
+from ._checks import (  # noqa: F401
+    _check_chroma_data,
+    _check_chroma_freshness,
+    _check_chroma_venv,
+    _check_codegraph_api,
+    _check_codegraph_db,
+    _check_codegraph_mcp,
+    _check_cross_layer,
+    _check_cross_link_mcp,
+    _check_daemon,
+    _check_embed_load,
+    _check_embed_model,
+    _check_git_tools,
+    _check_hook_missed,
+    _check_mcp_proxy,
+    _check_pd_servers,
+    _check_reranker,
+    _check_rules_vs_incident,
+    _check_torch,
+    _daemon_port,
+    _has_cross_link,
+    _resolve_model_dir,
+)
+from ._usage import (  # noqa: F401
+    _usage_cross_link,
+    _usage_platform_docs,
+    _usage_reindex,
+    _usage_search_recall,
+)
+
+
+# ----------------------------------------------------------------------
+# main command
+# ----------------------------------------------------------------------
+def cmd_health(args: argparse.Namespace) -> int:
+    if getattr(args, "all", False):
+        return cmd_health_all(args)
+    light = (args.mode == "light")
+    cfg = load_cfg()
+    cdv_root = codev_root()
+
+    try:
+        repo = resolve_repo(args.repo)
+    except RuntimeError as exc:
+        out(f"error: {exc}")
+        return 1
+
+    project_id = args.project or project_id_of(repo) or "unknown"
+    health = meta_health(args.project or project_id_of(repo))
+
+    chroma_py = chroma_python()
+    chroma_data = chroma_dir()
+    chroma_pkg = cdv_root / "codev_platform" / "chroma"
+
+    out(f"=== codev-platform health (mode={args.mode}) ===")
+    out(f"repo: {repo}")
+    out(f"project_id: {project_id}")
+    if args.project:
+        reg = cdv_root / "platform_meta" / "projects" / args.project
+        if not reg.exists():
+            out(f"project override: {args.project} (WARNING: not registered in platform_meta/projects)")
+    out("")
+
+    r = Report()
+    procs = _list_processes()
+    port = _daemon_port(cfg)
+    model_dir = _resolve_model_dir(cfg, repo)
+
+    _check_chroma_venv(r, chroma_py)
+    _check_embed_model(r, model_dir)
+    _check_embed_load(r, light, chroma_py, model_dir)
+    _check_reranker(r, cfg)
+    _check_torch(r, light, chroma_py)
+    _check_chroma_data(r, light, chroma_py, chroma_data, chroma_pkg, project_id)
+    _check_chroma_freshness(r, chroma_data, repo)
+    _check_daemon(r, port)
+    _check_pd_servers(r, port, procs)
+    _check_mcp_proxy(r, cfg)
+    _check_rules_vs_incident(r, repo)
+    _check_cross_layer(r, repo, cdv_root, chroma_py, project_id, health)
+    _check_cross_link_mcp(r, procs)
+    _check_codegraph_db(r, repo, chroma_py)
+    _check_codegraph_mcp(r, repo, procs)
+    _check_codegraph_api(r, repo)
+    _check_hook_missed(r, repo, health)
+    _check_git_tools(r, repo)
+
+    r.section("")
+    r.section("--- usage stats (last 7 days) ---")
+    recall_file = cdv_root / "codev_platform" / "chroma" / "search_recall.jsonl"
+    cl_usage = cdv_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl"
+    _usage_search_recall(r, recall_file)
+    _usage_reindex(r, repo)
+    _usage_platform_docs(r, repo, recall_file, health)
+    _usage_cross_link(r, cl_usage)
+    r.line("codegraph usage", "INFO", "not logged by project scripts yet; process/db health only")
+
+    # top banner (parity with .ps1 P6)
+    if r.red > 0:
+        out(f">>> BROKEN <<<    {r.red} FAIL / {r.amber} WARN (fix critical items below)")
+    elif r.amber > 0:
+        out(f">>> ATTENTION <<< all critical OK, {r.amber} WARN (degraded, still usable)")
+    else:
+        out(">>> READY <<<     all checks green")
+    out("")
+
+    r.flush()
+
+    # Optional widget snapshot (parity with ai-health.ps1 -JsonOut). Runs after
+    # all checks so red/amber are final; never affects the exit code below.
+    if getattr(args, "json_out", None) is not None:
+        if args.json_out == "":
+            if project_id:
+                snap = cdv_root / "platform_meta" / "health" / f"{project_id}.json"
+            else:
+                out("[json] WARN no project_id resolved; pass --json-out <path> explicitly")
+                snap = None
+        else:
+            snap = Path(args.json_out).expanduser()
+        if snap is not None:
+            _write_json_snapshot(r, snap, project_id, args.mode)
+
+    out("")
+    if r.red > 0:
+        out(f"SUMMARY: {r.red} FAIL / {r.amber} WARN")
+        return 1
+    if r.amber > 0:
+        out(f"SUMMARY: all critical OK, {r.amber} WARN")
+        return 2
+    out("SUMMARY: all green")
+    return 0
+
+
+def _verdict(red: int, amber: int) -> str:
+    if red > 0:
+        return "BROKEN"
+    if amber > 0:
+        return "ATTENTION"
+    return "READY"
+
+
+def _write_json_snapshot(r: Report, path: Path, project_id: str | None, mode: str) -> None:
+    """Serialise the report to a widget-readable JSON snapshot (parity with
+    ai-health.ps1 -JsonOut). Non-fatal: any failure is logged, never raised."""
+    try:
+        checks = [
+            {"tag": row["tag"], "status": row["status"], "msg": row["msg"]}
+            for row in r.rows
+            if "status" in row
+        ]
+        payload = {
+            "schema_version": 1,
+            "project_id": project_id,
+            "mode": mode.capitalize(),
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "verdict": _verdict(r.red, r.amber),
+            "fail_count": r.red,
+            "warn_count": r.amber,
+            "ok_count": sum(1 for c in checks if c["status"] == "OK"),
+            "checks": checks,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # UTF-8 WITHOUT BOM -- Node's JSON.parse on the widget side chokes on a BOM.
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        out(f"[json] wrote {path}")
+    except Exception as exc:  # noqa: BLE001 - snapshot write must never fail health
+        out(f"[json] WARN failed to write {path}: {exc}")
+
+
+# ----------------------------------------------------------------------
+# platform-wide aggregate (--all): HTTP client of daemon /platform/status
+# 原则: 访问平台数据走 HTTP/HTTPS。本函数只 HTTP GET, 不读任何本地文件路径;
+# 服务端 (daemon) 跑在平台主机上聚合本机 data/+PG, 见 codev_platform/platform_status.py。
+# ----------------------------------------------------------------------
+def _platform_url(cfg: dict) -> str:
+    base = cfg_get("platform.url", cfg=cfg) or f"http://127.0.0.1:{_daemon_port(cfg)}"
+    return base.rstrip("/") + "/platform/status"
+
+
+def cmd_health_all(args: argparse.Namespace) -> int:
+    cfg = load_cfg()
+    url = _platform_url(cfg)
+    try:
+        with urllib.request.urlopen(url, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as exc:  # noqa: BLE001
+        out(f"[FAIL] 连不上平台服务: {url}")
+        out(f"       {type(exc).__name__}: {exc}")
+        out("       平台数据一律走 HTTP。请确认 daemon 在跑(首个 Claude Code 会话自动起,")
+        out("       或在任一仓 `codev-platform reindex` 触发);远程平台则配 config.platform.url。")
+        return 1
+    if isinstance(data, dict) and data.get("error"):
+        out(f"[FAIL] 平台服务内部错误: {data['error']}")
+        return 1
+
+    projects = data.get("projects", {})
+    mem_org = data.get("memory_org", 0)
+    out("=== codev-platform health --all (平台全局视图 · via HTTP) ===")
+    out(f"平台服务: {url}")
+    out(f"data root: {data.get('data_root')}  |  registered: {len(data.get('registered', []))}  "
+        f"|  org 共享记忆: {mem_org} 条(全项目通用)")
+    out("")
+
+    tot_chroma = 0
+    for pid in sorted(projects):
+        p = projects[pid]
+        ch = p.get("chroma_chunks", 0)
+        tot_chroma += ch
+        cg = p.get("codegraph")
+        if isinstance(cg, dict):
+            src = cg.get("source")
+            tag = " (via codegraph-api HTTP)" if src == "http" else " (本地 sqlite)" if src == "local" else ""
+            cg_s = f"nodes={cg.get('nodes', 0)} edges={cg.get('edges', 0)}{tag}"
+        elif cg == "no_repo_path":
+            cg_s = "?(仓路径未在平台登记)"
+        elif cg == "no_db":
+            cg_s = "无 .codegraph db"
+        elif cg == "api_down":
+            cg_s = "codegraph-api 未响应(启动 :18082 / 查 config.projects.<id>.codegraph_api_url)"
+        elif cg == "api_error":
+            cg_s = "codegraph-api 返回错误"
+        else:
+            cg_s = str(cg)
+        xl = p.get("cross_link")
+        if isinstance(xl, dict):
+            xsrc = xl.get("source")
+            xtag = " (via codegraph-api HTTP)" if xsrc == "http" else " (本地)" if xsrc == "local" else ""
+            xl_s = f"nodes={xl.get('nodes', 0)}{xtag}"
+        elif xl == "not_built":
+            xl_s = "未建(不适用/未建)"
+        elif xl == "api_down":
+            xl_s = "codegraph-api 未响应"
+        else:
+            xl_s = "未建/不可用"
+        u = p.get("usage_7d", {})
+        reg_tag = "" if p.get("registered") else "  (未注册 platform_meta)"
+        out(f"[{pid}]{reg_tag}")
+        out(f"    chroma 文档 = {ch} chunks")
+        out(f"    codegraph 代码 = {cg_s}")
+        out(f"    cross-link 链路 = {xl_s}")
+        out(f"    memory 项目专属 = {p.get('memory_project', 0)} 条  (+ org 共享 {mem_org})")
+        out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / cross-link {u.get('cross_link', 0)}  (codegraph 未计数)")
+        out("")
+
+    # MCP 端点 reachability (P5): 业务仓走服务地址连的端点是否常驻可达。
+    eps = data.get("mcp_endpoints") or []
+    if eps:
+        out("MCP 服务端点 (业务仓走服务地址连这些):")
+        for e in eps:
+            mark = "OK  " if e.get("status") == "ok" else "DOWN"
+            note = ""
+            if e.get("status") != "ok":
+                note = "  (chroma 由会话自动拉起)" if e.get("self_spawned") else "  (跑 codev-platform serve-mcp start)"
+            out(f"    [{mark}] {e.get('name'):<20} :{e.get('port')}  {e.get('sse_url')}{note}")
+        out("")
+
+    proj_mem = sum(p.get("memory_project", 0) for p in projects.values())
+    out(f"合计: chroma {tot_chroma} chunks / {len(projects)} 项目 ; memory {mem_org} org + {proj_mem} project")
+    leg = data.get("usage_legacy")
+    if leg:
+        out(f"[INFO] 旧日志未带 project_id(daemon 重启后新查询才分项目): "
+            f"search_docs {leg.get('search_docs', 0)} / cross-link {leg.get('cross_link', 0)}")
+    for e in data.get("errors", []):
+        out(f"[WARN] 服务端: {e}")
+    return 0
+
+
+def register(subparsers) -> None:
+    sp = subparsers.add_parser("health", help="工具栈体检")
+    sp.add_argument("--repo")
+    sp.add_argument("--project")
+    sp.add_argument("--all", action="store_true", help="平台全局视图: 所有项目 x 三库 + 记忆(不限当前仓)")
+    sp.add_argument("--mode", choices=["light", "full"], default="full")
+    # --json-out: write a widget-readable snapshot. Bare flag => canonical path
+    # platform_meta/health/<project_id>.json; explicit path => that file.
+    sp.add_argument(
+        "--json-out", nargs="?", const="", default=None, dest="json_out",
+        help="写健康快照 JSON (widget 读); 省略路径=写规范位置 platform_meta/health/<pid>.json",
+    )
+    sp.set_defaults(func=cmd_health)
