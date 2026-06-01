@@ -80,6 +80,11 @@ class ReindexWorker:
             _log(f"project '{job.project_id}' 无 repo_path 或不存在 — 丢弃 {job.key}")
             self._q.complete(job)
             return None
+        # 索引前先把工作树追到远端 (webhook 模型下服务器 clone 常落后于 push):
+        # ff-only, 降级安全, 失败不阻断 —— pulled=False 照常索引当前工作树。
+        from codev_platform.reindex.git_sync import sync_repo_to_remote
+        sync = sync_repo_to_remote(repo)
+        _log(f"reindex git-sync {job.key}: pulled={sync['pulled']} ({sync['note']})")
         _log(f"reindex 开始 {job.key} (repo={repo})")
         try:
             rc = runner.run(job.project_id, repo, self._cfg)
