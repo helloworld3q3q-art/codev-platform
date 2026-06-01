@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>codev-platform 使用文档</title>
+<style>
+  :root { --bg:#0f1419; --panel:#1a2129; --fg:#d6deeb; --mut:#8a97a8; --acc:#4fb3ff; --ok:#4ec9b0; --warn:#e0a458; --code:#11161c; --line:#2a333d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 24px 80px; }
+  header { padding:36px 0 20px; border-bottom:1px solid var(--line); }
+  h1 { margin:0 0 6px; font-size:28px; }
+  header .sub { color:var(--mut); }
+  nav.toc { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 22px; margin:24px 0; columns:2; }
+  nav.toc a { color:var(--acc); text-decoration:none; display:block; padding:3px 0; }
+  nav.toc a:hover { text-decoration:underline; }
+  h2 { margin:40px 0 12px; font-size:21px; border-left:4px solid var(--acc); padding-left:12px; }
+  h3 { margin:24px 0 8px; font-size:16px; color:var(--acc); }
+  p, li { color:var(--fg); }
+  code { background:var(--code); padding:1px 6px; border-radius:4px; font-family:"Cascadia Code",Consolas,monospace; font-size:13px; color:#9cdcfe; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:14px 16px; overflow-x:auto; }
+  pre code { background:none; padding:0; color:#cfe3f5; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:7px 11px; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .mut { color:var(--mut); }
+  .note { background:#16202b; border-left:4px solid var(--acc); padding:10px 16px; border-radius:0 8px 8px 0; margin:14px 0; }
+  .warnbox { background:#241d12; border-left:4px solid var(--warn); padding:10px 16px; border-radius:0 8px 8px 0; margin:14px 0; }
+  .diagram { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:16px; white-space:pre; font-family:monospace; font-size:13px; color:#9cdcfe; overflow-x:auto; }
+  kbd { background:#2a333d; border-radius:4px; padding:1px 6px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>codev-platform 使用文档</h1>
+  <div class="sub">多项目 / 多组织 AI 协作工具栈 —— 平台服务在 WSL（或独立服务器）常驻，开发机连接使用。<br>更新日期 2026-06-01</div>
+</header>
+
+<nav class="toc">
+  <a href="#arch">0. 架构总览（先读）</a>
+  <a href="#config">1. 配置文件</a>
+  <a href="#start">2. 服务启动</a>
+  <a href="#autostart">3. 自动启动（开机）</a>
+  <a href="#restart">4. 重启 / 停止</a>
+  <a href="#status">5. 状态 / 排查</a>
+  <a href="#dev">6. 开发（连接平台）</a>
+  <a href="#project">7. 业务项目接入</a>
+  <a href="#update">8. 更新（自动 reindex）</a>
+  <a href="#webhook">9. Git webhook 配置</a>
+  <a href="#multi">10. 部署到独立服务器</a>
+  <a href="#agent">11. Agent 问答（可选）</a>
+</nav>
+
+<h2 id="arch">0. 架构总览（先读）</h2>
+<p>平台 = <b>服务端</b>（三套 MCP 知识平面 + agent + memory/PG + 网关）常驻一处；<b>开发机</b>不跑服务，只通过 <code>.mcp.json</code> 连服务端。<b>Git（Gitea）是唯一传输</b>：开发机 push → 服务端 webhook 收到 → 服务端 pull 自己的 clone → reindex。所以开发机和服务端在不在同一台机器都无所谓。</p>
+<div class="diagram">开发机（Windows / Mac / Linux，任意）
+  │  ① git push                         ② Claude Code 的 .mcp.json (SSE)
+  ▼                                         │
+Gitea（git 中心）                            ▼
+  │  ③ push webhook                  服务端 MCP 端点（同机 127.0.0.1:19xxx / 跨机 https://域名）
+  ▼
+服务端 codev-webhook ─→ reindex 队列 ─→ worker：git pull clone → 重建 chroma/codegraph/cross-link</div>
+<table>
+<tr><th>组件</th><th>端口（默认本机）</th><th>systemd unit</th><th>作用</th></tr>
+<tr><td>platform-docs（chroma 文档检索）</td><td>19083</td><td>codev-mcp-platform-docs</td><td>语义检索文档/规则</td></tr>
+<tr><td>cross-link（跨层链路）</td><td>19086</td><td>codev-mcp-cross-link</td><td>表↔接口↔代码链路</td></tr>
+<tr><td>codegraph（代码图谱）</td><td>19091</td><td>codev-mcp-codegraph</td><td>符号/调用/影响面</td></tr>
+<tr><td>reindex worker</td><td>—</td><td>codev-reindex</td><td>消费重建队列（先 pull 后索引）</td></tr>
+<tr><td>webhook 接收器</td><td>19099</td><td>codev-webhook</td><td>收 Gitea push → 入队</td></tr>
+<tr><td>agent HTTP（可选）</td><td>8848</td><td>codev-agent</td><td>LLM 问答 /chat</td></tr>
+<tr><td>时钟重同步</td><td>—</td><td>codev-clock-resync.timer</td><td>纠 WSL 睡眠后漂移</td></tr>
+</table>
+<div class="note">端口都是 config 驱动；本文以本机默认 19xxx 为例。下文命令默认<b>在服务端（WSL）执行</b>，除非注明"开发机"。</div>
+
+<h2 id="config">1. 配置文件</h2>
+<p>唯一用户级配置：<code>~/.codev-platform/config.json</code>（<b>每台机器各一份，不进 git</b>）。仓内 <code>config.example.json</code> 只是样板。优先级：<b>env &gt; 此文件 &gt; 代码默认</b>。</p>
+<p>Windows 访问 WSL 那份：<code>\\wsl.localhost\Ubuntu\home\helloworld\.codev-platform\config.json</code></p>
+<table>
+<tr><th>段</th><th>关键字段</th><th>说明</th></tr>
+<tr><td><code>models</code></td><td>embed_path / embed_device / reranker_path / reranker_device / <b>reranker_dtype</b>(auto/fp16/bf16/fp32) / <b>embed_batch_size</b></td><td>显卡参数。换机器（小卡↔服务器大卡）只改这段</td></tr>
+<tr><td><code>data</code></td><td>platform_data_dir</td><td>chroma/sqlite/索引数据根</td></tr>
+<tr><td><code>daemon</code> / <code>mcp</code></td><td>port(19083) / cross_link_sse_port / codegraph_sse_port</td><td>各 MCP 端口</td></tr>
+<tr><td><code>webhook</code></td><td>port(19099) / secret / allow_insecure</td><td>webhook 接收器</td></tr>
+<tr><td><code>memory</code></td><td>pg_dsn / recall_backend / conflict_policy</td><td>记忆 PG（独立库 codev_platform_memory）</td></tr>
+<tr><td><code>gateway</code></td><td>auth_mode(passthrough/token) / tokens</td><td>鉴权；dev=passthrough，对外=token</td></tr>
+<tr><td><code>deployment</code></td><td>mode(dev/prod)</td><td>prod 下非 token 拒绝启动</td></tr>
+<tr><td><code>projects.&lt;id&gt;</code></td><td><b>repo_path</b> / org_id / webhook_repo / codegraph_api_url</td><td>每个接入项目一条（见 §7）</td></tr>
+</table>
+<p>查看（敏感值脱敏）：</p>
+<pre><code>codev-platform config doctor --redact</code></pre>
+
+<h2 id="start">2. 服务启动</h2>
+<p>开机已自起（§3）。手动一键拉起 + 等待全部就绪：</p>
+<pre><code># 服务端（WSL）
+codev-platform serve-mcp start --wait          # 拉起并等三套端点 OK（超时报具体原因）
+codev-platform serve-mcp status                # 查四端点（DOWN 会显示原因：进程/依赖/端口/DB）</code></pre>
+<p>或一键完整 bootstrap（换机/重 clone 后）：</p>
+<pre><code>codev-platform bootstrap            # venv 检查 → serve-mcp start → codegraph link → memory init-db
+codev-platform bootstrap --dry-run  # 只看会做什么</code></pre>
+
+<h2 id="autostart">3. 自动启动（开机）</h2>
+<p>WSL 启用了 systemd，服务为 system unit，<b>开机自动拉起</b>（Windows 重启 → WSL 起 → 服务回来）。安装/重装 unit：</p>
+<pre><code># 生成 unit 到 ~/codev-systemd/ 并打印安装命令
+codev-platform serve-mcp install-systemd
+# 安装 + enable（需 root）
+sudo bash ~/codev-systemd/install.sh
+# 时钟纠偏 timer（可选，纠 WSL 睡眠后漂移）
+sudo systemctl enable --now codev-clock-resync.timer</code></pre>
+<div class="note">WSL2 默认非开机自启整个发行版；如需 Windows 开机即拉起 WSL+服务，在 Windows 任务计划加一条开机运行 <code>wsl -d Ubuntu -- true</code>（触发 WSL 启动，systemd 随之拉起服务）。</div>
+
+<h2 id="restart">4. 重启 / 停止</h2>
+<pre><code># 重启全部 MCP 服务（改了代码/config 后）
+sudo systemctl restart 'codev-mcp-*' codev-reindex codev-webhook
+# 单个
+sudo systemctl restart codev-mcp-platform-docs
+sudo systemctl restart codev-agent
+
+# 停止（临时）
+sudo systemctl stop 'codev-mcp-*' codev-reindex codev-webhook
+# 永久停某个（不再开机起）
+sudo systemctl disable --now codev-agent</code></pre>
+<div class="warnbox"><b>chroma 重启后需预热</b>：platform-docs 重启后约 30–60s 加载 Qwen 模型，期间 status 可能短暂 DOWN，预热完即 OK。</div>
+
+<h2 id="status">5. 状态 / 排查</h2>
+<pre><code>codev-platform serve-mcp status     # 四端点 + DOWN 原因
+codev-platform health               # 当前仓体检（含 chroma 新鲜度 / hook missed）
+codev-platform health --all         # 全平台各项目 × 三库 + 记忆
+codev-platform logs --service all --tail 50   # 聚合各服务日志
+codev-platform metrics              # 调用数 / 错误率 / 审计 deny / 阈值告警
+codev-platform metrics --prometheus # Prometheus 曝光格式（可被 node_exporter 抓）</code></pre>
+<table>
+<tr><th>现象</th><th>处理</th></tr>
+<tr><td>端点 DOWN</td><td><code>serve-mcp status</code> 看原因；进程没起 → <code>serve-mcp start</code>；预热中 → 等 30–60s</td></tr>
+<tr><td>chroma daemon 崩 / 睡眠后乱</td><td><code>sudo systemctl restart codev-mcp-platform-docs</code>；时钟漂移 → <code>wsl --shutdown</code>（Windows 端）</td></tr>
+<tr><td>查不到最新文档</td><td><code>health</code> 看 freshness；手动 <code>codev-platform reindex</code></td></tr>
+</table>
+
+<h2 id="dev">6. 开发（连接平台）</h2>
+<p>开发机<b>不跑服务</b>，业务仓 <code>.mcp.json</code> 走 <code>type:sse</code> 连服务端。</p>
+<h3>同机（开发机 = WSL 宿主）</h3>
+<p>用 <code>127.0.0.1:19xxx</code>（Windows 经 wslrelay 转发到 WSL）。<code>.mcp.json</code> 形如：</p>
+<pre><code>{
+  "mcpServers": {
+    "platform-docs": { "type": "sse", "url": "http://127.0.0.1:19083/sse?project_id=&lt;你的项目&gt;" },
+    "cross-link":    { "type": "sse", "url": "http://127.0.0.1:19086/sse?project_id=&lt;你的项目&gt;" },
+    "codegraph":     { "type": "sse", "url": "http://127.0.0.1:19091/sse?project_id=&lt;你的项目&gt;" }
+  }
+}</code></pre>
+<p>在业务仓目录开 Claude Code → <kbd>/mcp</kbd> 看三套已连接。<span class="ok">不会在开发机本地 spawn 任何服务</span>。</p>
+<h3>跨机（服务在别的服务器）</h3>
+<p>一条命令把 <code>.mcp.json</code> 改成指向服务器（见 §10），URL 变 <code>https://平台域名/&lt;服务&gt;/sse?project_id=...</code>。</p>
+<div class="warnbox">开发机用 <code>127.0.0.1</code>（同机）或<b>服务器域名</b>（跨机），不要用 WSL 的 VM IP（172.31.x，可能被 VPN/Clash 拦）。</div>
+
+<h2 id="project">7. 业务项目接入</h2>
+<p>让平台开始服务一个新项目（以 <code>my-app</code> 为例）：</p>
+<pre><code># A. 业务仓里建 project 标识（开发机或服务端均可）
+cd &lt;业务仓&gt; && codev-platform init my-app          # 生成 .claude/project.json
+codev-platform register                            # 登记进 platform_meta/projects/
+
+# B. 服务端 config.json 注册（运行时路由 + webhook 映射），projects 段加：
+#   "my-app": {
+#     "repo_path": "/home/helloworld/work/my-app",        # 服务端的 clone 路径
+#     "org_id": "default",                                  # 多 org 时填真实 org
+#     "webhook_repo": "&lt;owner&gt;/my-app"                       # Gitea 仓 owner/name，供 push 映射
+#   }
+
+# C. 服务端首次索引
+PLATFORM_PROJECT_ID=my-app codev-platform reindex   # 或 python -m codev_platform.chroma.indexer
+codev-platform codegraph link --project my-app      # codegraph 数据联接（如适用）
+
+# D. 业务仓 .mcp.json 走 SSE（?project_id=my-app），见 §6</code></pre>
+<div class="note">服务端要有该项目的 clone（<code>repo_path</code> 指它）。开发机另有自己的工作副本，两者经 Gitea 同步。</div>
+
+<h2 id="update">8. 更新（push 后自动 reindex）</h2>
+<p>配好 webhook（§9）后<b>全自动</b>：</p>
+<div class="diagram">开发机 git push → Gitea → push webhook → 服务端 codev-webhook → reindex 队列
+   → worker：git pull 服务端 clone（--ff-only，追到你 push 的状态）→ 重建索引</div>
+<p>所以开发机改完 <b>push 到 Gitea</b> 即可，服务端自动把它的 clone 拉到最新再重建索引。</p>
+<p>验证更新到没：</p>
+<pre><code>codev-platform health          # 看 "chroma freshness: index newer than latest doc" = 已更新
+codev-platform logs --service reindex --tail 20
+# 或 MCP codegraph_status 的 last_indexed_at</code></pre>
+<p>手动更新（不走 webhook 时）：</p>
+<pre><code>cd &lt;服务端 clone&gt; && git pull && codev-platform reindex</code></pre>
+
+<h2 id="webhook">9. Git webhook 配置</h2>
+<p>让某仓 push 后自动 reindex，两步：</p>
+<h3>① config 映射（服务端 config.json）</h3>
+<p>该项目 <code>projects.&lt;id&gt;.webhook_repo = "&lt;owner&gt;/&lt;repo&gt;"</code>（Gitea 仓全名，供 webhook 把 push 映射回 project_id）。</p>
+<h3>② Gitea 仓建 webhook</h3>
+<p>Gitea 网页：仓 → Settings → Webhooks → Add Webhook → Gitea，或 API：</p>
+<pre><code>curl -u '&lt;user&gt;:&lt;pass&gt;' -X POST \
+  http://localhost:3000/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/hooks \
+  -H 'Content-Type: application/json' -d '{
+    "type":"gitea",
+    "config":{"url":"http://127.0.0.1:19099/gitea","content_type":"json","secret":"&lt;webhook.secret&gt;"},
+    "events":["push"],"active":true }'</code></pre>
+<table>
+<tr><th>字段</th><th>值</th></tr>
+<tr><td>URL</td><td><code>http://127.0.0.1:19099/gitea</code>（Gitea 与 webhook 同机；跨机用反代地址）</td></tr>
+<tr><td>Content-Type</td><td>json</td></tr>
+<tr><td>Secret</td><td>= config <code>webhook.secret</code>（HMAC 验签，必须一致）</td></tr>
+<tr><td>Events</td><td>push</td></tr>
+</table>
+<p>验证：在 Gitea webhook 页点 "Test Delivery"，或真 push 后看 <code>codev-platform logs --service reindex</code>。当前已配仓：<code>platform</code> / <code>codev-platform</code> / <code>codev-platform-widget</code>。</p>
+<div class="note">Gitea 回环调用 webhook 需 <code>app.ini</code> 的 <code>[webhook] ALLOWED_HOST_LIST = loopback</code>（已配）。</div>
+
+<h2 id="multi">10. 部署到独立服务器</h2>
+<p>把服务从"和开发机同机的 WSL"搬到独立服务器，只需在服务器复刻服务端，开发机改指向：</p>
+<h3>服务器侧</h3>
+<pre><code>1. 装 Python + 重建 venv（requirements-runtime.txt）；如用 GPU 装对应 torch
+2. clone 各项目仓到服务器（repo_path 指它们）
+3. 配 ~/.codev-platform/config.json（models/data/ports/memory.pg_dsn/projects）
+4. 建 PG 独立库 codev_platform_memory + codev-platform memory init-db
+5. codev-platform serve-mcp install-systemd && sudo bash ~/codev-systemd/install.sh
+6. 对外：caddy/nginx 反代 + TLS（见 docs/plans/.../remote-access-reverse-proxy）
+   开 token 模式：codev-platform gateway mode token + 建 token</code></pre>
+<h3>开发机侧（指向服务器）</h3>
+<pre><code># 把业务仓 .mcp.json 的 url 改成服务器地址（按服务名做路径前缀）
+codev-platform gateway client-url --base https://平台域名 --repo &lt;业务仓&gt;
+# 注入 token（token 模式）
+codev-platform gateway client-auth --repo &lt;业务仓&gt;
+export PLATFORM_TOKEN='&lt;token&gt;'        # 重启 Claude Code</code></pre>
+<p>数据备份/恢复：<code>codev-platform backup</code>（pg_dump + data + 保留 N 份）；详见 PG 持久化 / 备份 runbook。</p>
+
+<h2 id="agent">11. Agent 问答（可选）</h2>
+<p>用平台的 LLM 问答（/chat、Web playground）才需要：</p>
+<pre><code># 服务端装 agent 依赖 + 填 provider key（~/.codev-platform/config.json 的 agent 段）
+.venv/bin/pip install fastapi uvicorn
+# config: "agent": { "provider": "deepseek", "providers": { "deepseek": { "api_key": "..." } } }
+sudo systemctl restart codev-agent          # 读 key
+curl -s -X POST http://127.0.0.1:8848/chat -H 'Content-Type: application/json' \
+  -d '{"question":"...","project_id":"&lt;项目&gt;"}'</code></pre>
+<p>只读 Web playground：<code>docs/playground/index.html</code>，平台地址填 <code>http://127.0.0.1:8848</code>。</p>
+
+<hr style="border-color:var(--line); margin:40px 0 20px;">
+<p class="mut">codev-platform · 详见仓内 <code>docs/QUICKSTART.md</code> / <code>docs/agent-provider-setup.md</code> / <code>docs/plans/roadmap-2026-05-31/</code> 各 runbook。</p>
+</div>
+</body>
+</html>
