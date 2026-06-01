@@ -195,6 +195,7 @@ codev-platform config init --force
 
 | 文档 | 内容 |
 |---|---|
+| [QUICKSTART.md](./QUICKSTART.md) | 新机器 30 分钟跑通全流程(install → config → index → serve → test query) |
 | [SETUP.md](./SETUP.md) | 换机器 / 队友 / 服务器安装 onboarding |
 | `.claude/rules/ai-tools-mcp.md` | 三套 MCP 触发指南 + 故障应急 |
 | `.claude/rules/workflow.md §3.2` | 任务类型 → MCP 选型映射 |

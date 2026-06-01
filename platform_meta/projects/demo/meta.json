@@ -1,0 +1,7 @@
+{
+  "project_id": "demo",
+  "display_name": "AcmeShop Demo",
+  "repo_path": "demo",
+  "rules_path": ".claude/rules",
+  "memory_path": "memory"
+}

@@ -1,5 +1,7 @@
 # codev-platform 跨平台 onboarding (Windows / macOS / Linux)
 
+> 想最快跑通全链路看 [QUICKSTART.md](./QUICKSTART.md)（30 分钟:install → config → index → serve → test query）。本文是完整安装细节。
+>
 > 目标:换机器 / 队友 / 服务器一把装起来。路径全走 `~/.codev-platform/config.json`,代码零硬编码盘符。
 > 平台所有权翻正 (2026-05-28) 后:venv + data + 模型全归 codev-platform 仓自有
 > (`.venv` / `data/`),daemon 直接从本仓 `.venv` 跑。
