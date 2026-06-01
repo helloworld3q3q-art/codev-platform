@@ -182,6 +182,26 @@ def unlink_project(cfg: dict, pid: str, repo: Path) -> dict:
     return {"pid": pid, "action": "unlinked", "note": "平台无数据, 仅删联接"}
 
 
+def ensure_codegraph_linked(project_id: str, repo: Path, cfg: dict) -> dict:
+    """reindex --codegraph 跑 `codegraph sync` 前的幂等 ensure-link(best-effort, fail-soft)。
+
+    复用 link_project / link_state 原语, 不重造 junction 逻辑:
+      - 已 linked → no-op(action="already-linked");
+      - in-repo / platform-only / link-broken → 调 link_project 建/修联接(幂等);
+      - missing(还没索引数据) → skip, 让 sync 在仓内首次生成。
+    任何异常都吞掉(返回 {"action": "error"}), 绝不中断 reindex —— link 是本机便利, 失败不该挡 sync。
+    """
+    repo = Path(repo)
+    try:
+        repo_cg = repo / ".codegraph"
+        plat_cg = codegraph_index_dir(project_id)
+        if link_state(repo_cg, plat_cg) == "linked":
+            return {"pid": project_id, "action": "already-linked"}
+        return link_project(cfg, project_id, repo)
+    except Exception as exc:  # noqa: BLE001 - fail-soft: link 失败不挡 reindex
+        return {"pid": project_id, "action": "error", "note": str(exc)}
+
+
 def cmd_codegraph(args: argparse.Namespace) -> int:
     from codev_platform.ops._common import config as load_cfg
     cfg = load_cfg()

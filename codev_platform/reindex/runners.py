@@ -61,7 +61,27 @@ class CliReindexRunner:
         return subprocess.run(cmd).returncode
 
 
+class CodegraphReindexRunner(CliReindexRunner):
+    """codegraph 专用 runner: sync 前先幂等 ensure .codegraph junction 指向平台。
+
+    免手动 `codegraph link --all` —— 首次对某 project reindex 时自动建联接, 让 sync
+    写穿 junction 落平台。ensure-link 是 fail-soft 的(见 ops.codegraph.ensure_codegraph_linked),
+    失败只记录不中断 sync。
+    """
+
+    def __init__(self) -> None:
+        super().__init__("codegraph", "--codegraph")
+
+    def run(self, project_id: str, repo: Path, cfg: dict) -> int:
+        from codev_platform.ops.codegraph import ensure_codegraph_linked
+        r = ensure_codegraph_linked(project_id, repo, cfg)
+        if r.get("action") == "error":
+            print(f"[reindex:codegraph] ensure-link 失败 (fail-soft, 继续 sync): {r.get('note')}",
+                  file=sys.stderr)
+        return super().run(project_id, repo, cfg)
+
+
 # 内置三类 (与 ops/reindex.py 的 --chroma / --codegraph / --cross-link 对齐)
 register(CliReindexRunner("chroma", "--chroma"))
-register(CliReindexRunner("codegraph", "--codegraph"))
+register(CodegraphReindexRunner())
 register(CliReindexRunner("cross_link", "--cross-link"))
