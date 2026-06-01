@@ -32,8 +32,18 @@ def cmd_agent(args: argparse.Namespace) -> int:
         import logging
         logging.basicConfig(level=logging.INFO)
         from codev_platform.core.config import load_config
-        from codev_platform.gateway.auth import build_authenticator, warn_if_insecure
-        warn_if_insecure(build_authenticator(load_config()), args.host)
+        from codev_platform.gateway.auth import (
+            build_authenticator, warn_if_insecure, deploy_policy_error,
+        )
+        _cfg = load_config()
+        # prod 硬拒(fail-fast): 非 token 认证对外暴露直接退出, 不让不安全服务起来。
+        err = deploy_policy_error(_cfg, args.host)
+        if err:
+            print(f"[gateway] 拒绝启动: {err}", file=sys.stderr)
+            sys.exit(2)
+        warn_if_insecure(build_authenticator(_cfg), args.host)  # dev 软告警保留
+    except SystemExit:
+        raise
     except Exception:  # noqa: BLE001 - 警告失败不阻塞起服务
         pass
     # 延迟到此 import service,避免没装 extra 时整个 CLI 挂掉

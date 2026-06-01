@@ -1,6 +1,11 @@
 {
   "_comment_top": "codev-platform 用户级配置样板。优先用 `codev-platform setup --auto` 自动探测生成 ~/.codev-platform/config.json; 本文件仅作字段参考。优先级: env var > 本配置文件 > 代码默认。路径示例用 ~ (展开 HOME); Windows 也可写 D:/...。",
 
+  "deployment": {
+    "_comment": "部署模式: dev|prod。prod 下 gateway.auth_mode 必须为 token, 否则 agent serve 拒绝启动(fail-fast); platform.url 指向远程(非 localhost) 同理强制 token。dev 仅软告警(warn_if_insecure)。",
+    "mode": "dev"
+  },
+
   "models": {
     "_comment": "GPU 模型路径 (Qwen3-Embedding-0.6B / Qwen3-Reranker-0.6B). 跨项目共享单实例避免 8GB VRAM OOM。模型自备放此路径; 缺 embed 时走仓内 paraphrase-multilingual-MiniLM fallback。",
     "embed_path": "~/models/Qwen3-Embedding-0.6B",

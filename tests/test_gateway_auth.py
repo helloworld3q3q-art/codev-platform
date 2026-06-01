@@ -157,6 +157,37 @@ def test_warn_if_insecure_only_passthrough_nonloopback(caplog):
     assert any("passthrough" in r.message for r in caplog.records)
 
 
+# ---- deploy_policy_error(prod fail-fast 纯函数)----
+
+def test_deploy_policy_prod_passthrough_rejected():
+    from codev_platform.gateway.auth import deploy_policy_error
+    err = deploy_policy_error({"deployment": {"mode": "prod"}, "gateway": {"auth_mode": "passthrough"}}, "0.0.0.0")
+    assert err and "auth_mode=token" in err
+
+
+def test_deploy_policy_prod_token_ok():
+    from codev_platform.gateway.auth import deploy_policy_error
+    assert deploy_policy_error({"deployment": {"mode": "prod"}, "gateway": {"auth_mode": "token"}}, "0.0.0.0") is None
+
+
+def test_deploy_policy_dev_ok():
+    from codev_platform.gateway.auth import deploy_policy_error
+    assert deploy_policy_error({"deployment": {"mode": "dev"}, "gateway": {"auth_mode": "passthrough"}}, "0.0.0.0") is None
+    assert deploy_policy_error({}, "127.0.0.1") is None  # 空 config 默认 dev/passthrough
+
+
+def test_deploy_policy_remote_url_passthrough_rejected():
+    from codev_platform.gateway.auth import deploy_policy_error
+    err = deploy_policy_error({"platform": {"url": "https://platform.example.com:8848"}}, "127.0.0.1")
+    assert err and "auth_mode=token" in err
+
+
+def test_deploy_policy_localhost_url_ok():
+    from codev_platform.gateway.auth import deploy_policy_error
+    assert deploy_policy_error({"platform": {"url": "http://127.0.0.1:18083"}}, "127.0.0.1") is None
+    assert deploy_policy_error({"platform": {"url": "http://localhost:8848"}}, "127.0.0.1") is None
+
+
 def test_middleware_token_mode_gates():
     cfg = {"gateway": {"auth_mode": "token", "tokens": {token_hash("good"): {"user_id": "bob", "org_id": "acme"}}}}
     app, cap = _starlette_app(cfg)

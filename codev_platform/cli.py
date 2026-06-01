@@ -42,6 +42,45 @@ def _eprint(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+# key 名命中任一子串即视为敏感, 其值掩码 (大小写不敏感)。
+_SECRET_KEY_HINTS = ("api_key", "apikey", "password", "passwd", "secret", "token", "dsn")
+
+
+def _mask_value(key: str, value):
+    """单个敏感值掩码。dsn 类只掩密码段 (复用 ops.backup._redact_dsn), 其余整体掩。
+
+    保留前 4 位便于核对是哪把 key, 太短的整体掩。非字符串原样掩成 "***"。
+    """
+    if isinstance(value, str) and "dsn" in key.lower():
+        from codev_platform.ops.backup import _redact_dsn
+        return _redact_dsn(value)
+    if not value:
+        return value
+    if isinstance(value, str) and len(value) > 8:
+        return value[:4] + "***"
+    return "***"
+
+
+def redact_config(cfg):
+    """纯函数: 深度遍历 dict/list, 把敏感 key 的值掩码后返回新结构, 不改原 cfg。
+
+    敏感判定: key 名 (小写) 含 _SECRET_KEY_HINTS 任一子串。dsn 类只掩密码段。
+    用于 config show/doctor --redact, 防截图 / 日志 / 备份泄漏明文 secret。
+    """
+    if isinstance(cfg, dict):
+        out = {}
+        for k, v in cfg.items():
+            ks = str(k).lower()
+            if any(h in ks for h in _SECRET_KEY_HINTS) and not isinstance(v, (dict, list)):
+                out[k] = _mask_value(str(k), v)
+            else:
+                out[k] = redact_config(v)
+        return out
+    if isinstance(cfg, list):
+        return [redact_config(it) for it in cfg]
+    return cfg
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """交互或带参创建 <cwd>/.claude/project.json"""
     cwd = Path.cwd()
@@ -586,8 +625,30 @@ def cmd_config(args: argparse.Namespace) -> int:
         return 0
     if args.action == "show":
         cfg = load_config()
+        if getattr(args, "redact", False):
+            cfg = redact_config(cfg)
         _print(f"# config file: {p}  (exists={p.is_file()})")
         _print(json.dumps(cfg, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "doctor":
+        cfg = load_config()
+        shown = redact_config(cfg) if getattr(args, "redact", False) else cfg
+        _print(f"# config file: {p}  (exists={p.is_file()})")
+        _print(json.dumps(shown, ensure_ascii=False, indent=2))
+        # provider api_key 体检: 只报 有/无, 绝不打印值
+        providers = {}
+        agent = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else {}
+        if isinstance(agent.get("providers"), dict):
+            providers = agent["providers"]
+        _print()
+        _print("=== provider api_key 体检 (只报有/无, 不打印值) ===")
+        if not providers:
+            _print("  (无 agent.providers 配置)")
+        else:
+            for name, spec in providers.items():
+                has = bool(isinstance(spec, dict) and spec.get("api_key"))
+                _print(f"  - {name}: api_key {'有' if has else '无'}")
+            _print("  建议: 定期轮换 key, 并优先用 env 引用 (env > config.agent.providers.<name>.api_key), 真 key 不进 git。")
         return 0
     if args.action == "init":
         if p.is_file() and not args.force:
@@ -644,8 +705,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp_setup.set_defaults(func=cmd_setup)
 
     sp_cfg = sub.add_parser("config", help="~/.codev-platform/config.json 管理")
-    sp_cfg.add_argument("action", choices=["show", "init", "path"], help="show=打印当前 / init=写默认 / path=只打印文件位置")
+    sp_cfg.add_argument("action", choices=["show", "init", "path", "doctor"],
+                        help="show=打印当前 / init=写默认 / path=只打印文件位置 / doctor=打印+secret体检")
     sp_cfg.add_argument("--force", action="store_true", help="init 时覆盖已有文件")
+    sp_cfg.add_argument("--redact", action="store_true", help="show/doctor 时掩码敏感字段值 (防截图/日志泄漏)")
     sp_cfg.set_defaults(func=cmd_config)
 
     sp_ver = sub.add_parser("version", help="打印版本号")

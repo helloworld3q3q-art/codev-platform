@@ -148,6 +148,40 @@ def _is_loopback(host: str) -> bool:
     return h in {"127.0.0.1", "::1", "localhost", ""}
 
 
+def deploy_policy_error(cfg: dict | None, host: str) -> str | None:
+    """prod 部署的认证 fail-fast 策略(纯函数, 可测)。
+
+    返回错误串 = 必须拒绝启动; None = 放行。
+    判定(任一命中即拒绝):
+      - deployment.mode == "prod" 且 gateway.auth_mode != "token"
+      - platform.url 非 localhost(对外暴露) 且 gateway.auth_mode != "token"
+    warn_if_insecure 保留作 dev 软告警, 这里是 prod 硬拒。
+    """
+    c = cfg or {}
+    auth_mode = _cfg_get(c, "gateway.auth_mode", "passthrough")
+    if auth_mode == "token":
+        return None
+    mode = _cfg_get(c, "deployment.mode", "dev")
+    if mode == "prod":
+        return ("deployment.mode=prod 但 gateway.auth_mode=%s —— prod 模式必须 auth_mode=token "
+                "(见 config.example.json)。" % auth_mode)
+    url = _cfg_get(c, "platform.url", None)
+    if url and not _url_is_loopback(str(url)):
+        return ("platform.url=%s 指向远程(非 localhost) 但 gateway.auth_mode=%s —— "
+                "对外暴露必须 auth_mode=token (见 config.example.json)。" % (url, auth_mode))
+    return None
+
+
+def _url_is_loopback(url: str) -> bool:
+    """从 platform.url 抽 host 判断是否 loopback。容错: 解析失败按非 loopback(更安全, 倾向拒绝)。"""
+    from urllib.parse import urlparse
+    try:
+        host = urlparse(url if "://" in url else "//" + url).hostname or ""
+    except Exception:  # noqa: BLE001
+        return False
+    return _is_loopback(host)
+
+
 def warn_if_insecure(authenticator: Authenticator, host: str) -> None:
     """passthrough 绑非 loopback = 未认证对外开放 → 启动期 loud WARN(secure-by-default 兜底)。
 

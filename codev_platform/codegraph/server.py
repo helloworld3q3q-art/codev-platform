@@ -309,7 +309,7 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
                 pid = _pid_validate(pid_raw)
             except Exception as exc:  # noqa: BLE001
                 _flog(f"[sse] reject invalid project_id {pid_raw!r}: {exc!s}")
-                return
+                return JSONResponse({"error": "invalid project_id"}, status_code=400)
         else:
             # 缺显式 project_id: 先置 None 过 ACL(token 模式 deny), 放行后再回退默认。
             pid = None

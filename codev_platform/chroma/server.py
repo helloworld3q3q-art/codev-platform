@@ -27,7 +27,9 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-import chromadb
+# 注:chromadb 不在顶层 import —— heavy runtime 依赖, lazy import 进 _get_client。
+# 这样 `import codev_platform.chroma.server` 在没装 chromadb 时也不崩(可被静态审计/测试 inspect),
+# 缺 runtime 依赖时在真正建连接处给清晰错误。
 # 注:不再用 Chroma 的 SentenceTransformerEmbeddingFunction —— 查询侧需要
 # prompt_name='query'(Qwen3 instruction-aware),必须自己持有 SentenceTransformer。
 # 索引侧同样自己 encode(见 index_docs.py)。
@@ -53,14 +55,18 @@ except ImportError as _bm25_imp_err:
 # 不再用 __file__.parents 推导 (那是 codev-platform package 自身位置, 错)
 DATA_DIR = chroma_dir()
 # 多项目命名: <project_id>__platform_docs
-# 启动时解析 project_id (env / .claude/project.json), 失败硬退出
+# import 期 best-effort 解析单 project (stdio 模式默认)。
+# HTTP daemon 多租户, 每请求带 ?project_id=, 不依赖此值; 故解析失败**不退出 / 不 sys.exit**
+# (与 cross_link/codegraph server 同款), 保证 `import codev_platform.chroma.server` 始终可成功。
 try:
     PROJECT_ID = resolve_local()
 except ProjectIdError as _pid_exc:
-    print(f"[codev_platform.chroma.server] FATAL: {_pid_exc!s}", file=sys.stderr, flush=True)
-    sys.exit(1)
+    print(f"[codev_platform.chroma.server] WARN: project_id 未解析 ({_pid_exc!s}); "
+          "daemon 多租户模式按请求 ?project_id= 路由, PROJECT_ID=None。", file=sys.stderr, flush=True)
+    PROJECT_ID = None
 COLLECTION_BASE = "platform_docs"
-COLLECTION_NAME = chroma_collection_name(PROJECT_ID, COLLECTION_BASE)
+# PROJECT_ID 为 None 时 (无默认 project) 不预生成 collection 名, 每请求带 project_id 时再算。
+COLLECTION_NAME = chroma_collection_name(PROJECT_ID, COLLECTION_BASE) if PROJECT_ID else None
 # backward compat: 旧索引存在 unprefixed `platform_docs`, daemon 启动时若新命名 collection
 # 不存在, 自动 fallback 到旧名 + 警告 (_load_project_state 内处理)
 LEGACY_COLLECTION_NAME = "platform_docs"  # 字面量明示, 与历史不带 project_id 前缀的 collection 名一致
@@ -368,6 +374,7 @@ def _get_client():
     """Lazy chroma client (跨 project 共享单实例)."""
     global _client
     if _client is None:
+        import chromadb  # lazy: heavy runtime 依赖, 顶层不 import (见模块头注释)
         _client = chromadb.PersistentClient(path=str(DATA_DIR))
         from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁 (默认 delete 模式会独占)
         ensure_wal(DATA_DIR)
@@ -434,11 +441,17 @@ def _load_project_state(project_id: str, reason: str) -> _ProjectState:
 
 def _maybe_reload_project(state: _ProjectState) -> bool:
     """探测构建戳, mtime 变新则把该 project 从 _projects 移除让下次 _ensure_project 重建。
-    返回 True = 已置失效 (caller 应重新 ensure)。"""
-    if not _STAMP_PATH.exists():
+    返回 True = 已置失效 (caller 应重新 ensure)。
+
+    优先读 per-project stamp `.last_build.<project_id>.json` (indexer 2026-05-28 起写),
+    全局 `.last_build.json` 仅 legacy fallback。这样一个项目重建只 evict 自己,
+    不再使其它项目误 reload。"""
+    pp = _STAMP_PATH.parent / f".last_build.{state.project_id}.json"
+    stamp = pp if pp.exists() else _STAMP_PATH
+    if not stamp.exists():
         return False
     try:
-        cur = _STAMP_PATH.stat().st_mtime
+        cur = stamp.stat().st_mtime
     except OSError:
         return False
     if cur <= state.last_stamp_mtime:
@@ -966,7 +979,8 @@ async def _run_http(port: int) -> None:
                 pid = _pid_validate(pid_raw)
             except Exception as exc:  # noqa: BLE001
                 _flog(f"[sse] reject: invalid project_id {pid_raw!r}: {exc!s}")
-                return  # SSE connect 中止
+                # 返显式 400 (裸 return 会让 Starlette 收到 None -> TypeError)
+                return JSONResponse({"error": "invalid project_id"}, status_code=400)
         else:
             # 缺显式 project_id: 先置 None 过 ACL —— token 模式 can_access(None)=deny;
             # passthrough 放行后才回退默认 PROJECT_ID(向后兼容)。防 token 省略 project_id 静默命中默认项目。

@@ -56,7 +56,7 @@ from codev_platform.ops._common import (
     resolve_repo,
     run,
 )
-from codev_platform.core.paths import chroma_dir
+from codev_platform.core.paths import chroma_dir, cross_link_db_path
 
 
 # ----------------------------------------------------------------------
@@ -559,7 +559,9 @@ def _check_cross_layer(
     project_id: str, health: dict,
 ) -> None:
     has_cl = _has_cross_link(repo)
-    db = cdv_root / "data" / "codegraph_ext" / project_id / "cross_layer.sqlite"
+    # 走 paths.cross_link_db_path: 尊重 data.platform_data_dir / PLATFORM_DATA_DIR override,
+    # 否则硬编码 cdv_root/data 在 override 后会误报缺失。
+    db = cross_link_db_path(project_id)
     if has_cl and db.is_file():
         if not (chroma_py and chroma_py.exists()):
             return

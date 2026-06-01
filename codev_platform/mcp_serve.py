@@ -190,9 +190,19 @@ def _tcp_open(host: str, port: int, timeout: float = 2.0) -> bool:
 
 
 def probe(ep: MCPEndpoint) -> str:
-    """探一个端点: 'ok' / 'down'。三套均自带 PUBLIC /healthz(走 _http_health);无 health_url 才退回 TCP。"""
+    """探一个端点: 'ok' / 'down'。
+
+    三套均自带 PUBLIC /healthz(走 _http_health)。但旧 daemon(P3 引入 /healthz 之前)只有
+    /health, 探 /healthz 会 404 → 误判 DOWN。故 /healthz 失败时回退探 /health(同样只看
+    HTTP status 2xx, 不解析 body, 不把详情当 public 合规结果)。两者皆失败再退回 TCP 存活。
+    """
     if ep.health_url:
-        return "ok" if _http_health(ep.health_url) else "down"
+        if _http_health(ep.health_url):
+            return "ok"
+        # 回退: 旧 daemon 仅有 /health alias。只看 2xx, 不读 body。
+        legacy_url = f"http://{ep.host}:{ep.port}/health"
+        if legacy_url != ep.health_url and _http_health(legacy_url):
+            return "ok"
     return "ok" if _tcp_open(ep.host, ep.port) else "down"
 
 
