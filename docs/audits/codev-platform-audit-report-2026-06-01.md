@@ -1,393 +1,329 @@
-# codev-platform 三轮审计与测试报告
+# codev-platform 审计复核报告
 
 日期: 2026-06-01
 
-范围: 当前仓库 `D:\WorkSpace\codev-platform` 的代码结构、测试基线、MCP/Agent/索引运行链路、打包交付、配置安全、部署可验证性。
+范围: 当前仓库 `D:\WorkSpace\codev-platform` 的代码结构、测试基线、MCP/Agent/索引运行链路、打包交付、配置安全、私有化部署可验证性。
 
-结论: 当前项目适合继续做内部 POC 和真实业务仓试点,但还不适合直接作为客户可交付产品发布。主要差距不在想法,而在交付形态、运行时依赖隔离、服务编排一致性、生产认证默认值、健康检查与打包资源。
+结论: 你前面能做的主要修复已经基本做完。当前项目已经从“内部原型”推进到“可继续做内部 POC / 可打包验证”的状态，但还不建议直接作为客户正式交付产品发布。主要剩余风险已经不在单元测试，而在服务编排、Docker 部署闭环、历史乱码清理、正式授权/升级/运维机制。
 
-## 一、三轮审计摘要
+## 1. 本轮复核结果
 
-### 第一轮: 代码结构与基础能力审计
+### 测试基线
 
-已确认能力:
+已执行:
 
-- `codev_platform.cli` 已形成统一 CLI 入口,包含项目初始化、注册、规则/技能同步、MCP 编排、重建索引、健康检查、Agent 服务等命令。
-- `core.project_id` / `core.paths` 已建立多项目标识和数据路径约定。
-- Chroma 文档索引、codegraph、cross-link、Agent HTTP 服务、memory/session、gateway/auth 已有代码落点。
-- 测试覆盖已经不是空架子,至少覆盖 CLI、路径、ACL、Agent、MCP 编排、Webhook、reindex、backup、bootstrap 等模块。
+- `python -m compileall -q codev_platform tests`
+- `python -m pytest -q`
+- `python -m pip check`
+- `python -m pip wheel . -w dist --no-deps`
+- 干净 venv 安装 wheel 后执行:
+  - `codev-platform --version`
+  - `codev-platform sync-rules --dry-run`
+  - `codev-platform sync-skills --dry-run`
+- 定向测试:
+  - `tests/test_resources_packaging.py`
+  - `tests/test_health_cross_link_path.py`
+  - `tests/test_health_split_security.py`
 
-当时主要问题:
+结果:
 
-- 早期全量测试出现 `tests/test_mcp_serve.py` 失败,根因是测试仍按旧的 per-project codegraph 端口模型断言,而实现已经切到单端口多租户代理。
-- `serve-mcp start` 的 Chroma 自定义端口注入曾存在风险。
-- Chroma manifest 原先有全局化风险,多项目轮流 reindex 会互相覆盖。
-- Agent `project_id` 校验和 ACL 一开始需要加强。
+- 全量测试: `351 passed, 5 skipped`
+- 编译检查: 通过
+- `pip check`: `No broken requirements found`
+- wheel 构建: 通过
+- 干净 venv 安装后 `sync-rules` / `sync-skills`: 通过
+- 仓库明文密钥扫描: 0 命中
+- Docker: 当前机器无 `docker` 命令，不能做容器启动验证
+
+### 当前本机服务状态
+
+执行 `python -m codev_platform.cli serve-mcp status`:
+
+| 服务 | 端口 | 状态 | 说明 |
+|---|---:|---|---|
+| platform-docs | 18083 | OK | `/healthz` 和 `/health` 都返回最小健康信息 |
+| cross-link | 18086 | DOWN | 当前端口未监听 |
+| codegraph | 18091 | DOWN | 当前端口未监听 |
+
+这说明旧报告里的 `platform-docs /healthz 404` 已经修复；当前 DOWN 是 cross-link/codegraph 服务没有启动，不是 health 路由泄露或探针格式问题。
+
+## 2. 已确认修复的问题
+
+### 2.1 Chroma 顶层重依赖问题已修复
+
+之前问题:
+
+- `codev_platform.chroma.server` 顶层 import `chromadb`，轻量安装或安全测试 import 时会失败。
 
 当前状态:
 
-- MCP 编排相关测试已恢复通过。
-- Agent `project_id` 校验与 ACL 已经在 `/chat`、MCP SSE 入口、memory 路由中落地。
-- Chroma per-project manifest 已有修复痕迹,但 server reload 仍有全局 stamp 问题。
+- `chromadb` 已延迟到 `_get_client()` 内部导入。
+- `ProjectIdError` 不再导致 import 阶段退出。
+- `tests/test_health_split_security.py` 已通过。
 
-### 第二轮: 文档、一图总览与产品边界审计
+结论: 已修复。
 
-已完成:
+### 2.2 wheel 资源缺失已修复
 
-- 更新 `docs/codev-platform-overview.html` 的“一图总览”,只保留当前已落地能力。
-- 修复该 HTML 中的 `??/????` 字面乱码残留。
-- 验证 HTML 文件仍是 UTF-8,无 replacement character。
+之前问题:
 
-验证结果:
+- wheel 不包含 `rules/`、`skills/`，普通 pip 安装后 `sync-rules` / `sync-skills` 失败。
 
-- `replacement-char-count=0`
-- `svg open=2 close=2`
-- `section open=14 close=14`
-- `Select-String '??'` 无输出
+当前状态:
 
-注意:
+- 资源已迁移到 `codev_platform/resources/`。
+- `pyproject.toml` 已配置 package data。
+- wheel 内包含:
+  - `codev_platform/resources/rules/`: 13 项
+  - `codev_platform/resources/skills/`: 3 项
+- 干净 venv 安装后同步命令可运行。
 
-- 用户要求中文风格,所以图内术语已改为中文主表达,例如控制平面、知识索引平面、记忆平面、网关权限平面、运行时平面。
-- 保留必要技术缩写的位置应以括号或说明出现,不能用英文标题替代中文表达。
+结论: 已修复。
 
-### 第三轮: 发布交付、运行时、安全与部署审计
+### 2.3 健康检查路径和敏感信息拆分已修复
 
-本轮重点验证:
+之前问题:
 
-- 当前全量测试基线
-- wheel 打包内容
-- 干净 venv 安装后 CLI 可用性
-- MCP 服务端口状态
-- runtime 依赖是否齐全
-- 配置文件和仓库密钥扫描
-- Docker/compose 可验证性
+- `/health` 暴露内部详情。
+- 新旧 health 探针不一致导致服务误判 DOWN。
 
-最新测试结果:
+当前状态:
 
-- `python -m compileall -q codev_platform tests`: 通过
-- `python -m pytest -q`: `300 passed, 4 skipped, 1 failed`
-- `python -m pip check`: `No broken requirements found`
-- 权限 / Webhook / Reindex 定向测试: `41 passed`
-- MCP / cross-link / codegraph / meta health 定向测试: `31 passed`
-- Agent / gateway / path / CLI 定向测试: `125 passed, 4 skipped`
-- Bootstrap / backup / systemd / codegraph link: `38 passed`
+- `/healthz` 与 `/health` 返回最小信息。
+- 详情面转到 `/platform/status` 或 `/platform/health`。
+- 定向安全测试通过。
 
-唯一全量失败:
+结论: 已修复。
 
-- `tests/test_health_split_security.py::test_servers_public_paths_are_healthz_only`
-- 失败原因: `codev_platform.chroma.server` 顶层 `import chromadb`,当前轻量环境未安装 runtime extra,导致 import 阶段失败。
+### 2.4 Chroma per-project reload stamp 已修复
 
-## 二、当前关键发现
+之前问题:
 
-### P0 / P1: 发布前必须修
+- Chroma reload 依赖全局 `.last_build.json`，多项目场景容易互相影响。
 
-#### 1. Chroma server 顶层依赖过重,导致测试和轻量安装失败
+当前状态:
 
-位置:
+- `_maybe_reload_project()` 优先读取 `.last_build.<project_id>.json`。
+- 全局 `.last_build.json` 仅作为兼容 fallback。
 
-- `codev_platform/chroma/server.py:30`
-- `tests/test_health_split_security.py:134`
+结论: 已修复。
 
-现象:
+### 2.5 health cross-link 路径已修复
 
-- 默认安装依赖为空,`chromadb` 在 `[runtime]` extra 中。
-- 但 `server.py` import 阶段直接 import `chromadb`。
-- 安全测试只是想 inspect 路由源码,也被 runtime 依赖挡住。
+之前问题:
 
-影响:
+- health 里 cross-link DB 路径硬编码到仓库 `data/`，不尊重 `PLATFORM_DATA_DIR`。
 
-- 轻量 SDK 安装不可靠。
-- CI 不能在纯 dev 依赖下稳定跑。
-- 安全测试、静态审计、文档生成都会被 runtime 依赖卡住。
+当前状态:
 
-建议:
+- 已改用 `cross_link_db_path(project_id)`。
+- 定向测试通过。
 
-- 将 `chromadb`、`sentence_transformers`、torch、reranker 等重依赖延迟到 `_get_client()` / `_ensure_model()` / `main()` 内。
-- 模块 import 阶段不要 `sys.exit(1)`。
-- 缺 runtime extra 时给清晰 503 或 CLI 提示,而不是 import 崩。
+结论: 已修复。
 
-#### 2. wheel 交付资源缺失,普通 pip 安装后核心命令失败
+### 2.6 生产认证 fail-fast 已补上
 
-位置:
+之前问题:
 
-- `codev_platform/cli.py:356`
-- `codev_platform/cli.py:390`
-- `codev_platform/cli.py:398`
-- `pyproject.toml:56`
+- 示例配置默认 `auth_mode=passthrough`，生产部署容易误暴露。
 
-验证:
-
-- wheel 文件数: 93
-- `codev_platform/`: 88
-- `rules/`: 0
-- `skills/`: 0
-- `docs/`: 0
-- `config.example.json`: 0
-
-干净 venv 安装后:
-
-- `codev-platform --version`: 可用
-- `codev-platform sync-rules --dry-run`: 失败
-- `codev-platform sync-skills --dry-run`: 失败
-
-影响:
-
-- 现在不能按普通 Python 包交付给客户。
-- 二进制化、Docker 镜像、私有化部署都会继承这个问题。
-
-建议:
-
-- 将 `rules/`、`skills/`、`config.example.json` 纳入 package data。
-- 或迁移到 `codev_platform/resources/` 并通过 `importlib.resources` 读取。
-- 增加一个 clean install 测试: wheel 安装后跑 `sync-rules --dry-run`、`sync-skills --dry-run`。
-
-#### 3. platform-docs 健康探针版本不一致,编排器误判 DOWN
-
-验证:
-
-- `serve-mcp status`: `platform-docs DOWN`, `cross-link OK`, `codegraph OK`
-- `http://127.0.0.1:18083/healthz`: 404
-- `http://127.0.0.1:18083/health`: 200,返回旧详细格式
-- `http://127.0.0.1:18086/healthz`: 200
-- `http://127.0.0.1:18091/healthz`: 200
-
-影响:
-
-- Chroma daemon 实际在跑,但新编排器按 `/healthz` 探测会判定 DOWN。
-- 可能导致重复拉起、误报、运维误判。
-
-建议:
-
-- 对旧 daemon 做兼容探测: `/healthz` 失败时 fallback `/health`,但要只判断 status code,不要把详细信息当 public 合规结果。
-- 或提供 daemon 版本检测和强制重启迁移命令。
-
-#### 4. Chroma reload 仍依赖全局 build stamp
-
-位置:
-
-- `codev_platform/chroma/server.py:171`
-- `codev_platform/chroma/server.py:435`
-- `codev_platform/chroma/indexer.py:93`
-- `codev_platform/chroma/indexer.py:592`
-
-现状:
-
-- indexer 已写 `index_manifest.<project_id>.json` 和 `.last_build.<project_id>.json`。
-- server 的 `_maybe_reload_project()` 仍看全局 `.last_build.json`。
-
-影响:
-
-- 一个项目重建可能触发其他项目状态失效。
-- 多租户场景下会造成不必要 reload 或新鲜度误判。
-
-建议:
-
-- `_maybe_reload_project(state)` 改为优先读取 `.last_build.<state.project_id>.json`。
-- 全局 `.last_build.json` 只作为 legacy fallback。
-
-#### 5. health cross-link 路径仍硬编码本仓 data
-
-位置:
-
-- `codev_platform/ops/health.py:562`
-- `codev_platform/ops/health.py:889`
-
-现状:
-
-- `chroma_data = chroma_dir()` 已走统一路径。
-- 但 cross-link DB 仍用 `cdv_root / "data" / "codegraph_ext" / project_id / "cross_layer.sqlite"`。
-
-影响:
-
-- 客户配置 `PLATFORM_DATA_DIR` 或 `data.platform_data_dir` 后,health 会误报 cross-link 缺失。
-
-建议:
-
-- 改为 `cross_link_db_path(project_id)`。
-- 测试覆盖 `PLATFORM_DATA_DIR` override。
-
-#### 6. 生产认证默认值不适合客户部署
-
-位置:
-
-- `config.example.json:66`
-- `config.example.json:67`
-- `codev_platform/gateway/auth.py`
-- `codev_platform/ops/agent.py:35`
-
-现状:
-
-- 示例配置默认 `auth_mode=passthrough`。
-- 对本机开发可接受,但对客户部署不应作为默认生产模式。
-- `warn_if_insecure()` 目前只是 warning,不是 fail-fast。
-
-影响:
-
-- 反代或远程访问配置不当时,可能形成裸访问。
-
-建议:
+当前状态:
 
 - 增加 `deployment.mode=dev|prod`。
-- prod 模式下非 token 直接拒绝启动。
-- `platform.url` 非 localhost 且 auth_mode 非 token 时拒绝启动或 health 红灯。
+- `prod` 模式下非 `token` 拒绝启动。
+- `platform.url` 指向远程且非 `token` 也拒绝。
+- token 只存 sha256 hash。
 
-### P2: 产品化前应修
+结论: 已修复基础防线。
 
-#### 7. 用户本机配置存在明文 API Key
+### 2.7 非法 project_id 返回 400 已修复
 
-验证:
+之前问题:
 
-- 仓库已跟踪文件未发现常见明文密钥。
-- `~/.codev-platform/config.json` 中存在一个非空 provider API key。
+- SSE 入口非法 `project_id` 分支可能裸 `return`，触发 Starlette `NoneType` 异常。
 
-风险:
+当前状态:
 
-- 本机配置不会进 git,但客户部署/截图/日志/备份时可能泄漏。
+- chroma / cross-link / codegraph SSE 入口都返回 `JSONResponse({"error": "invalid project_id"}, status_code=400)`。
 
-建议:
+结论: 已修复。
 
-- 立即轮换该 key。
-- 配置文件中只放环境变量名或 secret 引用。
-- 增加 `codev-platform config doctor --redact`。
+## 3. 当前仍需处理的问题
 
-#### 8. Docker 部署未验证
-
-验证:
-
-- 当前机器没有 `docker` 命令。
-- 因此 `docker-compose.yml` 只能静态读取,不能证明可部署。
-
-风险:
-
-- 私有化部署如果依赖 Docker,现在没有本机验证闭环。
-
-建议:
-
-- 增加 CI 或专用环境跑 `docker compose config`、`docker compose up -d`、health probe。
-- 明确 Docker 镜像边界: runtime 服务镜像、PostgreSQL、模型挂载、data volume、配置/secret 挂载。
-
-#### 9. 源码注释/docstring 仍有大量 mojibake
-
-验证:
-
-- 文件本身可 UTF-8 decode。
-- 但多处注释/docstring 已经是乱码内容。
-
-影响:
-
-- 不一定影响运行。
-- 但影响客户审计、二次开发、交付观感。
-
-建议:
-
-- 不要机械全局替换。
-- 按模块逐个恢复: gateway/core/agent/chroma/mcp_serve/reindex 优先。
-
-#### 10. cross-link / codegraph SSE 非法 project_id 分支返回 None
+### P1: cross-link / codegraph 当前未启动
 
 现象:
 
-- 历史日志中出现 `TypeError: 'NoneType' object is not callable`。
-- 原因是非法 `project_id` 分支里直接 `return`,Starlette 需要 Response。
+- `serve-mcp status` 显示:
+  - `platform-docs OK`
+  - `cross-link DOWN`
+  - `codegraph DOWN`
 
 影响:
 
-- 日志噪音,客户端看到 500 或连接异常。
+- 平台文档检索服务可用，但跨层链路和代码图谱当前不可用。
+- 如果要给别人试用，演示链路会断。
 
 建议:
 
-- 统一返回 `JSONResponse({"error": "invalid project_id"}, status_code=400)`。
+1. 增加一条端到端启动验收命令，例如 `codev-platform serve-mcp start --wait`。
+2. 验收必须覆盖:
+   - `http://127.0.0.1:18083/healthz`
+   - `http://127.0.0.1:18086/healthz`
+   - `http://127.0.0.1:18091/healthz`
+3. 对 DOWN 状态输出具体原因: 端口未监听、进程退出、依赖缺失、DB 缺失、项目未注册。
 
-## 三、当前能力判断
+### P1: Docker 部署仍未验证
 
-### 已经有实际价值的能力
+现象:
 
-- 多项目 project_id 体系
+- 当前机器没有 `docker` 命令。
+- 因此不能证明 `docker compose up` 能真正跑起来。
+
+影响:
+
+- 私有化交付如果走 Docker，目前还缺部署闭环。
+
+建议:
+
+1. 找一台有 Docker 的机器跑:
+   - `docker compose config`
+   - `docker compose up -d`
+   - 三个 MCP health probe
+   - agent health probe
+2. 把这套变成 CI 或发布前检查。
+
+### 已复核: 历史乱码不是当前阻断项
+
+第一次扫描曾误报 59 个文件，原因是 PowerShell 编码影响了扫描脚本，把要查的乱码字符转成了 `?`，导致正常的 `?project_id=`、SQL 占位符 `?`、文档问号都被算进去了。
+
+重新用 Unicode 编码点扫描后:
+
+- UTF-8 解码错误: 0
+- replacement character `U+FFFD`: 0
+- 典型 mojibake 标记 `U+951B/U+9286/U+9225`: 只命中 1 个文件
+
+唯一命中文件:
+
+- `codev_platform/resources/rules/windows-powershell.md`
+
+该文件第 16 行是在说明 PowerShell 5.1 编码问题，里面故意写了乱码样例，不是文件本身损坏。
+
+结论: 当前没有证据表明源码和文档存在批量真实乱码。后续只需要保持 UTF-8 读写规范，不需要安排大规模乱码清理。
+
+### P2: `python -m build` 当前不可用
+
+现象:
+
+- `python -m build --wheel` 失败:
+  - `No module named build.__main__; 'build' is a package and cannot be directly executed`
+
+但:
+
+- `python -m pip wheel . -w dist --no-deps` 成功。
+
+影响:
+
+- wheel 本身能构建。
+- 但发布文档或 CI 如果写 `python -m build` 会失败。
+
+建议:
+
+- 明确发布命令二选一:
+  - 安装正确的 `build` 包后使用 `python -m build`
+  - 或统一使用 `python -m pip wheel . -w dist --no-deps`
+
+### P2: 私有化授权、升级和权益保护还没有实现
+
+当前状态:
+
+- Python wheel 可打包。
+- 但没有正式授权机制。
+- 没有 U 盘授权。
+- 没有 license 校验。
+- 没有版本升级和迁移机制。
+
+影响:
+
+- 可以内部试用。
+- 不适合直接作为商业私有化产品交付。
+
+建议:
+
+1. 先做 Docker 镜像 + 配置挂载。
+2. 再做 license 文件或离线授权。
+3. U 盘授权作为增强项，不要作为第一版唯一授权方式。
+4. 数据目录、配置目录、日志目录必须明确挂载边界。
+
+## 4. 当前能力判断
+
+### 已经具备实际价值的能力
+
+- 多项目 `project_id` 隔离
 - 文档检索增强
+- BM25 / RRF 等检索融合基础
+- Chroma 常驻文档索引服务
 - codegraph 代码图谱接入
 - cross-link 跨层链路
 - Agent HTTP 服务
-- 分层 memory/session
-- gateway 认证中间件与 ACL
-- webhook + reindex queue
-- health / backup / bootstrap / systemd 相关命令
+- memory / session 基础能力
+- gateway 认证和 ACL
+- webhook / reindex queue
+- health / backup / bootstrap / systemd 辅助命令
+- wheel 打包和资源同步
 
-### 还不是正式产品的原因
+### 还不能直接商业发布的原因
 
-- 交付包不完整。
-- runtime 依赖和轻量 SDK 边界没有拆干净。
-- 服务编排与运行中 daemon 版本不一致。
-- 生产认证默认值偏开发。
-- Docker 私有化部署没有验证闭环。
-- 客户可读源码质量受乱码影响。
-- 授权、升级、License、U 盘授权、二进制化还没有实现。
+- Docker 私有化部署未闭环验证。
+- cross-link/codegraph 当前本机服务未运行。
+- 未发现批量真实乱码，但仍要保持 UTF-8 读写规范。
+- license、授权、升级、运维巡检机制还没落地。
+- 真实客户项目的 Node.js / .NET / Python / React / Vue 插件化扫描还没形成统一接口。
 
-## 四、建议修复路线
+## 5. 建议下一步
 
-### 阶段 1: 先把 POC 跑稳
+### 阶段 1: 把内部 POC 跑稳定
 
-目标: 内部真实项目稳定运行。
+验收标准:
 
-任务:
+- `python -m pytest -q` 全绿。
+- `serve-mcp status` 三个服务全部 OK。
+- 使用一个真实项目完成:
+  - 文档索引
+  - codegraph 查询
+  - cross-link 查询
+  - Agent 问答
 
-1. 修 Chroma lazy import 和 import-time `sys.exit`。
-2. 修 `/healthz` 探针兼容旧 daemon。
-3. 修 Chroma per-project reload stamp。
-4. 修 health cross-link data_root。
-5. 修非法 project_id 返回 400。
-6. 增加 clean wheel install 测试。
+### 阶段 2: 做可演示版本
 
-验收:
+验收标准:
 
-- 全量测试 0 failed。
-- `serve-mcp status` 三个端点 OK。
-- 干净 venv 安装后 `sync-rules`、`sync-skills` 可运行。
+- Docker compose 能一键启动。
+- 有 demo 项目和 demo 数据。
+- 有只读 Web/API playground。
+- 非开发人员能通过页面问业务问题。
 
-### 阶段 2: 变成可演示版本
+### 阶段 3: 做客户私有化交付版本
 
-目标: 别人能试用。
+验收标准:
 
-任务:
+- Docker 镜像 + 配置挂载 + 数据卷。
+- token/RBAC/审计日志。
+- 离线 license 或授权文件。
+- 升级脚本和数据迁移脚本。
+- 插件化扫描接口支持 Java / Node.js / .NET / Python / React / Vue。
 
-1. Docker compose 可跑通。
-2. 提供 demo 项目和 demo 数据。
-3. 提供只读 Web 演示页或 API playground。
-4. 配置全部 redacted,secret 走环境变量。
-5. 文档一键启动流程: install -> config -> index -> serve -> test query。
+## 6. 最终结论
 
-验收:
+这次复核后，项目状态比旧报告好很多:
 
-- 新机器按文档 30 分钟内跑通。
-- 非开发人员能通过页面/API 问项目问题。
+- 旧报告里的 P0/P1 大部分已经修完。
+- 全量测试已经全绿。
+- wheel 打包和干净安装已经可用。
+- 生产认证基础防线已经补上。
 
-### 阶段 3: 变成客户私有化交付
+但它现在仍是“内部 POC 到可演示版本之间”的状态，不是正式客户交付版本。下一步最重要的不是继续堆功能，而是把三件事做实:
 
-目标: 可控授权、可升级、可维护。
-
-任务:
-
-1. 二进制化或容器镜像化。
-2. License server / 离线 license / U 盘授权。
-3. 生产 token / RBAC / 审计日志。
-4. 备份恢复、版本迁移、数据目录升级脚本。
-5. 客户项目插件化: Java / Node.js / .NET / Python / React / Vue。
-6. 交付包去源码或源码加密策略。
-
-验收:
-
-- 客户拿到镜像 + 配置 + 授权即可部署。
-- 平台方能维护权益和版本升级。
-
-## 五、最终结论
-
-codev-platform 不是没有意义。它已经有“企业私有代码知识底座 + Agent 上下文基础设施”的雏形。
-
-但当前阶段应定位为:
-
-> 内部 POC / 技术验证版,用于验证真实业务仓的检索、图谱、跨层链路、Agent 问答和多租户治理是否真正有用。
-
-暂时不应定位为:
-
-> 可直接发布给客户部署的商业产品。
-
-要进入商业交付,优先补齐:测试全绿、wheel/Docker 交付、生产认证、健康检查一致性、secret 管理、部署验证、授权机制。
+1. 三个核心服务一键启动并稳定健康。
+2. Docker 私有化部署跑通。
+3. 保持 UTF-8 交付文档规范，让客户能看懂、能试用、能信任。
