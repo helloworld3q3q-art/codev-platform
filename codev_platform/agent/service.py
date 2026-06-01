@@ -18,10 +18,16 @@ def create_app() -> FastAPI:
     # 统一请求拦截(认证 → request.state.identity)。passthrough(单人)放行解析,
     # token 模式(M6)对非公开端点 401。/health 公开(存活探针)。模块在 gateway/,此处只挂载。
     from codev_platform.core.config import load_config
-    from codev_platform.gateway import AuthMiddleware, build_authenticator
+    from codev_platform.gateway import AuthMiddleware, build_authenticator, maybe_rate_limit_middleware
+    _cfg = load_config()
+    # FastAPI add_middleware 是栈式 (后加的在外层)。要让 Auth 外层先设 identity、
+    # RateLimit 内层读 identity, 必须先加 RateLimit、后加 Auth。dev 默认关 (工厂返回 None)。
+    _rl = maybe_rate_limit_middleware(_cfg)
+    if _rl is not None:
+        app.add_middleware(_rl.cls, **_rl.kwargs)
     app.add_middleware(
         AuthMiddleware,
-        authenticator=build_authenticator(load_config()),
+        authenticator=build_authenticator(_cfg),
         public_paths={"/health"},
     )
     return app

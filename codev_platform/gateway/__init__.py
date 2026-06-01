@@ -18,7 +18,11 @@ from codev_platform.gateway.auth import (
     Unauthorized,
     build_authenticator,
 )
-from codev_platform.gateway.middleware import AuthMiddleware
+from codev_platform.gateway.middleware import (
+    AuthMiddleware,
+    RateLimitMiddleware,
+    maybe_rate_limit_middleware,
+)
 
 __all__ = [
     "Authenticator",
@@ -28,4 +32,6 @@ __all__ = [
     "Unauthorized",
     "build_authenticator",
     "AuthMiddleware",
+    "RateLimitMiddleware",
+    "maybe_rate_limit_middleware",
 ]

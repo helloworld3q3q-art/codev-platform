@@ -1117,7 +1117,20 @@ async def _run_http(port: int) -> None:
     # public_paths 仅 /healthz (最小存活探针, 不泄敏); 详情面 /platform/health + /platform/status
     # 受鉴权保护 (审计 #4)。/health 保留为 /healthz 的 public 别名 (老探针向后兼容, 同样最小)。
     from starlette.middleware import Middleware
-    from codev_platform.gateway import AuthMiddleware, build_authenticator
+    from codev_platform.gateway import AuthMiddleware, build_authenticator, maybe_rate_limit_middleware
+
+    _cfg = load_config()
+    _mw = [
+        Middleware(
+            AuthMiddleware,
+            authenticator=build_authenticator(_cfg),
+            public_paths={"/healthz", "/health"},
+        ),
+    ]
+    # 限流挂在 Auth 之后 (内层读 identity); dev 默认关 (工厂返回 None)。
+    _rl = maybe_rate_limit_middleware(_cfg)
+    if _rl is not None:
+        _mw.append(_rl)
 
     app = Starlette(
         debug=False,
@@ -1129,13 +1142,7 @@ async def _run_http(port: int) -> None:
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],
-        middleware=[
-            Middleware(
-                AuthMiddleware,
-                authenticator=build_authenticator(load_config()),
-                public_paths={"/healthz", "/health"},
-            ),
-        ],
+        middleware=_mw,
     )
 
     _flog(f"[daemon] HTTP server starting on 127.0.0.1:{port}")

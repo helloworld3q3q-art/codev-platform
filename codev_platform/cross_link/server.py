@@ -525,7 +525,7 @@ async def run_http(port: int = _CL_SSE_PORT) -> None:
     import uvicorn
 
     from codev_platform.core.project_id import validate as _pid_validate
-    from codev_platform.gateway import AuthMiddleware, build_authenticator
+    from codev_platform.gateway import AuthMiddleware, build_authenticator, maybe_rate_limit_middleware
     from codev_platform.core.config import load_config
 
     sse_transport = SseServerTransport("/messages/")
@@ -584,6 +584,18 @@ async def run_http(port: int = _CL_SSE_PORT) -> None:
             "missing_db": _missing_db,        # 文件缺失 (瞬时, 每次重查)
         })
 
+    _cfg = load_config()
+    _mw = [
+        Middleware(
+            AuthMiddleware,
+            authenticator=build_authenticator(_cfg),
+            public_paths={"/healthz", "/health"},
+        ),
+    ]
+    _rl = maybe_rate_limit_middleware(_cfg)  # Auth 之后 (内层读 identity); dev 默认关
+    if _rl is not None:
+        _mw.append(_rl)
+
     app = Starlette(
         debug=False,
         routes=[
@@ -593,13 +605,7 @@ async def run_http(port: int = _CL_SSE_PORT) -> None:
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],
-        middleware=[
-            Middleware(
-                AuthMiddleware,
-                authenticator=build_authenticator(load_config()),
-                public_paths={"/healthz", "/health"},
-            ),
-        ],
+        middleware=_mw,
     )
     _flog(f"[http] cross-link SSE server starting on 127.0.0.1:{port}")
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)

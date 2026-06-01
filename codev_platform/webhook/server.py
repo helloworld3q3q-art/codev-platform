@@ -55,8 +55,11 @@ def webhook_port(cfg: dict | None = None) -> int:
     return int(_cfg_get(cfg if cfg is not None else load_config(), "webhook.port") or DEFAULT_WEBHOOK_PORT)
 
 
-def build_app():
-    """构建 Starlette app (路由 + handler), 与 serve 解耦 —— 便于 TestClient 测 413/验签等分支。"""
+def build_app(middleware=None):
+    """构建 Starlette app (路由 + handler), 与 serve 解耦 —— 便于 TestClient 测 413/验签等分支。
+
+    webhook 无 gateway 鉴权 (验签走 provider.verify), 但可叠加限流中间件 (run_http 注入)。
+    """
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Route
@@ -125,22 +128,31 @@ def build_app():
         # provider.verify), 故此路径与 /healthz 一样可公开访问, 仅作清单分离用。
         return JSONResponse({"status": "ok", "service": "webhook", "providers": list(providers.names())})
 
-    return Starlette(routes=[
-        Route("/healthz", healthz, methods=["GET"]),
-        Route("/health", healthz, methods=["GET"]),  # backward-compat alias (最小)
-        Route("/platform/status", platform_status, methods=["GET"]),
-        Route("/{provider}", handle, methods=["POST"]),
-    ])
+    return Starlette(
+        routes=[
+            Route("/healthz", healthz, methods=["GET"]),
+            Route("/health", healthz, methods=["GET"]),  # backward-compat alias (最小)
+            Route("/platform/status", platform_status, methods=["GET"]),
+            Route("/{provider}", handle, methods=["POST"]),
+        ],
+        middleware=middleware or [],
+    )
 
 
 async def run_http(port: int | None = None) -> None:
     import uvicorn
 
     from codev_platform.webhook import providers
+    from codev_platform.gateway import maybe_rate_limit_middleware
 
     if port is None:
         port = webhook_port()
-    app = build_app()
+    # webhook 无身份 (无 Auth 中间件) → 限流按 client IP (default_key_from_scope 自动回退); dev 默认关
+    _mw = []
+    _rl = maybe_rate_limit_middleware(load_config())
+    if _rl is not None:
+        _mw.append(_rl)
+    app = build_app(middleware=_mw)
     _log(f"[http] webhook receiver starting on 127.0.0.1:{port} (providers: {', '.join(providers.names())})")
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()
