@@ -105,7 +105,6 @@ codev-platform health --json-out
 ## 相关规则
 
 - 触发指南:`.claude/rules/ai-tools-mcp.md`(CodeGraph / Chroma / cross-link 何时用)
-- 平台总览:`docs/codev-platform-overview.html`(平面分层架构图 + 三库 + 记忆)
 - 重建:`codev-platform reindex`(四档:all / chroma / codegraph / cross-link)+ `post-commit`(提交后台重建)
 
 ## 5 视角

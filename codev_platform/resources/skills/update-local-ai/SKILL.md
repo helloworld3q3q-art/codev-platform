@@ -99,7 +99,6 @@ tools\dev\update-local-ai.ps1 -SkipCodeGraph -SkipCrossLink -ChromaForce
 
 ## 相关
 
-- 三库说明:`docs/ai-toolchain-guide.html`
 - 触发指南:`.claude/rules/ai-tools-mcp.md`
 - 验栈 skill:`/ai-health` (跑完后建议跑一次确认)
 - hook 实现:`tools/dev/post-commit.ps1`

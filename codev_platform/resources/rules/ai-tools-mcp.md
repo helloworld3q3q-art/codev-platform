@@ -1,6 +1,6 @@
 ﻿# AI 辅助工具栈（MCP）触发指南
 
-> **完整说明** —— `docs/ai-toolchain-guide.md`（架构原理 / 模型细节 / 故障手册 / 升级路线 全在那里）
+> **完整说明**（架构原理 / 模型细节 / 故障手册 / 升级路线）由 codev-platform 平台方集中维护,不随规则分发到消费仓。
 > 本文件只保留 AI 推理时**必需的强制规则 + 触发速查**,不重复完整文档内容。
 
 ---
@@ -128,7 +128,7 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 | post-commit hook 静默失败 | 跑 `ai-health` 看 `hook missed?`;WARN 则手动 `powershell -File tools/dev/post-commit.ps1` |
 | 需等 reindex 完成再调 MCP | `powershell -File tools/dev/wait-for-reindex.ps1`(秒回 exitCode 0/1/2) |
 
-**完整故障表** + 模型升级历程 + JSONL 召回日志分析 + A/B test 工具 等见 `docs/ai-toolchain-guide.md` §14。
+**完整故障表** + 模型升级历程 + JSONL 召回日志分析 + A/B test 工具 等由 codev-platform 平台方集中维护。
 
 ---
 
