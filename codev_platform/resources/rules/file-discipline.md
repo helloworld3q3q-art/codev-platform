@@ -74,7 +74,7 @@ Get-ChildItem docs\plans -File | Where-Object Name -ne 'README.md'
 
 ### 4.4 docs/plans 按日期分目录(roadmap-YYYY-MM-DD)硬规定
 
-工具栈 plan / design / daily 不平铺在 `docs/plans/` 根,**按规划启动日期归入 `roadmap-YYYY-MM-DD/` 子目录**(与业务仓 `docs/architecture/roadmap-*/` 同构;本仓是纯工具栈仓,直接用顶层 `docs/plans/`,无 `dev-evolution/` 中间层)。
+工具栈 plan / design / daily 不平铺在 `docs/plans/` 根,**按规划启动日期归入 `roadmap-YYYY-MM-DD/` 子目录**(与业务仓 `docs/architecture/roadmap-*/` 同构;工具栈仓直接用顶层 `docs/plans/`,无 `dev-evolution/` 中间层;业务仓的工具栈/流程 plan 才落 `docs/plans/`,业务 plan 仍走 `docs/architecture/`)。
 
 | 项 | 约定 |
 |---|---|
