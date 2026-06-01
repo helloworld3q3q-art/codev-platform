@@ -208,6 +208,7 @@ token 元数据来源:`config.gateway.tokens.<sha256>.{org_id, projects}`(token 
 | P3 远程访问 | `66c1c15` | health 拆分(`/healthz` public + `/platform/status` 鉴权,堵 #4)/ `gateway client-url --base` 远程地址重写 / caddy+TLS runbook | runbook 端口统一为 config 驱动(`client-url` 打印真实值) |
 | P4 持久化+备份 | `685bc48` | **B7** `codev-platform backup`(pg_dump + data_root + gitea,plan/prune 纯函数 + 保留 N + `_redact_dsn` 密码脱敏)/ **B6** `memory init-db`/`doctor`(幂等建表,不建库)/ runbook | 审计抓出 manifest/dry-run 密码泄漏 blocker 已修 |
 | M5 org/team RBAC | (本轮) | `core/rbac.py` 纯逻辑(`Membership`/`compute_visible_scopes`/`role_allows` 矩阵/`memory_scope_decision`,零 psycopg)/ `rbac_store_pg.py` 7 表 DDL+`fetch_membership`/ `ops/org.py` D13 管理 CLI / wire recall+memory(无 store 优雅回退)/ `verify_rbac_pg.py` | 运行态需真 PG 验(纯逻辑已单测;287 passed) |
+| A4 速率限制 | `49eb89d` | `core/ratelimit.py` 纯滑窗(now 入参可测)+ `RateLimitMiddleware`(挂 Auth 后, 按身份/IP, 超限 429, 豁免 healthz)+ `maybe_rate_limit_middleware` 工厂(默认关, prod 开)+ 4 服务+agent 挂载 | 默认关不破 dev;比反代 per-IP 细(per-token/org) |
 | P5 部分 | `ba90fd4` | **D15** 换机一键 `codev-platform bootstrap`(venv check → serve-mcp start → codegraph link --all → memory init-db,plan 纯函数 + fail-soft)+ onboarding runbook;**B9** 自愈核验:systemd units 早含 `Restart=always`/`RestartSec=3`,本轮补断言锁测;**B10** cross-link 重建已有 `reindex --cross-link`(+ reindex 队列),规则"重建脚本待补"是旧话;**D14** token 注入 `.mcp.json` 由 P2 `client-auth` + P3 `client-url` 覆盖 | D15/B9/B10/D14 闭环;余项见下 |
 
 **关联交付文档**:
@@ -223,6 +224,5 @@ token 元数据来源:`config.gateway.tokens.<sha256>.{org_id, projects}`(token 
 - **E16** agent 常驻 systemd:需 fastapi 依赖,暂非常驻。
 - **F18** webhook 自动 link codegraph:暂手动 `link --all`。
 - **C11/C12** 指标采集+告警 / 集中日志:可观测性,未启动。
-- **A4 速率限制 / 滥用防护**:反代层(caddy)可加,平台侧未做。
 
-> #2 memory org/team RBAC、D13 org 管理 CLI **本轮 M5 已落地**(见上表),从未做清单移除。
+> #2 memory org/team RBAC、D13 org 管理 CLI **M5 已落地**;**A4 速率限制 A4 commit 已落地**(平台侧按身份,反代 caddy 可叠加 IP 层)。A 组(A1-A5)全闭环,从未做清单移除。
