@@ -15,6 +15,7 @@
 | [remote-access-reverse-proxy-2026-06-01.md](remote-access-reverse-proxy-2026-06-01.md) | Caddy 反代 + TLS runbook(远程多机访问)—— 拓扑 + Caddyfile 路径前缀路由(与 `gateway client-url` 前缀严格一致) + 客户端 client-url/client-auth 操作 + health 探针 + 安全清单 | ✅ |
 | [persistence-backup-2026-06-01.md](persistence-backup-2026-06-01.md) | PG 持久化 (B6) + 备份/恢复 (B7) runbook —— psycopg 装 + 超级用户建独立库 + `memory init-db`/`doctor` + `session_backend` 切 pg;`codev-platform backup` 定时(systemd/cron)+ pg_dump/data_root 恢复 + 一致性权衡 | ✅ |
 | [onboarding-bootstrap-2026-06-01.md](onboarding-bootstrap-2026-06-01.md) | 换机 onboarding runbook (D15) —— 前提清单 + config 机器相关必改项 + `codev-platform bootstrap [--dry-run]` 一键(venv check → serve-mcp start → codegraph link --all → memory init-db)+ 仍需人工项(venv 重建/psycopg/建库/token/反代)+ 验证 | ✅ |
+| [memory-build-vs-integrate-2026-06-01.md](memory-build-vs-integrate-2026-06-01.md) | 记忆层战略决策:自建 M5 vs 接入 supermemory/mem0 —— 背景(记忆半商品化)+ 决策矩阵(7 维)+ 推荐(保留自建 M5、重心压向 codegraph/cross-link、留 RecallService 接缝)+ 切外部记忆触发条件 + 给记忆建 eval 行动项 | ✅ |
 
 ## 关联
 

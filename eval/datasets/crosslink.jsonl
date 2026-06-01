@@ -1,0 +1,12 @@
+{"kind": "table", "key": "stock_quote_daily", "expect_contains": ["WriteQuotesMixin.upsert_quotes", "ConfigurationQueryMapper.selectStockPoolItems"]}
+{"kind": "table", "key": "stock_recommend_result", "expect_contains": ["WriteSignalsMixin.save_recommendations", "ConfigurationQueryMapper.selectRecommendResults"]}
+{"kind": "table", "key": "stock_recommendation_track", "expect_contains": ["StockRecommendationTrackMapper.bootstrapTracksFromRecommendations", "DataHealthMapper.selectTrackProgress"]}
+{"kind": "table", "key": "stock_alert_event", "expect_contains": ["WriteSignalsMixin.save_alerts", "DataHealthMapper.selectRecentHighAlerts"]}
+{"kind": "table", "key": "stock_backtest_run", "expect_contains": ["BacktestPersistor._insert_run", "BacktestQueryMapper.selectRuns"]}
+{"kind": "table", "key": "stock_four_w_plan", "expect_contains": ["WriteTracksMixin.save_four_w_plans", "FourWQueryMapper.countFourW"]}
+{"kind": "table", "key": "stock_industry_score", "expect_contains": ["WriteTracksMixin.upsert_industry_scores", "StockIndustryScoreMapper.selectLatestRanking"]}
+{"kind": "table", "key": "stock_shadow_rule_stats_daily", "expect_contains": ["WriteShadowMixin.save_shadow_stats_daily", "ShadowRecommendMapper.selectShadowDailyPnl"]}
+{"kind": "endpoint", "key": "AuthController.login", "expect_contains": ["postLogin"]}
+{"kind": "endpoint", "key": "BacktestController.create", "expect_contains": ["postCreate"]}
+{"kind": "endpoint", "key": "AuthController.capitalHistory", "expect_contains": ["postCapitalHistory"]}
+{"kind": "endpoint", "key": "AdminEnumController.list", "expect_contains": ["postEnumsList"]}
