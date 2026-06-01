@@ -36,9 +36,9 @@
 |---|---|---|
 | 8 | Docker 部署验证 | 当前机器无 Docker，无法验证 |
 | 9 | 源码和文档历史乱码 | 已复核，之前 59 个文件为扫描误报；真实只命中 `windows-powershell.md` 中故意保留的乱码示例 |
-| 11 | cross-link / codegraph 服务状态 | 当前本机 `serve-mcp status` 显示 DOWN，端口未监听 |
+| 11 | cross-link / codegraph 服务状态 | 已补跑 `serve-mcp start --wait --timeout 90`，当前 `platform-docs/cross-link/codegraph` 三套 MCP 服务均 OK |
 | 12 | 授权、升级、U 盘授权、二进制化 | 尚未实现 |
-| 13 | 当前 HEAD 索引新鲜度 | `health --mode full` 提示 `hook missed?`，需要补跑 post-commit/reindex |
+| 13 | 当前 HEAD 索引新鲜度 | 已补跑 `post-commit --foreground`，当前 `health --mode full` 为 `READY / all checks green` |
 
 ## 当前结论
 
@@ -47,7 +47,7 @@
 
 下一步优先级:
 
-1. 让 `serve-mcp status` 三个核心服务全部 OK。
-2. 在 Docker 环境跑通 compose 部署。
-3. 保持 UTF-8 读写规范，避免 PowerShell 5.1 默认编码再次写坏文件。
+1. 在 Docker 环境跑通 compose 部署。
+2. 做 demo 项目和只读 API/Web playground。
+3. 验证真实 webhook push 触发 reindex。
 4. 再做 license / 授权 / 二进制化 / U 盘授权。

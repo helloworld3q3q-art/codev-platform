@@ -6,16 +6,19 @@
 
 ## 1. 总结
 
-当前项目代码层面已经比较稳，单元测试和打包链路是绿的。真正阻断“发布给别人试用 / 客户私有化交付”的点不在测试，而在运行态闭环:
+当前项目代码层面已经比较稳，单元测试、打包链路和本机服务链路已经跑通。真正阻断“客户正式私有化交付”的点不在当前代码测试，而在 Docker 部署闭环、授权/升级/运维机制。
 
 - `platform-docs` 当前可用。
-- `cross-link` 和 `codegraph` 的平台 SSE 服务当前未监听。
+- `cross-link` 当前可用。
+- `codegraph` 当前可用。
+- Agent HTTP 当前可用。
+- webhook 当前可用。
 - Docker 环境不可用，容器部署不能验证。
 - 本机配置里有一个 provider API key，已能脱敏显示，但仍建议迁移到环境变量或密钥管理。
 - 仓库没有发现真实明文密钥。
 - 没有发现批量真实乱码；之前看到的乱码主要是 PowerShell 输出编码问题。
 
-结论: 当前适合继续做内部 POC，不适合直接作为正式客户交付版发布。
+结论: 当前适合继续做内部 POC 和演示版，不适合直接作为正式客户交付版发布。
 
 ## 2. 执行项
 
@@ -31,7 +34,7 @@
 结果:
 
 - 编译检查: 通过
-- 全量测试: `351 passed, 5 skipped, 1 warning`
+- 全量测试: `427 passed, 5 skipped, 1 warning`
 - 依赖检查: `No broken requirements found`
 - CLI 入口: 可用
 
@@ -62,7 +65,11 @@
 
 已执行:
 
+- `python -m codev_platform.cli post-commit --foreground`
+- `python -m codev_platform.cli serve-mcp start --wait --timeout 90`
 - `python -m codev_platform.cli serve-mcp status`
+- `python -m codev_platform.cli webhook serve`
+- `python -m codev_platform.cli webhook status`
 - 直接探测:
   - `http://127.0.0.1:18083/healthz`
   - `http://127.0.0.1:18083/health`
@@ -77,14 +84,17 @@
 | 服务 | 端口 | 当前状态 | 说明 |
 |---|---:|---|---|
 | platform-docs | 18083 | OK | 端口监听，`/healthz` 返回 200 |
-| cross-link | 18086 | DOWN | 端口未监听 |
-| codegraph | 18091 | DOWN | 端口未监听 |
-| Agent HTTP | 8848 | DOWN | 端口未监听 |
-| webhook | 18099 | DOWN | 端口未监听 |
+| cross-link | 18086 | OK | 端口监听，`/healthz` 返回 200 |
+| codegraph | 18091 | OK | 端口监听，`/healthz` 返回 200 |
+| Agent HTTP | 8848 | OK | 端口监听，`/health` 返回 200 |
+| webhook | 18099 | OK | 端口监听，`/healthz` 返回 200 |
 
-注意: `codev-platform health --mode full` 显示关键项 OK，但有 1 个 WARN:
+`codev-platform health --mode full` 当前结果:
 
-- 当前 HEAD 命中索引范围，但没有进入 `reindex.log`，建议补跑 `post-commit` 或对应 reindex。
+- `READY`
+- `all checks green`
+- 当前 HEAD 新鲜度: OK
+- `reindex 7d`: OK
 
 ### 日志复核
 
@@ -169,17 +179,47 @@
 - 不能证明 `docker-compose.yml` 能启动。
 - 私有化部署闭环仍未完成。
 
+### 代码级审计
+
+本轮额外做了代码级静态扫描，重点看高风险调用、进程编排、认证边界和可维护性。
+
+规模:
+
+- `codev_platform`: 138 个文件，约 17,771 行文本，其中 Python 文件 92 个。
+- `tests`: 59 个文件，约 4,927 行文本，其中测试文件 58 个。
+- `docs`: 51 个文件，约 12,679 行文本。
+- `scripts`: 17 个文件，约 680 行文本。
+
+复杂度集中点:
+
+- `codev_platform/chroma/server.py`: 约 1286 行。
+- `codev_platform/ops/health.py`: 约 1119 行。
+- `codev_platform/cli.py`: 约 786 行。
+- `codev_platform/chroma/indexer.py`: 约 704 行。
+- `codev_platform/mcp_serve.py`: 约 701 行。
+- `codev_platform/cross_link/server.py`: 约 623 行。
+- `codev_platform/ops/reindex.py`: 约 595 行。
+
+结论:
+
+- 没有发现 `shell=True`、`os.system`、字符串执行型 `eval()` 这类直接高危点。
+- `eval(` 的命中实际是 PyTorch 模型的 `.eval()`，不是执行字符串。
+- `pickle` 的命中是 BM25 文档说明，当前没有真实 `pickle.load()` 反序列化调用。
+- `subprocess` 调用主要集中在 CLI、reindex、health、MCP 启停和 launcher，属于平台运维类代码的正常需求，但发布前应继续保留白名单命令和参数数组调用方式。
+- `except Exception` 命中较多，主要是 CLI/daemon 的 fail-soft 边界。短期可接受，但长期会降低定位效率，建议对核心链路逐步收窄异常类型并补结构化错误码。
+- 网关认证、token 哈希、过期时间、项目白名单、路径穿越防护已有测试覆盖。
+- webhook 走 provider 签名，不走 gateway token；空 secret 默认 fail-closed，只有显式 `webhook.allow_insecure=true` 才允许不安全模式。
+- `project_id` 已做 slug 校验，数据路径也会复用校验，当前没有发现明显路径穿越问题。
+
+需要继续加强:
+
+- 大文件拆分: `chroma/server.py`、`ops/health.py`、`mcp_serve.py` 已经偏大，后续新增能力前应先拆边界。
+- 错误分类: 对外 HTTP/API 返回应减少笼统异常，区分配置错误、依赖缺失、索引缺失、权限错误和下游服务不可用。
+- 进程治理: 后台进程已有健康检查，但正式交付还需要统一 pid、日志轮转、重启策略和退出清理。
+- 配置治理: 本机 provider key 能脱敏，但正式交付应迁移到环境变量、密钥文件或客户侧密钥管理。
+- 产品配置一致性: Agent health 当前能返回 200，但 provider/model 的命名组合需要再核对，避免演示时出现“provider 与模型名不一致”的理解成本。
+
 ## 3. 当前主要风险
-
-### P1: 平台服务没有全链路启动
-
-当前只有 `platform-docs` 在线，`cross-link` 和 `codegraph` 的平台 SSE 服务未监听。对于“全链路 AI 平台”定位，这是当前最大运行态缺口。
-
-建议:
-
-1. 增加或完善 `serve-mcp start --wait`。
-2. 启动后必须探测三个端口。
-3. DOWN 时输出具体原因: 进程未启动、依赖缺失、端口占用、DB 缺失、项目未注册。
 
 ### P1: Docker 私有化部署未验证
 
@@ -190,15 +230,6 @@
 1. 找一台有 Docker 的机器做闭环。
 2. 输出固定验收脚本。
 3. 把 compose 启动、health probe、日志收集纳入发布检查。
-
-### P1: 当前 HEAD 没有进入 reindex.log
-
-`health --mode full` 提示 `hook missed?`。这说明最近改动命中索引范围，但索引日志没有记录当前 HEAD。
-
-建议:
-
-- 执行 `python -m codev_platform.cli post-commit --foreground` 或对应 reindex 命令。
-- 后续把该 WARN 作为 POC 前置验收，避免演示时查不到最新文档。
 
 ### P2: 发布命令需要统一
 
@@ -235,26 +266,26 @@
 - rules / skills 同步
 - health / backup / bootstrap / metrics / logs 等 CLI 入口
 - cross-link/codegraph 的核心代码和测试
+- platform-docs / cross-link / codegraph 三套 MCP SSE 服务在线
+- Agent HTTP 在线
+- webhook 在线
 
 尚未完整运行验证:
 
-- cross-link SSE 服务在线可用
-- codegraph SSE 服务在线可用
-- Agent HTTP 面向非开发人员使用
-- webhook 常驻触发 reindex
 - Docker 私有化部署
 - 客户项目插件化扫描链路
+- webhook 真实 VCS 签名请求触发 reindex
+- Agent 面向非开发人员的产品化 UI
 
 ## 5. 下一步建议
 
 优先级从高到低:
 
-1. 修正 `serve-mcp start/status` 的全链路启动验收，让 `platform-docs/cross-link/codegraph` 三个服务同时 OK。
-2. 补跑当前 HEAD 的 reindex，消掉 `hook missed?`。
-3. 在 Docker 环境验证 compose，并写成固定脚本。
-4. 做一个 demo 项目和只读 API/Web playground，让别人能试用。
-5. 再规划 license、U 盘授权、二进制化、升级迁移。
+1. 在 Docker 环境验证 compose，并写成固定脚本。
+2. 做一个 demo 项目和只读 API/Web playground，让别人能试用。
+3. 验证 webhook 接真实 Gitea/GitLab push 后能入队 reindex。
+4. 再规划 license、U 盘授权、二进制化、升级迁移。
 
 最终判断:
 
-codev-platform 当前已经不是空想项目，基础设施和测试底座已经存在；但还没达到“发布出去给客户自助部署”的级别。现在最应该补的是运行闭环和交付闭环，而不是继续堆新概念。
+codev-platform 当前已经不是空想项目，基础设施、测试底座和本机运行链路已经存在；但还没达到“发布出去给客户自助部署”的级别。现在最应该补的是 Docker 交付闭环、可试用入口和授权升级机制，而不是继续堆新概念。
