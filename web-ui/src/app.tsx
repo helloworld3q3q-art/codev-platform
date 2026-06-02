@@ -1,7 +1,9 @@
 import EnumLoader from '@/components/EnumLoader';
+import LogoutButton from '@/components/LogoutButton';
 import ProjectSelect from '@/components/ProjectSelect';
 import TabContainer from '@/components/TabContainer';
 import { MENU_ITEMS } from '@/menus';
+import { getSession } from '@/services/apis/authapi';
 import type { UserInfo } from '@/models/user';
 import { StyleProvider } from '@ant-design/cssinjs';
 import type { Settings as LayoutSettings } from '@ant-design/pro-components';
@@ -14,18 +16,33 @@ import antdTheme from './theme/antd';
 
 import 'uno.css';
 
+function readStoredUser(): UserInfo | undefined {
+  const stored = localStorage.getItem('user');
+  if (!stored) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(stored) as UserInfo;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function getInitialState(): Promise<{
   settings?: Partial<LayoutSettings>;
   userInfo?: UserInfo;
 }> {
-  // 从 localStorage 恢复登录用户信息，供 access.ts 使用
-  let userInfo: UserInfo | undefined;
-  const stored = localStorage.getItem('user');
-  if (stored) {
+  // 有 token 则向后端校验会话(getSession), 拿到当前用户; 失败回退本地存储(dev 容错)。
+  let userInfo: UserInfo | undefined = readStoredUser();
+  if (localStorage.getItem('auth_token')) {
     try {
-      userInfo = JSON.parse(stored) as UserInfo;
+      const res = await getSession();
+      if (res.data?.username) {
+        userInfo = { username: res.data.username };
+        localStorage.setItem('user', JSON.stringify(userInfo));
+      }
     } catch {
-      userInfo = undefined;
+      // 401 已由 fetch 拦截器清 token + 跳登录; 其它错误保留本地用户(后端临时不可用容错)。
     }
   }
   return {
@@ -78,8 +95,8 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
     },
     menuHeaderRender: false,
     rightContentRender: false,
-    // 顶栏右侧项目选择器 (多租户上下文)。
-    actionsRender: () => [<ProjectSelect key="project" />],
+    // 顶栏右侧: 项目选择器 (多租户上下文) + 登出。
+    actionsRender: () => [<ProjectSelect key="project" />, <LogoutButton key="logout" />],
     waterMarkProps: undefined,
     ...initialState?.settings,
   };
