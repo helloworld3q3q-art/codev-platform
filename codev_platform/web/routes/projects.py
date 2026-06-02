@@ -9,10 +9,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 
 from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, page
-from codev_platform.core.httpkit.pagination import PageParams, page_params
 from codev_platform.web.schemas.projects import (
     ProjectActionResult,
     ProjectListItem,
+    ProjectListRequest,
     ProjectLoadRequest,
     ProjectRegisterRequest,
 )
@@ -40,20 +40,21 @@ def _rid(request: Request):
 )
 def list_projects(
     request: Request,
-    pg: PageParams = Depends(page_params),
-    orgId: str | None = Query(None, max_length=64, description="按组织过滤 (缺省=当前 org 可见全部)"),
-    keyword: str | None = Query(None, max_length=200, description="按项目编码 / 名称模糊匹配"),
+    body: ProjectListRequest | None = None,
     svc: ProjectService = Depends(_service),
 ) -> PageResult[ProjectListItem]:
-    # 按当前 org 过滤 (org 来自 X-Org-Id, gateway 解析进 identity.org_id; 项目无 org_id = 公开)。
-    # orgId 查询条件进一步收窄到指定组织; keyword 模糊 code/name。
+    # 参数走 POST body (前端 ResizableTable 发 body, 非 query); 空 body 用默认。
+    # 按当前 org 过滤 (org 来自 X-Org-Id, gateway 解析进 identity.org_id; 项目无 org_id = 公开);
+    # body.orgId 查询条件进一步收窄到指定组织; body.keyword 模糊 code/name。
+    b = body or ProjectListRequest()
     identity = getattr(request.state, "identity", None)
     org_id = getattr(identity, "org_id", None)
+    offset = (b.pageNumber - 1) * b.pageSize
     items, total = svc.list_projects(
-        org_id=org_id, filter_org_id=orgId, keyword=keyword,
-        offset=pg.offset, limit=pg.page_size,
+        org_id=org_id, filter_org_id=b.orgId, keyword=b.keyword,
+        offset=offset, limit=b.pageSize,
     )
-    return page(items, page_number=pg.page_number, page_size=pg.page_size,
+    return page(items, page_number=b.pageNumber, page_size=b.pageSize,
                 total=total, request_id=_rid(request))
 
 

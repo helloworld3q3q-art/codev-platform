@@ -135,7 +135,7 @@ def test_list_filter_by_org_id(client):
     c.post("/api/v1/projects/register", json={"code": "acmeproj", "name": "Acme", "orgId": "acme"}, headers=h)
     c.post("/api/v1/projects/register", json={"code": "betaproj", "name": "Beta", "orgId": "beta"}, headers=h)
     # 当前 org=acme + 查询 orgId=acme: 含 acmeproj + 公开项目(alpha/beta seed), 不含 betaproj
-    r = c.post("/api/v1/projects/list", params={"orgId": "acme"}, headers=h)
+    r = c.post("/api/v1/projects/list", json={"orgId": "acme"}, headers=h)
     codes = {it["code"] for it in r.json()["data"]}
     assert "acmeproj" in codes
     assert "betaproj" not in codes
@@ -146,10 +146,10 @@ def test_list_filter_by_org_id(client):
 
 def test_list_filter_by_keyword(client):
     c, _ = client
-    r = c.post("/api/v1/projects/list", params={"keyword": "alph"})
+    r = c.post("/api/v1/projects/list", json={"keyword": "alph"})
     codes = {it["code"] for it in r.json()["data"]}
     assert codes == {"alpha"}
     # 大小写不敏感 + 匹配 name
-    r2 = c.post("/api/v1/projects/list", params={"keyword": "BETA"})
+    r2 = c.post("/api/v1/projects/list", json={"keyword": "BETA"})
     codes2 = {it["code"] for it in r2.json()["data"]}
     assert codes2 == {"beta"}

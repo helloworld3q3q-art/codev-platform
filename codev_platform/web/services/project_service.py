@@ -105,10 +105,16 @@ class ProjectService:
         return ProjectActionResult(code=code, loaded=loaded, status=row.get("status", "ACTIVE"))
 
     def _to_item(self, row: dict) -> ProjectListItem:
+        # orgId 真值源优先 meta.json (row), 回退 config projects.<code>.org_id (兼容历史登记, 与 _project_in_org 同口径)。
+        org_id = row.get("orgId")
+        if org_id is None:
+            cfg = load_config()
+            proj = (_cfg_get(cfg, "projects", {}) or {}).get(row.get("code")) or {}
+            org_id = proj.get("org_id")
         return ProjectListItem(
             code=row["code"], name=row.get("name", ""),
             repoPath=row.get("repoPath"), description=row.get("description"),
-            orgId=row.get("orgId"),
+            orgId=org_id,
             status=row.get("status", "ACTIVE"),
             loaded=self._write.is_loaded(row["code"]),
         )

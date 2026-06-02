@@ -18,6 +18,15 @@ class ProjectRegisterRequest(BaseModel):
     orgId: str | None = Field(None, max_length=64, description="所属组织 (缺省=当前请求 org)")
 
 
+class ProjectListRequest(BaseModel):
+    """项目列表查询 (POST body, 与前端 ResizableTable 一致)。分页 + 组织/关键词过滤。"""
+
+    pageNumber: int = Field(1, ge=1, description="页码, 从 1 起")
+    pageSize: int = Field(20, ge=1, le=200, description="每页数量")
+    orgId: str | None = Field(None, max_length=64, description="按组织过滤 (缺省=当前 org 可见全部)")
+    keyword: str | None = Field(None, max_length=200, description="按项目编码/名称模糊匹配")
+
+
 class ProjectLoadRequest(BaseModel):
     code: str = Field(..., min_length=1, max_length=64, description="项目编码")
 
