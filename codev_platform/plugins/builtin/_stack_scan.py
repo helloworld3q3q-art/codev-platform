@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -35,7 +36,8 @@ _SKIP_DIRS = frozenset(
     {
         "node_modules", ".git", "dist", ".umi", ".umi-production", "target",
         "__pycache__", ".pytest_cache", ".venv", "venv", "build", ".next",
-        ".codegraph", "data",
+        ".codegraph", "data", "coverage", ".mypy_cache", ".ruff_cache",
+        ".idea", ".vscode", "site-packages", ".tox", ".eggs",
     }
 )
 
@@ -46,16 +48,50 @@ def _rel(path: Path, repo: Path) -> str:
 
 
 def _iter_files(repo: Path, suffixes: tuple[str, ...]) -> list[Path]:
-    """递归收集指定后缀文件, 跳过构建物/依赖目录。按路径排序保证稳定。"""
+    """递归收集指定后缀文件, 跳过构建物/依赖目录。按路径排序保证稳定。
+
+    用 os.walk 遍历时**原地剪枝** skip 目录 + 隐藏目录 (.xxx), 根本不进入
+    .venv / data / node_modules 等大目录树 (区别于 rglob 先全量下钻再过滤文件)。
+    """
     out: list[Path] = []
-    for path in repo.rglob("*"):
-        if not path.is_file() or path.suffix not in suffixes:
-            continue
-        parts = set(path.parts)
-        if parts & _SKIP_DIRS:
-            continue
-        out.append(path)
+    suffix_set = set(suffixes)
+    for dirpath, dirnames, filenames in _walk_pruned(repo):
+        base = Path(dirpath)
+        for name in filenames:
+            if Path(name).suffix in suffix_set:
+                out.append(base / name)
     return sorted(out, key=lambda p: _rel(p, repo))
+
+
+def _walk_pruned(repo: Path):
+    """os.walk(repo) 但**原地剪枝** skip 目录 + 隐藏目录 (.xxx), 阻断下钻。
+
+    所有遍历入口 (_iter_files / *_detect 的文件名扫描) 共用此生成器, 保证
+    .venv / data / node_modules 等大目录树根本不被进入 (rglob 做不到这点)。
+    yield 与 os.walk 同形 (dirpath, dirnames, filenames)。
+    """
+    for dirpath, dirnames, filenames in os.walk(repo):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _SKIP_DIRS and not d.startswith(".")
+        ]
+        yield dirpath, dirnames, filenames
+
+
+def _iter_named(repo: Path, filename: str):
+    """遍历时剪枝, 找出所有叫 <filename> 的文件 (如 package.json)。惰性 yield。"""
+    for dirpath, _dirnames, filenames in _walk_pruned(repo):
+        if filename in filenames:
+            yield Path(dirpath) / filename
+
+
+def _has_file_with_suffix(repo: Path, suffix: str) -> bool:
+    """遍历时剪枝, 探测 repo 内是否存在指定后缀文件 (找到即短路, 不全量收集)。"""
+    for _dirpath, _dirnames, filenames in _walk_pruned(repo):
+        for name in filenames:
+            if name.endswith(suffix):
+                return True
+    return False
 
 
 # ============================ React 前端 ============================
@@ -80,9 +116,7 @@ def react_detect(repo: Path) -> bool:
 
     不局限目录名 (不写死 web-ui), 纯按内容判定。
     """
-    for pkg in repo.rglob("package.json"):
-        if set(pkg.parts) & _SKIP_DIRS:
-            continue
+    for pkg in _iter_named(repo, "package.json"):
         try:
             data = json.loads(pkg.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -94,11 +128,7 @@ def react_detect(repo: Path) -> bool:
                 deps.update(section)
         if "react" in deps:
             return True
-    for tsx in repo.rglob("*.tsx"):
-        if set(tsx.parts) & _SKIP_DIRS:
-            continue
-        return True
-    return False
+    return _has_file_with_suffix(repo, ".tsx")
 
 
 def _infer_method(fn_name: str) -> str:
@@ -253,6 +283,204 @@ def scan_react_pages(
     return page_nodes, edges
 
 
+# ============================ Vue 前端 ============================
+
+# Vue Router 路由表条目: { path: '/foo', component: Foo } / { path: '/foo', name: 'Foo' }。
+_RE_VUE_ROUTE = re.compile(
+    r"""\{\s*[^{}]*?\bpath\s*:\s*[`'\"]([^`'\"]+)[`'\"][^{}]*?\}""",
+    re.S,
+)
+_RE_VUE_ROUTE_NAME = re.compile(r"\bname\s*:\s*[`'\"]([^`'\"]+)[`'\"]")
+_RE_VUE_ROUTE_COMP = re.compile(r"\bcomponent\s*:\s*([A-Za-z_$][\w$]*)")
+
+
+def vue_detect(repo: Path) -> bool:
+    """有 Vue 迹象即命中: package.json 含 vue 依赖, 或 repo 内存在 *.vue。
+
+    不局限目录名, 纯按 repo 内容判定 (与 react_detect 对称, 复用 JS/TS 基座规则)。
+    """
+    for pkg in _iter_named(repo, "package.json"):
+        try:
+            data = json.loads(pkg.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        deps: dict[str, str] = {}
+        for key in ("dependencies", "devDependencies"):
+            section = data.get(key)
+            if isinstance(section, dict):
+                deps.update(section)
+        if "vue" in deps:
+            return True
+    return _has_file_with_suffix(repo, ".vue")
+
+
+def _scan_inline_api(
+    text: str,
+    rel: str,
+    project_id: str,
+    seen_ids: set[str],
+    language: str,
+) -> list[GraphNode]:
+    """从一段文本扫内联 axios/fetch('/api/..') 调用 -> frontend_api_call 节点。
+
+    复用 JS/TS 基座的 _RE_INLINE_URL + _norm_url (单一真值源, Vue 不另造 url 解析)。
+    """
+    out: list[GraphNode] = []
+    for m in _RE_INLINE_URL.finditer(text):
+        url = _norm_url(m.group(1))
+        line = text.count("\n", 0, m.start()) + 1
+        node_id = f"{project_id}:frontend_api_call:{rel}:inline:{line}"
+        if node_id in seen_ids:
+            continue
+        seen_ids.add(node_id)
+        out.append(
+            GraphNode(
+                id=node_id,
+                kind=NodeKind.FRONTEND_API_CALL.value,
+                name=f"{rel.rsplit('/', 1)[-1]}@{line}",
+                project_id=project_id,
+                file=rel,
+                line=line,
+                language=language,
+                meta={"url": url, "http_method": "POST", "inline": True},
+            )
+        )
+    return out
+
+
+def scan_vue(repo: Path, project_id: str) -> list[GraphNode]:
+    """扫 .vue SFC + 同仓 JS/TS 里的 axios/fetch 调用。
+
+    产出:
+    - frontend_component 节点: 每个 .vue SFC 文件一个。
+    - frontend_api_call 节点: SFC <script> / 同仓 .js/.ts 内 axios/fetch('/api/..')
+      内联调用, 复用 JS/TS 基座的 _RE_INLINE_URL / _norm_url。
+
+    第一版轻量: 用正则扫 SFC + 脚本, 不追求覆盖所有写法 (template-only 组件仍产
+    component 节点; setup/options API 内联请求都吃)。
+    """
+    nodes: list[GraphNode] = []
+    seen_ids: set[str] = set()
+
+    # 1) .vue SFC -> frontend_component + SFC 内联 api 调用。
+    for f in _iter_files(repo, (".vue",)):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("read fail %s: %s", f, exc)
+            continue
+        rel = _rel(f, repo)
+        comp_id = f"{project_id}:frontend_component:{rel}"
+        if comp_id not in seen_ids:
+            seen_ids.add(comp_id)
+            nodes.append(
+                GraphNode(
+                    id=comp_id,
+                    kind=NodeKind.FRONTEND_COMPONENT.value,
+                    name=f.stem,
+                    project_id=project_id,
+                    file=rel,
+                    language="vue",
+                )
+            )
+        nodes.extend(
+            _scan_inline_api(text, rel, project_id, seen_ids, language="vue")
+        )
+
+    # 2) 同仓 .js/.ts/.jsx/.tsx 内联 api 调用 (Vue 仓的 api 封装层多在脚本里)。
+    for f in _iter_files(repo, (".js", ".jsx", ".ts", ".tsx")):
+        if f.name == "typings.d.ts":
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        rel = _rel(f, repo)
+        nodes.extend(
+            _scan_inline_api(
+                text, rel, project_id, seen_ids, language="typescript"
+            )
+        )
+
+    return nodes
+
+
+def scan_vue_routes(
+    repo: Path, project_id: str, component_nodes: list[GraphNode]
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """扫 Vue Router 路由表 -> frontend_route 节点 + renders 边 (route -> component)。
+
+    在 .js/.ts(x) 里找 { path: '/x', component: Foo, name: 'Foo' } 形态条目。
+    renders 边: route -> 对应 .vue 组件 (按 component 标识符 / name 匹配 SFC 文件名)。
+    第一版轻量: 只识别 path 字面量 + 可选 component 标识符 / name, 不解析懒加载工厂体内。
+    """
+    # SFC 文件名 (stem) -> component node id, 用于 renders 边目标匹配。
+    comp_by_stem: dict[str, str] = {}
+    for n in component_nodes:
+        if n.kind == NodeKind.FRONTEND_COMPONENT.value:
+            comp_by_stem.setdefault(n.name, n.id)
+
+    route_nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    seen_routes: set[str] = set()
+
+    for f in _iter_files(repo, (".js", ".jsx", ".ts", ".tsx")):
+        if f.name == "typings.d.ts":
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # 廉价短路: 没有 path 字面量的文件直接跳过。
+        if "path" not in text:
+            continue
+        rel = _rel(f, repo)
+        for m in _RE_VUE_ROUTE.finditer(text):
+            entry = m.group(0)
+            path = m.group(1)
+            name_m = _RE_VUE_ROUTE_NAME.search(entry)
+            comp_m = _RE_VUE_ROUTE_COMP.search(entry)
+            if not path.startswith("/"):
+                # 非 / 前缀的对象: 仅当带 component / name 时才算路由条目。
+                if not name_m and not comp_m:
+                    continue
+            line = text.count("\n", 0, m.start()) + 1
+            route_key = path or (name_m.group(1) if name_m else f"@{line}")
+            route_id = f"{project_id}:frontend_route:{rel}:{route_key}"
+            if route_id in seen_routes:
+                continue
+            seen_routes.add(route_id)
+            route_nodes.append(
+                GraphNode(
+                    id=route_id,
+                    kind=NodeKind.FRONTEND_ROUTE.value,
+                    name=name_m.group(1) if name_m else (path or f"route@{line}"),
+                    project_id=project_id,
+                    file=rel,
+                    line=line,
+                    language="typescript",
+                    meta={"path": path},
+                )
+            )
+            # renders 边: route -> SFC 组件 (按 component 标识符或 name 匹配 stem)。
+            target_stem = None
+            if comp_m and comp_m.group(1) in comp_by_stem:
+                target_stem = comp_m.group(1)
+            elif name_m and name_m.group(1) in comp_by_stem:
+                target_stem = name_m.group(1)
+            if target_stem:
+                edges.append(
+                    GraphEdge(
+                        source=route_id,
+                        target=comp_by_stem[target_stem],
+                        kind=EdgeKind.RENDERS.value,
+                        meta={"evidence": f"route->{target_stem}"},
+                    )
+                )
+
+    return route_nodes, edges
+
+
 # ============================ FastAPI 后端 ============================
 
 _HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
@@ -340,6 +568,90 @@ def scan_fastapi(repo: Path, project_id: str) -> list[GraphNode]:
                         },
                     )
                 )
+    return nodes
+
+
+# ============================ Node/Express 后端 ============================
+
+# 后端框架特征依赖 (出现在 package.json deps 即命中本栈)。
+_NODE_BACKEND_DEPS = frozenset({"express", "koa", "fastify", "@koa/router"})
+
+# app.get('/x', ...) / router.post('/x', ...) / api.use('/x', ...) 路由注册。
+# 捕获 (对象名, 方法, url) —— 方法限 HTTP 动词 + use (中间件挂载点)。
+_RE_NODE_ROUTE = re.compile(
+    r"""(?P<obj>\w+)\s*\.\s*(?P<method>get|post|put|delete|patch|options|head|all|use)\s*\(\s*[`'\"](?P<url>/[\w\-/:.{}]*)"""
+)
+# 限定 obj 必须像路由对象 (app / router / api / route / *Router / *router),
+# 过滤掉 lodash.get / array.use 之类误命中。
+_NODE_ROUTE_OBJ = re.compile(r"^(?:app|router|api|route)$|[Rr]outer$", re.A)
+
+
+def node_detect(repo: Path) -> bool:
+    """有 Node/Express 系后端迹象即命中: package.json deps 含 express/koa/fastify。
+
+    纯按 repo 内容判定 (查依赖, 不靠目录名), 多框架可共存 (与 react_detect 同一仓不冲突)。
+    """
+    for pkg in _iter_named(repo, "package.json"):
+        try:
+            data = json.loads(pkg.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        deps: dict = {}
+        for key in ("dependencies", "devDependencies"):
+            section = data.get(key)
+            if isinstance(section, dict):
+                deps.update(section)
+        if _NODE_BACKEND_DEPS & set(deps):
+            return True
+    return False
+
+
+def scan_node_express(repo: Path, project_id: str) -> list[GraphNode]:
+    """正则扫 Express/Koa/Fastify 路由注册 -> backend_endpoint 节点。
+
+    匹配 app.<method>('/url', ...) / router.<method>('/url', ...) / api.use('/url', ...)。
+    method 限 HTTP 动词 + use (中间件挂载点, 记 http_method=USE)。第一版轻量正则,
+    不解析 router 挂载前缀 (app.use('/api', router) 的路径拼接), plan 允许不追求全覆盖。
+    node id 与 FastAPI 同构 "<pid>:backend_endpoint:<METHOD>:<url>", 跨插件可链接。
+    """
+    nodes: list[GraphNode] = []
+    seen: set[str] = set()
+    for f in _iter_files(repo, (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")):
+        if f.name in {"typings.d.ts"}:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("read fail %s: %s", f, exc)
+            continue
+        rel = _rel(f, repo)
+        for m in _RE_NODE_ROUTE.finditer(text):
+            obj = m.group("obj")
+            if not _NODE_ROUTE_OBJ.search(obj):
+                continue
+            method = m.group("method").upper()
+            url = _norm_url(m.group("url")) or "/"
+            line = text.count("\n", 0, m.start()) + 1
+            node_id = f"{project_id}:backend_endpoint:{method}:{url}"
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            nodes.append(
+                GraphNode(
+                    id=node_id,
+                    kind=NodeKind.BACKEND_ENDPOINT.value,
+                    name=f"{method} {url}",
+                    project_id=project_id,
+                    file=rel,
+                    line=line,
+                    language="typescript",
+                    meta={
+                        "url": url,
+                        "http_method": method,
+                        "router_obj": obj,
+                    },
+                )
+            )
     return nodes
 
 

@@ -11,10 +11,16 @@
 """
 from __future__ import annotations
 
+import importlib
+import inspect
+import logging
+import pkgutil
 from pathlib import Path
 from typing import Any
 
 from codev_platform.plugins.executor import ExecutionResult, run_plugin
+
+logger = logging.getLogger(__name__)
 
 _REGISTRY: dict[str, Any] = {}
 _discovered = False
@@ -57,21 +63,47 @@ def clear_registry() -> None:
 
 
 def _discover_builtins() -> None:
-    """显式注册内置插件 (decision doc §5: 第一批只内置,不做第三方动态加载)。
+    """自动发现并注册内置插件 (decision doc §5: 第一批只内置,不做第三方动态加载)。
 
-    放开第三方时:在此追加 importlib.metadata.entry_points("codev_platform.plugins")
-    扫描 + 实例化,本函数即为唯一扩展点,核心其它代码无感。
+    扫描机制:遍历 `codev_platform.plugins.builtin` 包下所有非下划线模块,import 后
+    在模块命名空间里找出**本模块定义的** AnalyzerPlugin 具体子类 (排除基类 / import
+    进来的别处类 / 抽象类),逐一实例化 + register_plugin。新增一个 builtin 插件文件
+    即自动生效 —— build agent 不必改本函数 (taxonomy 三层各框架插件可独立并行落地)。
 
-    首个内置插件: builtin.cross_link (cross-link sqlite 适配器包成的 AnalyzerPlugin)。
-    随后加入按技术栈复用的通用栈插件: builtin.frontend_react / builtin.backend_fastapi
-    (detect 探测 repo 内容自动适配, 杜绝 per-project 脚本)。
+    去重 / 幂等:
+    - register_plugin 按 name 入表,重名覆盖 —— 同一插件类被多模块 import 时只留一份。
+    - 单个模块 import / 实例化失败只 warning + 跳过, 不阻断其余 (插件失败不拖垮核心)。
+
+    放开第三方时:在本函数追加 importlib.metadata.entry_points("codev_platform.plugins")
+    扫描即可,builtin 目录扫描与第三方加载是两条并行扩展点,核心其它代码无感。
     """
-    from codev_platform.plugins.builtin.cross_link import CrossLinkPlugin
-    from codev_platform.plugins.builtin.frontend_react import FrontendReactPlugin
-    from codev_platform.plugins.builtin.backend_fastapi import FastApiPlugin
-    register_plugin(CrossLinkPlugin())
-    register_plugin(FrontendReactPlugin())
-    register_plugin(FastApiPlugin())
+    from codev_platform.plugins import builtin
+    from codev_platform.plugins.base import AnalyzerPlugin
+
+    for mod_info in pkgutil.iter_modules(builtin.__path__):
+        mod_name = mod_info.name
+        if mod_name.startswith("_"):  # 共享工具 (_stack_scan 等) 不是插件模块。
+            continue
+        full_name = f"{builtin.__name__}.{mod_name}"
+        try:
+            module = importlib.import_module(full_name)
+        except Exception as exc:  # noqa: BLE001 — 单模块坏不拖垮发现流程。
+            logger.warning("discover: import %s failed: %s", full_name, exc)
+            continue
+
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if not issubclass(obj, AnalyzerPlugin) or obj is AnalyzerPlugin:
+                continue
+            # 只认本模块定义的具体类: 排除 import 进来的别处类 + 抽象类。
+            if obj.__module__ != full_name or inspect.isabstract(obj):
+                continue
+            try:
+                register_plugin(obj())
+            except Exception as exc:  # noqa: BLE001 — 实例化坏只跳过该类。
+                logger.warning(
+                    "discover: instantiate %s.%s failed: %s",
+                    full_name, obj.__name__, exc,
+                )
 
 
 def _ensure_discovered() -> None:

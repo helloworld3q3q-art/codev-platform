@@ -28,6 +28,7 @@ Vue/React 页面
 | [web-backend-framework-plan-2026-06-02.md](web-backend-framework-plan-2026-06-02.md) | Web Backend 框架化落地 plan: FastAPI 服务分层、登录退出、组织管理、用户管理、项目管理、读写分离、统一请求验证和拦截、统一字段、OpenAPI、审计、长任务和并发控制。**2026-06-02 校准(见 §零)**: 独立进程服务 + agent 架构一致(共抽 `core/httpkit`)、复用 gateway/core.acl/core.rbac/core.errors、envelope 扁平化(去 result)、错误码收敛 8 类、存储 PG 起步 | P0 先做(Phase 0-3 地基) |
 | [agent-memory-platform-plan-2026-06-01.md](agent-memory-platform-plan-2026-06-01.md) | Agent Memory 平台化落地 plan: 任务记忆、Context Engineering、生命周期治理、权限审计、性能评测、飞书/Jira/Wiki/Git 接入 | P1 地基后 |
 | [modular-core-plugin-extension-decision-2026-06-02.md](modular-core-plugin-extension-decision-2026-06-02.md) | 架构命名和边界决策: 哪些能力做核心模块，哪些能力做客户插件，codegraph/cross-link/Memory/报告如何归类 | 已定 |
+| [stack-adapter-taxonomy-2026-06-02.md](stack-adapter-taxonomy-2026-06-02.md) | 栈适配器三层 taxonomy(语言基座 × 框架适配 × DB 方言)+ 各插件统一 NodeKind/EdgeKind 契约 + detect 约定 + registry 自动发现(扫 builtin/ 目录,新增插件文件即生效,build agent 免改 registry)。供后续 Vue/Express/Spring/ASP.NET/SQL 框架插件并行落地 | 已定/自动发现已落地 |
 | [deployment-2026-06-01.md](deployment-2026-06-01.md) | Phase 0 部署骨架: 安全默认、本机最小启动、memory PG (Docker Compose)、systemd 常驻 (serve-mcp install-systemd)、Windows WSL 注意、远程部署 checklist。汇总既有命令真值源, 不发明命令 | Phase 0 底座 |
 
 ## 执行顺序 / 优先级(2026-06-02 议定)
