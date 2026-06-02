@@ -24,8 +24,8 @@ importers:
         specifier: ^5.1.1
         version: 5.1.1
       '@jlogi/ui':
-        specifier: 2.0.0-alpha.1.3
-        version: 2.0.0-alpha.1.3(@ant-design/icons@6.2.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(antd@6.3.7(date-fns@2.30.0)(moment@2.30.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(rc-field-form@1.38.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: 2.0.0-alpha.2.1
+        version: 2.0.0-alpha.2.1(@ant-design/icons@6.2.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(antd@6.3.7(date-fns@2.30.0)(moment@2.30.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(rc-field-form@1.38.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@types/crypto-js':
         specifier: ^4.2.2
         version: 4.2.2
@@ -2000,8 +2000,8 @@ packages:
     resolution: {integrity: sha512-u3UPsIilWKOM3F9CXtrG8LEJmNxwoCQC/XVj4IKYXvvpx7QIi/Kg1LI5uDmDpKlac62NUtX7eLjRh+jVZcLOzw==}
     engines: {node: ^14.15.0 || ^16.10.0 || >=18.0.0}
 
-  '@jlogi/ui@2.0.0-alpha.1.3':
-    resolution: {integrity: sha512-z/M502GospkXWHc/U5mjO4YyIXvLERX4iBn57Tty+KJ/4+pL6DdOnGC7HR8d7v0TooFw/UEt9rLWlh7fxgYG+g==}
+  '@jlogi/ui@2.0.0-alpha.2.1':
+    resolution: {integrity: sha512-SNCL87wLAm5WFusp8w9QF7rlmIBHV+Z5pnCsag8+ke7JvBFntygP7hWCIMLtxw4Wg0yxjlGjPhXLmKo9dt4ycg==}
     peerDependencies:
       '@ant-design/icons': '>=6.0.0'
       antd: '>=6.0.0'
@@ -13313,7 +13313,7 @@ snapshots:
       '@types/yargs': 17.0.35
       chalk: 4.1.2
 
-  '@jlogi/ui@2.0.0-alpha.1.3(@ant-design/icons@6.2.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(antd@6.3.7(date-fns@2.30.0)(moment@2.30.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(rc-field-form@1.38.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+  '@jlogi/ui@2.0.0-alpha.2.1(@ant-design/icons@6.2.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(antd@6.3.7(date-fns@2.30.0)(moment@2.30.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(rc-field-form@1.38.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
       '@ant-design/icons': 6.2.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@ant-design/pro-components': 2.8.10(antd@6.3.7(date-fns@2.30.0)(moment@2.30.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(rc-field-form@1.38.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)

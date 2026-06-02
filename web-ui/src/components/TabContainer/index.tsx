@@ -1,7 +1,11 @@
 import { findMenuNameByPath, MENU_ITEMS } from '@/menus';
+import UserMenu from '@/components/UserMenu';
 import { TabContainer as JlogiTabContainer } from '@jlogi/ui';
 import { history, useKeepOutlets, useLocation } from '@umijs/max';
 import React, { useCallback } from 'react';
+
+// 页签栏右侧插槽：用户菜单(组织/项目切换 + 登出)。元素稳定, 提到组件外避免每次渲染重建。
+const tabBarExtraContent = { right: <UserMenu /> };
 
 // 排除的路径（根路径和空路径不展示在 tab 中）
 export const excludePaths = ['/user/login', '/system/404', '/404', '/', ''];
@@ -66,6 +70,7 @@ const TabContainer: React.FC = () => {
       getTitle={getMenuTitle}
       storageKey="stock-admin-web-tab-container"
       enableContextMenu={true}
+      tabBarExtraContent={tabBarExtraContent}
     >
       {element}
     </JlogiTabContainer>

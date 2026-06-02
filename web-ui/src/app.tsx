@@ -1,7 +1,4 @@
 import EnumLoader from '@/components/EnumLoader';
-import LogoutButton from '@/components/LogoutButton';
-import OrgSelect from '@/components/Form/Select/OrgSelect';
-import ProjectSelect from '@/components/Form/Select/ProjectSelect';
 import TabContainer from '@/components/TabContainer';
 import { MENU_ITEMS } from '@/menus';
 import { getSession } from '@/services/apis/authapi';
@@ -87,16 +84,10 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
         history.replace('/dashboard');
       }
     },
-    // 全局包裹：EnumLoader 拉枚举；顶部工具条(组织/项目选择器+登出)+ TabContainer 多页签。
-    // 选择器放内容区工具条 (而非 ProLayout header rightContentRender) —— 后者在本 side 布局 +
-    // rightContentRender:false 既有约定下不渲染, 工具条放这里一定可见。
+    // 全局包裹：EnumLoader 拉枚举 + TabContainer 多页签。
+    // 组织/项目选择器 + 登出已收进 TabContainer 页签栏右侧的用户菜单(UserMenu), 不再单列工具条。
     childrenRender: () => (
       <EnumLoader>
-        <div className="flex items-center justify-end gap-12 px-16 py-8 bg-#ffffff">
-          <OrgSelect />
-          <ProjectSelect />
-          <LogoutButton />
-        </div>
         <TabContainer />
       </EnumLoader>
     ),

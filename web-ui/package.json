@@ -51,7 +51,7 @@
     "@ant-design/plots": "^2.1.5",
     "@ant-design/pro-components": "^3.1.11-0",
     "@antv/g6": "^5.1.1",
-    "@jlogi/ui": "2.0.0-alpha.1.3",
+    "@jlogi/ui": "2.0.0-alpha.2.1",
     "@types/crypto-js": "^4.2.2",
     "@types/less": "^3.0.8",
     "@umijs/route-utils": "^2.2.2",

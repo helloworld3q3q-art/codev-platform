@@ -1,33 +1,13 @@
-// 当前组织上下文 model —— 选中 org 写 localStorage, fetch 拦截器据此注入 X-Org-Id。
-import { useCallback, useEffect, useState } from 'react';
-
-import { postOrgsList } from '@/services/apis/orgapi';
+// 当前组织上下文 model —— 只持有当前选择 + 切换副作用(写 localStorage, fetch 拦截器据此注入 X-Org-Id)。
+// 组织列表数据由 OrgSelect 的 fetchOptions 远程拉取(DemoSelect 模式), 不在 model 缓存。
+import { useCallback, useState } from 'react';
 
 const STORAGE_KEY = 'current_org';
 
-export interface OrgOption {
-  code: string;
-  name: string;
-}
-
 export default function useOrgModel() {
-  const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<string>(
     () => localStorage.getItem(STORAGE_KEY) ?? '',
   );
-
-  const loadOrgs = useCallback(async (): Promise<void> => {
-    try {
-      const res = await postOrgsList({ pageNumber: 1, pageSize: 200 });
-      const list: OrgOption[] = (res.data ?? []).map((o) => ({
-        code: o.code ?? '',
-        name: o.name ?? '',
-      }));
-      setOrgs(list);
-    } catch {
-      setOrgs([]);
-    }
-  }, []);
 
   const setCurrentOrg = useCallback((code: string): void => {
     if (code) {
@@ -38,9 +18,5 @@ export default function useOrgModel() {
     setCurrentOrgId(code);
   }, []);
 
-  useEffect(() => {
-    loadOrgs();
-  }, [loadOrgs]);
-
-  return { orgs, currentOrgId, setCurrentOrg, loadOrgs };
+  return { currentOrgId, setCurrentOrg };
 }
