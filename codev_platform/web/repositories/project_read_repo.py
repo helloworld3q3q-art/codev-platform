@@ -51,5 +51,6 @@ class ProjectReadRepository:
             "name": data.get("display_name", ""),
             "repoPath": data.get("repo_path"),
             "description": data.get("notes"),
+            "orgId": data.get("org_id"),
             "status": data.get("status", "ACTIVE"),
         }

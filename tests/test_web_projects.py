@@ -113,3 +113,43 @@ def test_load_unknown_project_is_project_unknown(client):
     r = c.post("/api/v1/projects/load", json={"code": "ghost"})
     assert r.status_code == 404
     assert r.json()["errors"][0]["errorCode"] == "project_unknown"
+
+
+def test_register_with_org_id_persists_and_returns_in_detail(client):
+    c, meta_dir = client
+    r = c.post("/api/v1/projects/register",
+               json={"code": "orgproj", "name": "OrgProj", "orgId": "acme"})
+    assert r.status_code == 200
+    # 落库到 meta.json
+    meta = json.loads((meta_dir / "orgproj" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["org_id"] == "acme"
+    # 详情回显 orgId
+    d = c.get("/api/v1/projects/detail", params={"code": "orgproj"})
+    assert d.json()["data"]["orgId"] == "acme"
+
+
+def test_list_filter_by_org_id(client):
+    c, _ = client
+    # caller 在 org acme (X-Org-Id), 注册两个分属 acme/beta 的项目。
+    h = {"X-Org-Id": "acme"}
+    c.post("/api/v1/projects/register", json={"code": "acmeproj", "name": "Acme", "orgId": "acme"}, headers=h)
+    c.post("/api/v1/projects/register", json={"code": "betaproj", "name": "Beta", "orgId": "beta"}, headers=h)
+    # 当前 org=acme + 查询 orgId=acme: 含 acmeproj + 公开项目(alpha/beta seed), 不含 betaproj
+    r = c.post("/api/v1/projects/list", params={"orgId": "acme"}, headers=h)
+    codes = {it["code"] for it in r.json()["data"]}
+    assert "acmeproj" in codes
+    assert "betaproj" not in codes
+    # orgId 回显
+    item = next(it for it in r.json()["data"] if it["code"] == "acmeproj")
+    assert item["orgId"] == "acme"
+
+
+def test_list_filter_by_keyword(client):
+    c, _ = client
+    r = c.post("/api/v1/projects/list", params={"keyword": "alph"})
+    codes = {it["code"] for it in r.json()["data"]}
+    assert codes == {"alpha"}
+    # 大小写不敏感 + 匹配 name
+    r2 = c.post("/api/v1/projects/list", params={"keyword": "BETA"})
+    codes2 = {it["code"] for it in r2.json()["data"]}
+    assert codes2 == {"beta"}

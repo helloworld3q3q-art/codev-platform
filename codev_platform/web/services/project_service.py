@@ -15,11 +15,15 @@ from codev_platform.web.repositories.project_write_repo import ProjectWriteRepos
 from codev_platform.web.schemas.projects import ProjectActionResult, ProjectListItem
 
 
-def _project_in_org(cfg: dict, code: str | None, org_id: str) -> bool:
-    """项目是否属于该 org —— 与 core.acl 同口径: config projects.<code>.org_id 缺省=公开(全 org 可见),
-    否则须 == org_id。"""
-    proj = (_cfg_get(cfg, "projects", {}) or {}).get(code) or {}
-    proj_org = proj.get("org_id")
+def _project_in_org(cfg: dict, row: dict, org_id: str) -> bool:
+    """项目是否属于该 org —— 与 core.acl 同口径: 项目 org_id 缺省=公开(全 org 可见), 否则须 == org_id。
+
+    org_id 真值源优先 meta.json (register 落库于此), 回退 config projects.<code>.org_id (兼容历史登记)。
+    """
+    proj_org = row.get("orgId")
+    if proj_org is None:
+        proj = (_cfg_get(cfg, "projects", {}) or {}).get(row.get("code")) or {}
+        proj_org = proj.get("org_id")
     return proj_org is None or proj_org == org_id
 
 
@@ -30,13 +34,28 @@ class ProjectService:
         self._write = write_repo or ProjectWriteRepository()
 
     def list_projects(
-        self, *, org_id: str | None = None, offset: int, limit: int
+        self, *, org_id: str | None = None, filter_org_id: str | None = None,
+        keyword: str | None = None, offset: int, limit: int
     ) -> tuple[list[ProjectListItem], int]:
-        """分页列出已登记项目, 按当前 org 过滤 (org_id=None 不过滤; 项目无 config org_id = 公开)。"""
+        """分页列出已登记项目。
+
+        org_id: 当前请求 org (来自 X-Org-Id), 按归属过滤 (None 不过滤; 项目无 org_id = 公开)。
+        filter_org_id: 查询条件指定的组织, 进一步收窄到该 org 名下项目。
+        keyword: 模糊匹配 code / name (大小写不敏感)。
+        """
         rows = self._read.list_projects()
-        if org_id is not None:
+        if org_id is not None or filter_org_id is not None:
             cfg = load_config()
-            rows = [r for r in rows if _project_in_org(cfg, r.get("code"), org_id)]
+            if org_id is not None:
+                rows = [r for r in rows if _project_in_org(cfg, r, org_id)]
+            if filter_org_id is not None:
+                rows = [r for r in rows if _project_in_org(cfg, r, filter_org_id)]
+        if keyword:
+            kw = keyword.strip().lower()
+            if kw:
+                rows = [r for r in rows
+                        if kw in (r.get("code") or "").lower()
+                        or kw in (r.get("name") or "").lower()]
         total = len(rows)
         page = rows[offset:offset + limit]
         items = [self._to_item(r) for r in page]
@@ -51,17 +70,20 @@ class ProjectService:
         return self._to_item(row)
 
     def register_project(self, *, code: str, name: str,
-                         repo_path: str | None, description: str | None) -> ProjectActionResult:
+                         repo_path: str | None, description: str | None,
+                         org_id: str | None = None) -> ProjectActionResult:
         """注册项目 (幂等: 重复 code 报 INVALID_PARAMS)。
 
         编排: validate code → 查重 (read_repo) → 落库 (write_repo) → 回执。
+        org_id 为项目归属组织 (None = 公开; 由路由层用当前请求 org 兜底)。
         """
         code = self._validate_code(code)
         # 幂等/唯一约束: 已登记 → 报错 (errorCode 细分由路由层填, 主码就近归 INVALID_PARAMS, plan §10.2)。
         if self._read.get_project_detail(code) is not None or self._write.exists(code):
             raise PlatformError(ErrorCode.INVALID_PARAMS, f"project already registered: {code}")
+        org_id = org_id.strip() if org_id else None
         self._write.register_project(code=code, name=name,
-                                     repo_path=repo_path, description=description)
+                                     repo_path=repo_path, description=description, org_id=org_id)
         return ProjectActionResult(code=code, loaded=False, status="ACTIVE")
 
     def load_project(self, code: str) -> ProjectActionResult:
@@ -86,6 +108,7 @@ class ProjectService:
         return ProjectListItem(
             code=row["code"], name=row.get("name", ""),
             repoPath=row.get("repoPath"), description=row.get("description"),
+            orgId=row.get("orgId"),
             status=row.get("status", "ACTIVE"),
             loaded=self._write.is_loaded(row["code"]),
         )

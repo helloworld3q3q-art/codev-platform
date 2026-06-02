@@ -15,6 +15,7 @@ class ProjectRegisterRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, description="项目名称")
     repoPath: str | None = Field(None, max_length=500, description="项目仓路径")
     description: str | None = Field(None, max_length=2000, description="描述")
+    orgId: str | None = Field(None, max_length=64, description="所属组织 (缺省=当前请求 org)")
 
 
 class ProjectLoadRequest(BaseModel):
@@ -28,6 +29,7 @@ class ProjectListItem(BaseModel):
     name: str
     repoPath: str | None = None
     description: str | None = None
+    orgId: str | None = None
     status: str = "ACTIVE"
     loaded: bool = False
 

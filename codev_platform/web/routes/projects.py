@@ -41,12 +41,18 @@ def _rid(request: Request):
 def list_projects(
     request: Request,
     pg: PageParams = Depends(page_params),
+    orgId: str | None = Query(None, max_length=64, description="按组织过滤 (缺省=当前 org 可见全部)"),
+    keyword: str | None = Query(None, max_length=200, description="按项目编码 / 名称模糊匹配"),
     svc: ProjectService = Depends(_service),
 ) -> PageResult[ProjectListItem]:
-    # 按当前 org 过滤 (org 来自 X-Org-Id, gateway 解析进 identity.org_id; 项目无 config org_id = 公开)。
+    # 按当前 org 过滤 (org 来自 X-Org-Id, gateway 解析进 identity.org_id; 项目无 org_id = 公开)。
+    # orgId 查询条件进一步收窄到指定组织; keyword 模糊 code/name。
     identity = getattr(request.state, "identity", None)
     org_id = getattr(identity, "org_id", None)
-    items, total = svc.list_projects(org_id=org_id, offset=pg.offset, limit=pg.page_size)
+    items, total = svc.list_projects(
+        org_id=org_id, filter_org_id=orgId, keyword=keyword,
+        offset=pg.offset, limit=pg.page_size,
+    )
     return page(items, page_number=pg.page_number, page_size=pg.page_size,
                 total=total, request_id=_rid(request))
 
@@ -63,8 +69,12 @@ def register_project(
     body: ProjectRegisterRequest,
     svc: ProjectService = Depends(_service),
 ) -> CommonResult[ProjectActionResult]:
+    # orgId 缺省归当前请求 org (X-Org-Id → identity.org_id), 显式传则按所选组织。
+    identity = getattr(request.state, "identity", None)
+    org_id = body.orgId or getattr(identity, "org_id", None)
     result = svc.register_project(code=body.code, name=body.name,
-                                  repo_path=body.repoPath, description=body.description)
+                                  repo_path=body.repoPath, description=body.description,
+                                  org_id=org_id)
     return ok(result, request_id=_rid(request))
 
 

@@ -29,8 +29,12 @@ class ProjectWriteRepository:
         return (self._meta_dir / code / "meta.json").is_file()
 
     def register_project(self, *, code: str, name: str,
-                         repo_path: str | None, description: str | None) -> dict:
-        """写 meta.json (创建项目登记)。调用方 (service) 已保证 code 未占用。"""
+                         repo_path: str | None, description: str | None,
+                         org_id: str | None = None) -> dict:
+        """写 meta.json (创建项目登记)。调用方 (service) 已保证 code 未占用。
+
+        org_id 为项目归属组织 (None = 公开, 全 org 可见; 与 list 过滤同口径)。
+        """
         target = self._meta_dir / code / "meta.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         meta = {
@@ -43,10 +47,12 @@ class ProjectWriteRepository:
         }
         if description:
             meta["notes"] = description
+        if org_id:
+            meta["org_id"] = org_id
         target.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return {
             "code": code, "name": name, "repoPath": repo_path,
-            "description": description, "status": "ACTIVE",
+            "description": description, "orgId": org_id, "status": "ACTIVE",
         }
 
     @staticmethod
