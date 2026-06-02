@@ -8,9 +8,25 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from codev_platform.core.httpkit import build_app
-from codev_platform.web.routes import enums, graph, health, indexes, jobs, projects
+from codev_platform.web.routes import (
+    auth,
+    enums,
+    graph,
+    health,
+    indexes,
+    jobs,
+    orgs,
+    projects,
+    users,
+)
 
-_PUBLIC_PATHS = {"/health", "/api/v1/health/check"}
+# login / refresh 是登录入口, token 模式下须公开 (未持登录态即可访问); 其余走 gateway + 会话闸。
+_PUBLIC_PATHS = {
+    "/health",
+    "/api/v1/health/check",
+    "/api/v1/auth/login",
+    "/api/v1/auth/token/refresh",
+}
 
 
 def create_app(cfg: dict | None = None) -> FastAPI:
@@ -18,7 +34,10 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         title="codev-platform web",
         routers=[
             health.router,
+            auth.router,
             enums.router,
+            orgs.router,
+            users.router,
             projects.router,
             graph.router,
             jobs.router,

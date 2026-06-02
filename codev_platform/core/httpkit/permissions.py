@@ -15,6 +15,7 @@ from fastapi import Request
 from codev_platform.core import acl, audit
 from codev_platform.core.config import load_config
 from codev_platform.core.errors import ErrorCode, PlatformError
+from codev_platform.core.platform_admin import is_platform_admin
 
 _SERVICE = "web"
 
@@ -27,11 +28,16 @@ def require_project_access(request: Request):
     """项目访问闸: 校验 request.state.identity 能否访问 X-Project-Id。
 
     返回 (identity, project_id) 供路由继续用。deny → PlatformError(ACCESS_DENIED) + 审计。
-    platform_admin bypass 在 can_access 顶部已含 (此处直接走 can_access 即可, 标志由 identity 带)。
+    platform_admin (§5.2 方案C): 身份级 bypass, 跨 org 放行 (非 advisory → 审计必记)。
     """
     identity = _identity(request)
     project_id = request.headers.get("X-Project-Id") or request.headers.get("x-project-id")
     cfg = load_config()
+    # platform_admin bypass: 不进 scope×rank 阶梯, 跨 org 放行 (与 acl.all_projects 同范式)。
+    if is_platform_admin(cfg, getattr(identity, "user_id", None)):
+        decision = acl.AccessDecision(True, "platform admin: cross-org", advisory=False)
+        audit.audit_access(_SERVICE, identity, project_id, decision)
+        return identity, project_id
     decision = acl.can_access(cfg, identity, project_id)
     audit.audit_access(_SERVICE, identity, project_id, decision)
     if not decision.allowed:
