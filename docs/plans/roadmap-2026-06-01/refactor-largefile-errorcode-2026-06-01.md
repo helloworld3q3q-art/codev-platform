@@ -188,6 +188,22 @@ python -m pytest -q                        # 基线不降; 重点 test_cross_lin
 - `tests/test_agent_route_errors.py` —— chat/memory 各错误分支返回正确 code + status + **不含 raw `str(e)`**。
 - 扩 `test_cross_link_server.py` —— 断言新 `code` 字段同时存在。
 
+### B.6 进度 (2026-06-02)
+
+✅ **已落地 (additive, error 字符串保留, 435 passed)**:
+- `core/errors.py` —— `ErrorCode`(8 类)+ `http_status` 映射 + `PlatformError` + `to_mcp_error`/`to_http_payload`(`core/errors.py` 是 stdlib-only 叶子, 不依赖 starlette/fastapi)。
+- `tests/test_errors.py` —— 7 用例(映射完整 / PlatformError / mcp+http shape / 向后兼容 error 子串 / detail 不进对外体)。
+- **3 套 MCP server `_err` 并排 `code`**:chroma(`_schema._err` + `_tools` call_tool 分支配码)/ cross_link(`_err` + SSE 校验 JSONResponse)/ codegraph(同)。
+- **webhook** 6 处错误响应并排 `code`(unknown provider / 体超限 / 验签 / bad json 等)。
+- commit: `e135031`(core+MCP)`707b28d`(webhook)。
+
+⏳ **押后 (需更大改动 + 兼容核查, 文档化)**:
+- **agent FastAPI 路由**(`routes/chat.py` `routes/memory.py`)的 `code` 字段 —— 它们已按 400/403/503 分状态码(结构合规), 但加 `code` 要么改 `HTTPException(detail=...)` 体形状(可能破坏 `docs/playground/index.html` 读 `detail`), 要么注册 `PlatformError` 异常处理器。对**可选内部服务**风险不值, 留作后续(需先核查 playground 是否读 `detail`)。
+- **`str(e)` 不外泄**:agent 503 provider 错误仍带 `str(e)`(内部可选服务, 低风险); 收口随上条一起做。
+- **后台 fail-soft `except Exception` 收窄** —— launcher/reindex/metrics 等有意 fail-soft, 不动(plan §B.3 明确不动), 仅建议补结构化日志。
+
+> B 的**主错误面(AI 客户端打的 3 套 MCP + webhook)已带机器可读 code**; 剩 agent HTTP 面(可选服务)的 code 字段是有界后续。
+
 ---
 
 ## 排期 & 优先级
