@@ -90,14 +90,17 @@ def _clean_registry():
 def test_register_and_list():
     register_plugin(FakePlugin())
     assert "fake.ok" in registered_names()
-    plugins = list_plugins()
-    assert len(plugins) == 1 and plugins[0].name == "fake.ok"
+    # list_plugins 触发 _discover_builtins (注入 builtin.*); 只校验本测试注册的假插件存在
+    names = [p.name for p in list_plugins()]
+    assert "fake.ok" in names
 
 
 def test_list_sorted():
     register_plugin(CrashPlugin())
     register_plugin(FakePlugin())
-    assert registered_names() == ["fake.crash", "fake.ok"]
+    # 内置插件 (builtin.*) 也会被发现; 只校验假插件子集按 name 升序稳定
+    fakes = [n for n in registered_names() if n.startswith("fake.")]
+    assert fakes == ["fake.crash", "fake.ok"]
 
 
 def test_get_unknown_raises():

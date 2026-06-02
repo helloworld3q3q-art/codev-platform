@@ -62,13 +62,10 @@ def _discover_builtins() -> None:
     放开第三方时:在此追加 importlib.metadata.entry_points("codev_platform.plugins")
     扫描 + 实例化,本函数即为唯一扩展点,核心其它代码无感。
 
-    当前内置插件清单为空 (Phase 2 只落地 runtime);下一步把 cross-link 适配器包成
-    首个内置插件 builtin.cross_link 时,在此 register_plugin(CrossLinkPlugin())。
+    首个内置插件: builtin.cross_link (cross-link sqlite 适配器包成的 AnalyzerPlugin)。
     """
-    # 示例 (待 cross-link 适配器就绪后启用):
-    # from codev_platform.plugins.builtin.cross_link import CrossLinkPlugin
-    # register_plugin(CrossLinkPlugin())
-    return
+    from codev_platform.plugins.builtin.cross_link import CrossLinkPlugin
+    register_plugin(CrossLinkPlugin())
 
 
 def _ensure_discovered() -> None:
