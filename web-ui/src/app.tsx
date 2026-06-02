@@ -99,13 +99,15 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
       request: async () => MENU_ITEMS,
     },
     menuHeaderRender: false,
-    rightContentRender: false,
-    // 顶栏右侧: 组织 + 项目选择器 (多租户上下文) + 登出。
-    actionsRender: () => [
-      <OrgSelect key="org" />,
-      <ProjectSelect key="project" />,
-      <LogoutButton key="logout" />,
-    ],
+    // 顶栏右侧直接渲染: 组织 + 项目选择器 (多租户上下文) + 登出。
+    // 用 rightContentRender 显式渲染, 不走 actionsRender —— 后者依赖默认 rightContent, 易不显示。
+    rightContentRender: () => (
+      <div className="flex items-center gap-12 pr-16">
+        <OrgSelect />
+        <ProjectSelect />
+        <LogoutButton />
+      </div>
+    ),
     waterMarkProps: undefined,
     ...initialState?.settings,
   };
