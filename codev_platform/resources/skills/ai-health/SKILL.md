@@ -76,10 +76,10 @@ codev-platform health --json-out
     codegraph 代码 = nodes=N edges=N        # 每仓 .codegraph,经 config.projects.<id>.repo_path 定位
     cross-link 链路 = nodes=N / 未建        # 仅全栈仓建
     memory 项目专属 = N 条  (+ org 共享 M)  # project 作用域,只该项目召回
-    使用率(7d) = search_docs N / cross-link N  # 按 project_id 拆;codegraph 未计数
+    使用率(7d) = search_docs N / cross-link N / codegraph N  # 按 project_id 拆
 合计: chroma 全项目总数 ; memory M org + K project
 ```
-> 使用率按 project_id 分:chroma 召回日志加了 project_id 字段(**daemon 重启后**新查询才分项目;旧日志归 "legacy 无 project_id");cross-link 日志本就带 project_id。
+> 使用率按 project_id 分:chroma 召回日志加了 project_id 字段(**daemon 重启后**新查询才分项目;旧日志归 "legacy 无 project_id");cross-link / codegraph 日志本就带 project_id(codegraph 自写代理 server.py 的 codegraph_usage.jsonl 每次调用打点)。
 
 - **访问走 HTTP 服务地址**:`--all` 是客户端,GET 平台 daemon 的 `/platform/status`(`config.platform.url` 或默认 `http://127.0.0.1:<daemon.port>`);服务端跑在平台主机上聚合本机 data/+PG,客户端不碰路径。**子应用 / 远程机器查平台数据用同一个地址** —— 这才能多用户多项目共享。
 - **chroma / cross-link / memory** 中心化(`data/` + PG 一个库),服务端直读。

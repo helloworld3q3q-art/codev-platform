@@ -121,11 +121,12 @@ def _usage_7d(repo_root: Path) -> dict[str, dict[str, int]]:
 
     def bump(pid: str | None, key: str) -> None:
         k = pid or "(legacy)"
-        usage.setdefault(k, {"search_docs": 0, "cross_link": 0})[key] += 1
+        usage.setdefault(k, {"search_docs": 0, "cross_link": 0, "codegraph": 0})[key] += 1
 
     for path, key in (
         (repo_root / "codev_platform" / "chroma" / "search_recall.jsonl", "search_docs"),
         (repo_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl", "cross_link"),
+        (repo_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl", "codegraph"),
     ):
         if not path.is_file():
             continue

@@ -151,3 +151,31 @@ def _usage_cross_link(r: Report, cl_usage: Path) -> None:
     tools = ",".join(f"{k}={v}" for k, v in by_tool.items())
     r.line("cross-link usage", "INFO",
            f"{len(rows)} calls / ok={ok_rate}% / median={med} / {tools} last 7d")
+
+
+def _usage_codegraph(r: Report, cg_usage: Path) -> None:
+    # 镜像 _usage_cross_link: 读 codegraph 自写代理 (server.py) 的 codegraph_usage.jsonl。
+    if not cg_usage.is_file():
+        r.line("codegraph usage", "INFO", "codegraph_usage.jsonl not found (no calls yet)")
+        return
+    cutoff = datetime.now() - timedelta(days=7)
+    rows = []
+    for o in _iter_jsonl(cg_usage):
+        if o.get("ts"):
+            ts = _parse_dt(str(o["ts"]))
+            if ts and ts < cutoff:
+                continue
+        rows.append(o)
+    if not rows:
+        r.line("codegraph usage", "INFO", "no codegraph calls (last 7d)")
+        return
+    by_tool: dict[str, int] = {}
+    for o in rows:
+        by_tool[o.get("tool", "?")] = by_tool.get(o.get("tool", "?"), 0) + 1
+    ok = sum(1 for o in rows if o.get("ok"))
+    ok_rate = round(100.0 * ok / len(rows))
+    lat = sorted(float(o["elapsed_ms"]) for o in rows if o.get("elapsed_ms") is not None)
+    med = f"{round(lat[len(lat) // 2])}ms" if lat else "n/a"
+    tools = ",".join(f"{k}={v}" for k, v in by_tool.items())
+    r.line("codegraph usage", "INFO",
+           f"{len(rows)} calls / ok={ok_rate}% / median={med} / {tools} last 7d")

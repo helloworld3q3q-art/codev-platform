@@ -92,6 +92,7 @@ from ._checks import (  # noqa: F401
     _resolve_model_dir,
 )
 from ._usage import (  # noqa: F401
+    _usage_codegraph,
     _usage_cross_link,
     _usage_platform_docs,
     _usage_reindex,
@@ -159,11 +160,12 @@ def cmd_health(args: argparse.Namespace) -> int:
     r.section("--- usage stats (last 7 days) ---")
     recall_file = cdv_root / "codev_platform" / "chroma" / "search_recall.jsonl"
     cl_usage = cdv_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl"
+    cg_usage = cdv_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
     _usage_search_recall(r, recall_file)
     _usage_reindex(r, repo)
     _usage_platform_docs(r, repo, recall_file, health)
     _usage_cross_link(r, cl_usage)
-    r.line("codegraph usage", "INFO", "not logged by project scripts yet; process/db health only")
+    _usage_codegraph(r, cg_usage)
 
     # top banner (parity with .ps1 P6)
     if r.red > 0:
@@ -309,7 +311,7 @@ def cmd_health_all(args: argparse.Namespace) -> int:
         out(f"    codegraph 代码 = {cg_s}")
         out(f"    cross-link 链路 = {xl_s}")
         out(f"    memory 项目专属 = {p.get('memory_project', 0)} 条  (+ org 共享 {mem_org})")
-        out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / cross-link {u.get('cross_link', 0)}  (codegraph 未计数)")
+        out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / cross-link {u.get('cross_link', 0)} / codegraph {u.get('codegraph', 0)}")
         out("")
 
     # MCP 端点 reachability (P5): 业务仓走服务地址连的端点是否常驻可达。
@@ -329,7 +331,7 @@ def cmd_health_all(args: argparse.Namespace) -> int:
     leg = data.get("usage_legacy")
     if leg:
         out(f"[INFO] 旧日志未带 project_id(daemon 重启后新查询才分项目): "
-            f"search_docs {leg.get('search_docs', 0)} / cross-link {leg.get('cross_link', 0)}")
+            f"search_docs {leg.get('search_docs', 0)} / cross-link {leg.get('cross_link', 0)} / codegraph {leg.get('codegraph', 0)}")
     for e in data.get("errors", []):
         out(f"[WARN] 服务端: {e}")
     return 0
