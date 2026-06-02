@@ -14,13 +14,15 @@ from ._util import Report, _git, _iter_jsonl, _parse_dt
 
 
 # ---- usage stats (last 7 days) --------------------------------------
-def _usage_search_recall(r: Report, recall_file: Path) -> None:
+def _usage_search_recall(r: Report, recall_file: Path, project_id: str | None = None) -> None:
     if not recall_file.is_file():
         r.line("search_recall", "WARN", "search_recall.jsonl not found")
         return
     cutoff = datetime.now() - timedelta(days=7)
     recent = []
     for o in _iter_jsonl(recall_file):
+        if project_id and o.get("project_id") != project_id:
+            continue
         ts = _parse_dt(str(o["ts"])) if o.get("ts") else None
         if ts is None or ts >= cutoff:
             recent.append(o)
@@ -62,7 +64,8 @@ def _usage_reindex(r: Report, repo: Path) -> None:
     r.line("reindex 7d", "OK", f"{runs} runs (post-commit + manual)")
 
 
-def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict) -> None:
+def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict,
+                         project_id: str | None = None) -> None:
     # candidate / strict MCP-path patterns (defaults + project meta extensions)
     default_cand = [
         r"^apps/[^/]+/src/.*\.(java|ts|tsx|less)$",
@@ -104,6 +107,8 @@ def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict)
     query_count = 0
     if recall_file.is_file():
         for o in _iter_jsonl(recall_file):
+            if project_id and o.get("project_id") != project_id:
+                continue
             if o.get("ts"):
                 ts = _parse_dt(str(o["ts"]))
                 if ts and ts >= cutoff:
@@ -126,13 +131,15 @@ def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict)
         r.line("platform-docs adopt", "INFO", "no L2/L3 candidate commits detected in last 7d")
 
 
-def _usage_cross_link(r: Report, cl_usage: Path) -> None:
+def _usage_cross_link(r: Report, cl_usage: Path, project_id: str | None = None) -> None:
     if not cl_usage.is_file():
         r.line("cross-link usage", "INFO", "cross_link_usage.jsonl not found (no calls yet)")
         return
     cutoff = datetime.now() - timedelta(days=7)
     rows = []
     for o in _iter_jsonl(cl_usage):
+        if project_id and o.get("project_id") != project_id:
+            continue
         if o.get("ts"):
             ts = _parse_dt(str(o["ts"]))
             if ts and ts < cutoff:
@@ -153,7 +160,7 @@ def _usage_cross_link(r: Report, cl_usage: Path) -> None:
            f"{len(rows)} calls / ok={ok_rate}% / median={med} / {tools} last 7d")
 
 
-def _usage_codegraph(r: Report, cg_usage: Path) -> None:
+def _usage_codegraph(r: Report, cg_usage: Path, project_id: str | None = None) -> None:
     # 镜像 _usage_cross_link: 读 codegraph 自写代理 (server.py) 的 codegraph_usage.jsonl。
     if not cg_usage.is_file():
         r.line("codegraph usage", "INFO", "codegraph_usage.jsonl not found (no calls yet)")
@@ -161,6 +168,8 @@ def _usage_codegraph(r: Report, cg_usage: Path) -> None:
     cutoff = datetime.now() - timedelta(days=7)
     rows = []
     for o in _iter_jsonl(cg_usage):
+        if project_id and o.get("project_id") != project_id:
+            continue
         if o.get("ts"):
             ts = _parse_dt(str(o["ts"]))
             if ts and ts < cutoff:

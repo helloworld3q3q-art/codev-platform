@@ -33,6 +33,20 @@ def test_usage_codegraph_counts_calls(tmp_path):
     assert "codegraph_status=1" in msg
 
 
+def test_usage_codegraph_filters_by_project(tmp_path):
+    cg = tmp_path / "codegraph_usage.jsonl"
+    _write_jsonl(cg, [
+        {"ts": "2999-01-01T10:00:00", "project_id": "a", "tool": "codegraph_search", "ok": True, "elapsed_ms": 5.0},
+        {"ts": "2999-01-01T10:01:00", "project_id": "b", "tool": "codegraph_search", "ok": True, "elapsed_ms": 5.0},
+        {"ts": "2999-01-01T10:02:00", "project_id": "a", "tool": "codegraph_impact", "ok": True, "elapsed_ms": 5.0},
+    ])
+    r = Report()
+    _usage_codegraph(r, cg, project_id="a")
+    msg = next(row["msg"] for row in r.rows if row.get("tag") == "codegraph usage")
+    assert "2 calls" in msg  # 只算 project a 的两条, 不含 b
+    assert "codegraph_search=1" in msg and "codegraph_impact=1" in msg
+
+
 def test_usage_codegraph_missing_file_is_info(tmp_path):
     r = Report()
     _usage_codegraph(r, tmp_path / "nope.jsonl")

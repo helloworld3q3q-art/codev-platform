@@ -157,15 +157,19 @@ def cmd_health(args: argparse.Namespace) -> int:
     _check_git_tools(r, repo)
 
     r.section("")
-    r.section("--- usage stats (last 7 days) ---")
+    # 仅 --project 显式指定时按 project_id 过滤使用率; 默认 health 保持全平台合计
+    # (search_recall 有 legacy 无 project_id 行, 不显式过滤避免质量基线塌掉)。
+    usage_pid = args.project or None
+    scope = f", project={usage_pid}" if usage_pid else ""
+    r.section(f"--- usage stats (last 7 days{scope}) ---")
     recall_file = cdv_root / "codev_platform" / "chroma" / "search_recall.jsonl"
     cl_usage = cdv_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl"
     cg_usage = cdv_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
-    _usage_search_recall(r, recall_file)
+    _usage_search_recall(r, recall_file, usage_pid)
     _usage_reindex(r, repo)
-    _usage_platform_docs(r, repo, recall_file, health)
-    _usage_cross_link(r, cl_usage)
-    _usage_codegraph(r, cg_usage)
+    _usage_platform_docs(r, repo, recall_file, health, usage_pid)
+    _usage_cross_link(r, cl_usage, usage_pid)
+    _usage_codegraph(r, cg_usage, usage_pid)
 
     # top banner (parity with .ps1 P6)
     if r.red > 0:
