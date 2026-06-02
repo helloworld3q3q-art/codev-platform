@@ -410,6 +410,39 @@ def cmd_plugins(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_graph(args: argparse.Namespace) -> int:
+    """graph ingest: 跑适用插件把统一图谱产出灌进 per-project store。
+       graph stats:  打印某 project 统一图谱 store 的聚合统计。
+    """
+    pid = args.project or resolve_local()
+    if args.action == "ingest":
+        from codev_platform.graph.ingest import ingest_project
+        repo = Path(args.repo).resolve() if args.repo else Path.cwd()
+        report = ingest_project(repo, pid)
+        if not report.ingested:
+            _print(f"(无插件入库 project={pid}; 无适用且成功的 analyzer)")
+            return 0
+        _print(f"已 ingest project={pid} repo={repo}")
+        for name in report.ingested:
+            s = report.summaries.get(name, {})
+            _print(
+                f"  {name}: nodes={s.get('nodes', 0)} edges={s.get('edges', 0)} "
+                f"evidences={s.get('evidences', 0)} findings={s.get('findings', 0)}"
+            )
+        return 0
+    if args.action == "stats":
+        from codev_platform.graph.store import open_store, stats
+        conn = open_store(pid)
+        try:
+            data = stats(conn)
+        finally:
+            conn.close()
+        _print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    _eprint(f"unknown action: {args.action}")
+    return 1
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from codev_platform import __version__
     _print(f"codev-platform {__version__}")
@@ -772,6 +805,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp_plg = sub.add_parser("plugins", help="analyzer 插件管理 (list 列出已注册插件)")
     sp_plg.add_argument("action", choices=["list"], help="list=列出已注册插件 name/version")
     sp_plg.set_defaults(func=cmd_plugins)
+
+    sp_graph = sub.add_parser("graph", help="统一图谱 store (ingest 跑插件入库 / stats 统计)")
+    sp_graph.add_argument("action", choices=["ingest", "stats"],
+                          help="ingest=跑适用插件灌入 per-project store / stats=打印统计")
+    sp_graph.add_argument("--project", default=None, help="project_id (默认从 cwd 解析)")
+    sp_graph.add_argument("--repo", default=None, help="ingest: 被分析的仓库根 (默认 cwd)")
+    sp_graph.set_defaults(func=cmd_graph)
 
     sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")
     sp_dae.add_argument("action", choices=["status", "stop"], help="status=查 /health / stop=按 pid 结束")
