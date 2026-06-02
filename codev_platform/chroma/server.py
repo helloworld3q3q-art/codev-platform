@@ -80,7 +80,11 @@ from codev_platform.core.config import load_config  # noqa: E402
 # rebound 全局 rr._reranker_model (不可 from import, 否则 stale)。
 from codev_platform.chroma import _reranker as rr  # noqa: E402
 from codev_platform.chroma._reranker import _ensure_reranker, _rerank_scores  # noqa: E402,F401
-_gpu_sem: "asyncio.Semaphore | None" = None  # lazy init in event loop
+# 模型 / chroma client 生命周期抽到 _models.py (无环: 从 _config 拿常量, 不依赖 server)。
+# re-export 4 函数 (_tools / _ensure_project / _load_project_state 用); `m` 供 health/healthz
+# 读 rebound 全局 m._model / m._global_init_error (不可 from import, 否则 stale)。
+from codev_platform.chroma import _models as m  # noqa: E402
+from codev_platform.chroma._models import _ensure_model, _get_client, _encode_query, _get_gpu_sem  # noqa: E402,F401
 
 # 日志 helper (_flog / _log_recall / _maybe_rotate_log) + 路径常量已抽到 _obslog.py
 # (见上方 import re-export)。
@@ -88,11 +92,8 @@ _gpu_sem: "asyncio.Semaphore | None" = None  # lazy init in event loop
 import contextvars
 from dataclasses import dataclass, field
 
-_client = None
-_model = None  # shared embedding model (multi-tenant: 同模型服务所有 project)
-_reranker_model = None  # populated lazily by reranker loader
-_use_query_prompt = False
-_global_init_error: str | None = None  # model load failure (跨 project 共享)
+# _client / _model / _use_query_prompt / _global_init_error 抽到 _models.py;
+# _reranker_model 抽到 _reranker.py。读经 m.<name> / rr.<name> (访问当前值, 防 stale)。
 
 # _STAMP_PATH (构建戳路径) 已抽到 _config.py (上方 import re-export)。
 
@@ -156,59 +157,8 @@ _current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextV
 )
 
 
-def _ensure_model():
-    """Lazy 加载 SentenceTransformer 模型(只加载一次,hot-reload 不重载)。"""
-    global _model, _use_query_prompt, _global_init_error
-    if _model is not None:
-        return _model
-    if _global_init_error is not None:
-        return None
-    try:
-        _flog(f"[init] model_path={EMBED_MODEL}")
-        _flog(f"[init] device={EMBED_DEVICE} data_dir={DATA_DIR}")
-        try:
-            import torch
-            cuda_ok = torch.cuda.is_available()
-            cuda_name = torch.cuda.get_device_name(0) if cuda_ok else "n/a"
-            _flog(f"[init] torch={torch.__version__} cuda_available={cuda_ok} gpu={cuda_name}")
-        except Exception as e:
-            _flog(f"[init] torch import failed: {e}")
-
-        from sentence_transformers import SentenceTransformer
-        try:
-            # 瞬时 GPU 失败 (busy / transient OOM) 先在 GPU 上有界重试退避; 耗尽再降级 CPU。
-            _model = _load_with_retry(
-                "embedding", lambda: SentenceTransformer(EMBED_MODEL, device=EMBED_DEVICE)
-            )
-        except Exception as gpu_exc:  # noqa: BLE001
-            # F5: GPU 被其它进程抢占 (OOM / device busy) → 降级 CPU 重试一次, 不硬挂 daemon。
-            # CPU 推理慢但可用, 避免整卡满时检索功能完全不可用。
-            if EMBED_DEVICE != "cpu" and _is_gpu_error(gpu_exc):
-                _flog(f"[init] WARN: GPU load failed after retries ({gpu_exc!s}), fallback to CPU (slower)")
-                _model = SentenceTransformer(EMBED_MODEL, device="cpu")
-            else:
-                raise
-        prompts = getattr(_model, "prompts", None) or {}
-        _use_query_prompt = "query" in prompts and bool(prompts.get("query"))
-        get_dim = _model.get_embedding_dimension if hasattr(_model, "get_embedding_dimension") else _model.get_sentence_embedding_dimension
-        dim = get_dim()
-        _flog(f"[init] model loaded dim={dim} max_seq={getattr(_model, 'max_seq_length', '?')} use_query_prompt={_use_query_prompt}")
-        return _model
-    except Exception as exc:  # noqa: BLE001
-        _global_init_error = f"模型加载失败: {exc!s}"
-        _flog(f"[init] ERROR: {_global_init_error}")
-        return None
-
-
-def _get_client():
-    """Lazy chroma client (跨 project 共享单实例)."""
-    global _client
-    if _client is None:
-        import chromadb  # lazy: heavy runtime 依赖, 顶层不 import (见模块头注释)
-        _client = chromadb.PersistentClient(path=str(DATA_DIR))
-        from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁 (默认 delete 模式会独占)
-        ensure_wal(DATA_DIR)
-    return _client
+# _ensure_model / _get_client 已抽到 _models.py (上方 import re-export, _ensure_project /
+# _load_project_state 仍调 server.<name> -> _models 函数)。
 
 
 def _load_project_state(project_id: str, reason: str) -> _ProjectState:
@@ -324,27 +274,7 @@ def _ensure_project(project_id: str) -> _ProjectState | None:
         return None
 
 
-def _encode_query(query: str):
-    """查询侧 encode:Qwen3 用 prompt_name='query',MiniLM 不用。"""
-    kwargs: dict[str, Any] = {"normalize_embeddings": True, "convert_to_numpy": True}
-    if _use_query_prompt:
-        kwargs["prompt_name"] = "query"
-    _t0 = time.perf_counter()
-    try:
-        vec = _model.encode([query], **kwargs)[0]
-    except Exception as exc:
-        _record_stat_error("embedding", exc)
-        raise
-    _record_stat("embedding", (time.perf_counter() - _t0) * 1000)
-    return vec.tolist()
-
-
-def _get_gpu_sem() -> "asyncio.Semaphore":
-    """Lazy init GPU semaphore (must be inside event loop)."""
-    global _gpu_sem
-    if _gpu_sem is None:
-        _gpu_sem = asyncio.Semaphore(GPU_CONCURRENCY)
-    return _gpu_sem
+# _encode_query / _get_gpu_sem 已抽到 _models.py (上方 import re-export, _tools 仍 from server import)。
 
 
 # Reranker 子系统 (_ensure_reranker / _rerank_scores + 全局 + prompt 常量) 已抽到
@@ -452,7 +382,7 @@ async def _run_http(port: int) -> None:
         # default_project_id / loaded_projects / backends)。launcher 仅需就绪状态码
         # (200 ready / 503 starting) + tenant_mode (非敏感常量); 详情走鉴权的
         # /platform/health。
-        model_ready = _model is not None
+        model_ready = m._model is not None
         any_collection_ready = any(p.collection is not None for p in _projects.values())
         all_ready = model_ready and any_collection_ready
         return JSONResponse(
@@ -468,7 +398,7 @@ async def _run_http(port: int) -> None:
         # 鉴权后详情面 (挂 /platform/health, 不在 public_paths): 报所有 loaded projects +
         # 默认 project_id + stats + GPU。token 模式需 Bearer; passthrough 模式本机放行。
         # multi-tenant: 报告所有 loaded projects + 默认 project_id (向后兼容字段保留)
-        model_ready = _model is not None
+        model_ready = m._model is not None
         loaded = []
         stale_pids: list[str] = []
         for p in _projects.values():
@@ -531,7 +461,7 @@ async def _run_http(port: int) -> None:
                 "model": "loaded" if model_ready else "loading",
                 "collection": "ready" if any_collection_ready else "init",
                 "reranker": "loaded" if reranker_ready else "loading_or_disabled",
-                "init_error": _global_init_error,
+                "init_error": m._global_init_error,
                 "project_id": PROJECT_ID,  # backward-compat: 启动默认 project_id
                 "tenant_mode": "multi",
                 "loaded_projects": loaded,
