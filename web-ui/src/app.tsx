@@ -1,5 +1,6 @@
 import EnumLoader from '@/components/EnumLoader';
 import LogoutButton from '@/components/LogoutButton';
+import OrgSelect from '@/components/OrgSelect';
 import ProjectSelect from '@/components/ProjectSelect';
 import TabContainer from '@/components/TabContainer';
 import { MENU_ITEMS } from '@/menus';
@@ -40,6 +41,10 @@ export async function getInitialState(): Promise<{
       if (res.data?.username) {
         userInfo = { username: res.data.username };
         localStorage.setItem('user', JSON.stringify(userInfo));
+        // 当前组织默认取会话 org (供 fetch 注入 X-Org-Id); 未手动切换前以此为准。
+        if (res.data.orgId && !localStorage.getItem('current_org')) {
+          localStorage.setItem('current_org', res.data.orgId);
+        }
       }
     } catch {
       // 401 已由 fetch 拦截器清 token + 跳登录; 其它错误保留本地用户(后端临时不可用容错)。
@@ -95,8 +100,12 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
     },
     menuHeaderRender: false,
     rightContentRender: false,
-    // 顶栏右侧: 项目选择器 (多租户上下文) + 登出。
-    actionsRender: () => [<ProjectSelect key="project" />, <LogoutButton key="logout" />],
+    // 顶栏右侧: 组织 + 项目选择器 (多租户上下文) + 登出。
+    actionsRender: () => [
+      <OrgSelect key="org" />,
+      <ProjectSelect key="project" />,
+      <LogoutButton key="logout" />,
+    ],
     waterMarkProps: undefined,
     ...initialState?.settings,
   };

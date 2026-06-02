@@ -127,6 +127,12 @@ axiosInstance.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     config.headers['X-Project-Id'] = projectId;
   }
+  // 当前组织 (会话 org 或 useModel('org') 切换); 后端按 org 过滤 (如 projects list)。
+  const orgId = localStorage.getItem('current_org');
+  if (orgId) {
+    config.headers = config.headers || {};
+    config.headers['X-Org-Id'] = orgId;
+  }
   return config;
 });
 
