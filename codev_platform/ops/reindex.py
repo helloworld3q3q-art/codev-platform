@@ -165,7 +165,9 @@ def _git_out(repo: Path | None, *git_args: str) -> tuple[int, str]:
         cmd += ["-C", str(repo)]
     cmd += list(git_args)
     try:
-        cp = subprocess.run(cmd, capture_output=True, text=True)
+        # Windows 下 text=True 不指定 encoding 会按 GBK 解码 git 输出,撞中文 commit/diff
+        # 内容 → UnicodeDecodeError 崩 reader 线程 → 静默跳过 reindex(2026-06-02 修)
+        cp = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     except FileNotFoundError:
         return 127, ""
     return cp.returncode, cp.stdout.strip()

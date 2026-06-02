@@ -60,7 +60,8 @@ def resolve_repo(repo: str | os.PathLike | None = None) -> Path:
     try:
         top = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True,
+            # 显式 utf-8 解码：防仓位于中文路径时 GBK 解码崩(2026-06-02 GBK 扫尾)
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         if top.returncode == 0 and top.stdout.strip():
             return Path(top.stdout.strip()).resolve()
