@@ -21,6 +21,11 @@ def _git(repo: Path, *args: str, timeout: int = _PULL_TIMEOUT_SEC) -> subprocess
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
+        # Windows 下不显式指定时 text=True 按 locale(GBK)解码 git 输出,
+        # 撞中文 commit message / 中文文件 diff 内容会 UnicodeDecodeError 崩 reader 线程
+        # (2026-06-02 post-commit reindex 因含中文 .bat 的 commit 崩,静默跳过 reindex)。
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
     )
 
