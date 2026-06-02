@@ -47,15 +47,15 @@ export function createColumns({
       render: (_, record) =>
         record.loaded
           ? [
-              <Typography.Link key="unload" onClick={() => onUnload(record)}>
+            <Typography.Link key="unload" onClick={() => onUnload(record)}>
                 卸载
-              </Typography.Link>,
-            ]
+            </Typography.Link>,
+          ]
           : [
-              <Typography.Link key="load" onClick={() => onLoad(record)}>
+            <Typography.Link key="load" onClick={() => onLoad(record)}>
                 加载
-              </Typography.Link>,
-            ],
+            </Typography.Link>,
+          ],
     },
   ];
 }
