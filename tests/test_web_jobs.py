@@ -1,0 +1,139 @@
+"""Web Jobs + Indexes 垂直片测试 (plan §十二 / §十五)。
+
+覆盖: 提交 rebuild 返回 jobId + 同 project 同类型再次提交互斥 (RATE_LIMITED) +
+job detail 查询 + cancel 改状态 + 未知 job 报错 envelope。本 venv 未装 fastapi → skip。
+"""
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip("fastapi")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from codev_platform.core.httpkit import build_app  # noqa: E402
+from codev_platform.web.domain.locks import registry as lock_registry  # noqa: E402
+from codev_platform.web.repositories.job_write_repo import new_in_memory_store  # noqa: E402
+from codev_platform.web.routes import indexes, jobs  # noqa: E402
+from codev_platform.web.repositories.job_read_repo import InMemoryJobReadRepo  # noqa: E402
+from codev_platform.web.repositories.job_write_repo import InMemoryJobWriteRepo  # noqa: E402
+from codev_platform.web.services.index_service import IndexService  # noqa: E402
+from codev_platform.web.services.job_service import JobService  # noqa: E402
+
+_CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
+_HEADERS = {"X-Project-Id": "demo-proj"}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_state():
+    """每个用例独立 store + 干净项目锁 (模块级单例需手动复位)。"""
+    store = new_in_memory_store()
+    svc = JobService(
+        read_repo=InMemoryJobReadRepo(store),
+        write_repo=InMemoryJobWriteRepo(store),
+        locks=lock_registry,
+    )
+    jobs.job_service = svc
+    indexes.index_service = IndexService(svc)
+    # 清空任何残留锁
+    lock_registry._held.clear()  # noqa: SLF001  (测试复位, 非生产路径)
+    yield
+    lock_registry._held.clear()  # noqa: SLF001
+
+
+def _client() -> TestClient:
+    return TestClient(build_app(title="t", routers=[jobs.router, indexes.router], cfg=_CFG))
+
+
+def test_rebuild_returns_job_id():
+    c = _client()
+    r = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["data"]["jobId"]
+    assert body["requestId"]
+
+
+def test_rebuild_default_kind_all():
+    c = _client()
+    r = c.post("/api/v1/indexes/rebuild", json={}, headers=_HEADERS)
+    assert r.status_code == 200
+    assert r.json()["data"]["jobId"]
+
+
+def test_rebuild_unknown_kind_is_invalid_params():
+    c = _client()
+    r = c.post("/api/v1/indexes/rebuild", json={"indexKind": "nope"}, headers=_HEADERS)
+    assert r.status_code == 400
+    assert r.json()["code"] == "invalid_params"
+
+
+def test_same_project_same_type_is_mutually_exclusive():
+    c = _client()
+    r1 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
+    assert r1.status_code == 200
+    # 同 project 同 kind 再提交 → 互斥 (锁未释放, job 仍 Pending)
+    r2 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
+    assert r2.status_code == 429
+    body = r2.json()
+    assert body["success"] is False
+    assert body["code"] == "rate_limited"
+    assert body["requestId"]
+
+
+def test_different_kind_not_blocked():
+    c = _client()
+    r1 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
+    r2 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "codegraph"}, headers=_HEADERS)
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.json()["data"]["jobId"] != r2.json()["data"]["jobId"]
+
+
+def test_job_detail_query():
+    c = _client()
+    job_id = c.post(
+        "/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS
+    ).json()["data"]["jobId"]
+    r = c.get("/api/v1/jobs/detail", params={"jobId": job_id}, headers=_HEADERS)
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["jobId"] == job_id
+    assert data["projectId"] == "demo-proj"
+    assert data["jobType"] == "index_rebuild:chroma"
+    assert data["status"] == "Pending"
+
+
+def test_cancel_changes_status_and_releases_lock():
+    c = _client()
+    job_id = c.post(
+        "/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS
+    ).json()["data"]["jobId"]
+    r = c.post("/api/v1/jobs/cancel", json={"jobId": job_id}, headers=_HEADERS)
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "Cancelled"
+    # 锁释放后, 同 project 同 kind 可再次提交
+    r2 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
+    assert r2.status_code == 200
+
+
+def test_cancel_terminal_job_rejected():
+    c = _client()
+    job_id = c.post(
+        "/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS
+    ).json()["data"]["jobId"]
+    c.post("/api/v1/jobs/cancel", json={"jobId": job_id}, headers=_HEADERS)
+    # 再取消已 Cancelled 的 job → invalid_params
+    r = c.post("/api/v1/jobs/cancel", json={"jobId": job_id}, headers=_HEADERS)
+    assert r.status_code == 400
+    assert r.json()["code"] == "invalid_params"
+
+
+def test_unknown_job_is_error_envelope():
+    c = _client()
+    r = c.get("/api/v1/jobs/detail", params={"jobId": "nope-xyz"}, headers=_HEADERS)
+    assert r.status_code == 404
+    body = r.json()
+    assert body["success"] is False
+    assert body["code"] == "project_unknown"
+    assert body["requestId"]
