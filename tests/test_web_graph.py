@@ -216,6 +216,102 @@ def test_missing_db_specific_query_still_index_missing(tmp_path, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# 统一图谱 store (插件产出) 优先 + 空则 fallback (task2)
+# ----------------------------------------------------------------------
+
+
+def _seed_graph_store(path: Path, project_id: str) -> None:
+    """往统一图谱 store 写一份 cross-link 风格产出 (meta 含 cross_link_kind/rel 留底)。"""
+    from codev_platform.graph.schema import (
+        AnalyzerResult,
+        GraphEdge,
+        GraphNode,
+    )
+    from codev_platform.graph.store import open_store, upsert_result
+
+    table = GraphNode(
+        id=f"{project_id}:table:1", kind="db_table", name="store_table",
+        project_id=project_id, file=None, line=None, language=None,
+        meta={"cross_link_kind": "table"},
+    )
+    endpoint = GraphNode(
+        id=f"{project_id}:java_endpoint:2", kind="backend_endpoint",
+        name="GET /api/x", project_id=project_id, file="X.java", line=10,
+        language="java", meta={"cross_link_kind": "java_endpoint"},
+    )
+    edge = GraphEdge(
+        source=endpoint.id, target=table.id, kind="reads_table", confidence=0.8,
+        meta={"cross_link_rel": "queries_table"},
+    )
+    result = AnalyzerResult(
+        nodes=[table, endpoint], edges=[edge], plugin="builtin.cross_link",
+    )
+    conn = open_store(project_id, path=path)
+    try:
+        upsert_result(conn, project_id, result)
+    finally:
+        conn.close()
+
+
+def test_cross_link_graph_reads_store_when_present(tmp_path, monkeypatch):
+    """store 有 cross-link 数据 → graph 路由消费 store (不读 cross_layer.sqlite)。"""
+    store_db = tmp_path / "store.sqlite"
+    _seed_graph_store(store_db, _PID)
+    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
+    # cross_layer.sqlite 故意缺失: 若误走 fallback 会变空, 测试就能抓到。
+    import codev_platform.web.integrations.cross_link_client as clc
+    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
+    r = c.post("/api/v1/graph/cross-link/graph", headers=_HEADERS, json={})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["nodeCount"] == 2 and data["edgeCount"] == 1
+    kinds = {n["kind"] for n in data["nodes"]}
+    assert kinds == {"table", "java_endpoint"}  # 还原成 cross-link 原始 kind
+    assert data["edges"][0]["kind"] == "queries_table"  # 还原成 cross-link 原始 rel
+    names = {n["name"] for n in data["nodes"]}
+    assert names == {"store_table", "GET /api/x"}
+
+
+def test_cross_link_stats_reads_store_when_present(tmp_path, monkeypatch):
+    """store 有数据 → stats 路由按 cross-link 原始 kind/rel 统计 store。"""
+    store_db = tmp_path / "store.sqlite"
+    _seed_graph_store(store_db, _PID)
+    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
+    import codev_platform.web.integrations.cross_link_client as clc
+    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
+    r = c.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["nodesByKind"] == {"table": 1, "java_endpoint": 1}
+    assert data["edgesByRel"] == {"queries_table": 1}
+
+
+def test_cross_link_graph_falls_back_when_store_empty(client, tmp_path, monkeypatch):
+    """store 缺失/空 → fallback 现有 cross_layer.sqlite (现有页面不破)。"""
+    # store 路径指向不存在的文件 → 走 fallback。client fixture 已 seed cross_layer.sqlite。
+    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "no_store.sqlite")
+    r = client.post("/api/v1/graph/cross-link/graph", headers=_HEADERS, json={})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    # fallback 读到 seed 的 cross_layer.sqlite: table + flyway + java_method 三节点。
+    assert data["nodeCount"] >= 1
+    kinds = {n["kind"] for n in data["nodes"]}
+    assert "table" in kinds
+
+
+def test_cross_link_stats_falls_back_when_store_empty(client, tmp_path, monkeypatch):
+    """store 空 → stats fallback cross_layer.sqlite (build_meta.last_build_at 可见)。"""
+    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "no_store.sqlite")
+    r = client.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["lastBuildAt"] == "2026-06-02T00:00:00"
+    assert data["nodesByKind"]["table"] == 1
+
+
+# ----------------------------------------------------------------------
 # operationId 唯一 (plan §十三)
 # ----------------------------------------------------------------------
 
