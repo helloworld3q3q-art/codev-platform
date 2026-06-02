@@ -339,7 +339,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 async def _dispatch(name: str, args: dict) -> list[TextContent]:
     conn = _current_conn()
     if conn is None:
-        return _err(_error_for(_active_pid()) or "cross_layer DB 未初始化")
+        return _err(_error_for(_active_pid()) or "cross_layer DB 未初始化", ErrorCode.INDEX_MISSING)
 
     import time as _t
     _t0 = _t.perf_counter()
@@ -347,7 +347,7 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
         if name == "find_table_refs":
             table = (args.get("table") or "").strip()
             if not table:
-                return _err("table 不能为空")
+                return _err("table 不能为空", ErrorCode.INVALID_PARAMS)
             _flog(f"[find_table_refs] table={table!r}")
             # Flyway definers
             cur = conn.execute(
@@ -377,7 +377,7 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
         if name == "find_endpoint_link":
             qname = (args.get("name") or "").strip()
             if not qname:
-                return _err("name 不能为空")
+                return _err("name 不能为空", ErrorCode.INVALID_PARAMS)
             _flog(f"[find_endpoint_link] name={qname!r}")
             # 判断是 frontend_api 还是 java_endpoint
             cur = conn.execute(
@@ -387,7 +387,7 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             )
             src_rows = cur.fetchall()
             if not src_rows:
-                return _err(f"未找到节点 '{qname}'（kind 必须是 frontend_api / java_endpoint）")
+                return _err(f"未找到节点 '{qname}'（kind 必须是 frontend_api / java_endpoint）", ErrorCode.INVALID_PARAMS)
             results: list[dict] = []
             for src in src_rows:
                 meta = json.loads(src["meta_json"]) if src["meta_json"] else {}
@@ -445,7 +445,7 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
         if name == "search_nodes":
             query = (args.get("query") or "").strip()
             if not query:
-                return _err("query 不能为空")
+                return _err("query 不能为空", ErrorCode.INVALID_PARAMS)
             kind = args.get("kind", "all")
             limit = max(1, min(50, int(args.get("limit", 20))))
             _flog(f"[search_nodes] q={query!r} kind={kind} limit={limit}")
@@ -493,7 +493,7 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             }
             return _ok(payload)
 
-        return _err(f"未知 tool: {name}")
+        return _err(f"未知 tool: {name}", ErrorCode.INVALID_PARAMS)
     except Exception as exc:
         tb = traceback.format_exc()
         print(f"[cross-link] tool '{name}' error: {tb}", file=sys.stderr)
