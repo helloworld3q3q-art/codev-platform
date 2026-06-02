@@ -34,17 +34,15 @@ from mcp.types import TextContent, Tool
 # prompt_name='query'(Qwen3 instruction-aware),必须自己持有 SentenceTransformer。
 # 索引侧同样自己 encode(见 index_docs.py)。
 
-# codev-platform 包内 import (pip install -e codev-platform 后)
-from codev_platform.core.project_id import ProjectIdError, resolve_local
-from codev_platform.core.paths import chroma_collection_name, chroma_dir
+# codev-platform 包内 import。chroma_collection_name 仍在 _load_project_state 用。
+from codev_platform.core.paths import chroma_collection_name
 
-# BM25 hybrid retrieval 伴侣(可选,jieba + rank_bm25 缺失时自动 disable)
+# BM25Index 类 (_load_project_state 用); jieba+rank_bm25 缺失时不可用, 实际用前由
+# _config._BM25_IMPORT_OK 守护。rrf_fuse 已随 call_tool 移到 _tools (各自 guarded import)。
 try:
-    from codev_platform.chroma.bm25 import BM25Index, rrf_fuse
-    _BM25_IMPORT_OK = True
-except ImportError as _bm25_imp_err:
-    _BM25_IMPORT_OK = False
-    _BM25_IMPORT_ERR = str(_bm25_imp_err)
+    from codev_platform.chroma.bm25 import BM25Index
+except ImportError:
+    pass
 
 # 2026-06-02 拆包 (file-discipline §1): 日志 / 统计 / 纯 helper / tool schema 抽到 sibling
 # 模块, server.py 保留有状态核心 (model/client/projects/reranker/transport)。这些 import
@@ -66,69 +64,16 @@ from codev_platform.chroma._schema import (  # noqa: E402
 # 全局：Chroma 客户端 + collection（lazy init，启动失败也不挂 server）
 # ----------------------------------------------------------------------
 
-# DATA_DIR 走 codev_platform.core.paths.chroma_dir() (基于业务项目 cwd)
-# 不再用 __file__.parents 推导 (那是 codev-platform package 自身位置, 错)
-DATA_DIR = chroma_dir()
-# 多项目命名: <project_id>__platform_docs
-# import 期 best-effort 解析单 project (stdio 模式默认)。
-# HTTP daemon 多租户, 每请求带 ?project_id=, 不依赖此值; 故解析失败**不退出 / 不 sys.exit**
-# (与 cross_link/codegraph server 同款), 保证 `import codev_platform.chroma.server` 始终可成功。
-try:
-    PROJECT_ID = resolve_local()
-except ProjectIdError as _pid_exc:
-    print(f"[codev_platform.chroma.server] WARN: project_id 未解析 ({_pid_exc!s}); "
-          "daemon 多租户模式按请求 ?project_id= 路由, PROJECT_ID=None。", file=sys.stderr, flush=True)
-    PROJECT_ID = None
-COLLECTION_BASE = "platform_docs"
-# PROJECT_ID 为 None 时 (无默认 project) 不预生成 collection 名, 每请求带 project_id 时再算。
-COLLECTION_NAME = chroma_collection_name(PROJECT_ID, COLLECTION_BASE) if PROJECT_ID else None
-# backward compat: 旧索引存在 unprefixed `platform_docs`, daemon 启动时若新命名 collection
-# 不存在, 自动 fallback 到旧名 + 警告 (_load_project_state 内处理)
-LEGACY_COLLECTION_NAME = "platform_docs"  # 字面量明示, 与历史不带 project_id 前缀的 collection 名一致
-# 优先级: env var > ~/.codev-platform/config.json > 代码默认.
-# 不再 hardcode D:\models\... 路径 — 用户跑 `codev-platform config init` 生成 config 文件.
-from codev_platform.core.config import load_config, env_or_config  # noqa: E402
-from codev_platform.core.obslog import logging_mode, redact_text  # noqa: E402
-
-_CFG = load_config()
-# dev (默认全量) / prod (脱敏) —— 见 core.obslog。模块加载时解析一次。
-_LOG_MODE = logging_mode(_CFG)
-EMBED_MODEL = str(Path(env_or_config("PLATFORM_EMBED_MODEL_PATH", _CFG, "models.embed_path")).expanduser().resolve())
-EMBED_DEVICE = env_or_config("PLATFORM_EMBED_DEVICE", _CFG, "models.embed_device", "cuda")
-
-# ---------- Reranker config (Qwen3-Reranker-0.6B chat-template + yes/no logits) ----------
-RERANKER_MODEL = env_or_config("PLATFORM_RERANKER_MODEL_PATH", _CFG, "models.reranker_path", "")
-RERANKER_DEVICE = env_or_config("PLATFORM_RERANKER_DEVICE", _CFG, "models.reranker_device", "cuda")
-# 精度配置化: 不同显卡最优 dtype 不同(消费卡 fp16 / Ampere+ 服务器卡 bf16 / 大显存或 CPU fp32)。
-# auto = 老行为(cuda 系 fp16, 否则 fp32)。env > config models.reranker_dtype > auto。
-RERANKER_DTYPE = env_or_config("PLATFORM_RERANKER_DTYPE", _CFG, "models.reranker_dtype", "auto")
-
-
-_rer_enabled_raw = env_or_config("PLATFORM_RERANKER_ENABLED", _CFG, "models.reranker_enabled", True)
-RERANKER_ENABLED = (
-    _rer_enabled_raw.lower() in ("true", "1", "yes")
-    if isinstance(_rer_enabled_raw, str) else bool(_rer_enabled_raw)
+# 配置常量抽到 _config.py (无环分层叶子, §A.2b)。此处 re-export 保持 server.<NAME> 兼容
+# (_tools / _models / _projects / _http 仍可 `from .server import EMBED_MODEL` 等; 也可直接 from _config)。
+from codev_platform.chroma._config import (  # noqa: E402
+    DATA_DIR, _STAMP_PATH, PROJECT_ID, COLLECTION_BASE, COLLECTION_NAME, LEGACY_COLLECTION_NAME,
+    _CFG, _LOG_MODE, EMBED_MODEL, EMBED_DEVICE,
+    RERANKER_MODEL, RERANKER_DEVICE, RERANKER_DTYPE, RERANKER_ENABLED, RERANKER_TOP_K,
+    DEFAULT_RETURN_K, BM25_TOP_K, BM25_ENABLED, RRF_K_CONST, GPU_CONCURRENCY, _BM25_IMPORT_OK,
 )
-
-# 重排前从 Chroma 取多少候选(rerank 后取 k 返回); 兼容旧 env 名 PLATFORM_RERANKER_TOP_K
-RERANKER_TOP_K = int(
-    os.getenv("PLATFORM_SEARCH_RECALL_K") or os.getenv("PLATFORM_RERANKER_TOP_K")
-    or env_or_config("", _CFG, "search.recall_k", 30)
-)
-DEFAULT_RETURN_K = int(env_or_config("PLATFORM_SEARCH_RETURN_K", _CFG, "search.return_k", 5))
-
-# ---------- BM25 hybrid config ----------
-BM25_TOP_K = int(os.getenv("PLATFORM_BM25_TOP_K", str(RERANKER_TOP_K)))
-_bm25_enabled_raw = env_or_config("PLATFORM_BM25_ENABLED", _CFG, "search.bm25_enabled", True)
-BM25_ENABLED = (
-    _BM25_IMPORT_OK
-    and ((_bm25_enabled_raw.lower() in ("true", "1", "yes")) if isinstance(_bm25_enabled_raw, str) else bool(_bm25_enabled_raw))
-)
-RRF_K_CONST = int(env_or_config("PLATFORM_RRF_K_CONST", _CFG, "search.rrf_k_const", 60))
-
-# GPU concurrency: 多 session 同时 search_docs 时, encode / rerank 串行化的最大并发.
-# 默认 1 = 完全串行 (8GB GPU 安全), 调高仅在 >= 24GB VRAM 时考虑.
-GPU_CONCURRENCY = int(env_or_config("PLATFORM_GPU_CONCURRENCY", _CFG, "search.gpu_concurrency", 1))
+# load_config 仍在 server 用 (handle_sse / platform_status 的 ACL + 中间件构建)。
+from codev_platform.core.config import load_config  # noqa: E402
 _gpu_sem: "asyncio.Semaphore | None" = None  # lazy init in event loop
 
 # 日志 helper (_flog / _log_recall / _maybe_rotate_log) + 路径常量已抽到 _obslog.py
@@ -143,9 +88,7 @@ _reranker_model = None  # populated lazily by reranker loader
 _use_query_prompt = False
 _global_init_error: str | None = None  # model load failure (跨 project 共享)
 
-# 构建戳路径:index_docs.py 完成索引时写,server 每次 query 前 stat,
-# mtime 变新就只重连 Chroma collection(模型不重载)
-_STAMP_PATH = DATA_DIR / ".last_build.json"
+# _STAMP_PATH (构建戳路径) 已抽到 _config.py (上方 import re-export)。
 
 
 @dataclass
