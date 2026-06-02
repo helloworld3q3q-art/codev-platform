@@ -26,9 +26,9 @@ def test_health_check_envelope_and_request_id():
     r = _client().get("/api/v1/health/check")
     assert r.status_code == 200
     body = r.json()
-    assert body["success"] is True
+    assert body["result"] == 0
     assert body["data"]["status"] == "ok"
-    assert body["code"] is None and body["error"] is None
+    assert body["errors"] == []
     # RequestId 中间件: 响应头 + body.requestId 都在且一致
     assert r.headers.get("x-request-id")
     assert body["requestId"] == r.headers["x-request-id"]
@@ -70,8 +70,8 @@ def test_enums_unknown_type_is_unified_error_envelope():
     r = _client().post("/api/v1/enums/list", json={"enumType": "NopeEnum"})
     assert r.status_code == 400
     body = r.json()
-    assert body["success"] is False
-    assert body["code"] == "invalid_params"
+    assert body["result"] == 1
+    assert body["errors"][0]["errorCode"] == "invalid_params"
     assert body["requestId"]  # 错误体也带 request_id
 
 

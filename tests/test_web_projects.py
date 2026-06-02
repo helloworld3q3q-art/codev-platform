@@ -56,9 +56,9 @@ def test_list_returns_page_result_structure(client):
     r = c.post("/api/v1/projects/list")
     assert r.status_code == 200
     body = r.json()
-    assert body["success"] is True
-    assert body["pageNumber"] == 1 and body["pageSize"] == 20
-    assert body["total"] == 2
+    assert body["result"] == 0
+    assert body["currentPage"] == 1 and body["pageSize"] == 20
+    assert body["total"] == 2 and body["totalPage"] == 1
     codes = {it["code"] for it in body["data"]}
     assert codes == {"alpha", "beta"}
     assert body["requestId"]
@@ -82,8 +82,8 @@ def test_register_idempotent_duplicate_is_unified_error(client):
     r = c.post("/api/v1/projects/register", json=payload)
     assert r.status_code == 400
     body = r.json()
-    assert body["success"] is False
-    assert body["code"] == "invalid_params"
+    assert body["result"] == 1
+    assert body["errors"][0]["errorCode"] == "invalid_params"
     assert body["requestId"]
 
 
@@ -92,8 +92,8 @@ def test_detail_unknown_project_is_project_unknown(client):
     r = c.get("/api/v1/projects/detail", params={"code": "nope"})
     assert r.status_code == 404
     body = r.json()
-    assert body["success"] is False
-    assert body["code"] == "project_unknown"
+    assert body["result"] == 1
+    assert body["errors"][0]["errorCode"] == "project_unknown"
 
 
 def test_load_then_unload_toggles_runtime_state(client):
@@ -112,4 +112,4 @@ def test_load_unknown_project_is_project_unknown(client):
     c, _ = client
     r = c.post("/api/v1/projects/load", json={"code": "ghost"})
     assert r.status_code == 404
-    assert r.json()["code"] == "project_unknown"
+    assert r.json()["errors"][0]["errorCode"] == "project_unknown"

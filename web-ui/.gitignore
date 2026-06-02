@@ -1,0 +1,9 @@
+node_modules
+dist
+.umi
+.umi-production
+.umi-test
+*.log
+.env.local
+src/.umi
+src/.umi-production

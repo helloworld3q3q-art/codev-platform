@@ -1,13 +1,18 @@
-"""统一响应 envelope —— Web Backend / agent 共用 (plan §六 / D3 / D7)。
+"""统一响应 envelope —— 对齐 stock-admin-web 前端 BaseApiResponse (plan §六 / D3 修订)。
 
-扁平体: success / data / code / error / errorCode / requestId。
-- code  = core.errors.ErrorCode.value (8 类), 决定 HTTP status + 程序分支锚点;
-- error = 对外 message (与 MCP/HTTP {error,code} 字面量同构, 向后兼容);
-- errorCode = 可选 sub-code (plan §十 细分字符串), 纯展示不影响 status;
-- 去掉初稿冗余数字 result (双状态码) 与嵌套 errors[] (过度设计)。
+形状与业务前端 utils/fetch 的 BaseApiResponse 完全一致, 使新 admin 前端可逐字复用
+fetch.ts / types.ts / enum.ts / ProTable 全套, 零改请求层:
+- result: 业务码, 0=成功 / 非0=失败 (与 HTTP status 正交; 前端 responseCodeHandler 判 result===0);
+- message: 对外文案;
+- data: 业务数据;
+- errors: [{errorCode, errorMessage, field?}] (errorCode 复用 core.errors.ErrorCode 8 类或 sub-code);
+- 分页: currentPage / pageSize / total / totalPage;
+- requestId: 透传 RequestIdMiddleware (额外字段, 前端忽略不影响兼容)。
 
-适配复用 core.errors.to_http_payload 拿真值, core.errors 不 import fastapi (叶子)。
-本模块是 web 边界, 允许 import fastapi。
+> 注: 这里 result=0 是**业务码**(0=成功), 与 HTTP status 正交, 是成熟约定 —— 不是 D3 反对的
+> result:200(双状态码)。错误响应仍带正确 HTTP 4xx/5xx, 前端 401/403 拦截器照常工作。
+
+适配复用 core.errors.to_http_payload 拿真值 (HTTP status 单一真值源); core.errors 不 import fastapi。
 """
 from __future__ import annotations
 
@@ -21,35 +26,41 @@ from codev_platform.core.errors import ErrorCode, PlatformError, to_http_payload
 T = TypeVar("T")
 
 
-class CommonResult(BaseModel, Generic[T]):
-    """单对象统一响应。成功 success=True + data;失败 success=False + code/error。"""
+class ErrorItem(BaseModel):
+    """错误项 (对齐前端 BaseApiResponse.errors[])。"""
 
-    success: bool = True
+    errorCode: str
+    errorMessage: str
+    field: str | None = None
+
+
+class CommonResult(BaseModel, Generic[T]):
+    """单对象统一响应。result=0 成功 + data; 非0 失败 + errors。"""
+
+    result: int = 0
+    message: str = "OK"
     data: T | None = None
-    code: str | None = None        # 失败=ErrorCode.value;成功=None
-    error: str | None = None       # 失败=对外 message;成功=None
-    errorCode: str | None = None   # 可选 sub-code (§十), 纯展示
+    errors: list[ErrorItem] = Field(default_factory=list)
     requestId: str | None = None
 
 
 class PageResult(BaseModel, Generic[T]):
-    """分页统一响应。字段对齐 plan §七 (pageNumber/pageSize/total/nextToken)。"""
+    """分页统一响应。字段对齐前端 (currentPage/pageSize/total/totalPage)。"""
 
-    success: bool = True
+    result: int = 0
+    message: str = "OK"
     data: list[T] = Field(default_factory=list)
-    pageNumber: int = 1
+    currentPage: int = 1
     pageSize: int = 20
     total: int = 0
-    nextToken: str | None = None
-    code: str | None = None
-    error: str | None = None
-    errorCode: str | None = None
+    totalPage: int = 0
+    errors: list[ErrorItem] = Field(default_factory=list)
     requestId: str | None = None
 
 
 def ok(data: T | None = None, *, request_id: str | None = None) -> CommonResult[T]:
-    """成功体 helper。"""
-    return CommonResult(success=True, data=data, requestId=request_id)
+    """成功体 helper (result=0)。"""
+    return CommonResult(result=0, message="OK", data=data, requestId=request_id)
 
 
 def page(
@@ -58,13 +69,14 @@ def page(
     page_number: int = 1,
     page_size: int = 20,
     total: int = 0,
-    next_token: str | None = None,
     request_id: str | None = None,
 ) -> PageResult[T]:
-    """分页体 helper。"""
+    """分页体 helper。totalPage 由 total/pageSize 算 (前端不再自算)。"""
+    total_page = (total + page_size - 1) // page_size if page_size > 0 else 0
     return PageResult(
-        success=True, data=data, pageNumber=page_number, pageSize=page_size,
-        total=total, nextToken=next_token, requestId=request_id,
+        result=0, message="OK", data=data,
+        currentPage=page_number, pageSize=page_size, total=total, totalPage=total_page,
+        requestId=request_id,
     )
 
 
@@ -76,13 +88,14 @@ def error_response(
 ) -> JSONResponse:
     """PlatformError → envelope JSONResponse。HTTP status 复用 to_http_payload (单一真值源)。
 
-    body["error"]/body["code"] 即对外 message + 8 类机器码;detail 只进日志, 不进体。
+    result=1 + errors[{errorCode, errorMessage}]; errorCode 默认填 8 类机器码 (body["code"]),
+    传 error_code 则用 sub-code (plan §十 细分)。detail 只进日志, 不进体。
     """
     body, status = to_http_payload(err)
+    item = ErrorItem(errorCode=error_code or body["code"], errorMessage=body["error"])
     payload = CommonResult(
-        success=False, data=None,
-        code=body["code"], error=body["error"],
-        errorCode=error_code, requestId=request_id,
+        result=1, message=body["error"], data=None,
+        errors=[item], requestId=request_id,
     ).model_dump()
     return JSONResponse(payload, status_code=status)
 

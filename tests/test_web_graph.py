@@ -115,7 +115,7 @@ def test_cross_link_stats_envelope(client):
     r = client.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
     assert r.status_code == 200
     body = r.json()
-    assert body["success"] is True and body["code"] is None
+    assert body["result"] == 0 and body["errors"] == []
     data = body["data"]
     assert data["lastBuildAt"] == "2026-06-02T00:00:00"
     assert data["nodesByKind"]["table"] == 1
@@ -148,7 +148,7 @@ def test_cross_link_table_refs_empty_table_is_invalid_params(client):
     r = client.post("/api/v1/graph/cross-link/table-refs", headers=_HEADERS, json={"table": ""})
     assert r.status_code == 400
     body = r.json()
-    assert body["success"] is False and body["code"] == "invalid_params"
+    assert body["result"] == 1 and body["errors"][0]["errorCode"] == "invalid_params"
 
 
 # ----------------------------------------------------------------------
@@ -186,7 +186,7 @@ def test_codegraph_search_shape(client):
 def test_codegraph_search_empty_keyword_is_invalid_params(client):
     r = client.post("/api/v1/graph/codegraph/search", headers=_HEADERS, json={"keyword": ""})
     assert r.status_code == 400
-    assert r.json()["code"] == "invalid_params"
+    assert r.json()["errors"][0]["errorCode"] == "invalid_params"
 
 
 # ----------------------------------------------------------------------
@@ -203,7 +203,7 @@ def test_missing_db_returns_index_missing(tmp_path, monkeypatch):
     r = c.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
     assert r.status_code == 503
     body = r.json()
-    assert body["success"] is False and body["code"] == "index_missing"
+    assert body["result"] == 1 and body["errors"][0]["errorCode"] == "index_missing"
 
 
 # ----------------------------------------------------------------------

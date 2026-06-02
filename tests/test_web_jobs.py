@@ -50,7 +50,7 @@ def test_rebuild_returns_job_id():
     r = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
     assert r.status_code == 200
     body = r.json()
-    assert body["success"] is True
+    assert body["result"] == 0
     assert body["data"]["jobId"]
     assert body["requestId"]
 
@@ -66,7 +66,7 @@ def test_rebuild_unknown_kind_is_invalid_params():
     c = _client()
     r = c.post("/api/v1/indexes/rebuild", json={"indexKind": "nope"}, headers=_HEADERS)
     assert r.status_code == 400
-    assert r.json()["code"] == "invalid_params"
+    assert r.json()["errors"][0]["errorCode"] == "invalid_params"
 
 
 def test_same_project_same_type_is_mutually_exclusive():
@@ -77,8 +77,8 @@ def test_same_project_same_type_is_mutually_exclusive():
     r2 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
     assert r2.status_code == 429
     body = r2.json()
-    assert body["success"] is False
-    assert body["code"] == "rate_limited"
+    assert body["result"] == 1
+    assert body["errors"][0]["errorCode"] == "rate_limited"
     assert body["requestId"]
 
 
@@ -126,7 +126,7 @@ def test_cancel_terminal_job_rejected():
     # 再取消已 Cancelled 的 job → invalid_params
     r = c.post("/api/v1/jobs/cancel", json={"jobId": job_id}, headers=_HEADERS)
     assert r.status_code == 400
-    assert r.json()["code"] == "invalid_params"
+    assert r.json()["errors"][0]["errorCode"] == "invalid_params"
 
 
 def test_unknown_job_is_error_envelope():
@@ -134,6 +134,6 @@ def test_unknown_job_is_error_envelope():
     r = c.get("/api/v1/jobs/detail", params={"jobId": "nope-xyz"}, headers=_HEADERS)
     assert r.status_code == 404
     body = r.json()
-    assert body["success"] is False
-    assert body["code"] == "project_unknown"
+    assert body["result"] == 1
+    assert body["errors"][0]["errorCode"] == "project_unknown"
     assert body["requestId"]

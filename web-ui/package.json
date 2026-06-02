@@ -1,0 +1,40 @@
+{
+  "name": "codev-platform-admin-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "codev-platform 管理后端 Web 控制台 (风格对齐 stock-admin-web)",
+  "scripts": {
+    "dev": "cross-env REACT_APP_ENV=dev UMI_ENV=dev max dev",
+    "build": "max build",
+    "postinstall": "max setup",
+    "api": "npx ts-node scripts/swagger-generator.ts",
+    "enums": "npx ts-node scripts/fetch-enums.ts",
+    "lint": "eslint --ext .js,.jsx,.ts,.tsx ./src",
+    "lint:fix": "eslint --fix --ext .js,.jsx,.ts,.tsx ./src",
+    "tsc": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.1.0",
+    "@ant-design/pro-components": "^3.1.11-0",
+    "@antv/g6": "^5.1.1",
+    "@umijs/max": "^4.3.0",
+    "antd": "^6.3.1",
+    "antd-style": "^3.6.1",
+    "axios": "^1.9.0",
+    "classnames": "^2.5.1",
+    "dayjs": "^1.11.10",
+    "lodash": "^4.17.21",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-force-graph-2d": "^1.27.0"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.57.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}

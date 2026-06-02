@@ -62,16 +62,18 @@ Web Backend 的职责:
 - **D2 错误码单一真值源**:统一用 `core/errors.py:ErrorCode`。§十 那串 `VALIDATION_*/AUTH_*/...`
   **不另立第二套 taxonomy**,而是收敛/additive 扩进现有 8 类(`invalid_params` / `access_denied` /
   `project_unknown` / `dependency_missing` / `index_missing` / `upstream_unavailable` / `rate_limited` / `internal`)。
-- **D3 响应 envelope 收口(架构一致,agent 也采用)**:envelope 作为**共享层**(D7 的 `core/httpkit`),
-  Web Backend 与 **agent 服务都用同一份**(用户硬要求:两服务可独立部署但架构一致)。envelope 终态**扁平**:
-  `success / data / code / error / errorCode / requestId`(分页加 `pageNumber/pageSize/total/nextToken`),
-  **去掉冗余数字 `result`**(HTTP status 已表达,双状态码易漂移;初稿 `result:200` 实为抄旧 Java `codegraph-api`
-  的 `CommonResult` 误写——其真值是 `result:0`=成功,跨仓语义不一,见 §二十)、**去掉嵌套 `errors[]`**(一次请求只一个主错误,过度设计)。
-  `code` = `ErrorCode.value`(8 类,决定 HTTP status + 程序分支锚点,与 MCP/HTTP `{error,code}` 字面量同构);
-  `errorCode` = 可选 sub-code(承载 plan §十那串细分字符串,纯展示不影响 status)。
-  适配在 `core/httpkit/envelope.py`,复用 `core.errors.to_http_payload` 拿真值。
-  **MCP server 仍保持裸 `{error, code}`**(AI 工具面,非前端;`to_mcp_error` 已服务)。
-  现状提醒:`agent/routes/chat.py` 现直接 `HTTPException(detail=str(e))` **未走 core.errors 且泄漏 str(e)**,迁移时改抛 `PlatformError` 由统一异常处理器转 envelope。
+- **D3 响应 envelope 收口(2026-06-02 终定:对齐 stock-admin-web `BaseApiResponse`)**:为让新 admin 前端
+  **逐字复用** stock-admin-web 的 `utils/fetch`(`fetch.ts`/`types.ts`)+ `models/enum.ts` + ProTable 全套(零改请求层),
+  envelope 终态对齐业务前端 `BaseApiResponse`,而非更早设想的扁平 `success` 版:
+  - **成功**:`{result:0, message:"OK", data, errors:[], requestId}`(`result===0`=成功,前端 `responseCodeHandler` 据此判);
+  - **分页**:`{result:0, data:[], currentPage, pageSize, total, totalPage, errors:[], requestId}`;
+  - **错误**:HTTP 4xx/5xx + `{result:1, message, data:null, errors:[{errorCode, errorMessage, field?}], requestId}`。
+  - `result` 是**业务码**(0=成功,与 HTTP status 正交)—— 这是成熟约定,**不是** 早先反对的 `result:200`(body 内镜像 HTTP 的双状态码);
+    HTTP status 仍由 `ErrorCode` 8 类决定(`to_http_payload`),前端 401/403 拦截器照常工作。
+  - `errors[].errorCode` 复用 `core.errors.ErrorCode`(8 类)或 sub-code(§十),`errorMessage` = 对外 message。
+  适配在 `core/httpkit/envelope.py`(`ok`/`page`/`error_response`);路由用 `ok(data)`/`page(...)` helper,**不读 envelope 字段**,故对齐改动只动 envelope.py + 测试断言。
+  agent 服务架构一致(同用 httpkit envelope);**MCP server 仍裸 `{error, code}`**(AI 工具面,`to_mcp_error`)。
+  现状提醒:`agent/routes/chat.py` 现 `HTTPException(detail=str(e))` 泄漏 str(e),迁 envelope 时改抛 `PlatformError`。
 - **D4 权限模型复用 scoped RBAC**:复用 `core.acl.can_access`(项目访问闸)+ `core.rbac`
   (`Membership` + `role_allows` + scope 链 org>team>project>personal)。plan 的 5 角色是 scope×rank
   组合,映射见 §五;`team` scope 代码已有、初稿漏了,补上。取数走已存在 `rbac_store_pg.fetch_membership`。
@@ -111,7 +113,7 @@ Web Backend 的职责:
 - 模块化目录结构。
 - routes / services / repositories / schemas / domain / integrations 分层。
 - 统一请求上下文: request_id、org_id、project_id、user_id。
-- 统一响应结构: `CommonResult`、`PageResult`(扁平,见 §六;不再用嵌套 `ErrorItem[]`)。
+- 统一响应结构: `CommonResult`、`PageResult`(对齐前端 `BaseApiResponse`,见 §六:`result:0`+`errors[]`)。
 - 统一异常和错误码。
 - 统一字段命名规范。
 - 统一鉴权和权限依赖。
@@ -428,79 +430,61 @@ scope 链 `org > team > project > personal`,判定恒等式 `role_allows(role, a
 
 ## 六、统一响应结构
 
-> **据 D3 修订(扁平 envelope,agent + web 共用)**:去掉冗余数字 `result`(HTTP status 已表达,双状态码易漂移)、
-> 去掉嵌套 `errors[]`(一次请求只一个主错误,过度设计)。错误字段 `code`/`error` 与 `core.errors`
-> 的 `{error, code}` **字面量同构**(MCP/HTTP/web 三面一致 + 向后兼容)。HTTP status 由 `code`(8 类)决定。
-> 模型与适配函数落 `core/httpkit/envelope.py`(D7 共享层)。
+> **据 D3 终定(对齐 stock-admin-web `BaseApiResponse`,2026-06-02)**:envelope 形状与业务前端
+> `utils/fetch` 的 `BaseApiResponse` 一致,使新 admin 前端**逐字复用** `fetch.ts`/`types.ts`/`enum.ts`/ProTable 全套。
+> 模型 + 适配在 `core/httpkit/envelope.py`(D7 共享层),已落地。`result` 是业务码(0=成功,与 HTTP status 正交)。
 
 成功响应(HTTP 200):
 
 ```json
-{ "success": true, "data": {}, "code": null, "error": null, "errorCode": null, "requestId": "..." }
+{ "result": 0, "message": "OK", "data": {}, "errors": [], "requestId": "..." }
 ```
 
 分页响应(HTTP 200):
 
 ```json
-{ "success": true, "data": [], "pageNumber": 1, "pageSize": 20, "total": 0, "nextToken": null, "requestId": "..." }
+{ "result": 0, "message": "OK", "data": [], "currentPage": 1, "pageSize": 20, "total": 0, "totalPage": 0, "errors": [], "requestId": "..." }
 ```
 
-错误响应(HTTP status = `code` 对应,如 403):
+错误响应(HTTP status 由 `ErrorCode` 8 类决定,如 400/403/404/429/503):
 
 ```json
-{ "success": false, "data": null, "code": "access_denied", "error": "Current user cannot access this project.", "errorCode": "PERMISSION_PROJECT_FORBIDDEN", "requestId": "..." }
+{ "result": 1, "message": "unknown enumType: NopeEnum", "data": null,
+  "errors": [{ "errorCode": "invalid_params", "errorMessage": "unknown enumType: NopeEnum", "field": null }],
+  "requestId": "..." }
 ```
 
-- `code`:`core.errors.ErrorCode.value`(8 类之一),**决定 HTTP status + 程序分支锚点**。成功为 `null`。
-- `error`:对外人读 message(= `core.errors` 的 `error` 字段,保持子串兼容)。成功为 `null`。
-- `errorCode`:**可选 sub-code**,承载 §十那串细分字符串(`PROJECT_ALREADY_REGISTERED` 等),**纯展示/前端分支,不影响 status**。
-- `requestId`:透传 `RequestIdMiddleware`(替代初稿塞进 `referenceData` 的做法)。
+- `result`:业务码,**0=成功 / 非0=失败**(前端 `responseCodeHandler` 判 `result===0`);与 HTTP status 正交。
+- `message`:对外文案。`data`:业务数据。`errors[]`:`{errorCode, errorMessage, field?}`。
+- `errors[].errorCode`:`core.errors.ErrorCode`(8 类)或 sub-code(§十);`errorMessage` = 对外 message。
+- HTTP status 仍由 `ErrorCode` 8 类决定(`to_http_payload`),前端 401/403 拦截器照常工作。
+- `requestId`:透传 `RequestIdMiddleware`(`BaseApiResponse` 额外字段,前端忽略不影响兼容)。
 
-Pydantic 模型(`core/httpkit/envelope.py`):
+Pydantic 模型 + 适配(`core/httpkit/envelope.py`,已实现):
 
 ```python
-T = TypeVar("T")
+class ErrorItem(BaseModel):
+    errorCode: str; errorMessage: str; field: str | None = None
 
 class CommonResult(BaseModel, Generic[T]):
-    success: bool = True
-    data: T | None = None
-    code: str | None = None        # 失败=ErrorCode.value;成功=None
-    error: str | None = None       # 失败=对外 message;成功=None
-    errorCode: str | None = None   # 可选 sub-code(§十),纯展示
-    requestId: str | None = None
+    result: int = 0; message: str = "OK"; data: T | None = None
+    errors: list[ErrorItem] = Field(default_factory=list); requestId: str | None = None
 
 class PageResult(BaseModel, Generic[T]):
-    success: bool = True
-    data: list[T] = Field(default_factory=list)
-    pageNumber: int = 1            # 对齐 §七 分页字段(非 currentPage)
-    pageSize: int = 20
-    total: int = 0
-    nextToken: str | None = None   # §七 游标字段;totalPage 删(前端由 total/pageSize 算)
-    code: str | None = None
-    error: str | None = None
-    errorCode: str | None = None
-    requestId: str | None = None
+    result: int = 0; message: str = "OK"; data: list[T] = Field(default_factory=list)
+    currentPage: int = 1; pageSize: int = 20; total: int = 0; totalPage: int = 0
+    errors: list[ErrorItem] = Field(default_factory=list); requestId: str | None = None
+
+def ok(data=None, *, request_id=None): return CommonResult(result=0, data=data, requestId=request_id)
+def error_response(err, *, request_id=None, error_code=None):   # result=1 + errors[]; HTTP status 复用 to_http_payload
+    body, status = to_http_payload(err)
+    item = ErrorItem(errorCode=error_code or body["code"], errorMessage=body["error"])
+    return JSONResponse(CommonResult(result=1, message=body["error"], errors=[item],
+                                     requestId=request_id).model_dump(), status_code=status)
 ```
 
-适配函数(复用 `core.errors.to_http_payload` 拿真值,**core.errors 不动**):
-
-```python
-# core/httpkit/envelope.py
-from codev_platform.core.errors import PlatformError, ErrorCode, to_http_payload
-
-def error_response(err: PlatformError, *, request_id=None, error_code=None) -> JSONResponse:
-    body, status = to_http_payload(err)          # {"error": msg, "code": code}, http_status
-    payload = CommonResult(success=False, data=None,
-                           code=body["code"], error=body["error"],
-                           errorCode=error_code, requestId=request_id).model_dump()
-    return JSONResponse(payload, status_code=status)
-
-def ok(data, *, request_id=None) -> CommonResult:
-    return CommonResult(success=True, data=data, requestId=request_id)
-```
-
-统一异常处理器(`app_factory` 注册):非 `PlatformError` 异常 → `PlatformError(ErrorCode.INTERNAL, "internal error", detail=str(e))`
-再走 `error_response`(`detail` 只进日志,不进体)。`RequestValidationError` → `PlatformError(INVALID_PARAMS, ...)`。
+统一异常处理器(`app_factory` 注册):非 `PlatformError` → `PlatformError(INTERNAL)`(不泄漏 str(e));
+`RequestValidationError` → `PlatformError(INVALID_PARAMS)`。均经 `error_response` 转 envelope。
 
 ## 七、统一字段规范
 
