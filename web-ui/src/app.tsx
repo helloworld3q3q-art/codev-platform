@@ -87,9 +87,16 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
         history.replace('/dashboard');
       }
     },
-    // 全局包裹：EnumLoader 应用启动时拉取后端枚举；TabContainer 提供多页签和 KeepAlive
+    // 全局包裹：EnumLoader 拉枚举；顶部工具条(组织/项目选择器+登出)+ TabContainer 多页签。
+    // 选择器放内容区工具条 (而非 ProLayout header rightContentRender) —— 后者在本 side 布局 +
+    // rightContentRender:false 既有约定下不渲染, 工具条放这里一定可见。
     childrenRender: () => (
       <EnumLoader>
+        <div className="flex items-center justify-end gap-12 px-16 py-8 bg-#ffffff">
+          <OrgSelect />
+          <ProjectSelect />
+          <LogoutButton />
+        </div>
         <TabContainer />
       </EnumLoader>
     ),
@@ -99,15 +106,7 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
       request: async () => MENU_ITEMS,
     },
     menuHeaderRender: false,
-    // 顶栏右侧直接渲染: 组织 + 项目选择器 (多租户上下文) + 登出。
-    // 用 rightContentRender 显式渲染, 不走 actionsRender —— 后者依赖默认 rightContent, 易不显示。
-    rightContentRender: () => (
-      <div className="flex items-center gap-12 pr-16">
-        <OrgSelect />
-        <ProjectSelect />
-        <LogoutButton />
-      </div>
-    ),
+    rightContentRender: false,
     waterMarkProps: undefined,
     ...initialState?.settings,
   };
