@@ -1,55 +1,98 @@
-// 项目管理 (ProTable) —— 消费 POST /api/v1/projects/list (PageResult)。
-import { post } from '@/utils/fetch';
-import { PageContainer, ProTable } from '@ant-design/pro-components';
-import type { ProColumns } from '@ant-design/pro-components';
+import PageContainer from '@/components/PageContainer';
+import ResizableTable, { requestWrapper } from '@/components/ResizableTable';
+import type { ActionType } from '@ant-design/pro-components';
 import { useModel } from '@umijs/max';
-import { Tag } from 'antd';
+import { message } from 'antd';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
-interface ProjectItem {
-  code: string;
-  name: string;
-  status: string;
-  loaded: boolean;
-  repoPath?: string;
-}
+import { createColumns } from './components/Columns';
+import ProjectFormDrawer, { type ProjectFormDrawerContext } from './components/ProjectFormDrawer';
+import ToolBarRender from './components/ToolBarRender';
+import {
+  convertParams,
+  fetchProjectList,
+  loadProject,
+  unloadProject,
+  type ProjectRow,
+} from './components/utils';
 
-export default function ProjectsPage() {
+const FORM_DEFAULT: ProjectFormDrawerContext = { open: false };
+
+const ProjectsPage: React.FC = () => {
   // 状态枚举走后端真值源 (useModel('enum')), 不前端硬编码。
   const { getFormattedEnums } = useModel('enum');
-  const statusMap = getFormattedEnums('ProjectStatusEnum');
+  const actionRef = useRef<ActionType>();
+  const [formCtx, setFormCtx] = useState<ProjectFormDrawerContext>(FORM_DEFAULT);
 
-  const columns: ProColumns<ProjectItem>[] = [
-    { title: '项目编码', dataIndex: 'code', copyable: true },
-    { title: '名称', dataIndex: 'name' },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      render: (_, r) => <Tag>{statusMap[r.status] ?? r.status}</Tag>,
-    },
-    {
-      title: '运行态',
-      dataIndex: 'loaded',
-      render: (_, r) => (r.loaded ? <Tag color="green">已加载</Tag> : <Tag>未加载</Tag>),
-    },
-    { title: '仓路径', dataIndex: 'repoPath', ellipsis: true },
-  ];
+  const statusMap = useMemo(() => getFormattedEnums('ProjectStatusEnum'), [getFormattedEnums]);
+
+  const handleAdd = useCallback(() => {
+    setFormCtx({ open: true });
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    setFormCtx(FORM_DEFAULT);
+  }, []);
+
+  const handleOk = useCallback(() => {
+    setFormCtx(FORM_DEFAULT);
+    actionRef.current?.reload();
+  }, []);
+
+  const handleLoad = useCallback(async (record: ProjectRow) => {
+    try {
+      await loadProject(record.code);
+      message.success('已加载');
+      actionRef.current?.reload();
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleUnload = useCallback(async (record: ProjectRow) => {
+    try {
+      await unloadProject(record.code);
+      message.success('已卸载');
+      actionRef.current?.reload();
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleTableRequest = useCallback(
+    async (params: Record<string, any>, sort: any, filter: any) =>
+      requestWrapper(params, sort, filter, fetchProjectList, convertParams),
+    [],
+  );
+
+  const handleToolBarRender = useCallback(() => ToolBarRender({ onAdd: handleAdd }), [handleAdd]);
+
+  const columns = useMemo(
+    () =>
+      createColumns({
+        context: { statusMap },
+        onLoad: handleLoad,
+        onUnload: handleUnload,
+      }),
+    [statusMap, handleLoad, handleUnload],
+  );
 
   return (
     <PageContainer>
-      <ProTable<ProjectItem>
+      <ResizableTable<ProjectRow>
+        actionRef={actionRef}
         rowKey="code"
         columns={columns}
+        request={handleTableRequest}
+        toolBarRender={handleToolBarRender}
+        scroll={{ x: 1000 }}
+        pagination={{ defaultPageSize: 10 }}
         search={false}
-        options={{ reload: true, density: false, setting: false }}
-        request={async (params) => {
-          const res: any = await post({
-            url: '/api/v1/projects/list',
-            data: { pageNumber: params.current, pageSize: params.pageSize },
-          });
-          return { data: res.data ?? [], total: res.total ?? 0, success: true };
-        }}
-        pagination={{ pageSize: 20 }}
       />
+
+      <ProjectFormDrawer context={formCtx} onOk={handleOk} onCancel={handleCancel} />
     </PageContainer>
   );
-}
+};
+
+export default ProjectsPage;

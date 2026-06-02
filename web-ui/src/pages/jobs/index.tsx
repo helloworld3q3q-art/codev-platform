@@ -1,53 +1,114 @@
-// 任务中心 —— 提交索引重建 + 按 jobId 查状态 (/api/v1/indexes/rebuild + /api/v1/jobs/detail)。
+// 任务中心 —— 提交索引重建 (POST /api/v1/indexes/rebuild) + 按 jobId 查状态 (GET /api/v1/jobs/detail)。
+// 操作页 (非列表 CRUD): 提交区 + 查询区。状态中文走后端真值源 JobStatusEnum (useModel('enum'))。
+// TODO: pnpm run api 生成后切 @/services/apis 替换 @/utils/fetch 裸调。
+import { useCallback, useState } from 'react';
+import { useModel } from '@umijs/max';
+
+import { Button, Descriptions, Input, Select, Space, Tag, message } from 'antd';
+import { ProCard } from '@ant-design/pro-components';
+
+import PageContainer from '@/components/PageContainer';
 import { get, post } from '@/utils/fetch';
-import { PageContainer, ProCard } from '@ant-design/pro-components';
-import { Button, Descriptions, Input, Select, Space, message } from 'antd';
-import { useState } from 'react';
+
+import {
+  INDEX_KIND_OPTIONS,
+  convertDetailParams,
+  convertRebuildParams,
+} from './components/utils';
+
+interface JobDetail {
+  jobId: string;
+  projectId: string;
+  jobType: string;
+  status: string;
+}
+
+// 查询区关联 state (jobId 输入 + 拉回的 detail 总是一起重置) 合并为一个对象。
+interface QueryState {
+  jobId: string;
+  detail?: JobDetail;
+}
+
+const QUERY_DEFAULT: QueryState = { jobId: '', detail: undefined };
 
 export default function JobsPage() {
-  const [kind, setKind] = useState('chroma');
-  const [jobId, setJobId] = useState('');
-  const [detail, setDetail] = useState<any>(null);
+  // 状态枚举走后端真值源 (useModel('enum')), 不前端硬编码中文。
+  const { getFormattedEnums } = useModel('enum');
+  const statusMap = getFormattedEnums('JobStatusEnum');
 
-  const submit = async () => {
-    const res: any = await post({ url: '/api/v1/indexes/rebuild', data: { indexKind: kind } });
-    setJobId(res.data?.jobId);
-    message.success(`已提交 jobId=${res.data?.jobId}`);
-  };
-  const query = async () => {
-    const res: any = await get({ url: '/api/v1/jobs/detail', data: { jobId } });
-    setDetail(res.data);
-  };
+  const [indexKind, setIndexKind] = useState<string>('all');
+  const [query, setQuery] = useState<QueryState>(QUERY_DEFAULT);
+
+  const handleKindChange = useCallback((value: string): void => {
+    setIndexKind(value);
+  }, []);
+
+  const handleJobIdChange = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
+    const value = e.target.value;
+    setQuery((prev) => ({ ...prev, jobId: value }));
+  }, []);
+
+  const handleSubmit = useCallback(async (): Promise<void> => {
+    try {
+      const res: any = await post({
+        url: '/api/v1/indexes/rebuild',
+        data: convertRebuildParams(indexKind),
+      });
+      const newJobId = res.data?.jobId ?? '';
+      setQuery({ jobId: newJobId, detail: undefined });
+      message.success(`已提交 jobId=${newJobId}`);
+    } catch {
+      // 错误已由 fetch 统一处理
+    }
+  }, [indexKind]);
+
+  const handleQuery = useCallback(async (): Promise<void> => {
+    if (!query.jobId.trim()) return;
+    try {
+      const res: any = await get({
+        url: '/api/v1/jobs/detail',
+        data: convertDetailParams(query.jobId),
+      });
+      setQuery((prev) => ({ ...prev, detail: res.data }));
+    } catch {
+      // 错误已由 fetch 统一处理
+    }
+  }, [query.jobId]);
+
+  const { detail } = query;
 
   return (
     <PageContainer>
-      <ProCard title="提交索引重建" bordered style={{ marginBottom: 16 }}>
+      <ProCard title="提交索引重建" bordered classNames={{ root: 'i:mb-16' }}>
         <Space>
           <Select
-            value={kind}
-            style={{ width: 160 }}
-            onChange={setKind}
-            options={['chroma', 'codegraph', 'cross_link', 'all'].map((v) => ({ label: v, value: v }))}
+            className="w-160"
+            value={indexKind}
+            onChange={handleKindChange}
+            options={INDEX_KIND_OPTIONS}
           />
-          <Button type="primary" onClick={submit}>
+          <Button type="primary" onClick={handleSubmit}>
             提交 rebuild
           </Button>
         </Space>
       </ProCard>
+
       <ProCard title="查询任务状态" bordered>
-        <Space style={{ marginBottom: 12 }}>
+        <Space className="mb-12">
           <Input
-            value={jobId}
-            onChange={(e) => setJobId(e.target.value)}
+            className="w-320"
+            value={query.jobId}
+            onChange={handleJobIdChange}
             placeholder="jobId"
-            style={{ width: 320 }}
           />
-          <Button onClick={query}>查询</Button>
+          <Button onClick={handleQuery}>查询</Button>
         </Space>
         {detail && (
           <Descriptions column={2} bordered size="small">
             <Descriptions.Item label="jobId">{detail.jobId}</Descriptions.Item>
-            <Descriptions.Item label="状态">{detail.status}</Descriptions.Item>
+            <Descriptions.Item label="状态">
+              <Tag>{statusMap[detail.status] ?? detail.status}</Tag>
+            </Descriptions.Item>
             <Descriptions.Item label="类型">{detail.jobType}</Descriptions.Item>
             <Descriptions.Item label="项目">{detail.projectId}</Descriptions.Item>
           </Descriptions>
