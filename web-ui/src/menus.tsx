@@ -105,6 +105,18 @@ export const MENU_ITEMS: MenuDataItem[] = [
   { name: '图谱', path: '/graph', icon: <DeploymentUnitOutlined /> },
   { name: '枚举元数据', path: '/enums', icon: <TableOutlined /> },
   {
+    name: '代码图谱',
+    path: '/codegraph',
+    icon: <PartitionOutlined />,
+    children: [
+      { name: '节点图谱', path: '/codegraph/graph', icon: <PartitionOutlined /> },
+      { name: '节点表格', path: '/codegraph/table', icon: <TableOutlined /> },
+      { name: '文件列表', path: '/codegraph/filelist', icon: <FileOutlined /> },
+      { name: '文件浏览', path: '/codegraph/files', icon: <FolderOutlined /> },
+      { name: '跨层链路', path: '/codegraph/crosslink', icon: <ShareAltOutlined /> },
+    ],
+  },
+  {
     name: '系统管理',
     path: '/system',
     icon: <SafetyOutlined />,
