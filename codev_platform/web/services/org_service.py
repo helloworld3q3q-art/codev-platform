@@ -12,7 +12,7 @@ from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.project_id import ProjectIdError, validate
 from codev_platform.web.domain.accounts import Org, OrgMember
 from codev_platform.web.domain.enums import MemberRoleEnum, OrgStatusEnum
-from codev_platform.web.repositories.account_store import member_store, org_store
+from codev_platform.web.repositories.account_store import get_member_store, get_org_store
 from codev_platform.web.schemas.orgs import (
     MemberActionResult,
     MemberItem,
@@ -26,9 +26,10 @@ _VALID_ROLE = {e.value for e in MemberRoleEnum}
 
 
 class OrgService:
-    def __init__(self, orgs=org_store, members=member_store) -> None:
-        self._orgs = orgs
-        self._members = members
+    def __init__(self, orgs=None, members=None) -> None:
+        # 经 getter 取活动绑定 (内存或 PG, 见 bind_account_stores); 测试可显式注入。
+        self._orgs = orgs if orgs is not None else get_org_store()
+        self._members = members if members is not None else get_member_store()
 
     # ---- 组织 ----
 

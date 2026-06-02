@@ -19,13 +19,23 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS orgs (
   org_id     TEXT PRIMARY KEY,
   name       TEXT,
+  status     TEXT NOT NULL DEFAULT 'ACTIVE',   -- ACTIVE | DISABLED (web Orgs 波)
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS users (
-  user_id      TEXT PRIMARY KEY,
-  display_name TEXT,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  user_id       TEXT PRIMARY KEY,
+  display_name  TEXT,
+  -- web 账户列 (Auth/Users 波): 密码 hash / 状态 / 邮箱。RBAC 读不依赖, 仅 web CRUD 用。
+  password_hash TEXT,
+  status        TEXT NOT NULL DEFAULT 'ACTIVE',   -- ACTIVE | DISABLED
+  email         TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 既有库补列 (CREATE IF NOT EXISTS 不会给旧表加列): 幂等 ADD COLUMN IF NOT EXISTS。
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE orgs  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE';
 -- user <-> org 多对多(一人多 org / 一 org 多人), org_role 为 org 级角色。
 CREATE TABLE IF NOT EXISTS org_members (
   org_id   TEXT NOT NULL REFERENCES orgs(org_id),

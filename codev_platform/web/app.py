@@ -30,6 +30,15 @@ _PUBLIC_PATHS = {
 
 
 def create_app(cfg: dict | None = None) -> FastAPI:
+    # 启动期: 绑定账户存储后端 (PG/内存) + 播种首个 platform_admin (装机 bootstrap, 幂等)。
+    from codev_platform.core.config import load_config
+    from codev_platform.web.repositories.account_store import bind_account_stores
+    from codev_platform.web.security.bootstrap import ensure_seed_admin
+
+    _cfg = cfg if cfg is not None else load_config()
+    bind_account_stores(_cfg)
+    ensure_seed_admin(_cfg)
+
     return build_app(
         title="codev-platform web",
         routers=[
@@ -44,7 +53,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             indexes.router,
         ],
         public_paths=_PUBLIC_PATHS,
-        cfg=cfg,
+        cfg=_cfg,
     )
 
 

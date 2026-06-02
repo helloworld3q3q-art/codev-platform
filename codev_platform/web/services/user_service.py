@@ -19,8 +19,8 @@ from codev_platform.web.domain.accounts import (
 )
 from codev_platform.web.domain.enums import MemberRoleEnum, UserStatusEnum
 from codev_platform.web.repositories.account_store import (
-    member_store,
-    user_store,
+    get_member_store,
+    get_user_store,
 )
 from codev_platform.web.schemas.users import (
     UserActionResult,
@@ -37,14 +37,14 @@ _VALID_ROLE = {e.enum_value for e in MemberRoleEnum}
 class UserService:
     def profile(self, username: str) -> UserItem:
         """当前登录用户信息。会话存在但用户记录缺失 → PROJECT_UNKNOWN 兜底。"""
-        user = user_store.get(username)
+        user = get_user_store().get(username)
         if user is None:
             raise PlatformError(ErrorCode.PROJECT_UNKNOWN, f"user not found: {username}")
         return self._to_item(user)
 
     def list_users(self, *, org_id: str, offset: int, limit: int) -> tuple[list[UserItem], int]:
         """分页列出某 org 用户 (org_id 由路由层用 caller 的 org / 越权护栏决定)。"""
-        rows = sorted(user_store.list(org_id=org_id), key=lambda u: u.username)
+        rows = sorted(get_user_store().list(org_id=org_id), key=lambda u: u.username)
         total = len(rows)
         items = [self._to_item(u) for u in rows[offset:offset + limit]]
         return items, total
@@ -65,16 +65,16 @@ class UserService:
         # 越权护栏: 非 platform_admin 只能在自己 org 建用户。
         if not caller_is_admin and org_id != caller_org_id:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能跨组织创建用户")
-        if user_store.exists(username):
+        if get_user_store().exists(username):
             raise PlatformError(ErrorCode.INVALID_PARAMS, f"user already exists: {username}")
         role = self._coerce_role(role) if role else None
         user = User(
             username=username, password_hash=hash_password(password), org_id=org_id,
             status=STATUS_ACTIVE, display_name=display_name or "", email=email or "",
         )
-        user_store.create(user)
+        get_user_store().create(user)
         if role:
-            member_store.upsert(OrgMember(org_id=org_id, username=username, role=role))
+            get_member_store().upsert(OrgMember(org_id=org_id, username=username, role=role))
         return UserActionResult(username=username, status=user.status)
 
     def update_user(self, *, username: str, display_name: str | None, email: str | None,
@@ -88,7 +88,7 @@ class UserService:
             display_name=display_name if display_name is not None else user.display_name,
             email=email if email is not None else user.email,
         )
-        user_store.upsert(updated)
+        get_user_store().upsert(updated)
         return UserActionResult(username=username, status=updated.status)
 
     def set_status(self, *, username: str, status: str, caller_org_id: str,
@@ -101,7 +101,7 @@ class UserService:
             username=user.username, password_hash=user.password_hash, org_id=user.org_id,
             status=status, display_name=user.display_name, email=user.email,
         )
-        user_store.upsert(updated)
+        get_user_store().upsert(updated)
         if status == STATUS_DISABLED:
             session_store.revoke_user(username)  # plan §十五: 禁用必须令 token/session 失效
             self._audit(actor, "user.disable", username, {"org_id": user.org_id})
@@ -118,7 +118,7 @@ class UserService:
             username=user.username, password_hash=hash_password(new_password), org_id=user.org_id,
             status=user.status, display_name=user.display_name, email=user.email,
         )
-        user_store.upsert(updated)
+        get_user_store().upsert(updated)
         self._audit(actor, "user.password_reset", username, {"org_id": user.org_id})
         return UserActionResult(username=username, status=updated.status)
 
@@ -130,19 +130,19 @@ class UserService:
         if not caller_is_admin and org_id != caller_org_id:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能跨组织改角色")
         role = self._coerce_role(role)
-        member_store.upsert(OrgMember(org_id=org_id, username=username, role=role))
+        get_member_store().upsert(OrgMember(org_id=org_id, username=username, role=role))
         self._audit(actor, "user.roles", username, {"org_id": org_id, "role": role})
         return UserActionResult(username=username, status=user.status)
 
     def selections(self, *, org_id: str) -> list[UserSelectionItem]:
-        rows = sorted(user_store.list(org_id=org_id), key=lambda u: u.username)
+        rows = sorted(get_user_store().list(org_id=org_id), key=lambda u: u.username)
         return [UserSelectionItem(label=u.display_name or u.username, value=u.username)
                 for u in rows]
 
     # ---- helpers ----
 
     def _require_user(self, username: str) -> User:
-        user = user_store.get(username)
+        user = get_user_store().get(username)
         if user is None:
             raise PlatformError(ErrorCode.PROJECT_UNKNOWN, f"user not found: {username}")
         return user

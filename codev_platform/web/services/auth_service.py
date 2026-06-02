@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.web.domain.accounts import STATUS_ACTIVE
-from codev_platform.web.repositories.account_store import user_store
+from codev_platform.web.repositories.account_store import get_user_store
 from codev_platform.web.schemas.auth import TokenPair
 from codev_platform.web.security.passwords import verify_password
 from codev_platform.web.security.sessions import IssuedTokens, session_store
@@ -19,7 +19,7 @@ from codev_platform.web.security.sessions import IssuedTokens, session_store
 class AuthService:
     def login(self, *, username: str, password: str) -> TokenPair:
         """校验凭据 → 签发会话。失败统一 ACCESS_DENIED (detail 区分原因, 仅进日志)。"""
-        user = user_store.get(username)
+        user = get_user_store().get(username)
         if user is None:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "AUTH_LOGIN_FAILED", detail="user not found")
         if user.status != STATUS_ACTIVE:

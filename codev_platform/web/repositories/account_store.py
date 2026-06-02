@@ -75,14 +75,56 @@ class MemberStore:
         self._by_key.pop((org_id, username), None)
 
 
-# 进程内单实例 (共享数据层)。PG 实现后改为注入 PG-backed store, 调用方无感。
+# 进程内内存单实例 (默认后端)。bind_account_stores 可换成 PG-backed, 调用方经 getter 无感。
 org_store = OrgStore()
 user_store = UserStore()
 member_store = MemberStore()
 
+# 活动绑定 (默认内存; bind_account_stores 按 config 切 PG)。服务经 getter 取, 不直接 import 单例。
+_active: dict[str, object] = {"org": org_store, "user": user_store, "member": member_store}
+
+
+def get_org_store():
+    return _active["org"]
+
+
+def get_user_store():
+    return _active["user"]
+
+
+def get_member_store():
+    return _active["member"]
+
+
+def bind_account_stores(cfg: dict | None = None) -> str:
+    """按 config 选账户存储后端 —— `memory.pg_dsn` + psycopg 可用 → PG, 否则内存 (优雅回退)。
+
+    返回选中的后端名 ("pg" | "memory"), 供启动日志/测试断言。幂等: 重复调用按当前 cfg 重绑。
+    """
+    from codev_platform.core.config import get as _cfg_get
+
+    dsn = _cfg_get(cfg or {}, "memory.pg_dsn", None)
+    if not dsn:
+        _active.update(org=org_store, user=user_store, member=member_store)
+        return "memory"
+    try:
+        from codev_platform.web.repositories.account_store_pg import (
+            PgMemberStore,
+            PgOrgStore,
+            PgUserStore,
+        )
+        # 实例化即触发 psycopg_pool import (ConnectionPool open=False 不连库); 缺 psycopg 在此抛。
+        pg = {"org": PgOrgStore(dsn), "user": PgUserStore(dsn), "member": PgMemberStore(dsn)}
+    except Exception:  # noqa: BLE001 — psycopg 缺失 (平台 venv) → 回退内存, 不崩启动
+        _active.update(org=org_store, user=user_store, member=member_store)
+        return "memory"
+    _active.update(pg)
+    return "pg"
+
 
 def reset_account_stores() -> None:
-    """清空共享内存账户表 (测试隔离用; 生产 PG 实现无此操作)。"""
+    """清空共享内存账户表 + 重置绑定到内存 (测试隔离用; PG 实现无此操作)。"""
     org_store._by_code.clear()
     user_store._by_username.clear()
     member_store._by_key.clear()
+    _active.update(org=org_store, user=user_store, member=member_store)

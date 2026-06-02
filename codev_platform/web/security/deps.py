@@ -14,7 +14,7 @@ from codev_platform.core.config import load_config
 from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.platform_admin import is_platform_admin
 from codev_platform.core.rbac import role_allows
-from codev_platform.web.repositories.account_store import member_store
+from codev_platform.web.repositories.account_store import get_member_store
 from codev_platform.web.security.sessions import Session, session_store
 
 
@@ -48,7 +48,7 @@ def require_org_role(action: str = "admin"):
         cfg = load_config()
         if is_platform_admin(cfg, sess.username):
             return sess
-        member = member_store.get(sess.org_id, sess.username)
+        member = get_member_store().get(sess.org_id, sess.username)
         role = member.role if member else None
         if not role_allows(role, action):
             raise PlatformError(ErrorCode.ACCESS_DENIED, f"需要组织 {action} 权限")
