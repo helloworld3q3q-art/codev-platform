@@ -12,6 +12,7 @@ export default [
   { name: '文件列表', path: '/codegraph/filelist', icon: 'FileOutlined', component: './codegraph/filelist' },
   { name: '文件浏览', path: '/codegraph/files', icon: 'FolderOutlined', component: './codegraph/files' },
   { name: '跨层链路', path: '/codegraph/crosslink', icon: 'ShareAltOutlined', component: './codegraph/crosslink' },
+  { name: '统一图谱', path: '/codegraph/unified', icon: 'DeploymentUnitOutlined', component: './unifiedgraph' },
   // 路由保持扁平 (React Router: 嵌套绝对子路径须以父路径开头, /orgs 不能挂 /system 下)。
   // "系统管理" 分组只在菜单 (src/menus.tsx) 体现, 不影响路由结构。
   { name: '组织管理', path: '/orgs', icon: 'TeamOutlined', component: './orgs' },

@@ -112,6 +112,7 @@ export const MENU_ITEMS: MenuDataItem[] = [
       { name: '文件列表', path: '/codegraph/filelist', icon: <FileOutlined /> },
       { name: '文件浏览', path: '/codegraph/files', icon: <FolderOutlined /> },
       { name: '跨层链路', path: '/codegraph/crosslink', icon: <ShareAltOutlined /> },
+      { name: '统一图谱', path: '/codegraph/unified', icon: <DeploymentUnitOutlined /> },
     ],
   },
   {
