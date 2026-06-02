@@ -206,13 +206,8 @@ def cross_link_tables(request: Request, ctx=Depends(require_project_access)) -> 
 def cross_link_table_refs(request: Request, body: S.CrossLinkTableRefsRequest,
                           ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    try:
-        with CrossLinkClient(project_id) as cli:
-            data = cli.table_refs(body.table)
-    except PlatformError as exc:
-        if _is_missing(exc):
-            return ok(S.CrossLinkTableRefsResponse(), request_id=_rid(request))
-        raise
+    with CrossLinkClient(project_id) as cli:
+        data = cli.table_refs(body.table)
     return ok(S.CrossLinkTableRefsResponse(**data), request_id=_rid(request))
 
 
@@ -226,13 +221,8 @@ def cross_link_table_refs(request: Request, body: S.CrossLinkTableRefsRequest,
 def cross_link_endpoint_link(request: Request, body: S.CrossLinkEndpointLinkRequest,
                              ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    try:
-        with CrossLinkClient(project_id) as cli:
-            items = cli.endpoint_link(body.name)
-    except PlatformError as exc:
-        if _is_missing(exc):
-            return ok([], request_id=_rid(request))
-        raise
+    with CrossLinkClient(project_id) as cli:
+        items = cli.endpoint_link(body.name)
     data = [S.CrossLinkEndpointLinkItem(**it) for it in items]
     return ok(data, request_id=_rid(request))
 
@@ -247,13 +237,8 @@ def cross_link_endpoint_link(request: Request, body: S.CrossLinkEndpointLinkRequ
 def cross_link_search_nodes(request: Request, body: S.CrossLinkSearchNodesRequest,
                             ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    try:
-        with CrossLinkClient(project_id) as cli:
-            data = cli.search_nodes(body.query, body.kind, body.limit)
-    except PlatformError as exc:
-        if _is_missing(exc):
-            return ok(S.CrossLinkSearchNodesResponse(), request_id=_rid(request))
-        raise
+    with CrossLinkClient(project_id) as cli:
+        data = cli.search_nodes(body.query, body.kind, body.limit)
     return ok(S.CrossLinkSearchNodesResponse(**data), request_id=_rid(request))
 
 

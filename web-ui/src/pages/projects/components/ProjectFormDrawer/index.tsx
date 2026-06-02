@@ -1,4 +1,6 @@
 import Drawer from '@/components/Drawer';
+import OrgFieldSelect from '@/components/Form/Select/OrgFieldSelect';
+import { useModel } from '@umijs/max';
 import { Form, Input, message } from 'antd';
 import { useCallback, useEffect } from 'react';
 
@@ -16,6 +18,7 @@ interface ProjectFormDrawerProps {
 
 const ProjectFormDrawer: React.FC<ProjectFormDrawerProps> = ({ context, onOk, onCancel }) => {
   const [form] = Form.useForm<ProjectRegisterParams>();
+  const { currentOrgId } = useModel('org');
   const { open } = context;
 
   const handleOk = useCallback(async (): Promise<boolean | void> => {
@@ -25,12 +28,13 @@ const ProjectFormDrawer: React.FC<ProjectFormDrawerProps> = ({ context, onOk, on
     onOk();
   }, [form, onOk]);
 
-  // 打开时清空表单
+  // 打开时清空表单, 组织默认当前 org(缺省可不选, 后端按当前请求 org 兜底)。
   useEffect(() => {
     if (open) {
       form.resetFields();
+      form.setFieldValue('orgId', currentOrgId || undefined);
     }
-  }, [open, form]);
+  }, [open, form, currentOrgId]);
 
   return (
     <Drawer
@@ -55,6 +59,9 @@ const ProjectFormDrawer: React.FC<ProjectFormDrawerProps> = ({ context, onOk, on
           rules={[{ required: true, message: '请输入项目名称' }]}
         >
           <Input placeholder="请输入项目名称" maxLength={200} />
+        </Form.Item>
+        <Form.Item name="orgId" label="所属组织">
+          <OrgFieldSelect placeholder="缺省归当前组织" />
         </Form.Item>
         <Form.Item name="repoPath" label="仓路径">
           <Input placeholder="请输入项目仓路径" maxLength={500} />

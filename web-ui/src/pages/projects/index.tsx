@@ -94,7 +94,8 @@ const ProjectsPage: React.FC = () => {
         toolBarRender={handleToolBarRender}
         scroll={{ x: 1000 }}
         pagination={{ defaultPageSize: 10 }}
-        search={false}
+        search={{ span: 6, layout: 'vertical', defaultCollapsed: false }}
+        form={{ layout: 'vertical', colon: false }}
       />
 
       <ProjectFormDrawer context={formCtx} onOk={handleOk} onCancel={handleCancel} />

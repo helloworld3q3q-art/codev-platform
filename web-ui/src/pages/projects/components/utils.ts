@@ -12,12 +12,15 @@ export type ProjectRow = API.ProjectListItem;
 // 注册项目入参 (对齐后端 ProjectRegisterRequest)。
 export type ProjectRegisterParams = API.ProjectRegisterRequest;
 
-// 转换 ProTable 查询参数为后端分页 DTO。
+// 转换 ProTable 查询参数为后端分页 + 过滤 DTO。
 // ResizableTable 内部已将 ProTable 的 current 转为 pageNum。
+// orgId(组织过滤) / keyword(项目编码或名称模糊) 来自搜索区 dataIndex。
 export const convertParams = (params: Record<string, unknown>): Record<string, unknown> => {
   return {
     pageNumber: params.pageNum as number,
     pageSize: params.pageSize as number,
+    orgId: (params.orgId as string) || undefined,
+    keyword: (params.keyword as string) || undefined,
   };
 };
 
