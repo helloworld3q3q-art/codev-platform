@@ -79,7 +79,7 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
         );
       }
       if (token && path === '/user/login') {
-        history.replace('/projects');
+        history.replace('/dashboard');
       }
     },
     // 全局包裹：EnumLoader 应用启动时拉取后端枚举；TabContainer 提供多页签和 KeepAlive

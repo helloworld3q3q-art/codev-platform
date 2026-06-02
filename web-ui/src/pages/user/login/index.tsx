@@ -31,7 +31,7 @@ export default function LoginPage() {
         localStorage.setItem('user', JSON.stringify({ username: values.username }));
         await refresh();
         message.success('登录成功');
-        history.replace('/projects');
+        history.replace('/dashboard');
       } catch {
         // 凭据错误等已由 fetch 统一处理弹错。
       }
