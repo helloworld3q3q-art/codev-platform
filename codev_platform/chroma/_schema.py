@@ -10,6 +10,8 @@ from typing import Any
 
 from mcp.types import TextContent, Tool
 
+from codev_platform.core.errors import ErrorCode, to_mcp_error
+
 
 CATEGORIES = ["rule", "incident", "tooling_incident", "design", "operations", "claude_md", "skill", "doc", "tool_doc", "memory", "dev_log", "all"]
 MODULES = ["platform", "stock-admin-api", "stock-admin-web", "stock-pipeline", "all"]
@@ -73,8 +75,9 @@ def tool_definitions() -> list[Tool]:
     ]
 
 
-def _err(msg: str) -> list[TextContent]:
-    return [TextContent(type="text", text=json.dumps({"error": msg}, ensure_ascii=False))]
+def _err(msg: str, code: ErrorCode = ErrorCode.INTERNAL) -> list[TextContent]:
+    """MCP 错误体。向后兼容: `error` 字符串保留 (客户端/测试读子串), 并排新增机器可读 `code`。"""
+    return [TextContent(type="text", text=json.dumps(to_mcp_error(msg, code), ensure_ascii=False))]
 
 
 def _ok(payload: Any) -> list[TextContent]:

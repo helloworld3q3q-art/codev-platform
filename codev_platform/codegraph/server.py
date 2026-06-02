@@ -32,6 +32,8 @@ from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import TextContent, Tool
 
+from codev_platform.core.errors import ErrorCode, to_mcp_error
+
 from codev_platform.core.config import get as _cfg_get, load_config
 from codev_platform.core.obslog import logging_mode, redact_args
 from codev_platform.core.project_id import ProjectIdError, resolve_local
@@ -243,8 +245,9 @@ async def list_tools() -> list[Tool]:
         return []
 
 
-def _err(msg: str) -> list[TextContent]:
-    return [TextContent(type="text", text=json.dumps({"error": msg}, ensure_ascii=False))]
+def _err(msg: str, code: ErrorCode = ErrorCode.INTERNAL) -> list[TextContent]:
+    """MCP 错误体。向后兼容: `error` 字符串保留, 并排新增机器可读 `code`。"""
+    return [TextContent(type="text", text=json.dumps(to_mcp_error(msg, code), ensure_ascii=False))]
 
 
 @server.call_tool()
@@ -309,7 +312,7 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
                 pid = _pid_validate(pid_raw)
             except Exception as exc:  # noqa: BLE001
                 _flog(f"[sse] reject invalid project_id {pid_raw!r}: {exc!s}")
-                return JSONResponse({"error": "invalid project_id"}, status_code=400)
+                return JSONResponse({"error": "invalid project_id", "code": ErrorCode.INVALID_PARAMS.value}, status_code=400)
         else:
             # 缺显式 project_id: 先置 None 过 ACL(token 模式 deny), 放行后再回退默认。
             pid = None
@@ -321,7 +324,7 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
         audit_access("codegraph", _ident, pid, _dec)
         if not _dec.allowed:
             _flog(f"[sse] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
-            return JSONResponse({"error": "forbidden"}, status_code=403)
+            return JSONResponse({"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value}, status_code=403)
         # ACL 放行后才回退默认(仅 passthrough; token 无显式 project 已被拒)
         if pid is None:
             pid = PROJECT_ID

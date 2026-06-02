@@ -44,6 +44,7 @@ from codev_platform.chroma.server import (
 )
 from codev_platform.chroma._obslog import _flog, _log_recall
 from codev_platform.chroma._schema import _err, _ok, _build_where
+from codev_platform.core.errors import ErrorCode
 from codev_platform.core.obslog import redact_text
 
 # rrf_fuse 仅在 BM25 激活时用 (那要求 bm25 依赖在位); 缺依赖时降级 None, 与 server 同款守护。
@@ -65,7 +66,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         err = (
             _projects.get(pid).init_error if pid in _projects else None
         ) or mdl._global_init_error or f"project {pid} 未初始化"
-        return _err(err)
+        return _err(err, ErrorCode.PROJECT_UNKNOWN)
     col = state.collection
     _bm25 = state.bm25_index
 
@@ -77,7 +78,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if name == "search_docs":
             query = args.get("query", "").strip()
             if not query:
-                return _err("query 不能为空")
+                return _err("query 不能为空", ErrorCode.INVALID_PARAMS)
             _flog(f"[search_docs] q={query!r} k={args.get('k', 5)} cat={args.get('category', 'all')} mod={args.get('module', 'all')}")
             k = int(args.get("k", DEFAULT_RETURN_K))
             k = max(1, min(20, k))
@@ -274,13 +275,13 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         if name == "get_by_file":
             file_path = (args.get("file") or "").strip()
             if not file_path:
-                return _err("file 不能为空")
+                return _err("file 不能为空", ErrorCode.INVALID_PARAMS)
             res = col.get(where={"file": file_path}, include=["documents", "metadatas"])
             ids = res.get("ids") or []
             docs = res.get("documents") or []
             metas = res.get("metadatas") or []
             if not ids:
-                return _err(f"未找到文件 '{file_path}' 的任何 chunk（检查路径是否相对仓库根）")
+                return _err(f"未找到文件 '{file_path}' 的任何 chunk（检查路径是否相对仓库根）", ErrorCode.INDEX_MISSING)
             pairs = []
             for idx, _id in enumerate(ids):
                 meta = metas[idx] if idx < len(metas) else {}
@@ -295,7 +296,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             pairs.sort(key=lambda x: x.get("chunk_index") or 0)
             return _ok({"file": file_path, "chunk_count": len(pairs), "chunks": pairs})
 
-        return _err(f"未知 tool: {name}")
+        return _err(f"未知 tool: {name}", ErrorCode.INVALID_PARAMS)
     except Exception as exc:  # noqa: BLE001
         tb = traceback.format_exc()
         print(f"[chroma-mcp] tool '{name}' error: {tb}", file=sys.stderr)
