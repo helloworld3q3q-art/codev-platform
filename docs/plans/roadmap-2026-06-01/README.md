@@ -31,6 +31,13 @@ Vue/React 页面
 | [stack-adapter-taxonomy-2026-06-02.md](stack-adapter-taxonomy-2026-06-02.md) | 栈适配器三层 taxonomy(语言基座 × 框架适配 × DB 方言)+ 各插件统一 NodeKind/EdgeKind 契约 + detect 约定 + registry 自动发现(扫 builtin/ 目录,新增插件文件即生效,build agent 免改 registry)。供后续 Vue/Express/Spring/ASP.NET/SQL 框架插件并行落地 | 已定/自动发现已落地 |
 | [deployment-2026-06-01.md](deployment-2026-06-01.md) | Phase 0 部署骨架: 安全默认、本机最小启动、memory PG (Docker Compose)、systemd 常驻 (serve-mcp install-systemd)、Windows WSL 注意、远程部署 checklist。汇总既有命令真值源, 不发明命令 | Phase 0 底座 |
 
+## 迭代日报
+
+| 日报 | 内容 |
+|---|---|
+| [daily-summary-2026-06-02.md](daily-summary-2026-06-02.md) | 06-02 进展 |
+| [daily-summary-2026-06-03.md](daily-summary-2026-06-03.md) | admin web-ui 接入打通 + plan Phase 0-3 落地(统一图谱 schema/插件协议+6 栈适配器/store+ingest)+ WSL 全服务 systemd 化;591→680 passed |
+
 ## 执行顺序 / 优先级(2026-06-02 议定)
 
 ```text
