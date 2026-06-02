@@ -115,19 +115,38 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     if do_cross_link:
         C.out("")
         C.out("=== step 3/3: cross-layer KG rebuild ===")
-        cross_py = C.cross_link_python()
-        env = dict(os.environ)
-        # cross_link package lives under <repo>/tools (mirrors update-local-ai.ps1)
-        env["PYTHONPATH"] = str(repo / "tools")
-        env["PYTHONIOENCODING"] = "utf-8"
-        try:
-            rc = C.run([cross_py, "-m", "cross_link.build_index"], env=env).returncode
-        except FileNotFoundError:
-            C.err(f"FAIL: cross_link python not found ({cross_py}); set runtime.cross_link_python")
-            return 1
-        if rc != 0:
-            C.err(f"FAIL: cross_link build exit={rc}")
-            return rc
+        # The cross_link build scanners (build_index + scan_*) are a BUSINESS-repo
+        # asset, not part of the codev_platform package. Projects without them
+        # (e.g. codev-platform itself) must skip — NOT scan some other repo and
+        # pollute their own DB. Gate on the target repo actually shipping them.
+        builder = repo / "tools" / "cross_link" / "build_index.py"
+        if not builder.is_file():
+            C.out(f"step 3/3: cross-layer KG   -- skipped "
+                  f"(no {builder.relative_to(repo)} in this repo)")
+        else:
+            cross_py = C.cross_link_python()
+            env = dict(os.environ)
+            # cross_link package lives under <repo>/tools (mirrors update-local-ai.ps1)
+            env["PYTHONPATH"] = str(repo / "tools")
+            env["PYTHONIOENCODING"] = "utf-8"
+            # Pin scan-root AND write-path to the SAME project so we never
+            # "scan repo A, write DB B" (cross-tenant pollution). The builder's
+            # DB_PATH is resolved from PLATFORM_PROJECT_ID; its scan-root
+            # (schema.REPO_ROOT) now honors CROSS_LINK_REPO_ROOT. Pinning both to
+            # this repo keeps them in lockstep regardless of cwd / __file__.
+            pid = C.project_id_of(repo)
+            if pid:
+                env["PLATFORM_PROJECT_ID"] = pid
+            env["CROSS_LINK_REPO_ROOT"] = str(repo)
+            try:
+                rc = C.run([cross_py, "-m", "cross_link.build_index"],
+                           env=env, cwd=str(repo)).returncode
+            except FileNotFoundError:
+                C.err(f"FAIL: cross_link python not found ({cross_py}); set runtime.cross_link_python")
+                return 1
+            if rc != 0:
+                C.err(f"FAIL: cross_link build exit={rc}")
+                return rc
     else:
         C.out("step 3/3: cross-layer KG   -- skipped")
 
