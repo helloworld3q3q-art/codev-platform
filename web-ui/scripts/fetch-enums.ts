@@ -56,7 +56,7 @@ const CONFIG: Config = {
   // codev-platform web backend，POST /api/v1/enums/list (passthrough 无需鉴权)。
   // 响应已对齐: {result:0, data:{enumType:[{enumValue,displayName,enumOrder,localLanguage,description}]}}。
   apiUrl: '/api/v1/enums/list',
-  baseUrl: process.env.FETCH_ENUMS_BASE_URL || 'http://127.0.0.1:18088',
+  baseUrl: process.env.FETCH_ENUMS_BASE_URL || 'http://172.31.216.170:18088',
 
   // 输出配置
   outputDir: path.join(__dirname, '../src/models'),

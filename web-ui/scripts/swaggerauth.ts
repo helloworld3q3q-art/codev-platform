@@ -18,7 +18,7 @@ export interface SwaggerSource {
 const sources: SwaggerSource[] = [
   {
     name: 'main',
-    swaggerUrl: process.env.SWAGGER_URL || 'http://127.0.0.1:18088/openapi.json',
+    swaggerUrl: process.env.SWAGGER_URL || 'http://172.31.216.170:18088/openapi.json',
     commonUrl: '',
     namespace: 'API',
     outputSubDir: '',
