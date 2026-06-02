@@ -103,6 +103,15 @@ export const MENU_ITEMS: MenuDataItem[] = [
   { name: '任务中心', path: '/jobs', icon: <ScheduleOutlined /> },
   { name: '图谱', path: '/graph', icon: <DeploymentUnitOutlined /> },
   { name: '枚举元数据', path: '/enums', icon: <TableOutlined /> },
+  {
+    name: '系统管理',
+    path: '/system',
+    icon: <SafetyOutlined />,
+    children: [
+      { name: '组织管理', path: '/orgs', icon: <TeamOutlined /> },
+      { name: '用户管理', path: '/users', icon: <UserOutlined /> },
+    ],
+  },
 ];
 
 /**
