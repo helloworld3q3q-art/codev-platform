@@ -26,6 +26,7 @@ router = APIRouter()
 
 _CODEGRAPH_TAG = "GraphAPI-代码图谱"
 _CROSSLINK_TAG = "GraphAPI-跨层链路"
+_UNIFIED_TAG = "GraphAPI-统一图谱"
 
 
 def _rid(request: Request) -> str | None:
@@ -370,3 +371,74 @@ def cross_link_graph(request: Request, body: S.CrossLinkGraphRequest | None = No
             return ok(S.CrossLinkGraphResponse(), request_id=_rid(request))
         raise
     return ok(S.CrossLinkGraphResponse(**data), request_id=_rid(request))
+
+
+# ======================================================================
+# 统一图谱组 (2) —— 直读 graph/store.py 全量节点/边 (所有插件聚合)
+# ======================================================================
+#
+# 与 cross-link 组 (只筛 cross_link 适配器节点) 不同, 本组返回 store 内全部
+# GraphNode/GraphEdge (frontend/backend/database/cross_link 等所有插件), 用统一
+# NodeKind/EdgeKind 直出, 让插件产出 (尤其 sql 的 db_table/db_column) 完整可见。
+# store 缺失 / 空 → 返回空 (200, 非错误), 与现有 graph 路由的 graceful-empty 一致。
+
+
+def _load_unified_from_store(project_id: str) -> AnalyzerResult:
+    """读 store 内本 project 的全量图谱 (所有插件); store 缺/空 → 空 AnalyzerResult。"""
+    conn = _open_store_ro(project_id)
+    if conn is None:
+        return AnalyzerResult()
+    try:
+        return load_graph(conn, project_id)
+    finally:
+        conn.close()
+
+
+@router.post(
+    "/api/v1/graph/unified/graph",
+    tags=[_UNIFIED_TAG],
+    summary="统一图谱-全图加载",
+    operation_id="graphUnifiedGraph",
+    response_model=CommonResult[S.UnifiedGraphResponse],
+)
+def unified_graph(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
+    _identity, project_id = ctx
+    result = _load_unified_from_store(project_id)
+    nodes = [
+        S.UnifiedGraphNode(
+            id=n.id, kind=n.kind, name=n.name, filePath=n.file,
+            startLine=n.line, language=n.language, meta=n.meta,
+        )
+        for n in result.nodes
+    ]
+    edges = [
+        S.UnifiedGraphEdge(source=e.source, target=e.target, kind=e.kind)
+        for e in result.edges
+    ]
+    resp = S.UnifiedGraphResponse(
+        nodes=nodes, edges=edges, nodeCount=len(nodes), edgeCount=len(edges)
+    )
+    return ok(resp, request_id=_rid(request))
+
+
+@router.post(
+    "/api/v1/graph/unified/stats",
+    tags=[_UNIFIED_TAG],
+    summary="统一图谱-统计",
+    operation_id="graphUnifiedStats",
+    response_model=CommonResult[S.UnifiedGraphStatsResponse],
+)
+def unified_stats(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
+    _identity, project_id = ctx
+    result = _load_unified_from_store(project_id)
+    nodes_by_kind: dict[str, int] = {}
+    for n in result.nodes:
+        nodes_by_kind[n.kind] = nodes_by_kind.get(n.kind, 0) + 1
+    edges_by_kind: dict[str, int] = {}
+    for e in result.edges:
+        edges_by_kind[e.kind] = edges_by_kind.get(e.kind, 0) + 1
+    resp = S.UnifiedGraphStatsResponse(
+        nodesByKind=nodes_by_kind, edgesByKind=edges_by_kind,
+        totalNodes=len(result.nodes), totalEdges=len(result.edges),
+    )
+    return ok(resp, request_id=_rid(request))

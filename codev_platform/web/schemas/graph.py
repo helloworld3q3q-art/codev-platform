@@ -232,3 +232,44 @@ class CrossLinkGraphResponse(BaseModel):
     edges: list[CrossLinkGraphEdge] = Field(default_factory=list)
     nodeCount: int = 0
     edgeCount: int = 0
+
+
+# ----------------------------------------------------------------------
+# 统一图谱组 —— 直读 graph/store.py (插件聚合落点) 的全量节点/边
+# ----------------------------------------------------------------------
+#
+# 与 cross-link 组的区别:cross-link 组只筛 store 里 cross_link 适配器产出的节点
+# (meta 含 cross_link_kind),而本组返回 store 内 **全部** GraphNode/GraphEdge
+# (所有插件:frontend / backend / database / cross_link 等),用统一 NodeKind /
+# EdgeKind (db_table / db_column / backend_endpoint / frontend_route ...) 直出,
+# 让插件产出 (尤其 sql 的 db_table/db_column) 在前端完整可见。
+
+
+class UnifiedGraphNode(BaseModel):
+    id: str | None = None
+    kind: str | None = None
+    name: str | None = None
+    filePath: str | None = None
+    startLine: int | None = None
+    language: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class UnifiedGraphEdge(BaseModel):
+    source: str | None = None
+    target: str | None = None
+    kind: str | None = None
+
+
+class UnifiedGraphResponse(BaseModel):
+    nodes: list[UnifiedGraphNode] = Field(default_factory=list)
+    edges: list[UnifiedGraphEdge] = Field(default_factory=list)
+    nodeCount: int = 0
+    edgeCount: int = 0
+
+
+class UnifiedGraphStatsResponse(BaseModel):
+    nodesByKind: dict[str, int] = Field(default_factory=dict)
+    edgesByKind: dict[str, int] = Field(default_factory=dict)
+    totalNodes: int = 0
+    totalEdges: int = 0

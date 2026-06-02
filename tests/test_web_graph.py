@@ -312,6 +312,93 @@ def test_cross_link_stats_falls_back_when_store_empty(client, tmp_path, monkeypa
 
 
 # ----------------------------------------------------------------------
+# 统一图谱 store (全量节点/边, 所有插件) (task: unified graph)
+# ----------------------------------------------------------------------
+
+
+def _seed_unified_store(path: Path, project_id: str) -> None:
+    """往 store 写多插件混合产出: cross_link + database (db_table/db_column)。"""
+    from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode
+    from codev_platform.graph.store import open_store, upsert_result
+
+    # database 插件: 表 + 字段 (sql 产出, 这正是要让前端可见的)
+    table = GraphNode(
+        id=f"{project_id}:db_table:t1", kind="db_table", name="stock_quote_daily",
+        project_id=project_id, file="V1__init.sql", line=1, language="sql",
+    )
+    column = GraphNode(
+        id=f"{project_id}:db_column:c1", kind="db_column", name="close_price",
+        project_id=project_id, file="V1__init.sql", line=3, language="sql",
+        meta={"data_type": "numeric"},
+    )
+    col_edge = GraphEdge(source=table.id, target=column.id, kind="contains")
+    db_result = AnalyzerResult(
+        nodes=[table, column], edges=[col_edge], plugin="builtin.database",
+    )
+    # cross_link 插件: endpoint 读表 (与 db 插件不同 plugin, 不互相覆盖)
+    endpoint = GraphNode(
+        id=f"{project_id}:backend_endpoint:e1", kind="backend_endpoint",
+        name="GET /api/quote", project_id=project_id, file="X.java", line=10,
+        language="java", meta={"cross_link_kind": "java_endpoint"},
+    )
+    read_edge = GraphEdge(source=endpoint.id, target=table.id, kind="reads_table")
+    cl_result = AnalyzerResult(
+        nodes=[endpoint], edges=[read_edge], plugin="builtin.cross_link",
+    )
+    conn = open_store(project_id, path=path)
+    try:
+        upsert_result(conn, project_id, db_result)
+        upsert_result(conn, project_id, cl_result)
+    finally:
+        conn.close()
+
+
+def test_unified_graph_returns_all_plugin_nodes(tmp_path, monkeypatch):
+    """统一图谱返回全部插件节点 (db_table/db_column + backend_endpoint), 不只 cross-link。"""
+    store_db = tmp_path / "store.sqlite"
+    _seed_unified_store(store_db, _PID)
+    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
+    r = c.post("/api/v1/graph/unified/graph", headers=_HEADERS, json={})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["nodeCount"] == 3 and data["edgeCount"] == 2
+    kinds = {n["kind"] for n in data["nodes"]}
+    assert kinds == {"db_table", "db_column", "backend_endpoint"}  # 统一 kind 直出
+    col = next(n for n in data["nodes"] if n["kind"] == "db_column")
+    assert col["name"] == "close_price"
+    assert col["meta"]["data_type"] == "numeric"  # meta 不透明往返
+    edge_kinds = {e["kind"] for e in data["edges"]}
+    assert edge_kinds == {"contains", "reads_table"}
+
+
+def test_unified_stats_counts_by_kind(tmp_path, monkeypatch):
+    """统一统计按 kind 聚合全部插件节点/边。"""
+    store_db = tmp_path / "store.sqlite"
+    _seed_unified_store(store_db, _PID)
+    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
+    r = c.post("/api/v1/graph/unified/stats", headers=_HEADERS, json={})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["totalNodes"] == 3 and data["totalEdges"] == 2
+    assert data["nodesByKind"] == {"db_table": 1, "db_column": 1, "backend_endpoint": 1}
+    assert data["edgesByKind"] == {"contains": 1, "reads_table": 1}
+
+
+def test_unified_graph_empty_when_store_missing(tmp_path, monkeypatch):
+    """store 缺失 → 统一图谱返回空 (200, 非错误)。"""
+    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "nope.sqlite")
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
+    rg = c.post("/api/v1/graph/unified/graph", headers=_HEADERS, json={})
+    assert rg.status_code == 200
+    assert rg.json()["result"] == 0 and rg.json()["data"]["nodeCount"] == 0
+    rs = c.post("/api/v1/graph/unified/stats", headers=_HEADERS, json={})
+    assert rs.status_code == 200
+    assert rs.json()["data"]["totalNodes"] == 0 and rs.json()["data"]["nodesByKind"] == {}
+
+
+# ----------------------------------------------------------------------
 # operationId 唯一 (plan §十三)
 # ----------------------------------------------------------------------
 
