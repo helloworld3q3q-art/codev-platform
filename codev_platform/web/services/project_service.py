@@ -6,11 +6,21 @@ HTTP routes 不直接访问 repository, 必须经本 service 保持权限与幂�
 """
 from __future__ import annotations
 
+from codev_platform.core.config import get as _cfg_get
+from codev_platform.core.config import load_config
 from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.project_id import ProjectIdError, validate
 from codev_platform.web.repositories.project_read_repo import ProjectReadRepository
 from codev_platform.web.repositories.project_write_repo import ProjectWriteRepository
 from codev_platform.web.schemas.projects import ProjectActionResult, ProjectListItem
+
+
+def _project_in_org(cfg: dict, code: str | None, org_id: str) -> bool:
+    """项目是否属于该 org —— 与 core.acl 同口径: config projects.<code>.org_id 缺省=公开(全 org 可见),
+    否则须 == org_id。"""
+    proj = (_cfg_get(cfg, "projects", {}) or {}).get(code) or {}
+    proj_org = proj.get("org_id")
+    return proj_org is None or proj_org == org_id
 
 
 class ProjectService:
@@ -19,9 +29,14 @@ class ProjectService:
         self._read = read_repo or ProjectReadRepository()
         self._write = write_repo or ProjectWriteRepository()
 
-    def list_projects(self, *, offset: int, limit: int) -> tuple[list[ProjectListItem], int]:
-        """分页列出已登记项目。返回 (页数据, 总数)。"""
+    def list_projects(
+        self, *, org_id: str | None = None, offset: int, limit: int
+    ) -> tuple[list[ProjectListItem], int]:
+        """分页列出已登记项目, 按当前 org 过滤 (org_id=None 不过滤; 项目无 config org_id = 公开)。"""
         rows = self._read.list_projects()
+        if org_id is not None:
+            cfg = load_config()
+            rows = [r for r in rows if _project_in_org(cfg, r.get("code"), org_id)]
         total = len(rows)
         page = rows[offset:offset + limit]
         items = [self._to_item(r) for r in page]

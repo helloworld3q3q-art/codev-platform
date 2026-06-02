@@ -69,6 +69,12 @@ class JobService:
         self._trigger(job)
         return job
 
+    def list_jobs(self, *, project_id: str | None, offset: int, limit: int) -> tuple[list[Job], int]:
+        """列某项目 job (project_id=None 列全部), 按创建时间倒序 (新在前) + 分页。"""
+        rows = sorted(self._read.list(project_id), key=lambda j: j.created_at, reverse=True)
+        total = len(rows)
+        return rows[offset:offset + limit], total
+
     def get_detail(self, job_id: str) -> Job:
         job = self._read.get(job_id)
         if job is None:

@@ -43,7 +43,10 @@ def list_projects(
     pg: PageParams = Depends(page_params),
     svc: ProjectService = Depends(_service),
 ) -> PageResult[ProjectListItem]:
-    items, total = svc.list_projects(offset=pg.offset, limit=pg.page_size)
+    # 按当前 org 过滤 (org 来自 X-Org-Id, gateway 解析进 identity.org_id; 项目无 config org_id = 公开)。
+    identity = getattr(request.state, "identity", None)
+    org_id = getattr(identity, "org_id", None)
+    items, total = svc.list_projects(org_id=org_id, offset=pg.offset, limit=pg.page_size)
     return page(items, page_number=pg.page_number, page_size=pg.page_size,
                 total=total, request_id=_rid(request))
 

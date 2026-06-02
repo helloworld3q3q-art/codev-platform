@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from codev_platform.core.httpkit.envelope import CommonResult, ok
+from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, page
+from codev_platform.core.httpkit.pagination import PageParams, page_params
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.schemas.jobs import JobCancelRequest, JobDTO
 from codev_platform.web.services.job_service import build_in_memory_job_service
@@ -56,3 +57,25 @@ def cancel_job(
 ) -> CommonResult[JobDTO]:
     job = job_service.cancel(body.jobId)
     return ok(JobDTO.of(job), request_id=_rid(request))
+
+
+@router.post(
+    "/api/v1/jobs/list",
+    tags=["JobAPI-长任务"],
+    summary="长任务-列表(按当前项目过滤)",
+    operation_id="listJobs",
+    response_model=PageResult[JobDTO],
+)
+def list_jobs(
+    request: Request,
+    ctx=Depends(require_project_access),
+    pg: PageParams = Depends(page_params),
+) -> PageResult[JobDTO]:
+    # project_id 来自 X-Project-Id (require_project_access 解析 + 鉴权); 只列当前项目的 job。
+    _identity, project_id = ctx
+    rows, total = job_service.list_jobs(project_id=project_id, offset=pg.offset, limit=pg.page_size)
+    return page(
+        [JobDTO.of(j) for j in rows],
+        page_number=pg.page_number, page_size=pg.page_size, total=total,
+        request_id=_rid(request),
+    )
