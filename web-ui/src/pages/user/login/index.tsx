@@ -1,16 +1,38 @@
-// 登录页 —— 真鉴权: POST /api/v1/auth/login 换 token (后端 Auth 波 + 种子 admin 已就绪)。
-// 失败由 fetch 统一弹错; 成功存 access/refresh token + 用户名, 刷新 initialState 后进控制台。
+// 登录页 —— 真鉴权 + 口令加密 (方案 B): 拉 RSA 公钥 → JSEncrypt 加密口令再传, 请求体不出现明文。
+// 拉公钥/加密失败则降级明文 (后端兼容); 传输层加密靠 TLS (方案 A, 部署层)。
 import { useCallback } from 'react';
 import { history, useModel } from '@umijs/max';
 
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { Button, Card, Form, Input, message } from 'antd';
+import { JSEncrypt } from 'jsencrypt';
 
 import { postLogin } from '@/services/apis/authapi';
+import { get } from '@/utils/fetch';
+import type { BaseApiResponse } from '@/utils/fetch';
 
 interface LoginValues {
   username: string;
   password: string;
+}
+
+// 拉公钥并 RSA 加密口令; 任一步失败 → 返回明文 (后端 _maybe_decrypt 兼容明文)。
+async function encryptPassword(plain: string): Promise<string> {
+  try {
+    const res = await get<BaseApiResponse<{ publicKey?: string }>>({
+      url: '/api/v1/auth/public-key',
+    });
+    const pub = res.data?.publicKey;
+    if (!pub) {
+      return plain;
+    }
+    const encryptor = new JSEncrypt();
+    encryptor.setPublicKey(pub);
+    const encrypted = encryptor.encrypt(plain);
+    return encrypted || plain;
+  } catch {
+    return plain;
+  }
 }
 
 export default function LoginPage() {
@@ -19,7 +41,8 @@ export default function LoginPage() {
   const handleFinish = useCallback(
     async (values: LoginValues): Promise<void> => {
       try {
-        const res = await postLogin({ username: values.username, password: values.password });
+        const password = await encryptPassword(values.password);
+        const res = await postLogin({ username: values.username, password });
         const pair = res.data;
         if (!pair?.accessToken) {
           return;

@@ -13,11 +13,13 @@ from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.web.schemas.auth import (
     LoginRequest,
     LogoutRequest,
+    PublicKeyInfo,
     RefreshRequest,
     SessionInfo,
     TokenPair,
 )
 from codev_platform.web.security.deps import current_session
+from codev_platform.web.security.rsa_keys import get_keypair
 from codev_platform.web.security.sessions import Session
 from codev_platform.web.services.auth_service import AuthService
 
@@ -32,6 +34,19 @@ def _service() -> AuthService:
 
 def _rid(request: Request):
     return getattr(request.state, "request_id", None)
+
+
+@router.get(
+    "/api/v1/auth/public-key",
+    tags=[_TAG],
+    summary="认证-登录口令加密公钥",
+    operation_id="authPublicKey",
+    response_model=CommonResult[PublicKeyInfo],
+)
+def public_key(request: Request) -> CommonResult[PublicKeyInfo]:
+    """前端登录前拉公钥, JSEncrypt 加密口令 (方案 B)。RSA 不可用时 publicKey 空 → 前端降级明文。"""
+    kp = get_keypair()
+    return ok(PublicKeyInfo(publicKey=kp.public_pem if kp else ""), request_id=_rid(request))
 
 
 @router.post(

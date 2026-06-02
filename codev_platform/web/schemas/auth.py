@@ -9,10 +9,17 @@ from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    """登录请求。username + 明文 password (校验后立即丢弃, 不落库)。"""
+    """登录请求。username + password(前端 RSA 加密的 base64, 或明文兼容; 校验后即丢弃)。"""
 
     username: str = Field(..., min_length=1, max_length=128, description="用户名")
-    password: str = Field(..., min_length=1, max_length=256, description="密码 (明文, 仅校验用)")
+    # max_length 放宽到 512 容纳 RSA/PKCS1v1.5 密文的 base64 (2048-bit → ~344 字符)。
+    password: str = Field(..., min_length=1, max_length=512, description="密码 (RSA 加密 base64 或明文)")
+
+
+class PublicKeyInfo(BaseModel):
+    """登录口令加密用 RSA 公钥 (PEM, SubjectPublicKeyInfo)。前端 JSEncrypt setPublicKey 用。"""
+
+    publicKey: str
 
 
 class LogoutRequest(BaseModel):

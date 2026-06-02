@@ -17,3 +17,16 @@ def web_host(cfg: dict | None = None) -> str:
 
 def web_port(cfg: dict | None = None) -> int:
     return int(_cfg_get(cfg or load_config(), "web.port", DEFAULT_PORT))
+
+
+def web_tls(cfg: dict | None = None) -> tuple[str, str] | None:
+    """方案 A: TLS 证书/私钥路径 (web.tls_cert / web.tls_key)。两者都配 → uvicorn 终结 TLS;
+    否则 None (HTTP, 由反向代理终结 TLS, 或 dev 本机)。env CODEV_WEB_TLS_CERT/_KEY 优先。"""
+    import os
+
+    c = cfg or load_config()
+    cert = os.environ.get("CODEV_WEB_TLS_CERT") or _cfg_get(c, "web.tls_cert", None)
+    key = os.environ.get("CODEV_WEB_TLS_KEY") or _cfg_get(c, "web.tls_key", None)
+    if cert and key:
+        return str(cert), str(key)
+    return None

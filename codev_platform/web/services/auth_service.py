@@ -13,12 +13,24 @@ from codev_platform.web.domain.accounts import STATUS_ACTIVE
 from codev_platform.web.repositories.account_store import get_user_store
 from codev_platform.web.schemas.auth import TokenPair
 from codev_platform.web.security.passwords import verify_password
+from codev_platform.web.security.rsa_keys import get_keypair
 from codev_platform.web.security.sessions import IssuedTokens, session_store
 
 
 class AuthService:
+    @staticmethod
+    def _maybe_decrypt(password: str) -> str:
+        """口令可能是前端 RSA 加密 (方案 B) → 解密; 非密文 (明文/测试) 原样返回。"""
+        kp = get_keypair()
+        if kp is not None:
+            dec = kp.decrypt_b64(password)
+            if dec is not None:
+                return dec
+        return password
+
     def login(self, *, username: str, password: str) -> TokenPair:
         """校验凭据 → 签发会话。失败统一 ACCESS_DENIED (detail 区分原因, 仅进日志)。"""
+        password = self._maybe_decrypt(password)
         user = get_user_store().get(username)
         if user is None:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "AUTH_LOGIN_FAILED", detail="user not found")

@@ -26,6 +26,7 @@ _PUBLIC_PATHS = {
     "/api/v1/health/check",
     "/api/v1/auth/login",
     "/api/v1/auth/token/refresh",
+    "/api/v1/auth/public-key",  # 登录前拉口令加密公钥 (方案 B)
 }
 
 
