@@ -318,6 +318,24 @@ interface CommonResult_TokenPair_ {
   requestId?: any;
 }
 
+// CommonResult_UnifiedGraphResponse_ 响应数据
+interface CommonResult_UnifiedGraphResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_UnifiedGraphStatsResponse_ 响应数据
+interface CommonResult_UnifiedGraphStatsResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_UserActionResult_ 接口
 interface CommonResult_UserActionResult_ {
   result?: number;
@@ -727,6 +745,14 @@ interface ProjectListItem {
   loaded?: boolean;
 }
 
+// 项目列表查询 (POST body, 与前端 ResizableTable 一致)。分页 + 组织/关键词过滤。
+interface ProjectListRequest {
+  pageNumber?: number; // 页码, 从 1 起
+  pageSize?: number; // 每页数量
+  orgId?: any; // 按组织过滤 (缺省=当前 org 可见全部)
+  keyword?: any; // 按项目编码/名称模糊匹配
+}
+
 // ProjectLoadRequest 请求参数
 interface ProjectLoadRequest {
   code: string; // 项目编码
@@ -761,6 +787,40 @@ interface SessionInfo {
 interface TokenPair {
   accessToken: string;
   refreshToken: string;
+}
+
+// UnifiedGraphEdge 接口
+interface UnifiedGraphEdge {
+  source?: any;
+  target?: any;
+  kind?: any;
+}
+
+// UnifiedGraphNode 接口
+interface UnifiedGraphNode {
+  id?: any;
+  kind?: any;
+  name?: any;
+  filePath?: any;
+  startLine?: any;
+  language?: any;
+  meta?: Record<string, any>;
+}
+
+// UnifiedGraphResponse 响应数据
+interface UnifiedGraphResponse {
+  nodes?: UnifiedGraphNode[];
+  edges?: UnifiedGraphEdge[];
+  nodeCount?: number;
+  edgeCount?: number;
+}
+
+// UnifiedGraphStatsResponse 响应数据
+interface UnifiedGraphStatsResponse {
+  nodesByKind?: Record<string, number>;
+  edgesByKind?: Record<string, number>;
+  totalNodes?: number;
+  totalEdges?: number;
 }
 
 // create / update / status / password / roles 写操作回执 (不含敏感字段)。
@@ -856,14 +916,6 @@ interface PostUsersListParams {
 // UsersGetDetailParams 查询参数
 interface UsersGetDetailParams {
   username: string; // 用户名
-}
-
-// PostProjectsListParams 查询参数
-interface PostProjectsListParams {
-  orgId?: any; // 按组织过滤 (缺省=当前 org 可见全部)
-  keyword?: any; // 按项目编码 / 名称模糊匹配
-  pageNumber?: number; // 页码, 从 1 起
-  pageSize?: number; // 每页数量
 }
 
 // ProjectsGetDetailParams 查询参数

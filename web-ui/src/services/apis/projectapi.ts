@@ -6,7 +6,7 @@ import {
 const commonUrl = '';
 
 // 项目管理-项目列表
-export async function postProjectsList(data: Partial<API.PostProjectsListParams>): Promise<API.PageResult_ProjectListItem_> {
+export async function postProjectsList(data: Partial<API.any>): Promise<API.PageResult_ProjectListItem_> {
   return await post<API.PageResult_ProjectListItem_>({
     url: `${commonUrl}/api/v1/projects/list`,
     data,
