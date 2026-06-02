@@ -59,6 +59,37 @@
 5. 抽 `_tools.py` → 测 (重点: search_docs/get_by_file 召回)。
 6. server.py 收尾成 facade → 测 + 手动起 daemon `serve-mcp start --wait` 验 SSE。
 
+### A.2b 议定的无环分层 DAG + 进度 (2026-06-02)
+
+原 A.2 把"常量"塞进 `_state.py`,但**配置常量留在 server 会导致 reranker 循环**(server 又要 reranker 给 health/main)。修正:**配置(`_config`)与可变状态(`_state`)各抽一个叶子模块**,所有逻辑模块只向下依赖叶子 → DAG 无环。
+
+```
+core.* (config/paths/obslog/project_id)
+  ↑
+_config  _state  _obslog  _stats  _schema     ← 5 叶子 (只依赖 core)
+  ↑
+_helpers           (→_obslog,_stats)
+  ↑
+_models  _reranker (→_config,_state,_helpers,_obslog,_stats)
+  ↑
+_projects          (→_config,_state,_models,_obslog)
+  ↑
+_tools  _http      (→_config,_state,_models,_reranker,_projects,...)
+  ↑
+server.py          ← 瘦装配器: Server()+list_tools wrapper+_run_stdio+main+注册 import (~120-150 行)
+```
+
+**铁律**:rebound 标量(`_model`/`_global_init_error`/`_reranker_load_err`...)真值源在 `_state.py`,所有读写走 `import _state as st; st.X`。已在 `_tools.py` 用 `srv._global_init_error` 验证可行(早返回烟测返回 `{"error":"SMOKE_ERR"}`)。
+
+**进度**:
+- ✅ `_obslog` / `_stats` / `_helpers` / `_schema` 已抽 (`3ca9715`)
+- ✅ `_tools`(call_tool)已抽 (`364133f`),server.py **1286→674**(过 1000 硬限)
+- ⏳ `_config`(叶子,常量按值,低风险)— **下一步,解 reranker 循环的钥匙**
+- ⏳ `_state`(可变全局→`st.X`,高风险机械大改)— **上线前必须过 WSL search_docs 烟测**(改了所有热路径全局访问,Windows CI 测不到 GPU 段)
+- ⏳ `_models` / `_reranker` / `_projects` / `_http` — 各只依赖 _config+_state,抽完即 ≤600
+
+**降风险**:`_state` 转换配 deeper mock 烟测(mock `_ensure_project` 返回带 collection 的假 state + mock `_encode_query`/`col.query`,让 call_tool 跑过早返回触到 `st._reranker_load_err` 行,抓"漏改引用"的 AttributeError)。
+
 ### A.3 ops/health.py (1119 → 子包)
 
 函数已天然分组, 风险最低 (大多 `(r: Report, ...)` 入参, 无共享可变全局):
