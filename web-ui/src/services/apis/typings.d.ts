@@ -722,6 +722,7 @@ interface ProjectListItem {
   name: string;
   repoPath?: any;
   description?: any;
+  orgId?: any;
   status?: string;
   loaded?: boolean;
 }
@@ -737,6 +738,7 @@ interface ProjectRegisterRequest {
   name: string; // 项目名称
   repoPath?: any; // 项目仓路径
   description?: any; // 描述
+  orgId?: any; // 所属组织 (缺省=当前请求 org)
 }
 
 // 登录口令加密用 RSA 公钥 (PEM, SubjectPublicKeyInfo)。前端 JSEncrypt setPublicKey 用。
@@ -858,6 +860,8 @@ interface UsersGetDetailParams {
 
 // PostProjectsListParams 查询参数
 interface PostProjectsListParams {
+  orgId?: any; // 按组织过滤 (缺省=当前 org 可见全部)
+  keyword?: any; // 按项目编码 / 名称模糊匹配
   pageNumber?: number; // 页码, 从 1 起
   pageSize?: number; // 每页数量
 }
