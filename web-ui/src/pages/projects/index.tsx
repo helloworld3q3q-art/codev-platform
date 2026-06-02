@@ -1,10 +1,9 @@
 // 项目管理 (ProTable) —— 消费 POST /api/v1/projects/list (PageResult)。
-// 风格对齐 stock-admin-web: ProTable + PageContainer + post('@/utils/fetch')。
+import { post } from '@/utils/fetch';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
-import { Tag } from 'antd';
 import { useModel } from '@umijs/max';
-import { post } from '@/utils/fetch';
+import { Tag } from 'antd';
 
 interface ProjectItem {
   code: string;
@@ -15,7 +14,7 @@ interface ProjectItem {
 }
 
 export default function ProjectsPage() {
-  // 状态枚举走后端真值源 (useModel('enum')), 不前端硬编码 (cross-layer-enum-consistency)。
+  // 状态枚举走后端真值源 (useModel('enum')), 不前端硬编码。
   const { getFormattedEnums } = useModel('enum');
   const statusMap = getFormattedEnums('ProjectStatusEnum');
 
@@ -41,12 +40,12 @@ export default function ProjectsPage() {
         rowKey="code"
         columns={columns}
         search={false}
+        options={{ reload: true, density: false, setting: false }}
         request={async (params) => {
           const res: any = await post({
             url: '/api/v1/projects/list',
             data: { pageNumber: params.current, pageSize: params.pageSize },
           });
-          // envelope 已对齐 BaseApiResponse: result===0 时 post 直接返回 body
           return { data: res.data ?? [], total: res.total ?? 0, success: true };
         }}
         pagination={{ pageSize: 20 }}

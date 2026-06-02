@@ -1,8 +1,7 @@
-// 枚举元数据演示 —— useModel('enum') 复用 stock-admin-web 模式, 数据来自 POST /api/v1/enums/list。
-// 证明前端 enum model 零改对接 codev-platform 后端。
+// 枚举元数据演示 —— useModel('enum') (来自 POST /api/v1/enums/list)。
 import { PageContainer, ProCard } from '@ant-design/pro-components';
-import { Table, Tag } from 'antd';
 import { useModel } from '@umijs/max';
+import { Table, Tag } from 'antd';
 
 export default function EnumsPage() {
   const { enumsGroup } = useModel('enum');
@@ -11,7 +10,7 @@ export default function EnumsPage() {
   return (
     <PageContainer>
       {types.map((t) => (
-        <ProCard key={t} title={t} bordered style={{ marginBottom: 16 }} collapsible>
+        <ProCard key={t} title={t} bordered collapsible style={{ marginBottom: 16 }}>
           <Table
             rowKey="enumValue"
             size="small"

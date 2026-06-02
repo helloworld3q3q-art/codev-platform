@@ -1,16 +1,10 @@
-// 任务中心 —— 提交索引重建 + 按 jobId 查状态 (消费 /api/v1/indexes/rebuild + /api/v1/jobs/detail)。
-// 第一版极简 (后端暂无 job list 接口, 只有 detail/cancel/rebuild)。
+// 任务中心 —— 提交索引重建 + 按 jobId 查状态 (/api/v1/indexes/rebuild + /api/v1/jobs/detail)。
+import { get, post } from '@/utils/fetch';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import { Button, Descriptions, Input, Select, Space, message } from 'antd';
 import { useState } from 'react';
-import { post, get } from '@/utils/fetch';
-import { useModel } from '@umijs/max';
-
-const PROJECT_HEADER = { 'X-Project-Id': 'codev-platform' };
 
 export default function JobsPage() {
-  const { getEnumOptions } = useModel('enum');
-  const statusOptions = getEnumOptions('JobStatusEnum'); // 仅展示用, 证明枚举打通
   const [kind, setKind] = useState('chroma');
   const [jobId, setJobId] = useState('');
   const [detail, setDetail] = useState<any>(null);
@@ -42,7 +36,12 @@ export default function JobsPage() {
       </ProCard>
       <ProCard title="查询任务状态" bordered>
         <Space style={{ marginBottom: 12 }}>
-          <Input value={jobId} onChange={(e) => setJobId(e.target.value)} placeholder="jobId" style={{ width: 320 }} />
+          <Input
+            value={jobId}
+            onChange={(e) => setJobId(e.target.value)}
+            placeholder="jobId"
+            style={{ width: 320 }}
+          />
           <Button onClick={query}>查询</Button>
         </Space>
         {detail && (

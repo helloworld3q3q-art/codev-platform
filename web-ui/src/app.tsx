@@ -1,32 +1,83 @@
-// Umi Max 运行时 (与 stock-admin-web src/app.tsx 同构, 精简)。
-// getInitialState 提供当前用户; layout 提供 ProLayout 配置 + 未登录跳转。
+import EnumLoader from '@/components/EnumLoader';
+import TabContainer from '@/components/TabContainer';
+import { MENU_ITEMS } from '@/menus';
+import type { UserInfo } from '@/models/user';
+import { StyleProvider } from '@ant-design/cssinjs';
+import type { Settings as LayoutSettings } from '@ant-design/pro-components';
+import type { RunTimeLayoutConfig } from '@umijs/max';
 import { history } from '@umijs/max';
+import { App, ConfigProvider } from 'antd';
+import type { ReactNode } from 'react';
 import defaultSettings from '../config/defaultSettings';
+import antdTheme from './theme/antd';
 
-const LOGIN_PATH = '/user/login';
+import 'uno.css';
 
-export interface InitialState {
-  name?: string;
-  token?: string;
-}
-
-export async function getInitialState(): Promise<InitialState> {
-  // passthrough 期: 从 localStorage 读登录态 (真 auth 波接入后改为请求 /api/v1/auth/session)。
-  const token = localStorage.getItem('auth_token') || undefined;
-  const name = localStorage.getItem('user') || undefined;
-  return { name, token };
-}
-
-export const layout = ({ initialState }: { initialState?: InitialState }) => {
+export async function getInitialState(): Promise<{
+  settings?: Partial<LayoutSettings>;
+  userInfo?: UserInfo;
+}> {
+  // 从 localStorage 恢复登录用户信息，供 access.ts 使用
+  let userInfo: UserInfo | undefined;
+  const stored = localStorage.getItem('user');
+  if (stored) {
+    try {
+      userInfo = JSON.parse(stored) as UserInfo;
+    } catch {
+      userInfo = undefined;
+    }
+  }
   return {
-    title: 'codev-platform 控制台',
-    menu: { locale: false },
-    ...defaultSettings,
+    settings: defaultSettings as Partial<LayoutSettings>,
+    userInfo,
+  };
+}
+
+export function rootContainer(container: ReactNode) {
+  return (
+    <StyleProvider hashPriority="high">
+      <ConfigProvider theme={antdTheme} componentSize="middle">
+        <App>
+          {container}
+        </App>
+      </ConfigProvider>
+    </StyleProvider>
+  );
+}
+
+// 路径白名单：不需要缓存的页面（KeepAlive）
+export function getKeepAlive() {
+  return [/^\/(?!(user\/login|system\/404|404$))\/.+/];
+}
+
+export const layout: RunTimeLayoutConfig = ({ initialState }) => {
+  return {
     onPageChange: () => {
-      const { pathname } = history.location;
-      if (!initialState?.token && pathname !== LOGIN_PATH) {
-        history.push(LOGIN_PATH);
+      const path = history.location.pathname;
+      const token = localStorage.getItem('auth_token');
+      if (!token && path !== '/user/login') {
+        history.replace(
+          `/user/login?redirect=${encodeURIComponent(path + history.location.search)}`,
+        );
+      }
+      if (token && path === '/user/login') {
+        history.replace('/projects');
       }
     },
+    // 全局包裹：EnumLoader 应用启动时拉取后端枚举；TabContainer 提供多页签和 KeepAlive
+    childrenRender: () => (
+      <EnumLoader>
+        <TabContainer />
+      </EnumLoader>
+    ),
+    menu: {
+      locale: false,
+      // codev-platform admin: 静态菜单 (无后端 sys_menu 动态菜单系统; 接入后改回 request 拉取)。
+      request: async () => MENU_ITEMS,
+    },
+    menuHeaderRender: false,
+    rightContentRender: false,
+    waterMarkProps: undefined,
+    ...initialState?.settings,
   };
 };

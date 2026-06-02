@@ -1,0 +1,14 @@
+/lambda/
+/scripts
+/config
+.history
+public
+dist
+.umi
+mock
+.husky
+*.js
+/src/pages/examples
+
+/src/pages/examples/**/*.tsx
+/src/pages/examples/*.tsx

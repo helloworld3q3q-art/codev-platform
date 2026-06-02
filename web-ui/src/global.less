@@ -1,5 +1,531 @@
-html,
-body,
+@import './styles/variables.less'; // 引入 Less 变量文件
+
+:root {
+  /* 颜色变量 */
+  --orange: @orange;
+  --border: @border;
+  --divider: @divider;
+  --disabled: @disabled;
+  --bar: @bar;
+  --primary: @primary;
+  --secondary: @secondary;
+  --textPlaceholder: @textPlaceholder;
+  --textPrimary: @textPrimary;
+  --textSecondary: @textSecondary;
+  --textTertiary: @textTertiary;
+  --tertiaryBackground: @tertiaryBackground;
+  --popDivider: @popDivider;
+  --primaryDivider: @primaryDivider;
+  --quaternaryText: @quaternaryText;
+  --prefixColor: @prefixColor;
+  --cardBackground: @cardBackground;
+  --cardPopBackground: @cardPopBackground;
+  --primaryButton: @primaryButton;
+  --red: @red;
+  --green: @green;
+  --blue: @blue;
+  --loginSecondary: @loginSecondary;
+  --secondaryBackground: @secondaryBackground;
+  --hiddenColor: @hiddenColor;
+
+  /* 原色基础变量（带Origin后缀） */
+  --textPrimaryOrigin: @textPrimaryOrigin;
+  --quaternaryTextOrigin: @quaternaryTextOrigin;
+  --tintOrigin: @tintOrigin;
+  --orangeOrigin: @orangeOrigin;
+  --greenOrigin: @greenOrigin;
+  --blueOrigin: @blueOrigin;
+  --redOrigin: @redOrigin;
+  --normalTextColor: @normalTextColor;
+  --cardBackgroundOrigin: @cardBackgroundOrigin;
+  --textTertiaryOrigin: @textTertiaryOrigin;
+  --tertiaryBackgroundOrigin: @tertiaryBackgroundOrigin;
+
+  /* 布局尺寸变量 */
+  --page-min-width: @page-min-width;
+  --side-bar-width: @side-bar-width;
+  --navigation-bar-height: @navigation-bar-height;
+}
 #root {
   height: 100%;
+  & > :first-child {
+    height: 100%;
+  }
+  .ant-pro-layout, .ant-layout.ant-layout-has-sider {
+    height: 100%;
+  }
+  .ant-pro-layout-content {
+    padding: 0;
+  }
+  .ant-pro-layout-content .ant-app {
+    min-height: calc(100vh - 56px);
+  }
+}
+.colorWeak {
+  filter: invert(80%);
+}
+
+.ant-layout {
+  min-height: 100vh;
+}
+.ant-pro-sider.ant-layout-sider.ant-pro-sider-fixed {
+  left: unset;
+}
+
+canvas {
+  display: block;
+}
+
+body {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+@media (max-width: 768px) {
+  .ant-table {
+    width: 100%;
+    overflow-x: auto;
+    &-thead > tr,
+    &-tbody > tr {
+      > th,
+      > td {
+        white-space: pre;
+        > span {
+          display: block;
+        }
+      }
+    }
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #c1c1c1;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #bbb;
+  border-radius: 5px;
+}
+
+.ant-pro-table-column-setting-overlay
+  .ant-tree-treenode:hover
+  .ant-pro-table-column-setting-list-item-option {
+  display: none !important;
+}
+
+// 深色侧边栏折叠按钮默认不可见，固定为浅色确保常亮
+.ant-pro-sider-collapsed-button {
+  color: #818cf8;
+  &:hover {
+    color: #a5b4fc;
+  }
+}
+
+// ProLayout 将菜单 icon 放在 title-content 内；折叠态下 Ant Menu 会把 title-content
+// 压成 0 宽，导致 icon 被裁掉。这里仅恢复折叠侧边栏里的 icon 展示。
+.ant-pro-sider-collapsed {
+  .ant-menu-inline-collapsed > .ant-menu-item {
+    justify-content: center;
+    padding-inline: 0;
+
+    .ant-menu-title-content {
+      display: flex;
+      justify-content: center;
+      width: 100%;
+      overflow: visible;
+      opacity: 1;
+    }
+
+    .ant-pro-base-menu-vertical-item-title-collapsed {
+      justify-content: center;
+      width: 100%;
+    }
+
+    .ant-pro-base-menu-vertical-item-icon {
+      line-height: 1;
+      margin-inline-end: 0;
+    }
+
+    .ant-pro-base-menu-vertical-item-text {
+      display: none;
+    }
+  }
+}
+
+canvas {
+  display: block;
+}
+
+body {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+@media (max-width: 768px) {
+  .ant-table {
+    width: 100%;
+    overflow-x: auto;
+    &-thead > tr,
+    &-tbody > tr {
+      > th,
+      > td {
+        white-space: pre;
+        > span {
+          display: block;
+        }
+      }
+    }
+  }
+}
+
+.app-header-wrapper {
+  width: 100%;
+  // min-width: 1300px;
+  // overflow-x: auto;
+  // overflow-y: hidden;
+}
+
+.ant-pro-layout .ant-pro-layout-content {
+  height: calc(100vh - 56px);
+  padding: 0;
+}
+
+.ant-pro-layout .ant-layout-sider.ant-pro-sider {
+  background: #ffffff;
+}
+
+.ant-pro-table .ant-pro-table-search {
+  margin-block-end: 10px !important;
+}
+
+.ant-pro-card {
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+}
+.ant-pro-table-column-setting-overlay
+  .ant-tree-treenode:hover
+  .ant-pro-table-column-setting-list-item-option {
+  display: none !important;
+}
+html,
+body {
+  width: 100%;
+  height: 100%;
+}
+
+input::-ms-clear,
+input::-ms-reveal {
+  display: none;
+}
+
+*,
+*:before,
+*:after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: sans-serif;
+  line-height: 1.15;
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  -ms-overflow-style: scrollbar;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+
+body {
+  margin: 0;
+}
+
+[tabindex='-1']:focus {
+  outline: none;
+}
+
+hr {
+  box-sizing: content-box;
+  height: 0;
+  overflow: visible;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin-top: 0;
+  margin-bottom: 0.5em;
+  font-weight: 500;
+}
+
+p {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+
+abbr[title],
+abbr[data-original-title] {
+  text-decoration: underline dotted;
+  border-bottom: 0;
+  cursor: help;
+}
+
+address {
+  margin-bottom: 1em;
+  font-style: normal;
+  line-height: inherit;
+}
+
+input[type='text'],
+input[type='password'],
+input[type='number'],
+textarea {
+  -webkit-appearance: none;
+}
+
+ol,
+ul,
+dl {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+
+ol ol,
+ul ul,
+ol ul,
+ul ol {
+  margin-bottom: 0;
+}
+
+dt {
+  font-weight: 500;
+}
+
+dd {
+  margin-bottom: 0.5em;
+  margin-left: 0;
+}
+
+blockquote {
+  margin: 0 0 1em;
+}
+
+dfn {
+  font-style: italic;
+}
+
+b,
+strong {
+  font-weight: bolder;
+}
+
+small {
+  font-size: 80%;
+}
+
+sub,
+sup {
+  position: relative;
+  font-size: 75%;
+  line-height: 0;
+  vertical-align: baseline;
+}
+
+sub {
+  bottom: -0.25em;
+}
+
+sup {
+  top: -0.5em;
+}
+
+pre,
+code,
+kbd,
+samp {
+  font-size: 1em;
+  font-family:
+    SFMono-Regular,
+    Consolas,
+    Liberation Mono,
+    Menlo,
+    Courier,
+    monospace;
+}
+
+pre {
+  margin-top: 0;
+  margin-bottom: 1em;
+  overflow: auto;
+}
+
+figure {
+  margin: 0 0 1em;
+}
+
+img {
+  vertical-align: middle;
+  border-style: none;
+}
+
+a,
+area,
+button,
+[role='button'],
+input:not([type='range']),
+label,
+select,
+summary,
+textarea {
+  touch-action: manipulation;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+caption {
+  padding-top: 0.75em;
+  padding-bottom: 0.3em;
+  text-align: left;
+  caption-side: bottom;
+}
+
+input,
+button,
+select,
+optgroup,
+textarea {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+  line-height: inherit;
+}
+
+button,
+input {
+  overflow: visible;
+}
+
+button,
+select {
+  text-transform: none;
+}
+
+button,
+html [type='button'],
+[type='reset'],
+[type='submit'] {
+  -webkit-appearance: button;
+}
+
+button::-moz-focus-inner,
+[type='button']::-moz-focus-inner,
+[type='reset']::-moz-focus-inner,
+[type='submit']::-moz-focus-inner {
+  padding: 0;
+  border-style: none;
+}
+
+input[type='radio'],
+input[type='checkbox'] {
+  box-sizing: border-box;
+  padding: 0;
+}
+
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'] {
+  -webkit-appearance: listbox;
+}
+
+textarea {
+  overflow: auto;
+  resize: vertical;
+}
+
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+legend {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 0.5em;
+  padding: 0;
+  color: inherit;
+  font-size: 1.5em;
+  line-height: inherit;
+  white-space: normal;
+}
+
+progress {
+  vertical-align: baseline;
+}
+
+[type='number']::-webkit-inner-spin-button,
+[type='number']::-webkit-outer-spin-button {
+  height: auto;
+}
+
+[type='search'] {
+  outline-offset: -2px;
+  -webkit-appearance: none;
+}
+
+[type='search']::-webkit-search-cancel-button,
+[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+::-webkit-file-upload-button {
+  font: inherit;
+  -webkit-appearance: button;
+}
+
+output {
+  display: inline-block;
+}
+
+summary {
+  display: list-item;
+}
+
+template {
+  display: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+mark {
+  padding: 0.2em;
+  background-color: #feffe6;
 }
