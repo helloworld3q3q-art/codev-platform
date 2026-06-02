@@ -19,7 +19,8 @@ from typing import Any
 
 from mcp.types import TextContent
 
-import codev_platform.chroma.server as srv  # rebind 标量经 srv.<name> 读当前值
+import codev_platform.chroma.server as srv  # rebind 标量经 srv.<name> 读当前值 (_global_init_error)
+import codev_platform.chroma._reranker as rr  # reranker rebind 标量经 rr.<name> (_reranker_load_err)
 from codev_platform.chroma.server import (
     server,
     _current_project_id,
@@ -83,7 +84,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             where = _build_where(category, module)
 
             # Stage 1: embedding 召回. Reranker 启用时取 top-K 候选, 否则直接 top-k.
-            use_rerank = RERANKER_ENABLED and Path(RERANKER_MODEL or "").exists() and srv._reranker_load_err is None
+            use_rerank = RERANKER_ENABLED and Path(RERANKER_MODEL or "").exists() and rr._reranker_load_err is None
             n_candidates = max(k, RERANKER_TOP_K) if use_rerank else k
 
             # GPU 串行: 多 session 并发 search_docs 时 encode 排队 (防 8GB VRAM 抖动)
