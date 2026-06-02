@@ -2,6 +2,7 @@ import EnumLoader from '@/components/EnumLoader';
 import TabContainer from '@/components/TabContainer';
 import { MENU_ITEMS } from '@/menus';
 import { getSession } from '@/services/apis/authapi';
+import { postProjectsList } from '@/services/apis/projectapi';
 import type { UserInfo } from '@/models/user';
 import { StyleProvider } from '@ant-design/cssinjs';
 import type { Settings as LayoutSettings } from '@ant-design/pro-components';
@@ -26,6 +27,23 @@ function readStoredUser(): UserInfo | undefined {
   }
 }
 
+// 启动即初始化项目上下文: 未选则取当前 org 第一个项目写 localStorage,
+// 保证各页首个请求就带 X-Project-Id(组织/项目选择器在懒渲染的用户菜单里, 不能靠它初始化)。
+async function ensureCurrentProject(): Promise<void> {
+  if (localStorage.getItem('current_project')) {
+    return;
+  }
+  try {
+    const projRes = await postProjectsList({ pageNumber: 1, pageSize: 1 });
+    const firstProject = projRes.data?.[0]?.code;
+    if (firstProject) {
+      localStorage.setItem('current_project', firstProject);
+    }
+  } catch {
+    // 拉项目失败不阻塞启动
+  }
+}
+
 export async function getInitialState(): Promise<{
   settings?: Partial<LayoutSettings>;
   userInfo?: UserInfo;
@@ -42,6 +60,7 @@ export async function getInitialState(): Promise<{
         if (res.data.orgId && !localStorage.getItem('current_org')) {
           localStorage.setItem('current_org', res.data.orgId);
         }
+        await ensureCurrentProject();
       }
     } catch {
       // 401 已由 fetch 拦截器清 token + 跳登录; 其它错误保留本地用户(后端临时不可用容错)。
