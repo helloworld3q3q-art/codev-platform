@@ -1,0 +1,305 @@
+# 代码审查
+
+## 技能描述
+
+对 React 页面代码进行全面审查，支持多种审查范围，确保代码质量、规范遵循和最佳实践，并追溯问题代码的来源。
+
+## 使用场景
+
+- 审查整个项目的代码质量
+- 审查某个模块的代码规范
+- 审查最近提交的代码（如本周、最近 N 天）
+- Code Review 前的预检查
+- 发现潜在的性能问题和规范问题
+
+---
+
+## 审查流程
+
+### 步骤 0：确定审查范围（必须首先执行）
+
+**启动代码审查时，必须立即调用 AskUserQuestion 工具让用户选择，不要用文字询问。**
+
+使用单次 AskUserQuestion 调用，包含 3 个问题：
+
+```typescript
+AskUserQuestion({
+  questions: [
+    {
+      header: '审查范围',
+      multiSelect: false,
+      options: [
+        { label: '整个项目', description: '审查 src/pages 下所有代码' },
+        { label: '某个模块', description: "审查指定目录或组件（在'其他'中输入路径）" },
+        { label: '某个文件', description: "审查指定文件（在'其他'中输入文件路径）" },
+      ],
+      question: '您想审查哪些代码？',
+    },
+    {
+      header: '时间范围',
+      multiSelect: false,
+      options: [
+        { label: '最近 7 天', description: '审查最近一周的提交' },
+        { label: '最近 30 天', description: '审查最近一个月的提交' },
+        { label: '全部代码', description: '不限时间' },
+        { label: '指定日期', description: "在'其他'中输入日期范围，如 2026-03-20 至 2026-03-24" },
+      ],
+      question: '您想审查什么时间范围的代码？',
+    },
+    {
+      header: '代码作者',
+      multiSelect: false,
+      options: [
+        { label: '所有人', description: '不区分作者' },
+        { label: '指定作者', description: "在'其他'中输入作者名" },
+      ],
+      question: '您想审查谁的代码？',
+    },
+  ],
+});
+```
+
+**选项与 Git 命令对应关系**：
+
+| 选择       | Git 命令参数                                |
+| ---------- | ------------------------------------------- |
+| 整个项目   | 无需额外参数                                |
+| 某个模块   | `-- src/pages/user/`                        |
+| 某个文件   | `-- src/components/Table/index.tsx`         |
+| 最近 7 天  | `--since="7 days ago"`                      |
+| 最近 30 天 | `--since="30 days ago"`                     |
+| 指定日期   | `--since="2026-03-20" --until="2026-03-24"` |
+| 所有人     | 无需额外参数                                |
+| 指定作者   | `--author="张三"`                           |
+
+**快速场景解析**（用户直接输入时的处理）：
+
+| 用户输入                 | 解析结果                                      |
+| ------------------------ | --------------------------------------------- |
+| "审查最近一周的代码变更" | 时间：最近 7 天，范围：整个项目，作者：所有人 |
+| "审查 Select 组件"       | 范围：Select 组件目录，时间：全部代码         |
+| "审查张三昨天提交的代码" | 作者：张三，时间：昨天，范围：整个项目        |
+
+---
+
+### 步骤 1：获取审查范围内的提交
+
+```bash
+# 获取最近 7 天的所有提交
+git log --since="7 days ago" --pretty=format:"%h|%an|%ae|%ad|%s" --date=short
+
+# 获取某个模块的最近提交
+git log --since="7 days ago" --pretty=format:"%h|%an|%ae|%ad|%s" --date=short -- src/pages/user/
+
+# 获取某个作者的提交
+git log --author="张三" --since="7 days ago" --pretty=format:"%h|%an|%ae|%ad|%s" --date=short
+
+# 获取两个分支之间的差异提交
+git log main..feature/xxx --pretty=format:"%h|%an|%ae|%ad|%s" --date=short
+```
+
+### 步骤 2：获取提交的文件列表
+
+```bash
+# 获取某个提交修改的文件
+git show --name-only --pretty=format:"" <commit-hash>
+
+# 获取某个提交的详细统计
+git show --stat <commit-hash>
+
+# 获取两个分支之间的差异文件
+git diff --name-only main...feature/xxx
+```
+
+### 步骤 3：读取提交的具体代码
+
+```bash
+# 查看某个提交的完整改动
+git show <commit-hash>
+
+# 查看某个提交中某个文件的改动
+git show <commit-hash> -- <文件路径>
+
+# 查看具体改动的 diff
+git diff <commit-hash>^..<commit-hash> -- <文件路径>
+```
+
+### 步骤 4：问题代码追溯
+
+```bash
+# 追溯问题代码的作者
+git blame -L <起始行>,<结束行> <文件路径>
+
+# 示例：查看 index.tsx 第 10-20 行的代码作者
+git blame -L 10,20 src/pages/user/index.tsx
+
+# 查看完整的提交信息
+git log --pretty=format:"%h|%an|%ae|%ad|%s" --date=short -n 1 <commit-hash>
+```
+
+### 步骤 5：生成审查报告文档
+
+审查完成后，**必须**将报告保存为 Markdown 文件。
+
+**保存位置**：`.claude/reports/`
+
+**命名格式**：`code-review-YYYY-MM-DD.md`
+
+**示例**：
+
+```
+.claude/reports/code-review-2026-03-25.md
+```
+
+**生成步骤**：
+
+1. 使用 `Write` 工具创建报告文件
+2. 按照下方的"审查报告模板"格式填写内容
+3. 向用户报告文件保存路径
+
+**注意事项**：
+
+- 如果同一天已有报告，在文件名后添加序号：`code-review-2026-03-25-2.md`
+- 报告文件应包含完整的审查结果和修复建议
+- 文件生成后告知用户报告位置
+
+---
+
+## 检查清单
+
+### TypeScript 类型
+
+参考：`.claude/rules/code-quality.md`
+
+- [ ] 无 `any` 类型
+- [ ] 所有组件有 Props 接口定义
+- [ ] 表格/表单使用了正确的泛型类型
+- [ ] 无类型断言（`as`）
+
+### 国际化
+
+- [ ] 所有文本使用 `i18nMessages()`
+- [ ] 国际化键包含中文默认值
+- [ ] 无硬编码中文文本
+
+### 权限控制
+
+- [ ] 操作按钮使用 `PermissionButton`
+- [ ] 权限码格式正确: `MODULE-LIST-Action`
+
+### 枚举值
+
+- [ ] ProTable 列使用 `getFormattedEnums()`
+- [ ] 表单 Select 使用 `getEnumOptions()`
+- [ ] 无硬编码枚举值
+
+### 代码组织
+
+- [ ] index.tsx 文件不超过 900 行
+- [ ] 工具函数不超过 90 行
+- [ ] 抽屉使用语义化命名
+- [ ] 复杂逻辑提取到 utils.tsx
+
+### 错误处理
+
+- [ ] 所有 API 调用有 try/catch
+- [ ] 错误有友好的提示信息
+
+### 性能优化
+
+- [ ] 使用 `useCallback` 缓存回调函数
+- [ ] 使用 `useMemo` 缓存计算结果
+- [ ] 列表渲染使用正确的 key
+
+---
+
+## 审查报告模板
+
+````markdown
+# 代码审查报告
+
+## 审查信息
+
+| 项目     | 内容                            |
+| -------- | ------------------------------- |
+| 审查范围 | 整个项目 / 某个模块 / 某个文件  |
+| 时间范围 | 最近 7 天 / 指定日期 / 全部代码 |
+| 代码作者 | 所有人 / 指定作者               |
+| 审查日期 | YYYY-MM-DD                      |
+
+## 统计数据
+
+- **提交总数**: X 次
+- **修改文件**: X 个
+- **新增行数**: X 行
+- **删除行数**: X 行
+
+## 问题统计
+
+| 级别    | 数量 | 说明     |
+| ------- | ---- | -------- |
+| 🚨 严重 | X 个 | 必须修复 |
+| ⚠️ 警告 | X 个 | 建议修复 |
+| 💡 建议 | X 个 | 可选优化 |
+
+---
+
+## 问题详情
+
+### 🚨 严重问题 1：<问题标题>
+
+**位置**: `文件路径:行号`
+
+**作者**: 姓名 (邮箱) | **日期**: YYYY-MM-DD | **提交**: hash
+
+**问题代码**:
+
+```tsx
+// ❌ 问题代码
+```
+````
+
+**修复建议**:
+
+```tsx
+// ✅ 修复后
+```
+
+**参考规范**: `.claude/rules/xxx.md`
+
+---
+
+## 改进建议
+
+### 🔴 高优先级
+
+1. 替换所有 `any` 类型为具体类型
+2. 为所有按钮添加权限控制
+3. 所有文本使用国际化
+
+### 🟡 中优先级
+
+1. 添加错误处理
+2. 使用 useCallback 优化性能
+
+### 🟢 低优先级
+
+1. 重命名抽屉组件为语义化名称
+2. 提取复杂逻辑到 utils
+
+---
+
+## 总体评价
+
+代码质量评分：⭐⭐⭐⭐☆
+
+**总结**: 代码整体结构良好，但需要注意类型安全和规范遵循。建议优先修复严重问题。
+
+```
+
+## 相关规范
+
+- [代码质量规范](../../rules/code-quality.md)
+- [组件命名规范](../../rules/component-naming.md)
+- [API 服务规范](../../rules/api-service.md)
+```
