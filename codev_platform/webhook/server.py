@@ -21,7 +21,11 @@ from codev_platform.core.errors import ErrorCode
 
 _LOG_FILE = Path(__file__).resolve().parent / "webhook.log"
 DEFAULT_WEBHOOK_PORT = 18099
-_MAX_BODY = 1 * 1024 * 1024  # 1MB 请求体上限, 防超大 payload 拖垮 reindex 队列 / OOM
+# 8MB 请求体上限, 防超大 payload 拖垮 reindex 队列 / OOM。
+# 1MB 太紧: Gitea push payload 内联整段 commit 列表 + 文件清单, 多文件/大 commit 的
+# 推送实测 >1MB (2026-06-02 webhook.log 全是 Content-Length=1048577 的 413 拒绝, 即
+# 1MB+1 字节), 导致所有 push 被拒、reindex 从不触发。放宽到 8MB 覆盖正常推送。
+_MAX_BODY = 8 * 1024 * 1024
 
 
 def _log(msg: str) -> None:
@@ -113,6 +117,9 @@ def build_app(middleware=None):
         if not scopes:
             _log(f"[{name}] {event.repo} -> {pid}: {len(event.changed_files)} 文件改动但无 reindex scope 命中, 跳过")
             return JSONResponse({"ok": True, "project_id": pid, "skipped": "no scope match"})
+        # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest (与本地 hook 同源)。
+        if "codegraph" in scopes and "ingest" not in scopes:
+            scopes.append("ingest")
         q = open_default_queue()
         for kind in scopes:
             q.enqueue(pid, kind)

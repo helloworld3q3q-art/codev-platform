@@ -61,10 +61,12 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         C.err(str(exc))
         return 1
 
-    selected = bool(args.chroma or args.codegraph or args.cross_link)
+    do_ingest_flag = getattr(args, "ingest", False)
+    selected = bool(args.chroma or args.codegraph or args.cross_link or do_ingest_flag)
     do_codegraph = args.codegraph if selected else True
     do_chroma = args.chroma if selected else True
     do_cross_link = args.cross_link if selected else True
+    do_ingest = do_ingest_flag if selected else True
 
     if args.force or (do_codegraph and do_chroma and do_cross_link and not selected):
         C.out("[reindex] full rebuild: run in foreground to watch progress "
@@ -75,7 +77,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     # --- stage 1/3: codegraph sync ---
     if do_codegraph:
         C.out("")
-        C.out("=== step 1/3: codegraph sync ===")
+        C.out("=== step 1/4: codegraph sync ===")
         try:
             cp = C.run(["codegraph", "sync"], cwd=str(repo))
             rc = cp.returncode
@@ -89,12 +91,12 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             C.err(f"FAIL: codegraph sync exit={rc}")
             return rc
     else:
-        C.out("step 1/3: codegraph sync   -- skipped")
+        C.out("step 1/4: codegraph sync   -- skipped")
 
     # --- stage 2/3: chroma reindex ---
     if do_chroma:
         C.out("")
-        C.out("=== step 2/3: chroma reindex ===")
+        C.out("=== step 2/4: chroma reindex ===")
         chroma_py = C.chroma_python()
         if not chroma_py or not Path(chroma_py).exists():
             C.err(f"FAIL: chroma python not found ({chroma_py}); set runtime.chroma_venv in config")
@@ -109,19 +111,19 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             C.err(f"FAIL: chroma reindex exit={rc}")
             return rc
     else:
-        C.out("step 2/3: chroma reindex   -- skipped")
+        C.out("step 2/4: chroma reindex   -- skipped")
 
     # --- stage 3/3: cross-layer KG rebuild ---
     if do_cross_link:
         C.out("")
-        C.out("=== step 3/3: cross-layer KG rebuild ===")
+        C.out("=== step 3/4: cross-layer KG rebuild ===")
         # The cross_link build scanners (build_index + scan_*) are a BUSINESS-repo
         # asset, not part of the codev_platform package. Projects without them
         # (e.g. codev-platform itself) must skip — NOT scan some other repo and
         # pollute their own DB. Gate on the target repo actually shipping them.
         builder = repo / "tools" / "cross_link" / "build_index.py"
         if not builder.is_file():
-            C.out(f"step 3/3: cross-layer KG   -- skipped "
+            C.out(f"step 3/4: cross-layer KG   -- skipped "
                   f"(no {builder.relative_to(repo)} in this repo)")
         else:
             cross_py = C.cross_link_python()
@@ -148,7 +150,31 @@ def cmd_reindex(args: argparse.Namespace) -> int:
                 C.err(f"FAIL: cross_link build exit={rc}")
                 return rc
     else:
-        C.out("step 3/3: cross-layer KG   -- skipped")
+        C.out("step 3/4: cross-layer KG   -- skipped")
+
+    # --- stage 4/4: unified graph ingest (plugins -> graph store) ---
+    # 跑所有适用 analyzer 插件, 把产出灌进 per-project 统一图谱 store。与上面三个
+    # stage 并列, 但 FAILURE-ISOLATED: 这是 Phase 3 聚合层, 任何异常只 warn 不
+    # 改 reindex 退出码 —— 绝不让插件层拖垮已稳定的 codegraph/chroma/cross-link 基线。
+    if do_ingest:
+        C.out("")
+        C.out("=== step 4/4: unified graph ingest ===")
+        pid = C.project_id_of(repo)
+        if not pid:
+            C.out("step 4/4: graph ingest     -- skipped (repo 无 .claude/project.json project_id)")
+        else:
+            try:
+                from codev_platform.graph.ingest import ingest_project
+                rep = ingest_project(repo, pid)
+                if rep.ingested:
+                    C.out(f"graph ingest ok: {len(rep.ingested)} plugin(s) -> store "
+                          f"[{', '.join(rep.ingested)}]")
+                else:
+                    C.out("graph ingest ok: no applicable plugin produced output")
+            except Exception as exc:  # noqa: BLE001 — 聚合层失败隔离, 不污染基线退出码
+                C.err(f"WARN: graph ingest failed (non-fatal, baseline indexes unaffected): {exc}")
+    else:
+        C.out("step 4/4: graph ingest     -- skipped")
 
     dur = int(time.monotonic() - started)
     C.out("")
@@ -199,6 +225,10 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
     if not scoped:
         return 0  # silent no-op
     scopes = list(scoped.keys())
+    # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest (插件重跑落 store)。
+    # ingest 失败隔离在 reindex --ingest 内, 不影响 codegraph 自身索引。
+    if "codegraph" in scoped and "ingest" not in scopes:
+        scopes.append("ingest")
     log_file = _reindex_log(repo)
     all_matched = sorted({p for paths in scoped.values() for p in paths})
     header = "\n".join(
@@ -570,6 +600,7 @@ def register(subparsers) -> None:
     sp.add_argument("--chroma", action="store_true", help="只跑 chroma (与其它 flag 组合则只跑选中的)")
     sp.add_argument("--codegraph", action="store_true", help="只跑 codegraph sync")
     sp.add_argument("--cross-link", action="store_true", dest="cross_link", help="只跑 cross-link 重建")
+    sp.add_argument("--ingest", action="store_true", help="只跑统一图谱 ingest (plugins -> graph store)")
     sp.add_argument("--force", action="store_true", help="chroma indexer 传 --force (drop + rebuild)")
     sp.set_defaults(func=cmd_reindex)
 
