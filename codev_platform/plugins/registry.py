@@ -63,9 +63,15 @@ def _discover_builtins() -> None:
     扫描 + 实例化,本函数即为唯一扩展点,核心其它代码无感。
 
     首个内置插件: builtin.cross_link (cross-link sqlite 适配器包成的 AnalyzerPlugin)。
+    随后加入按技术栈复用的通用栈插件: builtin.frontend_react / builtin.backend_fastapi
+    (detect 探测 repo 内容自动适配, 杜绝 per-project 脚本)。
     """
     from codev_platform.plugins.builtin.cross_link import CrossLinkPlugin
+    from codev_platform.plugins.builtin.frontend_react import FrontendReactPlugin
+    from codev_platform.plugins.builtin.backend_fastapi import FastApiPlugin
     register_plugin(CrossLinkPlugin())
+    register_plugin(FrontendReactPlugin())
+    register_plugin(FastApiPlugin())
 
 
 def _ensure_discovered() -> None:
