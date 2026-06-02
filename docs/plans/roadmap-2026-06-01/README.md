@@ -23,10 +23,22 @@ Vue/React 页面
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [pluginized-fullstack-ai-platform-2026-06-01.md](pluginized-fullstack-ai-platform-2026-06-01.md) | 模块化核心 + 插件化扩展落地 plan: 安全底座、统一图谱、插件协议、Vue/React、Java/FastAPI、Wiki/Jira/飞书、Demo、POC | 规划中 |
+| [pluginized-fullstack-ai-platform-2026-06-01.md](pluginized-fullstack-ai-platform-2026-06-01.md) | 模块化核心 + 插件化扩展落地 plan: 安全底座、统一图谱、插件协议、Vue/React、Java/FastAPI、Wiki/Jira/飞书、Demo、POC | 主线/先切薄片证价值 |
 | [refactor-largefile-errorcode-2026-06-01.md](refactor-largefile-errorcode-2026-06-01.md) | 来自 0601 审计的可维护性整改: A 拆大文件 (chroma/server.py 1286 / ops/health.py 1119 / mcp_serve.py 701) + B 错误码结构化 (对外 HTTP/MCP 收窄 except, 5 类机器可读 code); 4 批排期 + 向后兼容 + 验证门 | 规划中 |
-| [agent-memory-platform-plan-2026-06-01.md](agent-memory-platform-plan-2026-06-01.md) | Agent Memory 平台化落地 plan: 任务记忆、Context Engineering、生命周期治理、权限审计、性能评测、飞书/Jira/Wiki/Git 接入 | 规划中 |
+| [web-backend-framework-plan-2026-06-02.md](web-backend-framework-plan-2026-06-02.md) | Web Backend 框架化落地 plan: FastAPI 服务分层、登录退出、组织管理、用户管理、项目管理、读写分离、统一请求验证和拦截、统一字段、OpenAPI、审计、长任务和并发控制 | P0 先做(Phase 0-3 地基) |
+| [agent-memory-platform-plan-2026-06-01.md](agent-memory-platform-plan-2026-06-01.md) | Agent Memory 平台化落地 plan: 任务记忆、Context Engineering、生命周期治理、权限审计、性能评测、飞书/Jira/Wiki/Git 接入 | P1 地基后 |
 | [modular-core-plugin-extension-decision-2026-06-02.md](modular-core-plugin-extension-decision-2026-06-02.md) | 架构命名和边界决策: 哪些能力做核心模块，哪些能力做客户插件，codegraph/cross-link/Memory/报告如何归类 | 已定 |
+
+## 执行顺序 / 优先级(2026-06-02 议定)
+
+```text
+1. web-backend Phase 0-3(骨架 + 统一错误 + Identity/ACL,~1 周)— 地基 + 关掉当前审计缺口(token 强制 project_id / org-team ACL / 入口级 ACL 集成测试)+ 消费 core/errors.py 错误码成果
+2. pluginized 切薄片(统一 GraphNode/Edge + 1 个 AnalyzerPlugin + demo)— 证明“影响分析”差异化
+3. web-backend Phase 4-6(org/user/project/job)与 pluginized graph 并行
+4. agent-memory M0-M1(任务记忆)接在 web-backend 之上
+```
+
+理由: web-backend 是地基(#2/#4 都踩它),最有界可验证,直接关审计缺口,且 pluginized 的 Phase 0 安全部署底座与它重叠 → 先把地基铺好再切差异化薄片。
 
 ## 关联
 
