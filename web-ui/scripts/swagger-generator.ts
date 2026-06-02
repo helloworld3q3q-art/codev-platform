@@ -489,7 +489,6 @@ class SwaggerStyleGenerator {
    */
   generateDynamicImports(methods: ApiMethod[]): string {
     const usedMethods = new Set<string>();
-    const baseImports = new Set<string>();
 
     // 分析每个方法使用的 HTTP 方法
     methods.forEach((method) => {
@@ -515,19 +514,9 @@ class SwaggerStyleGenerator {
       }
     });
 
-    // 检查是否需要分页响应类型
-    const hasPagination = methods.some(
-      (method) =>
-        method.returnType.includes('Pagination') ||
-        method.returnType.includes('PageResult'),
-    );
-    if (hasPagination) {
-      baseImports.add('BasePaginationResponse');
-    }
-
-    // 构建导入语句
-    const imports = [];
-    if (hasPagination) imports.push('BasePaginationResponse');
+    // 构建导入语句 (只导出方法体实际用到的;分页返回类型走 API.PageResult_* 命名空间,
+    // 不需要 import BasePaginationResponse —— 旧逻辑会导致生成文件 no-unused-vars 报错)
+    const imports: string[] = [];
 
     // 添加使用的 HTTP 方法
     if (usedMethods.has('get')) imports.push('get');

@@ -1,63 +1,77 @@
 import {
-  BasePaginationResponse,
+  get,
   post,
 } from '@/utils/fetch';
 
 const commonUrl = '';
 
-// 更新用户基本信息
-export async function postUpdate(data: Partial<API.UserUpdateRequest>): Promise<API.CommonResultVoid> {
-  return await post<API.CommonResultVoid>({
-    url: `${commonUrl}/v1/users/update`,
+// 用户管理-当前用户
+export async function getProfile(): Promise<API.CommonResult_UserItem_> {
+  return await get<API.CommonResult_UserItem_>({
+    url: `${commonUrl}/api/v1/users/profile`,
+  });
+}
+
+// 用户管理-用户列表
+export async function postUsersList(data: Partial<API.PostUsersListParams>): Promise<API.PageResult_UserItem_> {
+  return await post<API.PageResult_UserItem_>({
+    url: `${commonUrl}/api/v1/users/list`,
     data,
   });
 }
 
-// 重置用户密码（管理员操作，重置后强制改密）
-export async function postResetPassword(data: Partial<API.ResetPasswordRequest>): Promise<API.CommonResultVoid> {
-  return await post<API.CommonResultVoid>({
-    url: `${commonUrl}/v1/users/resetPassword`,
+// 用户管理-创建用户
+export async function postCreate(data: Partial<API.UserCreateRequest>): Promise<API.CommonResult_UserActionResult_> {
+  return await post<API.CommonResult_UserActionResult_>({
+    url: `${commonUrl}/api/v1/users/create`,
     data,
   });
 }
 
-// 分页查询用户列表
-export async function postUsersPage(data: Partial<API.UserPageRequest>): Promise<API.PageResultUserPageResponse> {
-  return await post<API.PageResultUserPageResponse>({
-    url: `${commonUrl}/v1/users/page`,
+// 用户管理-用户详情
+export async function getDetail(data: Partial<API.UsersGetDetailParams>): Promise<API.CommonResult_UserItem_> {
+  return await get<API.CommonResult_UserItem_>({
+    url: `${commonUrl}/api/v1/users/detail`,
     data,
   });
 }
 
-// 启用用户
-export async function postEnable(data: Partial<API.UserToggleRequest>): Promise<API.CommonResultVoid> {
-  return await post<API.CommonResultVoid>({
-    url: `${commonUrl}/v1/users/enable`,
+// 用户管理-更新用户
+export async function postUpdate(data: Partial<API.UserUpdateRequest>): Promise<API.CommonResult_UserActionResult_> {
+  return await post<API.CommonResult_UserActionResult_>({
+    url: `${commonUrl}/api/v1/users/update`,
     data,
   });
 }
 
-// 禁用用户
-export async function postDisable(data: Partial<API.UserToggleRequest>): Promise<API.CommonResultVoid> {
-  return await post<API.CommonResultVoid>({
-    url: `${commonUrl}/v1/users/disable`,
+// 用户管理-启用禁用
+export async function postStatus(data: Partial<API.UserStatusRequest>): Promise<API.CommonResult_UserActionResult_> {
+  return await post<API.CommonResult_UserActionResult_>({
+    url: `${commonUrl}/api/v1/users/status`,
     data,
   });
 }
 
-// 创建用户
-export async function postCreate(data: Partial<API.UserCreateRequest>): Promise<API.CommonResultLong> {
-  return await post<API.CommonResultLong>({
-    url: `${commonUrl}/v1/users/create`,
+// 用户管理-重置密码
+export async function postReset(data: Partial<API.UserPasswordResetRequest>): Promise<API.CommonResult_UserActionResult_> {
+  return await post<API.CommonResult_UserActionResult_>({
+    url: `${commonUrl}/api/v1/users/password/reset`,
     data,
   });
 }
 
-// 为用户分配角色（覆盖式）
-export async function postAssignRoles(data: Partial<API.AssignRolesRequest>): Promise<API.CommonResultVoid> {
-  return await post<API.CommonResultVoid>({
-    url: `${commonUrl}/v1/users/assignRoles`,
+// 用户管理-角色授权
+export async function postRoles(data: Partial<API.UserRolesRequest>): Promise<API.CommonResult_UserActionResult_> {
+  return await post<API.CommonResult_UserActionResult_>({
+    url: `${commonUrl}/api/v1/users/roles`,
     data,
+  });
+}
+
+// 用户管理-用户选择器
+export async function getSelections(): Promise<API.CommonResult_list_UserSelectionItem__> {
+  return await get<API.CommonResult_list_UserSelectionItem__>({
+    url: `${commonUrl}/api/v1/users/selections`,
   });
 }
 
