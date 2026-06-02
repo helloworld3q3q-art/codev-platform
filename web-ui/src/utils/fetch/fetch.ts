@@ -114,12 +114,18 @@ const axiosInstance: AxiosInstance = axios.create({
   },
 });
 
-// 请求拦截：自动注入登录 token
+// 请求拦截：自动注入登录 token + 当前项目上下文 (多租户 X-Project-Id)
 axiosInstance.interceptors.request.use((config) => {
   const token = localStorage.getItem('auth_token');
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // 当前项目由 useModel('project') 写入 localStorage；后端多租户接口据此路由。
+  const projectId = localStorage.getItem('current_project');
+  if (projectId) {
+    config.headers = config.headers || {};
+    config.headers['X-Project-Id'] = projectId;
   }
   return config;
 });

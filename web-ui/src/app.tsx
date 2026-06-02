@@ -1,4 +1,5 @@
 import EnumLoader from '@/components/EnumLoader';
+import ProjectSelect from '@/components/ProjectSelect';
 import TabContainer from '@/components/TabContainer';
 import { MENU_ITEMS } from '@/menus';
 import type { UserInfo } from '@/models/user';
@@ -77,6 +78,8 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
     },
     menuHeaderRender: false,
     rightContentRender: false,
+    // 顶栏右侧项目选择器 (多租户上下文)。
+    actionsRender: () => [<ProjectSelect key="project" />],
     waterMarkProps: undefined,
     ...initialState?.settings,
   };
