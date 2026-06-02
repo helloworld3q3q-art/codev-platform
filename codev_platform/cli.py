@@ -387,6 +387,29 @@ def cmd_mcp_source(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plugins(args: argparse.Namespace) -> int:
+    """plugins list: 列出已注册的 analyzer 插件 (name / version)。
+
+    Phase 2 第一批只内置插件 (registry._discover_builtins 显式注册);列空属正常,
+    下一步把 cross-link 适配器包成 builtin.cross_link 后这里就有行。
+    """
+    from codev_platform.plugins import list_plugins
+    if args.action == "list":
+        plugins = list_plugins()
+        if not plugins:
+            _print("(无已注册插件)")
+            _print("提示: Phase 2 只落地 plugin runtime; 内置插件 (如 builtin.cross_link) 待后续接入。")
+            return 0
+        width = max(len(p.name) for p in plugins)
+        _print(f"{'name'.ljust(width)}  version")
+        _print("-" * (width + 12))
+        for p in plugins:
+            _print(f"{p.name.ljust(width)}  {p.version}")
+        return 0
+    _eprint(f"unknown action: {args.action}")
+    return 1
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from codev_platform import __version__
     _print(f"codev-platform {__version__}")
@@ -745,6 +768,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp_ver = sub.add_parser("version", help="打印版本号")
     sp_ver.set_defaults(func=cmd_version)
+
+    sp_plg = sub.add_parser("plugins", help="analyzer 插件管理 (list 列出已注册插件)")
+    sp_plg.add_argument("action", choices=["list"], help="list=列出已注册插件 name/version")
+    sp_plg.set_defaults(func=cmd_plugins)
 
     sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")
     sp_dae.add_argument("action", choices=["status", "stop"], help="status=查 /health / stop=按 pid 结束")
