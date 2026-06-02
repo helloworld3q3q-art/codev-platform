@@ -253,6 +253,122 @@ def test_sql_inline_foreign_key_constraint_excluded(tmp_path):
     assert cols == {"id", "uid"}
 
 
+# ---------------- Python 源: 内嵌 DDL + SQLAlchemy + Django ----------------
+
+def test_py_embedded_ddl_detect(tmp_path):
+    # .py 里只有 conn.execute("CREATE TABLE ...") 内嵌 DDL (无 .sql / ORM) -> 命中。
+    (tmp_path / "schema.py").write_text(
+        'def init(conn):\n'
+        '    conn.executescript("""\n'
+        '    CREATE TABLE nodes (id INTEGER PRIMARY KEY, kind TEXT NOT NULL);\n'
+        '    """)\n',
+        encoding="utf-8",
+    )
+    assert SqlPlugin().detect(tmp_path) is True
+
+
+def test_py_embedded_ddl_extracts_table_and_columns(tmp_path):
+    # codev 主用法: 三引号多行 SQL 字符串里的 CREATE TABLE -> db_table/db_column。
+    (tmp_path / "store.py").write_text(
+        'SCHEMA_SQL = """\n'
+        'CREATE TABLE IF NOT EXISTS nodes (\n'
+        '    id          TEXT NOT NULL,\n'
+        '    kind        TEXT NOT NULL,\n'
+        '    name        TEXT NOT NULL,\n'
+        '    PRIMARY KEY (id)\n'
+        ');\n'
+        '"""\n'
+        'def open_db(conn):\n'
+        '    conn.executescript(SCHEMA_SQL)\n',
+        encoding="utf-8",
+    )
+    result = SqlPlugin().analyze(tmp_path, "demo")
+    tables = [n for n in result.nodes if n.kind == NodeKind.DB_TABLE.value]
+    cols = [n for n in result.nodes if n.kind == NodeKind.DB_COLUMN.value]
+    assert len(tables) == 1
+    assert tables[0].name == "nodes"
+    assert tables[0].id == "demo:db_table:nodes"
+    assert tables[0].language == "python"
+    assert tables[0].meta.get("source") == "python-ddl"
+    assert {c.name for c in cols} == {"id", "kind", "name"}
+    defines = [e for e in result.edges if e.kind == _DEFINES_COLUMN]
+    assert len(defines) == 3
+
+
+def test_py_sqlalchemy_orm_extracts_table_and_columns(tmp_path):
+    (tmp_path / "models.py").write_text(
+        "from sqlalchemy import Column, Integer, String\n"
+        "from sqlalchemy.orm import declarative_base\n"
+        "Base = declarative_base()\n"
+        "class User(Base):\n"
+        "    __tablename__ = 'users'\n"
+        "    id = Column(Integer, primary_key=True)\n"
+        "    name = Column(String(64))\n"
+        "    email = Column(String)\n",
+        encoding="utf-8",
+    )
+    result = SqlPlugin().analyze(tmp_path, "demo")
+    tables = [n for n in result.nodes if n.kind == NodeKind.DB_TABLE.value]
+    cols = [n for n in result.nodes if n.kind == NodeKind.DB_COLUMN.value]
+    assert len(tables) == 1
+    assert tables[0].name == "users"
+    assert tables[0].id == "demo:db_table:users"
+    assert tables[0].meta.get("source") == "sqlalchemy"
+    assert {c.name for c in cols} == {"id", "name", "email"}
+    # 列类型尽力抽取 (Column(Integer) -> Integer)。
+    id_col = next(c for c in cols if c.name == "id")
+    assert id_col.meta.get("col_type") == "Integer"
+
+
+def test_py_django_orm_extracts_table_and_columns(tmp_path):
+    (tmp_path / "models.py").write_text(
+        "from django.db import models\n"
+        "class BlogPost(models.Model):\n"
+        "    title = models.CharField(max_length=200)\n"
+        "    body = models.TextField()\n"
+        "    created = models.DateTimeField(auto_now_add=True)\n",
+        encoding="utf-8",
+    )
+    result = SqlPlugin().analyze(tmp_path, "demo")
+    tables = [n for n in result.nodes if n.kind == NodeKind.DB_TABLE.value]
+    cols = [n for n in result.nodes if n.kind == NodeKind.DB_COLUMN.value]
+    assert len(tables) == 1
+    # 模型名 BlogPost -> snake_case blog_post。
+    assert tables[0].name == "blog_post"
+    assert tables[0].meta.get("source") == "django"
+    assert {c.name for c in cols} == {"title", "body", "created"}
+
+
+def test_py_django_meta_db_table_overrides_name(tmp_path):
+    (tmp_path / "models.py").write_text(
+        "from django.db import models\n"
+        "class BlogPost(models.Model):\n"
+        "    title = models.CharField(max_length=200)\n"
+        "    class Meta:\n"
+        "        db_table = 'cms_posts'\n",
+        encoding="utf-8",
+    )
+    result = SqlPlugin().analyze(tmp_path, "demo")
+    tables = [n for n in result.nodes if n.kind == NodeKind.DB_TABLE.value]
+    assert tables[0].name == "cms_posts"
+    assert tables[0].id == "demo:db_table:cms_posts"
+
+
+def test_py_cross_source_dedup_same_table(tmp_path):
+    # 同名表既在 .sql 又在 .py 内嵌 DDL -> 合并为单一 db_table node (.sql 优先)。
+    (tmp_path / "schema.sql").write_text(
+        "CREATE TABLE nodes (id INTEGER, kind TEXT);", encoding="utf-8"
+    )
+    (tmp_path / "store.py").write_text(
+        'SQL = "CREATE TABLE nodes (id INTEGER, kind TEXT, extra TEXT);"\n',
+        encoding="utf-8",
+    )
+    result = SqlPlugin().analyze(tmp_path, "demo")
+    tables = [n for n in result.nodes if n.kind == NodeKind.DB_TABLE.value]
+    assert len(tables) == 1  # 跨源去重: 同 id 只保留一次。
+    assert tables[0].meta.get("source") == "sql"  # .sql pass 先跑, 优先。
+
+
 # ---------------- 自动发现: 新插件免改 registry 即注册 ----------------
 
 def test_sql_plugin_autodiscovered():

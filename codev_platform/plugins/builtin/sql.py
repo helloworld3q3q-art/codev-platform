@@ -29,6 +29,7 @@ node id 统一 "<project_id>:<kind>:<stable-key>" (与 _stack_scan / cross_link 
 """
 from __future__ import annotations
 
+import ast
 import logging
 import re
 from pathlib import Path
@@ -59,10 +60,12 @@ _SQLITE_SUFFIXES = (".sqlite", ".sqlite3", ".db")
 
 # CREATE TABLE [IF NOT EXISTS] [schema.]name ( ... ) —— 捕获表名 + 括号内列定义体。
 # 表名允许被反引号 / 双引号 / 方括号包裹 (mysql / pg / mssql 各家引号); 可带 schema 前缀。
+# 用 re.ASCII 约束 \w 仅匹配 ASCII (SQL 标识符不含 CJK), 防内嵌 DDL 扫描误命中 .py 注释/
+# 文档串里 "CREATE TABLE <中文> (" 这类非 DDL 文本 (\w 默认含 Unicode 会吞中文当表名)。
 _RE_CREATE_TABLE = re.compile(
     r"""create\s+table\s+(?:if\s+not\s+exists\s+)?"""
     r"""(?P<name>[`"\[\]\w.]+)\s*\(""",
-    re.IGNORECASE,
+    re.IGNORECASE | re.ASCII,
 )
 
 # 列定义行起始: 列名 (可带引号) + 类型 token。过滤掉表级约束行
@@ -196,16 +199,112 @@ def _extract_table_body(text: str, open_paren_idx: int) -> str | None:
     return None
 
 
-def _scan_sql_file(
-    text: str, rel: str, dialect: str, project_id: str
+def _emit_table_nodes(
+    table: str,
+    columns: list[tuple[str, str | None]],
+    *,
+    rel: str,
+    line: int,
+    language: str,
+    project_id: str,
+    table_meta: dict,
+    col_meta: dict,
 ) -> tuple[list[GraphNode], list[GraphEdge]]:
-    """扫单个 SQL 文件文本里的 CREATE TABLE -> db_table / db_column 节点 + contains 边。"""
+    """统一产 db_table + db_column 节点 + defines_column 边 (三种源共用的出口)。
+
+    columns: (col_name, col_type|None) 列表。语义/id 形态与 .sql 路径完全一致,
+    保证跨源 (sql / python-ddl / sqlalchemy / django) 同 table/column id 可去重 + 链接。
+    """
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
+    table_key = table.lower()
+    table_id = f"{project_id}:db_table:{table_key}"
+    nodes.append(
+        GraphNode(
+            id=table_id,
+            kind=NodeKind.DB_TABLE.value,
+            name=table,
+            project_id=project_id,
+            file=rel,
+            line=line,
+            language=language,
+            meta=dict(table_meta),
+        )
+    )
+    seen_cols: set[str] = set()
+    for col_name, col_type in columns:
+        if not col_name:
+            continue
+        col_key = col_name.lower()
+        if col_key in seen_cols:  # 同表同列名 (源内重复) 去重。
+            continue
+        seen_cols.add(col_key)
+        col_id = f"{project_id}:db_column:{table_key}.{col_key}"
+        meta = dict(col_meta)
+        meta["table"] = table
+        if col_type is not None:
+            meta["col_type"] = col_type
+        nodes.append(
+            GraphNode(
+                id=col_id,
+                kind=NodeKind.DB_COLUMN.value,
+                name=col_name,
+                project_id=project_id,
+                file=rel,
+                line=line,
+                language=language,
+                meta=meta,
+            )
+        )
+        edges.append(
+            GraphEdge(
+                source=table_id,
+                target=col_id,
+                kind=_REL_DEFINES_COLUMN,
+                meta={
+                    "cross_link_rel": _REL_DEFINES_COLUMN,
+                    "evidence": f"column {col_name} of {table}",
+                },
+            )
+        )
+    return nodes, edges
 
+
+def _parse_create_table_columns(body: str) -> list[tuple[str, str | None]]:
+    """把 CREATE TABLE 括号体解析成 (col_name, col_type) 列表 (排除表级约束行)。
+
+    .sql 路径与 python-ddl 路径共用 —— 列识别 / 约束过滤逻辑单一真值源。
+    """
+    out: list[tuple[str, str | None]] = []
+    for seg in _split_columns(body):
+        cm = _RE_COLUMN.match(seg)
+        if not cm:
+            continue
+        col_raw = cm.group("col")
+        first_token = _unquote(col_raw)
+        if not first_token:
+            continue
+        # 过滤表级约束行 (PRIMARY KEY / FOREIGN KEY / CONSTRAINT / ...);
+        # 引号包裹的列名 (col_raw 带引号) 一律视为真实列, 不做约束关键字判定。
+        if col_raw == first_token and _is_constraint_segment(seg, first_token):
+            continue
+        out.append((first_token, cm.group("type")))
+    return out
+
+
+def _scan_create_table_text(
+    text: str, rel: str, dialect: str, project_id: str, *,
+    language: str = "sql", source: str = "sql",
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """扫一段文本里所有 `CREATE TABLE ... (...)` -> db_table / db_column 节点 + 边。
+
+    对 .sql 文件全文 / .py 文件全文 (内嵌 DDL 在字符串字面量里) 一视同仁:
+    正则在哪种文本里匹配到 CREATE TABLE 就抽哪个。复用同一列解析器 + 节点出口。
+    """
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
     for m in _RE_CREATE_TABLE.finditer(text):
-        raw_name = m.group("name")
-        table = _unquote(raw_name)
+        table = _unquote(m.group("name"))
         if not table:
             continue
         # '(' 紧跟在匹配末尾前一位 (正则以 '(' 结束)。
@@ -214,67 +313,164 @@ def _scan_sql_file(
         if body is None:
             continue
         line = text.count("\n", 0, m.start()) + 1
-        table_key = table.lower()
-        table_id = f"{project_id}:db_table:{table_key}"
-        nodes.append(
-            GraphNode(
-                id=table_id,
-                kind=NodeKind.DB_TABLE.value,
-                name=table,
-                project_id=project_id,
-                file=rel,
-                line=line,
-                language="sql",
-                meta={"dialect": dialect},
-            )
+        columns = _parse_create_table_columns(body)
+        t_nodes, t_edges = _emit_table_nodes(
+            table, columns,
+            rel=rel, line=line, language=language, project_id=project_id,
+            table_meta={"dialect": dialect, "source": source},
+            col_meta={"dialect": dialect, "source": source},
         )
+        nodes.extend(t_nodes)
+        edges.extend(t_edges)
+    return nodes, edges
 
-        for seg in _split_columns(body):
-            cm = _RE_COLUMN.match(seg)
-            if not cm:
+
+# 向后兼容别名: 旧名 _scan_sql_file 等价新 _scan_create_table_text 的 .sql 默认配置。
+def _scan_sql_file(
+    text: str, rel: str, dialect: str, project_id: str
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """扫单个 SQL 文件文本里的 CREATE TABLE -> db_table / db_column 节点 + 边。"""
+    return _scan_create_table_text(
+        text, rel, dialect, project_id, language="sql", source="sql"
+    )
+
+
+# ============================ Python 源 (ORM) ============================
+
+# CamelCase 模型名 -> snake_case 表名 (Django 默认 db_table 规则: app 前缀此处不可知,
+# 只做模型名本身的 snake 化, 第一版不拼 app_label)。
+_RE_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def _snake_case(name: str) -> str:
+    """CamelCase -> snake_case (Django 模型名默认表名近似)。"""
+    return _RE_CAMEL_BOUNDARY.sub("_", name).lower()
+
+
+def _str_const(node: ast.expr) -> str | None:
+    """取 ast 字符串常量值, 非字符串常量返回 None。"""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _call_attr_chain(call: ast.Call) -> str | None:
+    """取 Call 的被调名最后一段 (Column / models.CharField -> 'Column' / 'CharField')。"""
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _is_models_model_base(bases: list[ast.expr]) -> bool:
+    """判断基类列表是否含 Django models.Model (或裸 Model 习惯写法)。"""
+    for b in bases:
+        if isinstance(b, ast.Attribute) and b.attr == "Model":
+            base_obj = b.value
+            if isinstance(base_obj, ast.Name) and base_obj.id == "models":
+                return True
+    return False
+
+
+def _scan_python_orm(
+    src: str, rel: str, project_id: str
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """AST 扫 .py 里的 SQLAlchemy declarative / Django Model -> db_table / db_column。
+
+    - SQLAlchemy: `class X(...): __tablename__ = "t"; col = Column(Type, ...)`
+      -> table = __tablename__ 值, columns = 赋值为 Column(...) 的属性名。source=sqlalchemy。
+    - Django: `class X(models.Model): f = models.XxxField(...)`
+      -> table = snake(模型名), columns = 赋值为 models.*Field(...) 的属性名。source=django。
+    第一版轻量: 只解析类体顶层简单赋值, 不展开 mixin / 抽象基类继承的列。
+    """
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:
+        logger.warning("python orm parse fail %s: %s", rel, exc)
+        return nodes, edges
+
+    for cls in ast.walk(tree):
+        if not isinstance(cls, ast.ClassDef):
+            continue
+
+        tablename: str | None = None
+        sa_cols: list[tuple[str, str | None]] = []
+        dj_cols: list[tuple[str, str | None]] = []
+        for stmt in cls.body:
+            if not isinstance(stmt, ast.Assign):
                 continue
-            col_raw = cm.group("col")
-            first_token = _unquote(col_raw)
-            if not first_token:
+            # 取赋值左侧第一个简单名 (col = ... / __tablename__ = ...)。
+            target = stmt.targets[0] if stmt.targets else None
+            if not isinstance(target, ast.Name):
                 continue
-            # 过滤表级约束行 (PRIMARY KEY / FOREIGN KEY / CONSTRAINT / ...);
-            # 引号包裹的列名 (col_raw 带引号) 一律视为真实列, 不做约束关键字判定
-            # (用户显式引用即意图把保留字当列名)。
-            if col_raw == first_token and _is_constraint_segment(seg, first_token):
+            attr = target.id
+            if attr == "__tablename__":
+                tablename = _str_const(stmt.value)
                 continue
-            col_name = first_token
-            col_type = cm.group("type")
-            col_key = col_name.lower()
-            col_id = f"{project_id}:db_column:{table_key}.{col_key}"
-            nodes.append(
-                GraphNode(
-                    id=col_id,
-                    kind=NodeKind.DB_COLUMN.value,
-                    name=col_name,
-                    project_id=project_id,
-                    file=rel,
-                    line=line,
-                    language="sql",
-                    meta={
-                        "dialect": dialect,
-                        "table": table,
-                        "col_type": col_type,
-                    },
-                )
+            if not isinstance(stmt.value, ast.Call):
+                continue
+            callee = _call_attr_chain(stmt.value)
+            if callee == "Column":  # SQLAlchemy 列。
+                sa_cols.append((attr, _sa_column_type(stmt.value)))
+            elif callee and callee.endswith("Field"):  # Django 字段。
+                dj_cols.append((attr, callee))
+
+        # SQLAlchemy: 必须有 __tablename__ 才能确定表名。
+        if tablename and sa_cols:
+            t_nodes, t_edges = _emit_table_nodes(
+                tablename, sa_cols,
+                rel=rel, line=cls.lineno, language="python",
+                project_id=project_id,
+                table_meta={"dialect": "unknown", "source": "sqlalchemy"},
+                col_meta={"dialect": "unknown", "source": "sqlalchemy"},
             )
-            edges.append(
-                GraphEdge(
-                    source=table_id,
-                    target=col_id,
-                    kind=_REL_DEFINES_COLUMN,
-                    meta={
-                        "cross_link_rel": _REL_DEFINES_COLUMN,
-                        "evidence": f"column {col_name} of {table}",
-                    },
-                )
+            nodes.extend(t_nodes)
+            edges.extend(t_edges)
+            continue
+
+        # Django: 基类是 models.Model 且有 *Field 列 -> 模型名 snake 为表名。
+        if dj_cols and _is_models_model_base(cls.bases):
+            table = _django_db_table(cls) or _snake_case(cls.name)
+            t_nodes, t_edges = _emit_table_nodes(
+                table, dj_cols,
+                rel=rel, line=cls.lineno, language="python",
+                project_id=project_id,
+                table_meta={"dialect": "unknown", "source": "django"},
+                col_meta={"dialect": "unknown", "source": "django"},
             )
+            nodes.extend(t_nodes)
+            edges.extend(t_edges)
 
     return nodes, edges
+
+
+def _sa_column_type(call: ast.Call) -> str | None:
+    """SQLAlchemy Column(Integer, ...) 第一个位置实参的类型名 (尽力, 无则 None)。"""
+    for arg in call.args:
+        if isinstance(arg, ast.Call):
+            return _call_attr_chain(arg)
+        if isinstance(arg, ast.Name):
+            return arg.id
+        if isinstance(arg, ast.Attribute):
+            return arg.attr
+    return None
+
+
+def _django_db_table(cls: ast.ClassDef) -> str | None:
+    """Django 内部 class Meta: db_table = 'x' 显式表名 (优先于模型名 snake 化)。"""
+    for stmt in cls.body:
+        if isinstance(stmt, ast.ClassDef) and stmt.name == "Meta":
+            for inner in stmt.body:
+                if isinstance(inner, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == "db_table"
+                    for t in inner.targets
+                ):
+                    return _str_const(inner.value)
+    return None
 
 
 class SqlPlugin(AnalyzerPlugin):
@@ -291,7 +487,8 @@ class SqlPlugin(AnalyzerPlugin):
         # 2) 有嵌入式 sqlite 库文件 (.sqlite / .db / .sqlite3)。
         if _stack_scan._iter_files(repo, _SQLITE_SUFFIXES):
             return True
-        # 3) ORM 迹象 (Python SQLAlchemy / Django models)。
+        # 3) Python 源迹象: ORM (SQLAlchemy / Django) 或内嵌 CREATE TABLE 字符串
+        #    (codev 主用 conn.execute("CREATE TABLE ...") / executescript 建表)。
         for f in _stack_scan._iter_files(repo, (".py",)):
             try:
                 text = f.read_text(encoding="utf-8")
@@ -299,14 +496,32 @@ class SqlPlugin(AnalyzerPlugin):
                 continue
             if any(hint in text for hint in _ORM_HINTS):
                 return True
+            if _RE_CREATE_TABLE.search(text):
+                return True
         return False
 
     def analyze(self, repo_path: Path, project_id: str) -> AnalyzerResult:
         repo = Path(repo_path)
         result = AnalyzerResult(plugin=PLUGIN_NAME)
-        seen_tables: set[str] = set()
-        seen_cols: set[str] = set()
+        # 跨源去重: 同 table/column node id (按表名/列名归一) 只保留首次出现 (.sql 优先,
+        # 再 python-ddl, 再 ORM)。id 已含表/列名 lower, 故天然合并多源同名表。
+        seen_nodes: set[str] = set()
+        seen_edges: set[tuple[str, str, str]] = set()
 
+        def _absorb(nodes: list[GraphNode], edges: list[GraphEdge]) -> None:
+            for n in nodes:
+                if n.id in seen_nodes:
+                    continue
+                seen_nodes.add(n.id)
+                result.nodes.append(n)
+            for e in edges:
+                key = (e.source, e.target, e.kind)
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
+                result.edges.append(e)
+
+        # Pass 1: .sql 文件里的 CREATE TABLE。
         for f in _stack_scan._iter_files(repo, _SQL_SUFFIXES):
             try:
                 text = f.read_text(encoding="utf-8")
@@ -315,17 +530,25 @@ class SqlPlugin(AnalyzerPlugin):
                 continue
             rel = _stack_scan._rel(f, repo)
             dialect = _detect_dialect(text, f.name)
-            nodes, edges = _scan_sql_file(text, rel, dialect, project_id)
-            for n in nodes:
-                if n.kind == NodeKind.DB_TABLE.value:
-                    if n.id in seen_tables:
-                        continue
-                    seen_tables.add(n.id)
-                else:  # db_column
-                    if n.id in seen_cols:
-                        continue
-                    seen_cols.add(n.id)
-                result.nodes.append(n)
-            result.edges.extend(edges)
+            _absorb(*_scan_sql_file(text, rel, dialect, project_id))
+
+        # Pass 2 + 3: .py 源 —— 内嵌 CREATE TABLE 字符串 + SQLAlchemy/Django ORM。
+        for f in _stack_scan._iter_files(repo, (".py",)):
+            try:
+                src = f.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.warning("read fail %s: %s", f, exc)
+                continue
+            rel = _stack_scan._rel(f, repo)
+            # Pass 2: python-ddl (字符串字面量里的 CREATE TABLE; 正则直扫全文)。
+            if _RE_CREATE_TABLE.search(src):
+                dialect = _detect_dialect(src, f.name)
+                _absorb(*_scan_create_table_text(
+                    src, rel, dialect, project_id,
+                    language="python", source="python-ddl",
+                ))
+            # Pass 3: ORM (AST; 仅当文件含 ORM 迹象时才解析, 省 AST 开销)。
+            if any(hint in src for hint in _ORM_HINTS):
+                _absorb(*_scan_python_orm(src, rel, project_id))
 
         return result
