@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from codev_platform.agent.routes import memory as memory_route  # noqa: E402
+from codev_platform.core.rbac import Membership  # noqa: E402
 
 
 class _FakeStore:
@@ -132,3 +133,93 @@ def test_list_org_scope_token_denied(monkeypatch):
     r = c.get("/memory", headers=_hdrs(),
               params={"scope": "org", "scope_ref": "orgA"})
     assert r.status_code == 403
+
+
+# ---- rbac-store-backed path (M5: 真实成员校验) ----
+# 上面的用例 mock get_rbac_store=None, 走 interim(org/team 全 deny)。这一组挂一个
+# 返回真 Membership 的 fake store, 验证路由把 fetch_membership → memory_scope_decision
+# 接对了: 同 org 成员可读写 org memory; 非成员 deny; 跨 team deny。
+
+
+class _FakeRbacStore:
+    """fetch_membership 据 (org_id, user_id) 返回预置 Membership; 命中不到 → 空(非成员)。"""
+
+    def __init__(self, memberships):
+        self._m = memberships  # {(org_id, user_id): Membership}
+
+    def fetch_membership(self, org_id, user_id, project_id=None):
+        return self._m.get((org_id, user_id), Membership())
+
+
+def _client_with_rbac(monkeypatch, *, identity, memberships):
+    monkeypatch.setattr(memory_route.deps, "get_memory_store", lambda: _FakeStore())
+    monkeypatch.setattr(memory_route.deps, "get_rbac_store",
+                        lambda: _FakeRbacStore(memberships))
+    cfg = {"gateway": {"auth_mode": "token"}, "projects": {}}
+    monkeypatch.setattr(memory_route, "load_config", lambda: cfg)
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def _inject_identity(request: Request, call_next):
+        request.state.identity = identity
+        return await call_next(request)
+
+    app.include_router(memory_route.router)
+    return TestClient(app)
+
+
+def test_rbac_org_member_can_read_org_memory(monkeypatch):
+    c = _client_with_rbac(
+        monkeypatch, identity=_ident(org_id="orgA", user_id="userA"),
+        memberships={("orgA", "userA"): Membership(org_role="member")})
+    r = c.get("/memory", headers=_hdrs(uid="userA", org="orgA"),
+              params={"scope": "org", "scope_ref": "orgA"})
+    assert r.status_code == 200
+
+
+def test_rbac_org_member_can_write_org_memory(monkeypatch):
+    c = _client_with_rbac(
+        monkeypatch, identity=_ident(org_id="orgA", user_id="userA"),
+        memberships={("orgA", "userA"): Membership(org_role="member")})
+    r = c.post("/memory", headers=_hdrs(uid="userA", org="orgA"),
+               json={"scope": "org", "scope_ref": "orgA", "content": "x"})
+    assert r.status_code == 200
+
+
+def test_rbac_org_nonmember_denied(monkeypatch):
+    # userB 不在 memberships → fetch 返回空 Membership(org_role=None)→ deny。
+    c = _client_with_rbac(
+        monkeypatch, identity=_ident(org_id="orgA", user_id="userB"),
+        memberships={("orgA", "userA"): Membership(org_role="member")})
+    r = c.get("/memory", headers=_hdrs(uid="userB", org="orgA"),
+              params={"scope": "org", "scope_ref": "orgA"})
+    assert r.status_code == 403
+
+
+def test_rbac_org_viewer_denied_both(monkeypatch):
+    # 当前路由 read/write 都过 memory_scope_decision(write 口径, 保守 deny):
+    # viewer 角色 < member 写门槛, 故 org viewer 读写均 403。这是有意的保守姿态
+    # (宁可 deny 不误放), 非 bug; 若后续要放开 viewer 读, 需路由按 action 分流。
+    c = _client_with_rbac(
+        monkeypatch, identity=_ident(org_id="orgA", user_id="userV"),
+        memberships={("orgA", "userV"): Membership(org_role="viewer")})
+    r_read = c.get("/memory", headers=_hdrs(uid="userV", org="orgA"),
+                   params={"scope": "org", "scope_ref": "orgA"})
+    assert r_read.status_code == 403
+    r_write = c.post("/memory", headers=_hdrs(uid="userV", org="orgA"),
+                     json={"scope": "org", "scope_ref": "orgA", "content": "x"})
+    assert r_write.status_code == 403
+
+
+def test_rbac_team_member_allowed_crossteam_denied(monkeypatch):
+    # userA 是 teamA 成员 → 读 teamA 放行; 读 teamB(非其 team)→ deny。
+    c = _client_with_rbac(
+        monkeypatch, identity=_ident(org_id="orgA", user_id="userA"),
+        memberships={("orgA", "userA"): Membership(teams=(("teamA", "member"),))})
+    r_own = c.get("/memory", headers=_hdrs(uid="userA", org="orgA"),
+                  params={"scope": "team", "scope_ref": "teamA"})
+    assert r_own.status_code == 200
+    r_cross = c.get("/memory", headers=_hdrs(uid="userA", org="orgA"),
+                    params={"scope": "team", "scope_ref": "teamB"})
+    assert r_cross.status_code == 403
