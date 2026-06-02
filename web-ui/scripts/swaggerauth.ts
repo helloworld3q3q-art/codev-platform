@@ -1,12 +1,11 @@
-// Swagger 生成配置 —— 支持多 backend 并行生成
+// Swagger/OpenAPI 生成配置 —— 支持多 backend 并行生成
 //
-// 添加新 backend 时，往 sources 数组追加一项即可：
-//   - name        : 子目录名 + 日志标识（'main' / 'codegraph' / ...）
-//   - swaggerUrl  : 后端 /v3/api-docs 地址
-//   - commonUrl   : 生成代码内拼到 fetch url 前面的前缀。空串=走前端 dev proxy。
-//                   跨进程后端（如 codegraph-api 18082）必须填绝对 URL，绕过 proxy。
-//   - namespace   : 生成的 typings.d.ts 用的 TS 命名空间。各 backend 必须唯一。
-//   - outputSubDir: src/services/apis/ 下的子目录。空串=直接写到根（保持 main 向后兼容）。
+// codev-platform 单后端 (FastAPI :18088, /openapi.json 是 OpenAPI 3.x)。图谱接口已并入
+// 本后端 /api/v1/graph/*, 不再需要独立 codegraph-api source。
+//   - swaggerUrl  : 后端 OpenAPI JSON 地址 (FastAPI 默认 /openapi.json)。
+//   - commonUrl   : 生成代码内拼到 fetch url 前面的前缀。空串=走前端 dev proxy(/api -> :18088)。
+//   - namespace   : 生成的 typings.d.ts 用的 TS 命名空间。
+//   - outputSubDir: src/services/apis/ 下的子目录。空串=直接写到根。
 
 export interface SwaggerSource {
   name: string;
@@ -23,13 +22,6 @@ const sources: SwaggerSource[] = [
     commonUrl: '',
     namespace: 'API',
     outputSubDir: '',
-  },
-  {
-    name: 'codegraph',
-    swaggerUrl: process.env.CODEGRAPH_SWAGGER_URL || 'http://localhost:18082/v3/api-docs',
-    commonUrl: 'http://localhost:18082',
-    namespace: 'CG',
-    outputSubDir: 'codegraph',
   },
 ];
 

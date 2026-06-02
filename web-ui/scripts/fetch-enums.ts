@@ -53,9 +53,10 @@ interface Config {
 
 // 配置
 const CONFIG: Config = {
-  // 本地 Java API，POST /v1/admin/enums/list，无需鉴权
-  apiUrl: '/v1/admin/enums/list',
-  baseUrl: process.env.FETCH_ENUMS_BASE_URL || 'http://localhost:18081',
+  // codev-platform web backend，POST /api/v1/enums/list (passthrough 无需鉴权)。
+  // 响应已对齐: {result:0, data:{enumType:[{enumValue,displayName,enumOrder,localLanguage,description}]}}。
+  apiUrl: '/api/v1/enums/list',
+  baseUrl: process.env.FETCH_ENUMS_BASE_URL || 'http://127.0.0.1:18088',
 
   // 输出配置
   outputDir: path.join(__dirname, '../src/models'),
