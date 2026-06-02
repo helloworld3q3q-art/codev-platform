@@ -21,3 +21,11 @@ export async function postCancel(data: Partial<API.JobCancelRequest>): Promise<A
   });
 }
 
+// 长任务-列表(按当前项目过滤)
+export async function postJobsList(data: Partial<API.PostJobsListParams>): Promise<API.PageResult_JobDTO_> {
+  return await post<API.PageResult_JobDTO_>({
+    url: `${commonUrl}/api/v1/jobs/list`,
+    data,
+  });
+}
+

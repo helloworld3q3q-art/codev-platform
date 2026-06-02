@@ -291,6 +291,15 @@ interface CommonResult_ProjectListItem_ {
   requestId?: any;
 }
 
+// CommonResult_PublicKeyInfo_ 接口
+interface CommonResult_PublicKeyInfo_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_SessionInfo_ 接口
 interface CommonResult_SessionInfo_ {
   result?: number;
@@ -548,10 +557,10 @@ interface JobIdData {
   jobId: string; // 新建任务 ID
 }
 
-// 登录请求。username + 明文 password (校验后立即丢弃, 不落库)。
+// 登录请求。username + password(前端 RSA 加密的 base64, 或明文兼容; 校验后即丢弃)。
 interface LoginRequest {
   username: string; // 用户名
-  password: string; // 密码 (明文, 仅校验用)
+  password: string; // 密码 (RSA 加密 base64 或明文)
 }
 
 // 登出请求。撤销 refreshToken 对应会话。
@@ -635,6 +644,19 @@ interface OrgUpdateRequest {
   description?: any; // 描述
 }
 
+// PageResult_JobDTO_ 数据传输对象
+interface PageResult_JobDTO_ {
+  result?: number;
+  message?: string;
+  data?: JobDTO[];
+  currentPage?: number;
+  pageSize?: number;
+  total?: number;
+  totalPage?: number;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // PageResult_MemberItem_ 接口
 interface PageResult_MemberItem_ {
   result?: number;
@@ -715,6 +737,11 @@ interface ProjectRegisterRequest {
   name: string; // 项目名称
   repoPath?: any; // 项目仓路径
   description?: any; // 描述
+}
+
+// 登录口令加密用 RSA 公钥 (PEM, SubjectPublicKeyInfo)。前端 JSEncrypt setPublicKey 用。
+interface PublicKeyInfo {
+  publicKey: string;
 }
 
 // 刷新请求。refreshToken 换新 token 对 (旧 refresh 轮换失效)。
@@ -843,5 +870,11 @@ interface ProjectsGetDetailParams {
 // JobsGetDetailParams 查询参数
 interface JobsGetDetailParams {
   jobId: string; // 任务 ID
+}
+
+// PostJobsListParams 查询参数
+interface PostJobsListParams {
+  pageNumber?: number; // 页码, 从 1 起
+  pageSize?: number; // 每页数量
 };
     }

@@ -5,6 +5,13 @@ import {
 
 const commonUrl = '';
 
+// 认证-登录口令加密公钥
+export async function getPublicKey(): Promise<API.CommonResult_PublicKeyInfo_> {
+  return await get<API.CommonResult_PublicKeyInfo_>({
+    url: `${commonUrl}/api/v1/auth/public-key`,
+  });
+}
+
 // 认证-登录
 export async function postLogin(data: Partial<API.LoginRequest>): Promise<API.CommonResult_TokenPair_> {
   return await post<API.CommonResult_TokenPair_>({

@@ -1,4 +1,4 @@
-// API 生成时间：2026-06-02T07:32:14.137Z
+// API 生成时间：2026-06-02T12:29:52.892Z
 
 import * as healthAPI from './healthapi';
 import * as authAPI from './authapi';
