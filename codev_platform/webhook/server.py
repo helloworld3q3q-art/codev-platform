@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from codev_platform.core.config import get as _cfg_get, load_config
+from codev_platform.core.errors import ErrorCode
 
 _LOG_FILE = Path(__file__).resolve().parent / "webhook.log"
 DEFAULT_WEBHOOK_PORT = 18099
@@ -71,35 +72,35 @@ def build_app(middleware=None):
         name = request.path_params["provider"]
         prov = providers.get_provider(name)
         if prov is None:
-            return JSONResponse({"error": f"unknown provider '{name}'"}, status_code=404)
+            return JSONResponse({"error": f"unknown provider '{name}'", "code": ErrorCode.INVALID_PARAMS.value}, status_code=404)
         # 请求体大小上限 (fail-closed): 先看 Content-Length 头早拒; 无头时读 body 后再校验长度。
         clen = request.headers.get("content-length")
         if clen is not None:
             try:
                 if int(clen) > _MAX_BODY:
                     _log(f"[{name}] 请求体 Content-Length={clen} 超上限 {_MAX_BODY}, 拒绝")
-                    return JSONResponse({"error": "payload too large"}, status_code=413)
+                    return JSONResponse({"error": "payload too large", "code": ErrorCode.INVALID_PARAMS.value}, status_code=413)
             except ValueError:
-                return JSONResponse({"error": "bad content-length"}, status_code=400)
+                return JSONResponse({"error": "bad content-length", "code": ErrorCode.INVALID_PARAMS.value}, status_code=400)
         body = await request.body()
         if len(body) > _MAX_BODY:
             _log(f"[{name}] 请求体 {len(body)} 字节超上限 {_MAX_BODY}, 拒绝")
-            return JSONResponse({"error": "payload too large"}, status_code=413)
+            return JSONResponse({"error": "payload too large", "code": ErrorCode.INVALID_PARAMS.value}, status_code=413)
         cfg = load_config()
         secret = str(_cfg_get(cfg, "webhook.secret") or "")
         allow_insecure = bool(_cfg_get(cfg, "webhook.allow_insecure") or False)
         if not secret:
             if not allow_insecure:
                 _log(f"[{name}] webhook.secret 未配置, fail-closed 拒绝; 本机信任可设 webhook.allow_insecure=true")
-                return JSONResponse({"error": "webhook secret not configured"}, status_code=401)
+                return JSONResponse({"error": "webhook secret not configured", "code": ErrorCode.DEPENDENCY_MISSING.value}, status_code=401)
             _log(f"[{name}] webhook.secret 未配置, 但 webhook.allow_insecure=true, 跳过验签放行 (仅限本机信任)")
         elif not prov.verify(request.headers, body, secret):
             _log(f"[{name}] 验签失败 (检查 webhook.secret 与 VCS 配置一致)")
-            return JSONResponse({"error": "invalid signature"}, status_code=401)
+            return JSONResponse({"error": "invalid signature", "code": ErrorCode.ACCESS_DENIED.value}, status_code=401)
         try:
             payload = json.loads(body)
         except Exception:  # noqa: BLE001
-            return JSONResponse({"error": "bad json"}, status_code=400)
+            return JSONResponse({"error": "bad json", "code": ErrorCode.INVALID_PARAMS.value}, status_code=400)
         event = prov.parse(request.headers, payload)
         if event is None:
             _log(f"[{name}] 非 push 事件, 跳过")
