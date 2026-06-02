@@ -102,8 +102,6 @@ export const MENU_ITEMS: MenuDataItem[] = [
   { name: '仪表盘', path: '/dashboard', icon: <DashboardOutlined /> },
   { name: '项目管理', path: '/projects', icon: <AppstoreOutlined /> },
   { name: '任务中心', path: '/jobs', icon: <ScheduleOutlined /> },
-  { name: '图谱', path: '/graph', icon: <DeploymentUnitOutlined /> },
-  { name: '枚举元数据', path: '/enums', icon: <TableOutlined /> },
   {
     name: '代码图谱',
     path: '/codegraph',

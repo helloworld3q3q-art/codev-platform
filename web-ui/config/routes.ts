@@ -5,8 +5,6 @@ export default [
   { name: '仪表盘', path: '/dashboard', icon: 'DashboardOutlined', component: './dashboard' },
   { name: '项目管理', path: '/projects', icon: 'AppstoreOutlined', component: './projects' },
   { name: '任务中心', path: '/jobs', icon: 'ScheduleOutlined', component: './jobs' },
-  { name: '图谱', path: '/graph', icon: 'DeploymentUnitOutlined', component: './graph' },
-  { name: '枚举元数据', path: '/enums', icon: 'TableOutlined', component: './enums' },
   // 代码图谱 (codegraph 5 子页)。路由保持扁平 (React Router 嵌套绝对子路径须以父路径开头),
   // "代码图谱" 父分组只在菜单 (src/menus.tsx) 体现, 子路径以 /codegraph/ 前缀归组。
   { name: '节点图谱', path: '/codegraph/graph', icon: 'PartitionOutlined', component: './codegraph/graph' },
