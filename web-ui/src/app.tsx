@@ -27,8 +27,8 @@ function readStoredUser(): UserInfo | undefined {
   }
 }
 
-// 启动即初始化项目上下文: 未选则取当前 org 第一个项目写 localStorage,
-// 保证各页首个请求就带 X-Project-Id(组织/项目选择器在懒渲染的用户菜单里, 不能靠它初始化)。
+// 启动即预置当前项目(被 umi await, 保证首屏渲染前 current_project 就位 → 各页首个请求即带 X-Project-Id)。
+// model 的 useEffect 在 render 之后才跑, 挡不住首屏竞态, 故初始预拉放这里; model init 幂等(已设则跳过)负责后续级联。
 async function ensureCurrentProject(): Promise<void> {
   if (localStorage.getItem('current_project')) {
     return;
@@ -60,6 +60,7 @@ export async function getInitialState(): Promise<{
         if (res.data.orgId && !localStorage.getItem('current_org')) {
           localStorage.setItem('current_org', res.data.orgId);
         }
+        // 预置当前项目(首屏前就位); model useEffect 仅负责后续级联/兜底(幂等)。
         await ensureCurrentProject();
       }
     } catch {

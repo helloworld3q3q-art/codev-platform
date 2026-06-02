@@ -1,6 +1,7 @@
-// 顶栏组织选择器 —— @jlogi/ui Select + fetchOptions 远程拉组织(DemoSelect 模式)。
-// 受控值绑 useModel('org').currentOrgId; 切换写 localStorage 注入 X-Org-Id, 并重置项目(切 org 项目按新 org 过滤)。
-import { useCallback, useRef } from 'react';
+// 顶栏组织选择器 —— @jlogi/ui Select + fetchOptions 远程拉组织选项(DemoSelect 模式, 纯展示无副作用)。
+// 受控值绑 useModel('org').currentOrgId; 默认值/初始化由 org model 负责(全局常驻必跑), 本组件不在 fetchOptions 里设默认。
+// 切换写 localStorage 注入 X-Org-Id, 并重置项目(切 org 后 project model 按新 org 重新默认第一个)。
+import { useCallback } from 'react';
 import { useModel } from '@umijs/max';
 
 import type { SelectProps } from '@jlogi/ui';
@@ -13,10 +14,6 @@ type OrgSelectProps = Omit<SelectProps, 'fetchOptions'>;
 const OrgSelect: React.FC<OrgSelectProps> = ({ ...restProps }) => {
   const { currentOrgId, setCurrentOrg } = useModel('org');
   const { setCurrentProject } = useModel('project');
-
-  // 用 ref 读取当前选择, 不进 handleFetchOptions 依赖(否则选中变化 → 函数重建 → Select 重拉, 易循环)。
-  const currentOrgIdRef = useRef(currentOrgId);
-  currentOrgIdRef.current = currentOrgId;
 
   const handleFetchOptions = useCallback(
     async (params: { keyWord: string; page: number; pageSize: number }) => {
@@ -31,11 +28,6 @@ const OrgSelect: React.FC<OrgSelectProps> = ({ ...restProps }) => {
           name: item.name ?? '',
           data: item,
         }));
-        // 初次加载(无关键词)且未选时, 默认选第一个组织 → 触发 ProjectSelect 按该 org 拉并默认第一个项目。
-        if (!params.keyWord && !currentOrgIdRef.current && options.length > 0) {
-          setCurrentProject(''); // 清掉可能残留的旧 org 项目, 让新 org 重新默认第一个
-          setCurrentOrg(options[0].value);
-        }
         const filteredOptions = params.keyWord
           ? options.filter(
             (opt) =>
@@ -48,7 +40,7 @@ const OrgSelect: React.FC<OrgSelectProps> = ({ ...restProps }) => {
         return { data: [], totalCounts: 0 };
       }
     },
-    [setCurrentOrg, setCurrentProject],
+    [],
   );
 
   const handleChange = useCallback(
