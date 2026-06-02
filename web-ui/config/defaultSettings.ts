@@ -12,7 +12,7 @@ const Settings: ProLayoutProps & {
   fixedHeader: true,
   fixSiderbar: true,
   colorWeak: false,
-  title: 'OpenClaw Stock',
+  title: 'CoDev Platform',
   pwa: false,
   iconfontUrl: '',
   token: {

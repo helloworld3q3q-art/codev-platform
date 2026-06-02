@@ -36,7 +36,7 @@ export default defineConfig({
   proxy: proxy[REACT_APP_ENV as keyof typeof proxy],
   request: {},
   routes,
-  title: 'OpenClaw Stock',
+  title: 'CoDev Platform',
   theme: {
     'root-entry-name': 'variable',
   },
