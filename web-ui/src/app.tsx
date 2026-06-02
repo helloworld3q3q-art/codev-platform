@@ -1,7 +1,7 @@
 import EnumLoader from '@/components/EnumLoader';
 import LogoutButton from '@/components/LogoutButton';
-import OrgSelect from '@/components/OrgSelect';
-import ProjectSelect from '@/components/ProjectSelect';
+import OrgSelect from '@/components/Form/Select/OrgSelect';
+import ProjectSelect from '@/components/Form/Select/ProjectSelect';
 import TabContainer from '@/components/TabContainer';
 import { MENU_ITEMS } from '@/menus';
 import { getSession } from '@/services/apis/authapi';
