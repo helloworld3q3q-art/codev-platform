@@ -1,15 +1,15 @@
 """chroma 索引器 —— 文件发现 + 分类 (从 indexer.py 抽出, file-discipline §1)。
 
 discover_files / infer_category / infer_module / _rel_path 等。常量 (PLATFORM_ROOT /
-DOC_PATTERNS / EXCLUDE_*) + logger 从 indexer 取 —— indexer 在定义完这些常量后才
-`from ._discover import ...` (bottom-import 模式), 故无循环。
+DOC_PATTERNS / EXCLUDE_*) + logger 从 **叶子 _index_config** 取 (不依赖 indexer), 故
+`import _discover` 可独立成功, 无 indexer↔_discover 循环 (审计 LOW#1 修复)。
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from codev_platform.chroma.indexer import (
+from codev_platform.chroma._index_config import (
     PLATFORM_ROOT,
     DOC_PATTERNS,
     EXCLUDE_PARTS,

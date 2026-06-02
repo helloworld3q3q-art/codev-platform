@@ -24,8 +24,9 @@ from typing import Iterable
 
 # ---- 配置 ----
 
-_DEFAULT_ROOT = Path(__file__).resolve().parents[2]
-PLATFORM_ROOT = Path(os.getenv("PLATFORM_ROOT", str(_DEFAULT_ROOT))).expanduser().resolve()
+# PLATFORM_ROOT / DOC_PATTERNS / EXCLUDE_* / logger 抽到 _index_config.py 叶子
+# (破 indexer ↔ _discover 双向 import 脆弱; _discover 改从叶子取)。
+from codev_platform.chroma._index_config import PLATFORM_ROOT, logger  # noqa: E402,F401
 
 # 多项目命名: <project_id>__platform_docs (与 server.py 共用 resolver)
 # PERSIST_DIR 走 codev_platform.core.paths.chroma_dir() — 它读 PLATFORM_DATA_DIR env,
@@ -58,21 +59,7 @@ EMBEDDING_DEVICE = os.getenv("PLATFORM_EMBED_DEVICE", _cfg_get(_cfg, "models.emb
 # env > config models.embed_batch_size > 16(换机器只改 config, 代码不动)。
 EMBEDDING_BATCH_SIZE = int(os.getenv("PLATFORM_EMBED_BATCH_SIZE", str(_cfg_get(_cfg, "models.embed_batch_size", 16))))
 
-# DEFAULT_DOC_PATTERNS: 任何项目通用的 markdown 位置 (不含业务专属路径).
-# 业务专属路径 (apps/stock-admin-* / python/stock-pipeline 等) 走各业务仓
-# <repo>/.claude/index.json:doc_patterns override (见 _load_project_index_config).
-DOC_PATTERNS = [
-    "CLAUDE.md",
-    "AGENTS.md",
-    "README.md",
-    ".claude/rules/*.md",
-    ".claude/skills/**/*.md",
-    "docs/**/*.md",
-]
-
-EXCLUDE_PARTS = {"archive", "node_modules", "__pycache__", "target"}
-# 白名单:即使路径含 EXCLUDE_PARTS 也保留(N10 incident 复盘需可检索)
-EXCLUDE_WHITELIST_SUBPATHS = ("archive/incidents/",)
+# DOC_PATTERNS / EXCLUDE_PARTS / EXCLUDE_WHITELIST_SUBPATHS 已抽到 _index_config.py 叶子 (见上方 import)。
 
 # chunk 切分常量 + 函数已迁到 codev_platform.chroma.chunking (跨项目通用算法).
 # 本地保留 import 别名兼容已有 manifest 校验逻辑 (params.chunk_*_max 比对).
@@ -93,11 +80,7 @@ MANIFEST_VERSION = 1
 # 旧全局 index_manifest.json 自然废弃（首次 per-project reindex 重建，留着无害）。
 MANIFEST_PATH = PERSIST_DIR / f"index_manifest.{PROJECT_ID}.json"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
-logger = logging.getLogger("chroma_index")
+# logging 配置 + logger 已抽到 _index_config.py (见上方 import)。
 
 
 # 文件发现 + 分类 (is_excluded / _load_project_index_config / discover_files / infer_category /

@@ -19,7 +19,6 @@ from typing import Any
 
 from mcp.types import TextContent
 
-import codev_platform.chroma.server as srv  # noqa: F401  (历史保留; rebind 标量改走 m./rr.)
 import codev_platform.chroma._models as mdl  # model rebind 标量经 mdl.<name> (_global_init_error)
 # 注: 不能用别名 `m` —— call_tool 内有局部 `for m in metas` / `m = metas[i]`, 会 UnboundLocalError。
 import codev_platform.chroma._reranker as rr  # reranker rebind 标量经 rr.<name> (_reranker_load_err)
