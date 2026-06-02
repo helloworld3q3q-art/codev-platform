@@ -3,8 +3,9 @@
 
 import PageContainer from '@/components/PageContainer';
 import { ProTable } from '@ant-design/pro-components';
+import { useModel } from '@umijs/max';
 import { Alert, Button, Card, Col, Input, Row, Select, Space } from 'antd';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchSearch } from '../common/services';
 import type { NodeDTO } from '../common/types';
@@ -12,6 +13,8 @@ import { KIND_OPTIONS, LANG_OPTIONS } from '../common/utils';
 import { createColumns } from './components/Columns';
 
 const CodeGraphTablePage: React.FC = () => {
+  // 订阅当前项目, 切项目后若有进行中的搜索则原地重拉(fetch 注入 X-Project-Id)。
+  const { currentProjectId } = useModel('project');
   const [keyword, setKeyword] = useState('');
   const [languages, setLanguages] = useState<string[]>([]);
   const [kinds, setKinds] = useState<string[]>([]);
@@ -37,7 +40,18 @@ const CodeGraphTablePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [keyword, languages, kinds]);
+    // currentProjectId 变化触发重拉
+  }, [keyword, languages, kinds, currentProjectId]);
+
+  // loadList 经 ref 透传, 让"切项目重搜"的 effect 只依赖 currentProjectId,
+  // 避免把 loadList 放进依赖导致每次输入关键字都重搜。
+  const loadListRef = useRef(loadList);
+  loadListRef.current = loadList;
+
+  // 切项目后, 若已有搜索关键字则原地重新搜索(无关键字 loadList 内部会清空)。
+  useEffect(() => {
+    loadListRef.current();
+  }, [currentProjectId]);
 
   const handleKeywordChange = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
     setKeyword(e.target.value);

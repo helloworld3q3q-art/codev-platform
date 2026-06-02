@@ -1,5 +1,6 @@
 // 仪表盘首页 —— 平台健康 + 当前项目图谱统计 + 资源计数概览。
 import { useCallback, useEffect, useState } from 'react';
+import { useModel } from '@umijs/max';
 
 import { ProCard, StatisticCard } from '@ant-design/pro-components';
 import { Descriptions, Spin, Tag } from 'antd';
@@ -9,6 +10,8 @@ import PageContainer from '@/components/PageContainer';
 import { DASHBOARD_DEFAULT, loadDashboard, type DashboardData } from './components/utils';
 
 export default function DashboardPage() {
+  // 订阅当前项目, 切项目后图谱统计原地重拉(KeepAlive 缓存页 mount 仍按旧 X-Project-Id)。
+  const { currentProjectId } = useModel('project');
   const [data, setData] = useState<DashboardData>(DASHBOARD_DEFAULT);
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +23,8 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // currentProjectId 变化触发重拉
+  }, [currentProjectId]);
 
   useEffect(() => {
     load();

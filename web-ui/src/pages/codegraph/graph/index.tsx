@@ -4,7 +4,7 @@
 // 鼠标左键拖拽旋转 / 右键平移 / 滚轮缩放 / 拖节点物理重排。
 
 import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons';
-import { useLocation } from '@umijs/max';
+import { useLocation, useModel } from '@umijs/max';
 import { AutoComplete, Spin, Tag, Tooltip, message } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -18,6 +18,8 @@ const INITIAL_GRAPH_LIMIT = 2000;
 
 const CodeGraphGraphPage: React.FC = () => {
   const location = useLocation();
+  // 订阅当前项目, 切项目后图谱原地重拉(fetch 拦截器据此注入 X-Project-Id)。
+  const { currentProjectId } = useModel('project');
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [centerId, setCenterId] = useState<string | undefined>(undefined);
   const [graphData, setGraphData] = useState<NeighborsResponse | undefined>(undefined);
@@ -63,7 +65,8 @@ const CodeGraphGraphPage: React.FC = () => {
     } finally {
       setGraphLoading(false);
     }
-  }, []);
+    // currentProjectId 变化触发重拉
+  }, [currentProjectId]);
 
   const loadNeighbors = useCallback(async (id: string): Promise<void> => {
     setGraphLoading(true);
@@ -78,7 +81,8 @@ const CodeGraphGraphPage: React.FC = () => {
     } finally {
       setGraphLoading(false);
     }
-  }, []);
+    // currentProjectId 变化触发重拉
+  }, [currentProjectId]);
 
   const handleSearchInput = useCallback(async (value: string): Promise<void> => {
     setKeyword(value);

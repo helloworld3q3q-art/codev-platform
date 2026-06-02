@@ -3,7 +3,7 @@ import ResizableTable, { requestWrapper } from '@/components/ResizableTable';
 import type { ActionType } from '@ant-design/pro-components';
 import { useModel } from '@umijs/max';
 import { message } from 'antd';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createColumns } from './components/Columns';
 import ProjectFormDrawer, { type ProjectFormDrawerContext } from './components/ProjectFormDrawer';
@@ -21,10 +21,17 @@ const FORM_DEFAULT: ProjectFormDrawerContext = { open: false };
 const ProjectsPage: React.FC = () => {
   // 状态枚举走后端真值源 (useModel('enum')), 不前端硬编码。
   const { getFormattedEnums } = useModel('enum');
+  // 订阅当前组织, 切组织后项目列表(按 org 过滤)原地重拉(fetch 注入 X-Org-Id)。
+  const { currentOrgId } = useModel('org');
   const actionRef = useRef<ActionType>();
   const [formCtx, setFormCtx] = useState<ProjectFormDrawerContext>(FORM_DEFAULT);
 
   const statusMap = useMemo(() => getFormattedEnums('ProjectStatusEnum'), [getFormattedEnums]);
+
+  // 切组织后让 ResizableTable 重新走 request(按新 X-Org-Id 过滤)。
+  useEffect(() => {
+    actionRef.current?.reload();
+  }, [currentOrgId]);
 
   const handleAdd = useCallback(() => {
     setFormCtx({ open: true });

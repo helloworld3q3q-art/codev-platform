@@ -21,6 +21,7 @@ import {
   Spin,
   Typography,
 } from 'antd';
+import { useModel } from '@umijs/max';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { fetchFileTree } from '@/pages/codegraph/common/services';
@@ -37,6 +38,8 @@ import {
 } from './utils';
 
 const FilesPage: React.FC = () => {
+  // 订阅当前项目, 切项目后文件树原地重拉(fetch 注入 X-Project-Id)。
+  const { currentProjectId } = useModel('project');
   const [files, setFiles] = useState<FileDTO[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -63,7 +66,8 @@ const FilesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // currentProjectId 变化触发重拉
+  }, [currentProjectId]);
 
   useEffect(() => {
     loadFiles();

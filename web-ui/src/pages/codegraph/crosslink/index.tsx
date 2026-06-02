@@ -4,6 +4,7 @@ import {
   FullscreenOutlined,
   UpOutlined,
 } from '@ant-design/icons';
+import { useModel } from '@umijs/max';
 import { Select, Spin, message } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -110,6 +111,8 @@ function toNeighborsResponse(g: CrossLinkGraphResponse | undefined): NeighborsRe
 }
 
 const CrossLinkPage: React.FC = () => {
+  // 订阅当前项目, 切项目后跨层图谱原地重拉(fetch 注入 X-Project-Id)。
+  const { currentProjectId } = useModel('project');
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [tables, setTables] = useState<string[]>([]);
   const [centerTable, setCenterTable] = useState<string | undefined>(undefined);
@@ -152,7 +155,8 @@ const CrossLinkPage: React.FC = () => {
     } catch {
       setTables([]);
     }
-  }, []);
+    // currentProjectId 变化触发重拉
+  }, [currentProjectId]);
 
   const loadGraph = useCallback(async (filter: GraphFilter): Promise<void> => {
     setGraphLoading(true);
@@ -171,7 +175,8 @@ const CrossLinkPage: React.FC = () => {
     } finally {
       setGraphLoading(false);
     }
-  }, []);
+    // currentProjectId 变化触发重拉
+  }, [currentProjectId]);
 
   const handleFilterClick = useCallback((filter: GraphFilter): void => {
     setActiveFilterKey(filter.key);

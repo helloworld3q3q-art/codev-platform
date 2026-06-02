@@ -4,6 +4,7 @@
 
 import PageContainer from '@/components/PageContainer';
 import ResizableTable from '@/components/ResizableTable';
+import { useModel } from '@umijs/max';
 import { Alert, Button, Card, Col, Input, Row, Select, Space } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -13,6 +14,8 @@ import { LANG_OPTIONS } from '../common/utils';
 import { createColumns } from './components/Columns';
 
 const CodeGraphFileListPage: React.FC = () => {
+  // 订阅当前项目, 切项目后文件列表原地重拉(fetch 注入 X-Project-Id)。
+  const { currentProjectId } = useModel('project');
   const [prefix, setPrefix] = useState('');
   const [languages, setLanguages] = useState<string[]>([]);
   const [items, setItems] = useState<FileDTO[]>([]);
@@ -31,7 +34,8 @@ const CodeGraphFileListPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [prefix]);
+    // currentProjectId 变化触发重拉
+  }, [prefix, currentProjectId]);
 
   const handlePrefixChange = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
     setPrefix(e.target.value);
