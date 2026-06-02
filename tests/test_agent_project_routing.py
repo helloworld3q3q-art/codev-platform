@@ -3,12 +3,52 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from codev_platform.agent.tools import _project
 from codev_platform.agent.tools import build_default_registry
+from codev_platform.core.project_id import ProjectIdError
 
 
 def test_resolve_project_id_explicit_wins():
     assert _project.resolve_project_id("proj-a") == "proj-a"
+
+
+def test_resolve_project_id_explicit_wins_even_in_token_mode(monkeypatch):
+    # token 模式下 explicit 仍直接走 validate(在读 config 之前 return), 不受 cwd-fallback 禁令影响
+    monkeypatch.setattr(
+        "codev_platform.core.config.load_config",
+        lambda: {"gateway": {"auth_mode": "token"}},
+    )
+    assert _project.resolve_project_id("proj-a") == "proj-a"
+
+
+def test_resolve_project_id_token_mode_no_cwd_fallback(monkeypatch):
+    # Phase 0: token 模式 + explicit 缺失 → 禁 cwd fallback, 抛 ProjectIdError (越权扫盲防线)
+    monkeypatch.setattr(
+        "codev_platform.core.config.load_config",
+        lambda: {"gateway": {"auth_mode": "token"}},
+    )
+    # resolve_local 若被调用即破坏隔离 —— 用 sentinel 断言它**不**被触达
+    monkeypatch.setattr(
+        "codev_platform.core.project_id.resolve_local",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("token 模式不应触达 cwd 回退")),
+    )
+    with pytest.raises(ProjectIdError):
+        _project.resolve_project_id(None)
+
+
+def test_resolve_project_id_passthrough_keeps_cwd_fallback(monkeypatch):
+    # passthrough(dev 单机): explicit 缺失仍走 cwd 回退(单项目兼容不破)
+    monkeypatch.setattr(
+        "codev_platform.core.config.load_config",
+        lambda: {"gateway": {"auth_mode": "passthrough"}},
+    )
+    monkeypatch.setattr(
+        "codev_platform.core.project_id.resolve_local",
+        lambda *a, **k: "cwd-derived-proj",
+    )
+    assert _project.resolve_project_id(None) == "cwd-derived-proj"
 
 
 def test_repo_path_of_reads_meta(tmp_path, monkeypatch):
