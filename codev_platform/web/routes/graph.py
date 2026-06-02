@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
+from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.integrations.codegraph_client import CodegraphClient
@@ -27,6 +28,12 @@ def _rid(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
 
+def _is_missing(exc: PlatformError) -> bool:
+    """index_missing = 该项目尚无此索引 → 概览(stats)/可视化(graph)返回空(非错误);
+    具体查询(node/search/table-refs 等)仍抛 503, 让"找不到"是显式错误。"""
+    return exc.code == ErrorCode.INDEX_MISSING
+
+
 # ======================================================================
 # codegraph 组 (6)
 # ======================================================================
@@ -41,8 +48,13 @@ def _rid(request: Request) -> str | None:
 )
 def codegraph_stats(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    with CodegraphClient(project_id) as cli:
-        data = cli.stats()
+    try:
+        with CodegraphClient(project_id) as cli:
+            data = cli.stats()
+    except PlatformError as exc:
+        if _is_missing(exc):
+            return ok(S.CodegraphStatsResponse(), request_id=_rid(request))
+        raise
     return ok(S.CodegraphStatsResponse(**data), request_id=_rid(request))
 
 
@@ -126,8 +138,13 @@ def codegraph_graph(request: Request, body: S.CodegraphGraphRequest | None = Non
                     ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
     b = body or S.CodegraphGraphRequest()
-    with CodegraphClient(project_id) as cli:
-        data = cli.graph(b.limit, b.languages, b.kinds, b.edgeKinds)
+    try:
+        with CodegraphClient(project_id) as cli:
+            data = cli.graph(b.limit, b.languages, b.kinds, b.edgeKinds)
+    except PlatformError as exc:
+        if _is_missing(exc):
+            return ok(S.CodegraphGraphResponse(), request_id=_rid(request))
+        raise
     resp = S.CodegraphGraphResponse(
         nodes=[S.CodegraphNode(**n) for n in data["nodes"]],
         edges=[S.CodegraphEdge(**e) for e in data["edges"]],
@@ -150,8 +167,13 @@ def codegraph_graph(request: Request, body: S.CodegraphGraphRequest | None = Non
 )
 def cross_link_stats(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    with CrossLinkClient(project_id) as cli:
-        data = cli.stats()
+    try:
+        with CrossLinkClient(project_id) as cli:
+            data = cli.stats()
+    except PlatformError as exc:
+        if _is_missing(exc):
+            return ok(S.CrossLinkStatsResponse(), request_id=_rid(request))
+        raise
     return ok(S.CrossLinkStatsResponse(**data), request_id=_rid(request))
 
 
@@ -226,6 +248,11 @@ def cross_link_graph(request: Request, body: S.CrossLinkGraphRequest | None = No
                      ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
     b = body or S.CrossLinkGraphRequest()
-    with CrossLinkClient(project_id) as cli:
-        data = cli.graph(b.mode, b.kinds, b.excludeKinds, b.rels, b.excludeRels, b.limit)
+    try:
+        with CrossLinkClient(project_id) as cli:
+            data = cli.graph(b.mode, b.kinds, b.excludeKinds, b.rels, b.excludeRels, b.limit)
+    except PlatformError as exc:
+        if _is_missing(exc):
+            return ok(S.CrossLinkGraphResponse(), request_id=_rid(request))
+        raise
     return ok(S.CrossLinkGraphResponse(**data), request_id=_rid(request))

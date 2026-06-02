@@ -190,20 +190,29 @@ def test_codegraph_search_empty_keyword_is_invalid_params(client):
 
 
 # ----------------------------------------------------------------------
-# 错误隔离: DB 缺失 → index_missing(503)
+# DB 缺失: 概览/可视化(stats/graph)优雅空(200); 具体查询(table-refs)仍 index_missing(503)
 # ----------------------------------------------------------------------
 
 
-def test_missing_db_returns_index_missing(tmp_path, monkeypatch):
+def test_missing_db_stats_is_graceful_empty(tmp_path, monkeypatch):
+    """无索引项目: stats 返回空(200 result:0), 前端显零而非报错 toast。"""
     import codev_platform.web.integrations.cross_link_client as clc
-    missing = tmp_path / "nope.sqlite"
-    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: missing)
-    app = build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",))
-    c = TestClient(app)
+    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
     r = c.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
-    assert r.status_code == 503
+    assert r.status_code == 200
     body = r.json()
-    assert body["result"] == 1 and body["errors"][0]["errorCode"] == "index_missing"
+    assert body["result"] == 0 and body["data"]["nodesByKind"] == {} and body["data"]["edgesByRel"] == {}
+
+
+def test_missing_db_specific_query_still_index_missing(tmp_path, monkeypatch):
+    """无索引时具体查询(table-refs)仍是显式 index_missing(503), 不被空状态吞掉。"""
+    import codev_platform.web.integrations.cross_link_client as clc
+    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
+    r = c.post("/api/v1/graph/cross-link/table-refs", headers=_HEADERS, json={"table": "t"})
+    assert r.status_code == 503
+    assert r.json()["errors"][0]["errorCode"] == "index_missing"
 
 
 # ----------------------------------------------------------------------
