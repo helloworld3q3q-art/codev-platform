@@ -9,12 +9,15 @@ from fastapi import FastAPI
 
 from codev_platform.core.httpkit import build_app
 from codev_platform.web.routes import (
+    agent,
+    audit,
     auth,
     enums,
     graph,
     health,
     indexes,
     jobs,
+    memory,
     orgs,
     projects,
     reports,
@@ -59,6 +62,9 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             jobs.router,
             indexes.router,
             reports.router,
+            agent.router,
+            memory.router,
+            audit.router,
         ],
         public_paths=_PUBLIC_PATHS,
         cfg=_cfg,
