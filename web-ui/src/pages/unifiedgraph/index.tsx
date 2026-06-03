@@ -67,6 +67,22 @@ const UnifiedGraphPage: React.FC = () => {
     setSelectedKinds([]);
   }, []);
 
+  // 整层切换: 该层全选则取消整层, 否则补全整层 (用于快速看某层 / 拼跨层链路视图)。
+  const handleToggleLayer = useCallback((layerKinds: string[]): void => {
+    setSelectedKinds((prev) => {
+      const set = new Set(prev);
+      const allOn = layerKinds.every((k) => set.has(k));
+      layerKinds.forEach((k) => {
+        if (allOn) {
+          set.delete(k);
+        } else {
+          set.add(k);
+        }
+      });
+      return Array.from(set);
+    });
+  }, []);
+
   // id → 原始统一节点, 供点击后查详情 (Graph3DCanvas 的 onNodeClick 只回传 id)。
   const nodeById = useMemo(() => {
     const map = new Map<string, UnifiedGraphNode>();
@@ -129,6 +145,7 @@ const UnifiedGraphPage: React.FC = () => {
         kindCounts={data.stats?.nodesByKind ?? {}}
         selected={selectedKinds}
         onToggle={handleToggleKind}
+        onToggleLayer={handleToggleLayer}
         onSelectAll={handleSelectAll}
         onClear={handleClear}
       />
@@ -161,7 +178,13 @@ const UnifiedGraphPage: React.FC = () => {
       ) : null}
 
       {selectedNode ? (
-        <NodeDetailPanel node={selectedNode} onClose={handleCloseDetail} />
+        <NodeDetailPanel
+          node={selectedNode}
+          nodes={data.graph?.nodes ?? []}
+          edges={data.graph?.edges ?? []}
+          onJumpTo={handleNodeClick}
+          onClose={handleCloseDetail}
+        />
       ) : null}
 
       <Graph3DCanvas

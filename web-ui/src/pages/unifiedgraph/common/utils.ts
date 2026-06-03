@@ -66,6 +66,53 @@ export function unifiedKindLabelOf(kind?: string): string {
   return KIND_LABEL[kind as UnifiedNodeKind] ?? (kind ?? '未知');
 }
 
+// 节点 kind → 所属层 (用于 KindFilter 按层分组 + "跨层链路"视图)。
+export const KIND_LAYER: Record<UnifiedNodeKind, string> = {
+  frontend_route: '前端',
+  frontend_component: '前端',
+  frontend_api_call: '前端',
+  backend_endpoint: '后端',
+  backend_function: '后端',
+  db_table: '数据库',
+  db_column: '数据库',
+  project: '其他',
+  file: '其他',
+  wiki_page: '文档/外部',
+  jira_issue: '文档/外部',
+  feishu_doc: '文档/外部',
+  git_commit: '文档/外部',
+  pull_request: '文档/外部',
+};
+
+// 层展示顺序 (前端 → 后端 → 数据库 是主链路方向)。
+export const LAYER_ORDER = ['前端', '后端', '数据库', '文档/外部', '其他'];
+
+export function unifiedLayerOf(kind?: string): string {
+  return KIND_LAYER[kind as UnifiedNodeKind] ?? '其他';
+}
+
+// 边 kind → 中文标签 (节点详情面板里分组展示关联节点)。
+export const EDGE_LABEL: Record<string, string> = {
+  contains: '包含',
+  imports: '导入',
+  calls: '调用',
+  renders: '渲染',
+  defines_api: '定义接口',
+  calls_api: '调用接口',
+  implements: '实现',
+  reads_table: '读表',
+  writes_table: '写表',
+  updates_table: '改表',
+  defines_column: '定义字段',
+  mentions: '提及',
+  relates_to: '关联',
+  changed_by: '变更于',
+};
+
+export function unifiedEdgeLabelOf(kind?: string): string {
+  return EDGE_LABEL[kind ?? ''] ?? (kind ?? '关联');
+}
+
 // 边按类型粗分色 (与 codegraph 配色风格一致)。
 export const EDGE_COLOR: Record<string, string> = {
   contains: '#bfbfbf',
