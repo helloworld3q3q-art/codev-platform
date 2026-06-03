@@ -202,3 +202,32 @@ store 489 vs cross 4177，漏的 4165 全是 Lombok/POJO 样板（`equals`/`getI
 B1 测试基线 21/21（memory 10 / agent / audit / contract）全绿。运维坑沉淀：[[agent-model-config-footgun]]（顶层 agent.model footgun + WSL agent venv 需 `.[agent]`）。
 
 > 待评估（未做，需用户点头）：`config.py:model_name` 顶层优先是 footgun（切 provider 静默坏），可改 per-provider 优先 + 顶层 fallback —— 属改既有语义。
+
+---
+
+## SQLAlchemy Core 血缘检测 + codev 自身 dogfood gap 排查（本会话续 6）
+
+排查 codev-platform 自己的「端点→表可达=0」根因，发现是两个独立 gap，逐个处理。
+
+### 根因排查（实测 openclaw 对比 codev）
+- codev store 「端点→表可达」始终 0（cross_layer 也 0，非回归）。实测确认**两个独立 gap**:
+  1. **SQLAlchemy Core 不被检测**:codev 业务 CRUD（D1 迁移后走 `account_store_pg`/`rbac_store_pg` 的 Core builder `o=tables.orgs; select(o.c.x)`），sql 插件只认 raw SQL 字符串 / MyBatis / declarative，**认不出 Core** → 这些仓的函数 0 碰表边 + `tables.py` 的 `Table("orgs")` 连 db_table 节点都没产（orgs←None 桩 / users←测试文件幽灵表）。
+  2. **桥接 service→store 断**:codegraph 能追 route→service（局部变量方法调用），但追不动 `self._store.create()`（实例属性 + DI 方法调用）→ endpoint→function 桥接 0。Python DI 限制，与 SQLAlchemy 无关。
+
+### 三专家方案（后端/数据血缘/AI）
+派 3 视角并行分析「怎么修 SQLAlchemy 检测」，高度收敛:纯静态 AST（否决 LLM/运行时/桥接 hack 作主路）+ 复用 `_emit_table_access` 单一出口 + confidence 分级（Core=0.9 / raw=1.0 / MyBatis-Plus=0.6）+ 分 P1/P2/P3 落地。
+
+### P1（`3d0e446`，真库验证）
+- `_scan_python_core_tables`:AST 扫 imperative `Table("orgs", metadata, Column("col", Type))` → 权威 db_table/db_column（source=sqlalchemy-core）。
+- `_is_test_path`:sql 插件表定义/访问扫描排除 tests/（治幽灵表，不动全局 `_SKIP_DIRS`）。
+- **实测**:codev 7 表（orgs/users/org_members/teams/projects/project_access/team_members）全来自 `web/db/tables.py`，幽灵表清零。
+
+### P2（`3454dac`，真库验证 + 审计 PASS）
+- `_scan_python_core_dml`:两阶段别名解析（全局 `<var>=Table` + 函数内 `o=tables.orgs`）+ 调用点读写细分（select=读 / insert,update,delete=写 / join=双表读 / on_conflict=读+写）+ 跨函数传表（`_upsert_stmt(tables.X,...)` 归调用方）。confidence=0.9。
+- 审计兄弟实跑真码:`PgOrgStore.get→读 orgs`、`fetch_membership→读 5 表无漏无多`、各 upsert 写对表。无 BLOCKER。
+- **实测**:account_store_pg 13 + rbac_store_pg 12 = **25 条碰表边**（之前 0）。`find_table_refs`/`table_usage` 查 codev 表现在能返回这些函数。
+
+### 结论 + 收口
+- **「SQLAlchemy Core 不被检测」gap 彻底闭环**（P1+P2）:codev 表权威、CRUD 仓函数→表血缘点亮。可泛化到任何 SQLAlchemy 业务仓。
+- **endpoint→表可达仍 0**:卡在桥接 service→store 的 Python DI 调用链（codegraph 追不动 `self._store.create()`），是**独立 gap**，与 SQLAlchemy 无关。只影响 codev 自身 dogfood（业务仓直调，桥接正常），ROI 低（AI 专家共识）、修法脆弱、cross_layer 也做不到不卡退役 → 列 **P3+ backlog**（Python-DI 桥接启发式）。
+- 测试基线 845→**854 passed**，P1+P2 各审计/验证零回归。
