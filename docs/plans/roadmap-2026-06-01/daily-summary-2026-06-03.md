@@ -48,8 +48,8 @@ endpoint/api/table)。收敛成单一实现,删 cross_link,全走统一 store:
 
 ## 六、待办
 
-1. **前端 `跨层链路` 页并入统一图谱**(P4 余留):该页现回落 legacy cross_layer 视图(非破);目标做成统一图谱的视图预设 + table-refs/endpoint-link 进节点详情面板。
-2. MyBatis-Plus BaseMapper 隐式 CRUD 的表读(需 `@TableName` 实体解析);Java/.NET 语言基座 `_java_scan` 待抽。
+1. ~~前端 `跨层链路` 页并入统一图谱~~ ✅ 已做(KindFilter 按层分组 + 详情面板关联节点 + 删冗余页)。
+2. ~~MyBatis-Plus BaseMapper 隐式 CRUD 表读~~ ✅ 已做(P2c:BaseMapper<Entity>→@TableName→表,openclaw Java reads 248,闭合最后 Java 表读 gap)。Java/.NET 语言基座 `_java_scan` 仍待抽。
 3. 真实验证 webhook 自动链路(下次 push 看 `tail /tmp` 日志 + `reindex-queue status`)。
 4. demo 项目(CRM Vue/React/Java/FastAPI)做 POC 演示数据(plan Phase 7)。
 5. 统一图谱 db_column 过密(openclaw 1088)→ KindFilter 按层分组 / db_column 默认折叠。

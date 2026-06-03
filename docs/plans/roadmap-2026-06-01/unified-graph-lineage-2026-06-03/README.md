@@ -30,7 +30,8 @@
 |---|---|---|
 | P1 | Spring 端点插件(Java 后端节点) | ✅ 已落地+真仓验证(stock-admin-api 131 端点 vs cross_link 132,近 parity) |
 | P2 | sql 插件扩 DML → writes_table / reads_table(上游→表→后端) | ✅ Python DML(openclaw writes 172 / reads 641) |
-| P2b | sql 插件扫 Java MyBatis 注解 SQL → 表读写(补 Java 后端读) | ✅ @Select/@Insert 等;BaseMapper 隐式 CRUD 留后续 |
+| P2b | sql 插件扫 Java MyBatis 注解 SQL → 表读写(补 Java 后端读) | ✅ @Select/@Insert 等 |
+| P2c | sql 插件解析 MyBatis-Plus BaseMapper<Entity>→@TableName→表(隐式 CRUD,粗粒度 conf=0.6) | ✅ 闭合最后 Java 表读 gap:openclaw Java mapper reads 248(cross_link 旧 236) |
 | P3 | 核心 linker pass 接进 ingest(前端→后端 calls_api,单一 owner builtin.linker) | ✅ 前端可链 FastAPI+Spring(openclaw 529 calls_api) |
 | P4 | 删 cross_link 适配器插件 + 生产者归属防复发闸 | ✅ store 单一来源(cross_link rows=0,每 kind 单 owner) |
 | P4-余 | 前端 `跨层链路` 页并入统一图谱 | ✅ KindFilter 按层分组 + 整层切换;详情面板"关联节点"(用 store 边还原表引用/端点关联);删 /codegraph/crosslink 路由+菜单+页 |
