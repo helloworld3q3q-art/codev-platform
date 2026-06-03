@@ -164,3 +164,41 @@ store 489 vs cross 4177，漏的 4165 全是 Lombok/POJO 样板（`equals`/`getI
 - `search_nodes` 描述讲清：搜的是「统一图谱跨层节点（端点/表/前端/桥接函数）」非全量符号，**找任意符号用 codegraph_search**。职责边界：search_nodes=跨层图谱，codegraph_search=全量符号。
 
 **结论**：store 对 cross_layer 实测无真缺口 —— 表/definers/语言全覆盖，端点命名兼容已补，方法级是正确取舍。cross-link 收敛 store 真完整闭环。`79443b0`。
+
+---
+
+## Track B / Phase 7 — B1 agent/memory/audit 三路由全栈交付（本会话续 6，跨日 06-04）
+
+把成熟的 agent 子系统经 web 前门**复用暴露**（非重建），三路由 + 前端 3 页 + 服务间身份信物全落地并端到端验证上线。核心红线：**复用时身份/组织/项目 id 全取 web 已认证态，绝不信 client**。
+
+### 设计 + 基建（`24b74e6`/`5cc775a` 方案；`5fe6617` 基建）
+- 方案先行：agent/memory/audit 各暴露什么 + 身份/权限传播红线 + 前端 3 页（`b1-agent-memory-audit-routes-2026-06-03.md`）。
+- **web→agent HMAC 身份信物**：web 用 `agent.internal_secret` 签 `X-Identity`（HMAC-SHA256 + b64url + exp，`core/service_identity.py`），agent 中间件验签 → `Identity(via="internal")`。agent 无 RBAC 数据 → ACL 对 `via="internal"` 走 **web-vouched 信任**（`core/acl.py`，审计修正点）。
+
+### 三路由（`5d792a4`）
+- **chat** `POST /api/v1/agent/chat`：`require_project_access` → `AgentClient` 签身份代理 codev-agent /chat；agent 不可达/超时 → `PlatformError(UPSTREAM_UNAVAILABLE)` → 503。
+- **memory** `POST/GET /api/v1/memory`：代理 agent /memory；两条红线 = org_id 取已认证身份、personal scopeRef 强制本人。
+- **audit** `POST /api/v1/audit/list`：`require_org_role("admin")`，新写 `audit_read_repo` 读 access.jsonl，org_admin 限本 org / platform_admin 跨 org。
+
+### 角色接入 + 前端（`bdc43f4` 3 页；`7d20234` 角色；`94452ac` typings）
+- 登录态补 roles：`resolve_session_roles`（platform_admin 白名单 + membership org_role）→ `/auth/session` 返 roles；前端 `isAdminRole` 单一口径（大小写归一），收口 access.ts/user.ts/menus 三处历史不一致。
+- 前端 3 页：`pages/agent`（AI 对话）/ `pages/memory`（记忆库）/ `pages/system/audit`（审计，admin），遵 useState 三件套（无 useRequest）/ antd6 / UnoCSS / 组件封装。
+- 契约 + parity 测试 `9bde345`（B3 operationId 全局唯一 + A2 图谱对账）。
+
+### 上线后用户实测 bug → 全部闭环（`27e6be7` + 两处环境修复）
+用户报 `GET /api/v1/memory?scope=personal&scopeRef=` → `invalid_params`，问"新加接口都这样吗"。逐一查清：**五接口里只有 memory 一个真 bug，其余全好**。
+- **memory `invalid_params`（代码 bug，`27e6be7`）**：`scopeRef` 误设 `min_length=1`，但 personal 前端正确传空（路由本就用本人 user_id 覆盖）→ Pydantic 先挂。修：schema + Query `scopeRef` 改可空；personal→本人、非 personal 空 ref 时 write 显式 400 / list 优雅返空。补 4 条空 scopeRef 分支测试。
+- **chat `upstream_unavailable`（非 web 层 bug，两个既有环境坑）**：audit 日志可见请求已穿前门→签名→agent 鉴权 `allowed:true`，卡在 agent 调 LLM。① WSL agent venv 缺 `openai`（`[agent]` extra 已声明没装）→ 补装 `.[agent]`；② 顶层 `agent.model='claude-opus-4-7'` 盖过 deepseek 的 `deepseek-chat`（`config.py:model_name` 顶层优先设计），DeepSeek 拒收 → 清空顶层 `agent.model`（备份后改，用户主权配置经确认）→ 回落 `deepseek-chat`。
+
+### 端到端验证（真 Bearer 鉴权，codev-web 18088 / codev-agent 8848）
+| 接口 | 结果 |
+|---|---|
+| `GET /memory` personal 空 scopeRef | ✅ `result:0`（原 invalid_params）|
+| `GET /memory` 非 personal 空 ref | ✅ 优雅返空 |
+| `POST /audit/list` | ✅ `result:0`，387 条+分页 |
+| `/auth/session` roles | ✅ `["platform_admin","admin"]` |
+| `POST /agent/chat` | ✅ DeepSeek 正常应答 + sessionId + steps + usage |
+
+B1 测试基线 21/21（memory 10 / agent / audit / contract）全绿。运维坑沉淀：[[agent-model-config-footgun]]（顶层 agent.model footgun + WSL agent venv 需 `.[agent]`）。
+
+> 待评估（未做，需用户点头）：`config.py:model_name` 顶层优先是 footgun（切 provider 静默坏），可改 per-provider 优先 + 顶层 fallback —— 属改既有语义。
