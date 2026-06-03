@@ -566,4 +566,11 @@ from codev_platform.chroma import _tools  # noqa: E402,F401
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # `python -m codev_platform.chroma.server` 把本文件作为 `__main__` 加载, 而 _tools.py
+    # (line 565 触发, 其内 `from ...chroma.server import server`) 会把本模块作为 *规范名*
+    # codev_platform.chroma.server 再加载一次 → 两个不同的 server 实例。@server.call_tool()
+    # 注册在规范实例上, 若直接 asyncio.run(main()) 服务的是 __main__ 实例 (只有 list_tools,
+    # 无 call_tool → tools/call 报 "Method not found")。故委派到规范模块的 main, 确保所服务的
+    # server 与 _tools 注册 call_tool 的是同一实例。
+    from codev_platform.chroma.server import main as _canonical_main
+    asyncio.run(_canonical_main())
