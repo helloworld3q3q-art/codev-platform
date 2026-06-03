@@ -48,3 +48,28 @@ README 核心卖点 **"改一处 → 跨层影响清单"** 打通,数据地基(�
 - agent 工具在 **codev-agent 服务**生效需 pull WSL checkout + 重启该服务(web 已重启)
 
 **spearhead 已完整交付 + 审计 + 上线;关键路径 A1→A4→A5 全绿。** 下一步可退役 cross-link(A2-A6)或转 Track B(web-backend 收尾)。
+
+---
+
+## roadmap-2026-06-01 收尾批(本会话续)
+
+应"先把 06-01 都结束"的要求,核实后发现**大部分已完成**(refactor 三大文件早拆达标、B 错误码主面、pluginized Phase 5 影响分析=本会话 Track A)。把剩余**有界项**逐个清掉:
+
+| 项 | commit | 内容 |
+|---|---|---|
+| **D2** file-size 预算断言 | `7f130dd` | `test_file_size_budget.py` 断言 `codev_platform/**/*.py` ≤600 行 + 防僵化白名单(当前 5 个已超:cli/sql/_stack_scan/cross_link.server/ops.reindex)。原 3 大文件 chroma 486 / mcp_serve 407 / health 目录化均达标 |
+| **D3** agent 路由错误码 | `3c7542a` | chat/memory 路由 `str(e)` → 机器可读 code(UPSTREAM/INVALID/ACCESS/DEPENDENCY),str(e) 只进日志;playground 兼容读 error/detail。additive 不破 detail 依赖。9 测试 |
+| **A2** parity 工具 | `be8b5bf` | `tools/audit_graph_parity.py` 核 store vs cross_layer(endpoint/table/前端链接/端点→表可达)。openclaw 实测 3/4 已超,**端点→表可达 store 0 vs cross 185 = GAP**(openclaw store 未 re-ingest 无桥接边;工具正确检测)。6 测试 |
+| **Phase 8** 契约测试 | `a48dff9` | `test_web_contract.py`:全 web app operationId 无重复(防 `pnpm run api` 生成错乱)+ OpenAPI 可生成 + 关键路由在册 + 每操作有显式 operationId |
+| **web serve CLI**(B5)| `a48dff9` | `codev-platform web serve [--host --port]` 起 uvicorn(与 codev-web.service 同 app)|
+
+**测试基线 → 786 passed / 5 skipped**,全程零回归。
+
+### 06-01 真实剩余(两块)
+1. **agent-memory M1-M7** —— 大特性(plan 自定义 6 周);M1 任务记忆要动 `memory_entries` schema(加 task_id/kind)+ store/recall/chat/routes 全链。值得开专门一轮做。
+2. **A6/A3 cross-link 退役** —— 低价值清理(新影响分析面已存在),且 blocked on openclaw re-ingest 达 parity。
+3. connectors / Demo / POC —— 用户明确靠后。
+
+### 待办坑(记下)
+- **openclaw store 需 reindex --ingest** 补桥接边(A2 检出端点→表可达=0;补后 parity 达标可退役 cross-link)。
+- **WSL+PG 测试隔离**:D3 兄弟报 WSL 下 `test_web_projects`/`test_web_filtering` 8 个 fail(Windows 全绿)—— 疑 PG backend 激活时账户 store 全局态跨测试泄漏,待查(env-specific,非代码逻辑 bug)。
