@@ -121,7 +121,7 @@ const CodeGraphFileListPage: React.FC = () => {
           type="error"
           showIcon
           title="加载文件列表失败"
-          description="请确认 codegraph-api (端口 18082) 已启动，且已索引项目代码图谱（.codegraph/codegraph.db）。"
+          description="请确认后端 codegraph 服务已就绪，且已索引项目代码图谱（.codegraph/codegraph.db）。"
           className="i:mb-16"
         />
       ) : (
