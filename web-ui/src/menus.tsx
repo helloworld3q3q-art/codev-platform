@@ -1,5 +1,6 @@
 import {
   AppstoreOutlined,
+  BranchesOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
   FileOutlined,
@@ -36,6 +37,7 @@ export const MENU_ITEMS: MenuDataItem[] = [
       { name: '文件列表', path: '/codegraph/filelist', icon: <FileOutlined /> },
       { name: '文件浏览', path: '/codegraph/files', icon: <FolderOutlined /> },
       { name: '统一图谱', path: '/codegraph/unified', icon: <DeploymentUnitOutlined /> },
+      { name: '影响分析', path: '/codegraph/impact', icon: <BranchesOutlined /> },
     ],
   },
   {
