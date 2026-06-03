@@ -69,9 +69,29 @@ def ingest_project(
         # 这是 calls_api 的**唯一** owner (前端插件不再各自只链同仓 FastAPI), 解决前端
         # 链不到 Java/Spring 端点的缺口。挂 builtin.linker, upsert 幂等可重跑。
         _link_pass(conn, project_id, report)
+
+        # A1 桥接: 用 codegraph 调用图把 backend_endpoint --calls--> backend_function(碰表) 物化,
+        # store 自成连通 (端点出边从 0 → >0), 解锁影响分析。fail-soft: codegraph 缺失则空跑。
+        _bridge_pass(conn, project_id, report)
     finally:
         conn.close()
     return report
+
+
+def _bridge_pass(conn, project_id: str, report: IngestReport) -> None:
+    """A1 codegraph 桥接: 读 store endpoint/function 节点 -> endpoint→function calls 边 -> upsert。"""
+    from codev_platform.graph.bridge_codegraph import (
+        BRIDGE_PLUGIN,
+        bridge_endpoints_to_functions,
+    )
+
+    merged = load_graph(conn, project_id)
+    endpoints = [n for n in merged.nodes if n.kind == NodeKind.BACKEND_ENDPOINT.value]
+    functions = [n for n in merged.nodes if n.kind == NodeKind.BACKEND_FUNCTION.value]
+    edges = bridge_endpoints_to_functions(project_id, endpoints, functions)
+    upsert_result(conn, project_id, AnalyzerResult(edges=edges, plugin=BRIDGE_PLUGIN))
+    report.ingested.append(BRIDGE_PLUGIN)
+    report.summaries[BRIDGE_PLUGIN] = {"endpoint_function_edges": len(edges)}
 
 
 def _link_pass(conn, project_id: str, report: IngestReport) -> None:
