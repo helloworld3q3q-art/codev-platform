@@ -3,8 +3,9 @@
 // (尤其 sql 的 db_table/db_column) 在页面可见。复用 codegraph 的 Graph3DCanvas。
 //
 // kind 多选筛选: 只渲染勾选类型的节点 (边的两端都在可见集合里才保留)。
-// 节点上色复用 Graph3DCanvas 内置的 codegraph 配色, 故把统一 kind 映射成
-// codegraph 兼容 kind (db_table→table 等), 使颜色与本页图例一致。
+// 节点上色/大小/标签走统一图谱自己的语言中性映射 (unifiedNodeColorOf 等),
+// 注入给 Graph3DCanvas, 不再把 backend_endpoint 伪装成 java_endpoint。
+// 点击节点弹右侧详情面板 (NodeDetailPanel)。
 
 import { useModel } from '@umijs/max';
 import { Spin, message } from 'antd';
@@ -13,24 +14,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Graph3DCanvas from '../codegraph/graph/components/Graph3DCanvas';
 import type { NeighborsResponse, NodeDTO } from '../codegraph/common/types';
 import { fetchUnifiedGraph, fetchUnifiedStats } from './common/services';
-import type { UnifiedGraphResponse, UnifiedGraphStatsResponse } from './common/types';
+import type {
+  UnifiedGraphNode,
+  UnifiedGraphResponse,
+  UnifiedGraphStatsResponse,
+} from './common/types';
+import { unifiedKindLabelOf, unifiedNodeColorOf, unifiedNodeSizeOf } from './common/utils';
 import KindFilter from './components/KindFilter';
-
-// 统一 kind → codegraph 兼容 kind (供 Graph3DCanvas 内置配色识别)。
-// 未列出的 kind 透传 (Graph3DCanvas fallback 灰色)。
-const KIND_TO_CODEGRAPH: Record<string, string> = {
-  db_table: 'table',
-  db_column: 'column',
-  backend_endpoint: 'java_endpoint',
-  backend_function: 'function',
-  frontend_route: 'frontend_page',
-  frontend_component: 'frontend_page',
-  frontend_api_call: 'frontend_api',
-};
-
-function toCodegraphKind(kind?: string): string {
-  return KIND_TO_CODEGRAPH[kind ?? ''] ?? (kind ?? 'file');
-}
+import NodeDetailPanel from './components/NodeDetailPanel';
 
 interface GraphState {
   graph: UnifiedGraphResponse | undefined;
@@ -43,9 +34,11 @@ const UnifiedGraphPage: React.FC = () => {
   const [data, setData] = useState<GraphState>({ graph: undefined, stats: undefined });
   const [loading, setLoading] = useState(false);
   const [selectedKinds, setSelectedKinds] = useState<string[]>([]);
+  const [selectedNode, setSelectedNode] = useState<UnifiedGraphNode | undefined>(undefined);
 
   const loadGraph = useCallback(async (): Promise<void> => {
     setLoading(true);
+    setSelectedNode(undefined);
     try {
       const [graph, stats] = await Promise.all([fetchUnifiedGraph(), fetchUnifiedStats()]);
       setData({ graph, stats });
@@ -74,6 +67,26 @@ const UnifiedGraphPage: React.FC = () => {
     setSelectedKinds([]);
   }, []);
 
+  // id → 原始统一节点, 供点击后查详情 (Graph3DCanvas 的 onNodeClick 只回传 id)。
+  const nodeById = useMemo(() => {
+    const map = new Map<string, UnifiedGraphNode>();
+    for (const n of data.graph?.nodes ?? []) {
+      if (n.id) map.set(n.id, n);
+    }
+    return map;
+  }, [data.graph]);
+
+  const handleNodeClick = useCallback(
+    (id: string): void => {
+      setSelectedNode(nodeById.get(id));
+    },
+    [nodeById],
+  );
+
+  const handleCloseDetail = useCallback((): void => {
+    setSelectedNode(undefined);
+  }, []);
+
   useEffect(() => {
     loadGraph();
   }, [loadGraph]);
@@ -87,8 +100,8 @@ const UnifiedGraphPage: React.FC = () => {
     const visibleIds = new Set(visibleNodes.map((n) => n.id ?? ''));
     const nodes: NodeDTO[] = visibleNodes.map((n) => ({
       id: n.id ?? '',
-      // 映射成 codegraph 兼容 kind, 让 Graph3DCanvas 内置配色识别
-      kind: toCodegraphKind(n.kind),
+      // 保留原始统一 kind, 颜色/大小/标签由注入的 unified* 函数处理
+      kind: n.kind ?? '',
       name: n.name ?? '',
       filePath: n.filePath ?? undefined,
       startLine: n.startLine ?? undefined,
@@ -147,10 +160,18 @@ const UnifiedGraphPage: React.FC = () => {
         </div>
       ) : null}
 
+      {selectedNode ? (
+        <NodeDetailPanel node={selectedNode} onClose={handleCloseDetail} />
+      ) : null}
+
       <Graph3DCanvas
         data={canvasData}
         showLegend={false}
         height={window.innerHeight - 56}
+        onNodeClick={handleNodeClick}
+        nodeColorFn={unifiedNodeColorOf}
+        nodeSizeFn={unifiedNodeSizeOf}
+        kindLabelFn={unifiedKindLabelOf}
       />
     </div>
   );

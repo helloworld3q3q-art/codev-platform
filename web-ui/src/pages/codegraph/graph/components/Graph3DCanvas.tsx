@@ -20,6 +20,16 @@ interface Graph3DCanvasProps {
   // height/width 不传时由 ResizeObserver 自动测量父容器铺满 (推荐用法)
   height?: number;
   width?: number;
+  // kind → 颜色 / 大小 / 显示标签 注入口 (统一图谱用语言中性 kind, 不传则用 codegraph 配色)。
+  // 不传时默认 codegraph 的 nodeColorOf / nodeSizeOf, 标签直接显示原始 kind (既有行为不变)。
+  nodeColorFn?: (kind?: string) => string;
+  nodeSizeFn?: (kind?: string) => number;
+  kindLabelFn?: (kind?: string) => string;
+}
+
+// 默认按原始 kind 显示 (codegraph 页保持 [class] / [java_endpoint] 原样)。
+function defaultKindLabel(kind?: string): string {
+  return kind ?? '';
 }
 
 // react-force-graph 要求 nodes/links 平坦字段；把 NodeDTO/EdgeDTO 透传 + 注入颜色/大小。
@@ -100,6 +110,9 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
   showLegend = true,
   height: heightProp,
   width: widthProp,
+  nodeColorFn = nodeColorOf,
+  nodeSizeFn = nodeSizeOf,
+  kindLabelFn = defaultKindLabel,
 }) => {
   // 用 unknown 收口 — react-force-graph-3d 的 ref 类型未导出（forwardRef 实例），
   // 通过 ref.current.controls() 拿 OrbitControls 实例
@@ -151,9 +164,9 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
     const nodes: FGNode[] = merged.map((n) => ({
       ...n,
       id: n.id ?? '',
-      color: nodeColorOf(n.kind),
+      color: nodeColorFn(n.kind),
       // center 节点稍大一些突出显示
-      val: n.id === data.center?.id ? nodeSizeOf(n.kind) * 2 : nodeSizeOf(n.kind),
+      val: n.id === data.center?.id ? nodeSizeFn(n.kind) * 2 : nodeSizeFn(n.kind),
     }));
     // 过滤掉端点不在 nodes 里的边，避免 react-force-graph 抛错
     const links: FGLink[] = (data.edges ?? [])
@@ -166,7 +179,7 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
         particles: e.kind === 'calls' ? 2 : 0,
       }));
     return { nodes, links };
-  }, [data]);
+  }, [data, nodeColorFn, nodeSizeFn]);
 
   // 用户主动锁定（点击节点后 5 秒内不被 hover 重启自动旋转）
   const autoRotateLockedUntilRef = useRef<number>(0);
@@ -224,14 +237,17 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
     }
   }, []);
 
-  // 节点 label：name + kind + file
-  const handleNodeLabel = useCallback((node: unknown): string => {
-    const n = node as NodeDTO;
-    const file = n.filePath ? `<br/><span style="color:#bfbfbf">${n.filePath}</span>` : '';
-    return `<div style="padding:4px 8px;background:rgba(255,255,255,0.95);color:#000;border-radius:4px;font-size:12px">
-      <b>${n.name ?? ''}</b> <span style="color:${nodeColorOf(n.kind)}">[${n.kind ?? ''}]</span>${file}
+  // 节点 label：name + kind + file (kind 显示走注入的 kindLabelFn, 统一图谱显示中文标签)
+  const handleNodeLabel = useCallback(
+    (node: unknown): string => {
+      const n = node as NodeDTO;
+      const file = n.filePath ? `<br/><span style="color:#bfbfbf">${n.filePath}</span>` : '';
+      return `<div style="padding:4px 8px;background:rgba(255,255,255,0.95);color:#000;border-radius:4px;font-size:12px">
+      <b>${n.name ?? ''}</b> <span style="color:${nodeColorFn(n.kind)}">[${kindLabelFn(n.kind)}]</span>${file}
     </div>`;
-  }, []);
+    },
+    [nodeColorFn, kindLabelFn],
+  );
 
   // 链接 label
   const handleLinkLabel = useCallback((link: unknown): string => {
