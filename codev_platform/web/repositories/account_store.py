@@ -6,7 +6,11 @@
 """
 from __future__ import annotations
 
+import logging
+
 from codev_platform.web.domain.accounts import Org, OrgMember, User
+
+logger = logging.getLogger(__name__)
 
 
 class OrgStore:
@@ -115,7 +119,15 @@ def bind_account_stores(cfg: dict | None = None) -> str:
         )
         # 实例化即触发 psycopg_pool import (ConnectionPool open=False 不连库); 缺 psycopg 在此抛。
         pg = {"org": PgOrgStore(dsn), "user": PgUserStore(dsn), "member": PgMemberStore(dsn)}
-    except Exception:  # noqa: BLE001 — psycopg 缺失 (平台 venv) → 回退内存, 不崩启动
+    except ImportError:
+        # 平台 venv 常态: psycopg 未装 → 始终回退内存
+        _active.update(org=org_store, user=user_store, member=member_store)
+        return "memory"
+    except Exception as exc:  # noqa: BLE001
+        mode = _cfg_get(cfg or {}, "deployment.mode", "dev")
+        if mode == "prod":
+            raise  # prod 配了 PG 却初始化失败 → fail-fast, 不静默降级
+        logger.warning("PG account store 初始化失败, dev 回退内存: %r", exc)
         _active.update(org=org_store, user=user_store, member=member_store)
         return "memory"
     _active.update(pg)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 
 from codev_platform.cli import PLATFORM_META_PROJECTS
+from codev_platform.core.errors import ErrorCode, PlatformError
 
 # 进程内运行态: 已 load 的 project code 集合 (单进程互斥; 跨进程升级见模块 docstring TODO)。
 _LOADED: set[str] = set()
@@ -49,7 +50,12 @@ class ProjectWriteRepository:
             meta["notes"] = description
         if org_id:
             meta["org_id"] = org_id
-        target.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        content = json.dumps(meta, ensure_ascii=False, indent=2) + "\n"
+        try:
+            with open(target, "x", encoding="utf-8") as f:
+                f.write(content)
+        except FileExistsError as exc:
+            raise PlatformError(ErrorCode.INVALID_PARAMS, f"project already registered: {code}") from exc
         return {
             "code": code, "name": name, "repoPath": repo_path,
             "description": description, "orgId": org_id, "status": "ACTIVE",
