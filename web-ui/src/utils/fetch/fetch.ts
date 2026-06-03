@@ -1,6 +1,5 @@
 // 核心
 // 提供请求方法，并处理response
-// @ts-nocheck
 /* eslint-disable */
 import { message } from 'antd';
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
@@ -174,6 +173,25 @@ function responseHandle<T extends BaseApiResponse>(response: AxiosResponse) {
     .then((res) => responseCodeHandler<T>(res));
 }
 
+// 清登录态并跳登录页（401 / 会话失效共用）
+function clearAuthAndRedirect() {
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('refresh_token');
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (window.location.pathname !== '/user/login') {
+    window.location.href = `/user/login?redirect=${encodeURIComponent(current)}`;
+  }
+}
+
+// 后端 current_session 失败返 403 + access_denied + "未登录或会话已失效"（见 web/security/deps.py），
+// 与"有登录态但无权限"的 403 文案不同。会话失效要清 token 跳登录，避免卡在假登录态（审计 P2#8）。
+function isSessionExpired403(error: any): boolean {
+  const data = error?.response?.data;
+  const msg: string = data?.errors?.[0]?.errorMessage || data?.message || '';
+  return /会话|未登录/.test(msg);
+}
+
 // 响应拦截器
 axiosInstance.interceptors.response.use(
   (response) => {
@@ -181,15 +199,14 @@ axiosInstance.interceptors.response.use(
   },
   async (error) => {
     if (error?.response?.status === 401) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
-      const current = `${window.location.pathname}${window.location.search}`;
-      if (window.location.pathname !== '/user/login') {
-        window.location.href = `/user/login?redirect=${encodeURIComponent(current)}`;
-      }
+      clearAuthAndRedirect();
       return Promise.reject(error);
     }
     if (error?.response?.status === 403) {
+      if (isSessionExpired403(error)) {
+        clearAuthAndRedirect();
+        return Promise.reject(error);
+      }
       message.error('无操作权限', 3);
       return Promise.reject(error);
     }
