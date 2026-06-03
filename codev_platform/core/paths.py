@@ -71,6 +71,17 @@ def data_root() -> Path:
     return _business_repo_root() / "data"
 
 
+def logs_dir() -> Path:
+    """运行日志目录 (data_root/logs)。
+
+    随 data/ 可打包带走, 且避免写进 import 包目录 —— wheel / 只读安装下包目录不可写,
+    日志落 data_root 才稳。目录按需创建 (幂等)。
+    """
+    d = data_root() / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def chroma_dir() -> Path:
     """chroma 持久化目录 (单 DB 多 collection)。"""
     return data_root() / "chroma"

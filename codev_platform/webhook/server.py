@@ -19,7 +19,6 @@ from pathlib import Path
 from codev_platform.core.config import get as _cfg_get, load_config
 from codev_platform.core.errors import ErrorCode
 
-_LOG_FILE = Path(__file__).resolve().parent / "webhook.log"
 DEFAULT_WEBHOOK_PORT = 18099
 # 8MB 请求体上限, 防超大 payload 拖垮 reindex 队列 / OOM。
 # 1MB 太紧: Gitea push payload 内联整段 commit 列表 + 文件清单, 多文件/大 commit 的
@@ -28,11 +27,17 @@ DEFAULT_WEBHOOK_PORT = 18099
 _MAX_BODY = 8 * 1024 * 1024
 
 
+def _log_path() -> Path:
+    # 落 data_root/logs (非 import 包目录: wheel/只读安装也可写, 见 core.paths.logs_dir)
+    from codev_platform.core.paths import logs_dir
+    return logs_dir() / "webhook.log"
+
+
 def _log(msg: str) -> None:
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     try:
-        with _LOG_FILE.open("a", encoding="utf-8") as f:
+        with _log_path().open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass

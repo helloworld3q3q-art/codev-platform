@@ -17,16 +17,21 @@ from codev_platform.core.config import get as _cfg_get
 from codev_platform.reindex import runners as _runners
 from codev_platform.reindex.queue import Job, JobQueue
 
-_LOG_FILE = Path(__file__).resolve().parent / "worker.log"
 _RETRY_RC = 2          # reindex 返回 2 = 锁占用 / db busy (暂时性) → 保留重试, 不丢
 _PERIODIC_SEC = 60.0   # 周期兜底再 drain (重试 rc=2 的 job + 补漏 watch 事件)
+
+
+def _log_path() -> Path:
+    # 落 data_root/logs (非 import 包目录: wheel/只读安装也可写, 见 core.paths.logs_dir)
+    from codev_platform.core.paths import logs_dir
+    return logs_dir() / "worker.log"
 
 
 def _log(msg: str) -> None:
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     try:
-        with _LOG_FILE.open("a", encoding="utf-8") as f:
+        with _log_path().open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass
