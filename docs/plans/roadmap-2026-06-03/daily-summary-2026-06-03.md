@@ -231,3 +231,32 @@ B1 测试基线 21/21（memory 10 / agent / audit / contract）全绿。运维�
 - **「SQLAlchemy Core 不被检测」gap 彻底闭环**（P1+P2）:codev 表权威、CRUD 仓函数→表血缘点亮。可泛化到任何 SQLAlchemy 业务仓。
 - **endpoint→表可达仍 0**:卡在桥接 service→store 的 Python DI 调用链（codegraph 追不动 `self._store.create()`），是**独立 gap**，与 SQLAlchemy 无关。只影响 codev 自身 dogfood（业务仓直调，桥接正常），ROI 低（AI 专家共识）、修法脆弱、cross_layer 也做不到不卡退役 → 列 **P3+ backlog**（Python-DI 桥接启发式）。
 - 测试基线 845→**854 passed**，P1+P2 各审计/验证零回归。
+
+---
+
+## agent 只读工具修复 + 每模型循环策略 LoopPolicy（本会话续 7，跨日 06-04）
+
+B1 上线后用户拿真实 agent chat（"怎么创建组织 / 怎么修改密码 / 影响分析"）压测,暴露 agent 两个工具全挂 + 弱模型工具选型/收敛问题。逐个查到代码底层修掉。
+
+### codegraph_search / search_docs 全挂 —— 根因不是"没建索引"（`154a345`/`166b0d9`）
+agent 报 `codegraph 未建索引` + `search_docs daemon 未运行`,实查发现**索引和 daemon 都在**,是工具实现的两个真 bug:
+- **codegraph 走了跨机失效路径（`166b0d9`）**:`_find_db` 经 `meta.json.repo_path="D:/WorkSpace/codev-platform"`（Windows 路径）拼 `.codegraph/codegraph.db`,WSL agent 解析不到 → 误报未建索引。改优先 `core.paths.codegraph_db_path`（`data_root/codegraph_ext/<pid>/codegraph/codegraph.db`,环境无关,2026-05-30 集中存放真值源）,仓内 junction 作回退。补集中路径测试。
+- **chroma `python -m` 双实例 footgun（`154a345`）**:今天 D2 拆分把 `call_tool` 移到 `_tools.py`。systemd `python -m ...chroma.server` 把本文件作 `__main__` 加载,而 `_tools.py`（末尾 `from . import _tools` 触发）内 `from ...chroma.server import server` 又把它作规范名加载 = **两个 server 实例**。`@server.call_tool()` 注册在规范实例,`main()` 服务 `__main__` 实例（只有 `list_tools`）→ `tools/call` 全报 **"Method not found"**（`tools/list` 正常,极易误判 daemon 没起）。修:`__main__` 委派规范模块的 `main`,服务与 `_tools` 同实例。
+- 运维教训沉淀 [[wsl-mcp-daemons-stale-after-pull]]:WSL `codev-mcp-*` systemd daemon 不随 git pull 重载,改 chroma/cross_link/codegraph 代码后必须重启对应 unit。
+
+### 弱模型不调 store + 打转 → 每模型循环策略 LoopPolicy（`1339286`）
+用户观察:agent 对"影响分析"类问题只反复调 `codegraph_search`（19 步触发 loop guard）,**从不调统一图谱 store 的 impact 工具**。实查:store 有数据（codev 309 节点/310 边）、`table_usage` 经 agent 能跑通、prompt 也写了"impact_analysis 优先" —— 根因是 **deepseek-chat 弱、变着参数 thrash 同一工具**（同义 query 换皮绕过 exact-args 去重）+ 不听 prompt。按用户"用策略/适配器调不同模型"方向 + `agent-provider §1/§4` 落地:
+- 新增中性 `agent/policy.py:LoopPolicy(max_steps, per_tool_cap)`,loop 只依赖它。
+- `ProviderSpec` 加 `default_loop_policy`（code 默认层,同 `default_model`）;deepseek 内置 `per_tool_cap=3`（弱模型调紧）。
+- `registry.loop_policy()` 解析:`agent.providers.<n>.loop.*` > `agent.loop.*` > 兼容 `agent.max_steps` > spec 默认 > 全局默认。**加模型/调参只动 config 或 spec 一行,核心 loop 零改**。
+- loop 加"同工具执行次数上限"护栏（变参 thrash 也算）,超限拒执行 + 点名未试过的互补工具逼换视角。
+- ChatService/deps 注入 `loop_policy_factory`（按 provider 名,运行中切 provider 即时生效）。向后兼容（`AgentLoop(max_steps=)` 仍可用）。
+
+### 验证
+- 单测 +3（变参 thrash cap / 策略解析 spec默认·config覆盖·全局 / codegraph 集中路径）,agent 全套 121 passed,ruff clean。
+- 线上（deepseek）:`table_usage("users")` 经 agent **真调 store**,2 步收敛 `result:0`,答案准确（users 被 6 后端函数读写）;`search_docs`/`codegraph_search` 端到端通。
+- 协议层多模型适配确认到位:`openai_compat` 已走原生 function-calling（`tools`/`tool_calls`）+ 思考模型 `reasoning_content` 往返。
+
+### 残留（待用户决断）
+- 开放式大"影响分析"问题在 deepseek-chat 上多轮 churn,超 web→agent 客户端 **30s 超时**（`agent.timeout_sec`）→ `result:1`。杠杆三选一:调高 `agent.timeout_sec` / 降 deepseek `max_steps` / 换更强模型。
+- `config.py:model_name` 顶层优先 footgun（续6 记录）仍待评估。
