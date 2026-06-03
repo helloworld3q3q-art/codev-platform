@@ -161,7 +161,14 @@ def upsert_result(
     version = result.plugin_version or ""
 
     # 先清该 plugin 旧数据 (幂等替换)。
-    for table in ("nodes", "edges", "evidences", "findings", "ingest_meta"):
+    # nodes 有 project_id 列 -> DELETE 必须按 (plugin, project_id) 双键, 否则共享库
+    # 下会误删别项目同插件节点。edges/evidences/findings/ingest_meta 无 project_id 列,
+    # 仍仅按 plugin 清: per-project 库是隔离边界。
+    # TODO: 全表 project_id 列化 (edges/evidences/findings 也带 project_id) 另立。
+    conn.execute(
+        "DELETE FROM nodes WHERE plugin = ? AND project_id = ?", (plugin, project_id)
+    )
+    for table in ("edges", "evidences", "findings", "ingest_meta"):
         conn.execute(f"DELETE FROM {table} WHERE plugin = ?", (plugin,))
 
     conn.executemany(
@@ -170,7 +177,9 @@ def upsert_result(
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
-                n.id, plugin, n.kind, n.name, n.project_id,
+                # project_id 强制用校验过的入参 (函数已 _validate), 不用 n.project_id,
+                # 防写时把别项目 id 写进本项目库。
+                n.id, plugin, n.kind, n.name, project_id,
                 n.file, n.line, n.language, _dump_meta(n.meta),
             )
             for n in result.nodes
@@ -239,8 +248,17 @@ def load_graph(
     单产出模型);plugin=<name> 只读该插件的产出 (含 plugin/version 归属)。
     """
     project_id = _validate_project_id(project_id)
+    # edges/evidences/findings 仅按 plugin 过滤 (无 project_id 列): per-project 库是
+    # 隔离边界, 且这些行的端点 node 已经过 project_id 过滤。
     where = "WHERE plugin = ?" if plugin else ""
     params: tuple = (plugin,) if plugin else ()
+
+    # nodes 始终带 project_id 过滤 (共享库防串项目); plugin 也给则 AND plugin。
+    node_where = "WHERE project_id = ?"
+    node_params: tuple = (project_id,)
+    if plugin:
+        node_where += " AND plugin = ?"
+        node_params = (project_id, plugin)
 
     nodes = [
         GraphNode(
@@ -249,8 +267,8 @@ def load_graph(
         )
         for row in conn.execute(
             f"SELECT id, kind, name, project_id, file, line, language, meta_json "
-            f"FROM nodes {where} ORDER BY id",
-            params,
+            f"FROM nodes {node_where} ORDER BY id",
+            node_params,
         )
     ]
     edges = [
