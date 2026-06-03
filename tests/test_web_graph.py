@@ -1,9 +1,10 @@
-"""Graph 组测试 (plan §十五 Graph + §二十) —— codegraph + cross-link 只读 SQLite 包装。
+"""Graph 组测试 (plan §十五 Graph + §二十) —— codegraph 只读 SQLite 包装 + 统一图谱 store。
 
-覆盖 12 接口的代表子集 (cross-link stats/tables/table-refs + codegraph stats/search) 返回
-200 统一 envelope; 字段形状对齐 Java codegraph-api。用临时 SQLite (含真 schema + 最小种子)
-驱动只读查询, 经 monkeypatch 把 per-project 路径解析重定向到临时库 (不依赖平台真数据)。
-另覆盖: DB 缺失 → index_missing(503) envelope; 空入参 → invalid_params(400)。
+覆盖 codegraph (stats/search) 返回 200 统一 envelope; 字段形状对齐 Java codegraph-api。
+用临时 SQLite (含真 schema + 最小种子) 驱动只读查询, 经 monkeypatch 把 per-project 路径
+解析重定向到临时库 (不依赖平台真数据)。统一图谱组直读 graph.store (多插件聚合)。
+
+cross-link 组已于 2026-06-03 全栈血缘收敛退场 (跨业务链路并入统一图谱), 相关测试一并移除。
 
 本 venv 未装 fastapi → importorskip 自动 skip。
 """
@@ -65,90 +66,15 @@ def _seed_codegraph(path: Path) -> None:
     c.close()
 
 
-def _seed_cross_link(path: Path) -> None:
-    c = sqlite3.connect(path)
-    c.executescript(
-        """
-        CREATE TABLE nodes (id INTEGER PRIMARY KEY, kind TEXT, name TEXT, parent_id INTEGER,
-            path TEXT, line INTEGER, language TEXT, meta_json TEXT);
-        CREATE TABLE edges (id INTEGER PRIMARY KEY, src_id INTEGER, rel TEXT, dst_id INTEGER,
-            confidence REAL, evidence TEXT);
-        CREATE TABLE build_meta (key TEXT, value TEXT);
-        """
-    )
-    # table node (path null) + a flyway definer + a java reader
-    c.execute("INSERT INTO nodes (id, kind, name, path) VALUES (1,'table','stock_quote_daily',NULL)")
-    c.execute("INSERT INTO nodes (id, kind, name, path, line) VALUES "
-              "(2,'flyway_migration','V1__init',' db/V1__init.sql',1)")
-    c.execute("INSERT INTO nodes (id, kind, name, path, line) VALUES "
-              "(3,'java_method','QuoteMapper.select','Mapper.java',42)")
-    c.execute("INSERT INTO edges (src_id, rel, dst_id, confidence, evidence) VALUES "
-              "(2,'defines_table',1,1.0,'create table')")
-    c.execute("INSERT INTO edges (src_id, rel, dst_id, confidence, evidence) VALUES "
-              "(3,'queries_table',1,0.9,'select *')")
-    c.execute("INSERT INTO build_meta (key, value) VALUES ('last_build_at','2026-06-02T00:00:00')")
-    c.commit()
-    c.close()
-
-
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> TestClient:
     cg_db = tmp_path / "codegraph.db"
-    cl_db = tmp_path / "cross_layer.sqlite"
     _seed_codegraph(cg_db)
-    _seed_cross_link(cl_db)
     # 重定向 per-project 路径解析到临时库 (integration 模块内 import 的符号)。
     import codev_platform.web.integrations.codegraph_client as cgc
-    import codev_platform.web.integrations.cross_link_client as clc
     monkeypatch.setattr(cgc, "codegraph_db_path", lambda pid: cg_db)
-    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: cl_db)
     app = build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",))
     return TestClient(app)
-
-
-# ----------------------------------------------------------------------
-# cross-link
-# ----------------------------------------------------------------------
-
-
-def test_cross_link_stats_envelope(client):
-    r = client.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["result"] == 0 and body["errors"] == []
-    data = body["data"]
-    assert data["lastBuildAt"] == "2026-06-02T00:00:00"
-    assert data["nodesByKind"]["table"] == 1
-    assert data["edgesByRel"]["queries_table"] == 1
-    assert body["requestId"]
-
-
-def test_cross_link_tables_envelope(client):
-    r = client.post("/api/v1/graph/cross-link/tables", headers=_HEADERS, json={})
-    assert r.status_code == 200
-    assert r.json()["data"]["tables"] == ["stock_quote_daily"]
-
-
-def test_cross_link_table_refs_shape(client):
-    r = client.post("/api/v1/graph/cross-link/table-refs", headers=_HEADERS,
-                    json={"table": "stock_quote_daily"})
-    assert r.status_code == 200
-    data = r.json()["data"]
-    # 7 类 key 全在 (字段形状对齐 Java CrossLinkTableRefsResponse)
-    for key in ("definers", "javaReaders", "javaWriters", "javaUpdaters",
-                "pythonReaders", "pythonWriters", "pythonUpdaters"):
-        assert key in data
-    assert data["table"] == "stock_quote_daily"
-    assert data["definers"][0]["name"] == "V1__init"
-    assert data["javaReaders"][0]["name"] == "QuoteMapper.select"
-    assert data["javaReaders"][0]["confidence"] == 0.9
-
-
-def test_cross_link_table_refs_empty_table_is_invalid_params(client):
-    r = client.post("/api/v1/graph/cross-link/table-refs", headers=_HEADERS, json={"table": ""})
-    assert r.status_code == 400
-    body = r.json()
-    assert body["result"] == 1 and body["errors"][0]["errorCode"] == "invalid_params"
 
 
 # ----------------------------------------------------------------------
@@ -190,139 +116,15 @@ def test_codegraph_search_empty_keyword_is_invalid_params(client):
 
 
 # ----------------------------------------------------------------------
-# DB 缺失: 概览/可视化(stats/graph)优雅空(200); 具体查询(table-refs)仍 index_missing(503)
-# ----------------------------------------------------------------------
-
-
-def test_missing_db_stats_is_graceful_empty(tmp_path, monkeypatch):
-    """无索引项目: stats 返回空(200 result:0), 前端显零而非报错 toast。"""
-    import codev_platform.web.integrations.cross_link_client as clc
-    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
-    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
-    r = c.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["result"] == 0 and body["data"]["nodesByKind"] == {} and body["data"]["edgesByRel"] == {}
-
-
-def test_missing_db_specific_query_still_index_missing(tmp_path, monkeypatch):
-    """无索引时具体查询(table-refs)仍是显式 index_missing(503), 不被空状态吞掉。"""
-    import codev_platform.web.integrations.cross_link_client as clc
-    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
-    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
-    r = c.post("/api/v1/graph/cross-link/table-refs", headers=_HEADERS, json={"table": "t"})
-    assert r.status_code == 503
-    assert r.json()["errors"][0]["errorCode"] == "index_missing"
-
-
-# ----------------------------------------------------------------------
-# 统一图谱 store (插件产出) 优先 + 空则 fallback (task2)
-# ----------------------------------------------------------------------
-
-
-def _seed_graph_store(path: Path, project_id: str) -> None:
-    """往统一图谱 store 写一份 cross-link 风格产出 (meta 含 cross_link_kind/rel 留底)。"""
-    from codev_platform.graph.schema import (
-        AnalyzerResult,
-        GraphEdge,
-        GraphNode,
-    )
-    from codev_platform.graph.store import open_store, upsert_result
-
-    table = GraphNode(
-        id=f"{project_id}:table:1", kind="db_table", name="store_table",
-        project_id=project_id, file=None, line=None, language=None,
-        meta={"cross_link_kind": "table"},
-    )
-    endpoint = GraphNode(
-        id=f"{project_id}:java_endpoint:2", kind="backend_endpoint",
-        name="GET /api/x", project_id=project_id, file="X.java", line=10,
-        language="java", meta={"cross_link_kind": "java_endpoint"},
-    )
-    edge = GraphEdge(
-        source=endpoint.id, target=table.id, kind="reads_table", confidence=0.8,
-        meta={"cross_link_rel": "queries_table"},
-    )
-    result = AnalyzerResult(
-        nodes=[table, endpoint], edges=[edge], plugin="builtin.cross_link",
-    )
-    conn = open_store(project_id, path=path)
-    try:
-        upsert_result(conn, project_id, result)
-    finally:
-        conn.close()
-
-
-def test_cross_link_graph_reads_store_when_present(tmp_path, monkeypatch):
-    """store 有 cross-link 数据 → graph 路由消费 store (不读 cross_layer.sqlite)。"""
-    store_db = tmp_path / "store.sqlite"
-    _seed_graph_store(store_db, _PID)
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
-    # cross_layer.sqlite 故意缺失: 若误走 fallback 会变空, 测试就能抓到。
-    import codev_platform.web.integrations.cross_link_client as clc
-    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
-    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
-    r = c.post("/api/v1/graph/cross-link/graph", headers=_HEADERS, json={})
-    assert r.status_code == 200
-    data = r.json()["data"]
-    assert data["nodeCount"] == 2 and data["edgeCount"] == 1
-    kinds = {n["kind"] for n in data["nodes"]}
-    # table 还原成 cross-link 原始 kind; 后端端点统一语言中性 backend_endpoint
-    assert kinds == {"table", "backend_endpoint"}
-    assert data["edges"][0]["kind"] == "queries_table"  # 还原成 cross-link 原始 rel
-    names = {n["name"] for n in data["nodes"]}
-    assert names == {"store_table", "GET /api/x"}
-
-
-def test_cross_link_stats_reads_store_when_present(tmp_path, monkeypatch):
-    """store 有数据 → stats 路由按 cross-link 原始 kind/rel 统计 store。"""
-    store_db = tmp_path / "store.sqlite"
-    _seed_graph_store(store_db, _PID)
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
-    import codev_platform.web.integrations.cross_link_client as clc
-    monkeypatch.setattr(clc, "cross_link_db_path", lambda pid: tmp_path / "nope.sqlite")
-    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
-    r = c.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
-    assert r.status_code == 200
-    data = r.json()["data"]
-    assert data["nodesByKind"] == {"table": 1, "backend_endpoint": 1}
-    assert data["edgesByRel"] == {"queries_table": 1}
-
-
-def test_cross_link_graph_falls_back_when_store_empty(client, tmp_path, monkeypatch):
-    """store 缺失/空 → fallback 现有 cross_layer.sqlite (现有页面不破)。"""
-    # store 路径指向不存在的文件 → 走 fallback。client fixture 已 seed cross_layer.sqlite。
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "no_store.sqlite")
-    r = client.post("/api/v1/graph/cross-link/graph", headers=_HEADERS, json={})
-    assert r.status_code == 200
-    data = r.json()["data"]
-    # fallback 读到 seed 的 cross_layer.sqlite: table + flyway + java_method 三节点。
-    assert data["nodeCount"] >= 1
-    kinds = {n["kind"] for n in data["nodes"]}
-    assert "table" in kinds
-
-
-def test_cross_link_stats_falls_back_when_store_empty(client, tmp_path, monkeypatch):
-    """store 空 → stats fallback cross_layer.sqlite (build_meta.last_build_at 可见)。"""
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "no_store.sqlite")
-    r = client.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
-    assert r.status_code == 200
-    data = r.json()["data"]
-    assert data["lastBuildAt"] == "2026-06-02T00:00:00"
-    assert data["nodesByKind"]["table"] == 1
-
-
-# ----------------------------------------------------------------------
-# 统一图谱 store (全量节点/边, 所有插件) (task: unified graph)
+# 统一图谱 store (全量节点/边, 所有插件)
 # ----------------------------------------------------------------------
 
 
 def _seed_unified_store(path: Path, project_id: str) -> None:
-    """往 store 写多插件混合产出: cross_link + database (db_table/db_column)。"""
+    """往 store 写多插件混合产出: database (db_table/db_column) + 后端端点。"""
     from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode
     from codev_platform.graph.store import open_store, upsert_result
 
-    # database 插件: 表 + 字段 (sql 产出, 这正是要让前端可见的)
     table = GraphNode(
         id=f"{project_id}:db_table:t1", kind="db_table", name="stock_quote_daily",
         project_id=project_id, file="V1__init.sql", line=1, language="sql",
@@ -334,28 +136,27 @@ def _seed_unified_store(path: Path, project_id: str) -> None:
     )
     col_edge = GraphEdge(source=table.id, target=column.id, kind="contains")
     db_result = AnalyzerResult(
-        nodes=[table, column], edges=[col_edge], plugin="builtin.database",
+        nodes=[table, column], edges=[col_edge], plugin="builtin.sql",
     )
-    # cross_link 插件: endpoint 读表 (与 db 插件不同 plugin, 不互相覆盖)
     endpoint = GraphNode(
         id=f"{project_id}:backend_endpoint:e1", kind="backend_endpoint",
         name="GET /api/quote", project_id=project_id, file="X.java", line=10,
-        language="java", meta={"cross_link_kind": "java_endpoint"},
+        language="java",
     )
     read_edge = GraphEdge(source=endpoint.id, target=table.id, kind="reads_table")
-    cl_result = AnalyzerResult(
-        nodes=[endpoint], edges=[read_edge], plugin="builtin.cross_link",
+    be_result = AnalyzerResult(
+        nodes=[endpoint], edges=[read_edge], plugin="builtin.backend_spring",
     )
     conn = open_store(project_id, path=path)
     try:
         upsert_result(conn, project_id, db_result)
-        upsert_result(conn, project_id, cl_result)
+        upsert_result(conn, project_id, be_result)
     finally:
         conn.close()
 
 
 def test_unified_graph_returns_all_plugin_nodes(tmp_path, monkeypatch):
-    """统一图谱返回全部插件节点 (db_table/db_column + backend_endpoint), 不只 cross-link。"""
+    """统一图谱返回全部插件节点 (db_table/db_column + backend_endpoint), 统一 kind 直出。"""
     store_db = tmp_path / "store.sqlite"
     _seed_unified_store(store_db, _PID)
     monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
@@ -365,7 +166,7 @@ def test_unified_graph_returns_all_plugin_nodes(tmp_path, monkeypatch):
     data = r.json()["data"]
     assert data["nodeCount"] == 3 and data["edgeCount"] == 2
     kinds = {n["kind"] for n in data["nodes"]}
-    assert kinds == {"db_table", "db_column", "backend_endpoint"}  # 统一 kind 直出
+    assert kinds == {"db_table", "db_column", "backend_endpoint"}
     col = next(n for n in data["nodes"] if n["kind"] == "db_column")
     assert col["name"] == "close_price"
     assert col["meta"]["data_type"] == "numeric"  # meta 不透明往返

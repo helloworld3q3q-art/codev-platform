@@ -6,16 +6,11 @@ import {
   postCodegraphNode,
   postFileTree,
   postGraph,
-  postGraph2,
   postNeighbors,
   postSearch,
-  postTables,
 } from '@/services/apis/graphapi';
 
 import type {
-  CrossLinkGraphRequest,
-  CrossLinkGraphResponse,
-  CrossLinkTablesResponse,
   FileTreeResponse,
   GraphRequest,
   GraphResponse,
@@ -58,19 +53,5 @@ export async function fetchGraph(
   req: Partial<GraphRequest> = {},
 ): Promise<GraphResponse | undefined> {
   const res = await postGraph(req);
-  return res.data;
-}
-
-// ---- cross-link ----
-
-export async function fetchCrossLinkTables(): Promise<CrossLinkTablesResponse | undefined> {
-  const res = await postTables();
-  return res.data;
-}
-
-export async function fetchCrossLinkGraph(
-  req: Partial<CrossLinkGraphRequest> = {},
-): Promise<CrossLinkGraphResponse | undefined> {
-  const res = await postGraph2(req);
   return res.data;
 }

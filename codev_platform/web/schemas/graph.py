@@ -120,129 +120,13 @@ class CodegraphGraphResponse(BaseModel):
 
 
 # ----------------------------------------------------------------------
-# cross-link 组 —— 对齐 codegraph-api dto/CrossLink*.java
-# ----------------------------------------------------------------------
-
-
-class CrossLinkStatsResponse(BaseModel):
-    lastBuildAt: str | None = None
-    nodesByKind: dict[str, int] = Field(default_factory=dict)
-    edgesByRel: dict[str, int] = Field(default_factory=dict)
-
-
-class CrossLinkTablesResponse(BaseModel):
-    tables: list[str] = Field(default_factory=list)
-
-
-class CrossLinkNodeRef(BaseModel):
-    name: str | None = None
-    kind: str | None = None
-    path: str | None = None
-    line: int | None = None
-    confidence: float | None = None
-    evidence: str | None = None
-
-
-class CrossLinkTableRefsRequest(BaseModel):
-    table: str | None = None
-
-
-class CrossLinkTableRefsResponse(BaseModel):
-    table: str | None = None
-    definers: list[CrossLinkNodeRef] = Field(default_factory=list)
-    javaReaders: list[CrossLinkNodeRef] = Field(default_factory=list)
-    javaWriters: list[CrossLinkNodeRef] = Field(default_factory=list)
-    javaUpdaters: list[CrossLinkNodeRef] = Field(default_factory=list)
-    pythonReaders: list[CrossLinkNodeRef] = Field(default_factory=list)
-    pythonWriters: list[CrossLinkNodeRef] = Field(default_factory=list)
-    pythonUpdaters: list[CrossLinkNodeRef] = Field(default_factory=list)
-
-
-class CrossLinkEndpointTarget(BaseModel):
-    name: str | None = None
-    path: str | None = None
-    line: int | None = None
-    url: str | None = None
-    confidence: float | None = None
-    evidence: str | None = None
-
-
-class CrossLinkEndpointLinkRequest(BaseModel):
-    name: str | None = None
-
-
-class CrossLinkEndpointLinkItem(BaseModel):
-    node: str | None = None
-    kind: str | None = None
-    path: str | None = None
-    line: int | None = None
-    url: str | None = None
-    direction: str | None = None
-    targets: list[CrossLinkEndpointTarget] = Field(default_factory=list)
-    callers: list[CrossLinkEndpointTarget] = Field(default_factory=list)
-
-
-class CrossLinkSearchNodesRequest(BaseModel):
-    query: str | None = None
-    kind: str | None = None
-    limit: int | None = None
-
-
-class CrossLinkSearchHit(BaseModel):
-    name: str | None = None
-    kind: str | None = None
-    path: str | None = None
-    line: int | None = None
-    language: str | None = None
-    meta: dict[str, Any] = Field(default_factory=dict)
-
-
-class CrossLinkSearchNodesResponse(BaseModel):
-    query: str | None = None
-    kind: str | None = None
-    hits: list[CrossLinkSearchHit] = Field(default_factory=list)
-
-
-class CrossLinkGraphNode(BaseModel):
-    id: str | None = None
-    kind: str | None = None
-    name: str | None = None
-    filePath: str | None = None
-    startLine: int | None = None
-    language: str | None = None
-
-
-class CrossLinkGraphEdge(BaseModel):
-    source: str | None = None
-    target: str | None = None
-    kind: str | None = None
-
-
-class CrossLinkGraphRequest(BaseModel):
-    mode: str | None = None
-    kinds: list[str] | None = None
-    excludeKinds: list[str] | None = None
-    rels: list[str] | None = None
-    excludeRels: list[str] | None = None
-    limit: int | None = None
-
-
-class CrossLinkGraphResponse(BaseModel):
-    nodes: list[CrossLinkGraphNode] = Field(default_factory=list)
-    edges: list[CrossLinkGraphEdge] = Field(default_factory=list)
-    nodeCount: int = 0
-    edgeCount: int = 0
-
-
-# ----------------------------------------------------------------------
 # 统一图谱组 —— 直读 graph/store.py (插件聚合落点) 的全量节点/边
 # ----------------------------------------------------------------------
 #
-# 与 cross-link 组的区别:cross-link 组只筛 store 里 cross_link 适配器产出的节点
-# (meta 含 cross_link_kind),而本组返回 store 内 **全部** GraphNode/GraphEdge
-# (所有插件:frontend / backend / database / cross_link 等),用统一 NodeKind /
-# EdgeKind (db_table / db_column / backend_endpoint / frontend_route ...) 直出,
-# 让插件产出 (尤其 sql 的 db_table/db_column) 在前端完整可见。
+# 跨业务链路 (前端→后端→表) 现由统一图谱单页承载: 返回 store 内 **全部** GraphNode/
+# GraphEdge (frontend / backend / database 各 stack 插件 + 核心 linker), 用统一
+# NodeKind / EdgeKind (db_table / db_column / backend_endpoint / frontend_route /
+# reads_table / writes_table / calls_api ...) 直出。cross_link 组已于 2026-06-03 退场。
 
 
 class UnifiedGraphNode(BaseModel):

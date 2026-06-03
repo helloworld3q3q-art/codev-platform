@@ -15,11 +15,6 @@ export type SearchRequest = API.CodegraphSearchRequest;
 export type NeighborsRequest = API.CodegraphNeighborsRequest;
 export type GraphRequest = API.CodegraphGraphRequest;
 
-// 跨层链路 cross-link 类型别名（仅 crosslink 子页用到的）
-export type CrossLinkTablesResponse = API.CrossLinkTablesResponse;
-export type CrossLinkGraphResponse = API.CrossLinkGraphResponse;
-export type CrossLinkGraphRequest = API.CrossLinkGraphRequest;
-
 // 节点 kind / 边 kind / 语言 — 自动生成 typings 把它们标成 any，这里收紧
 // 业务列表（用于 Select options 和颜色映射 fallback）
 export type NodeKind =
