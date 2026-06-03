@@ -12,6 +12,7 @@ import pytest
 
 from codev_platform.graph.schema import AnalyzerResult, NodeKind, EdgeKind
 from codev_platform.plugins import clear_registry, registered_names, run_applicable
+from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.builtin.backend_fastapi import (
     PLUGIN_NAME as FASTAPI_NAME,
     FastApiPlugin,
@@ -114,13 +115,16 @@ def test_react_analyze_links_to_backend(tmp_path):
     api_calls = [n for n in result.nodes
                  if n.kind == NodeKind.FRONTEND_API_CALL.value]
     routes = [n for n in result.nodes if n.kind == NodeKind.FRONTEND_ROUTE.value]
-    calls_api = [e for e in result.edges if e.kind == EdgeKind.CALLS_API.value]
     renders = [e for e in result.edges if e.kind == EdgeKind.RENDERS.value]
     assert len(api_calls) == 1
     assert len(routes) == 1
     assert len(renders) == 1  # 页面 -> api 调用
-    assert len(calls_api) == 1  # api 调用 -> backend endpoint (URL 精确匹配)
-    assert calls_api[0].confidence == 1.0
+    # calls_api 不再由前端插件产 (改由核心 linker pass 跨插件统一产, 见 test_ingest_linker)。
+    assert [e for e in result.edges if e.kind == EdgeKind.CALLS_API.value] == []
+    # 匹配逻辑仍单一真值源可用: 前端 api_call + 同 url 后端 endpoint -> 1 条精确 calls_api。
+    backend = _stack_scan.scan_fastapi(tmp_path, "demo")
+    linked = _stack_scan.link_api_calls(api_calls, backend)
+    assert len(linked) == 1 and linked[0].confidence == 1.0
 
 
 # ---------------- analyze: 在本仓 (codev-platform) 跑出非空 ----------------

@@ -14,8 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.schema import AnalyzerResult, NodeKind
+from codev_platform.graph.store import load_graph, open_store, upsert_result
+from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.registry import run_applicable
+
+LINKER_PLUGIN = "builtin.linker"
 
 
 @dataclass
@@ -59,6 +63,29 @@ def ingest_project(
             upsert_result(conn, project_id, analyzer_result)
             report.ingested.append(exec_result.plugin)
             report.summaries[exec_result.plugin] = exec_result.summary
+
+        # 核心 cross-plugin linker pass: 各插件落库后, 读回全量节点, 跨**所有**后端插件
+        # (fastapi/spring/node) 把 frontend_api_call --calls_api--> backend_endpoint 连起来。
+        # 这是 calls_api 的**唯一** owner (前端插件不再各自只链同仓 FastAPI), 解决前端
+        # 链不到 Java/Spring 端点的缺口。挂 builtin.linker, upsert 幂等可重跑。
+        _link_pass(conn, project_id, report)
     finally:
         conn.close()
     return report
+
+
+def _link_pass(conn, project_id: str, report: IngestReport) -> None:
+    """跨插件链接: 读 store 全量节点 -> calls_api 边 -> upsert builtin.linker。"""
+    merged = load_graph(conn, project_id)
+    frontend = [
+        n for n in merged.nodes if n.kind == NodeKind.FRONTEND_API_CALL.value
+    ]
+    backend = [
+        n for n in merged.nodes if n.kind == NodeKind.BACKEND_ENDPOINT.value
+    ]
+    edges = _stack_scan.link_api_calls(frontend, backend)
+    upsert_result(
+        conn, project_id, AnalyzerResult(edges=edges, plugin=LINKER_PLUGIN)
+    )
+    report.ingested.append(LINKER_PLUGIN)
+    report.summaries[LINKER_PLUGIN] = {"calls_api_edges": len(edges)}

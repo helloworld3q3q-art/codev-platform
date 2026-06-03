@@ -17,6 +17,7 @@ from codev_platform.plugins import (
     run_applicable,
 )
 from codev_platform.plugins.builtin.vue import PLUGIN_NAME as VUE_NAME, VuePlugin
+from codev_platform.plugins.builtin import _stack_scan
 
 
 @pytest.fixture(autouse=True)
@@ -145,9 +146,11 @@ def test_vue_analyze_produces_valid_nonempty(tmp_path):
     foo_api = [n for n in api_calls if n.meta.get("url") == "/api/v1/foo"]
     assert len(foo_api) == 1
 
-    # calls_api 边: api 调用 -> 同仓 FastAPI endpoint (URL 精确匹配)。
-    assert len(calls_api) == 1
-    assert calls_api[0].confidence == 1.0
+    # calls_api 不再由 vue 插件产 (改由核心 linker pass 跨插件统一产, 见 test_ingest_linker)。
+    assert calls_api == []
+    backend = _stack_scan.scan_fastapi(tmp_path, "demo")
+    linked = _stack_scan.link_api_calls(foo_api, backend)
+    assert len(linked) == 1 and linked[0].confidence == 1.0
 
     # schema 合法: 所有节点能 to_dict / from_dict 往返。
     for n in result.nodes:

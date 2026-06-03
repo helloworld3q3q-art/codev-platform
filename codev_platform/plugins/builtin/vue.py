@@ -6,13 +6,13 @@ analyze:
   - 扫 SFC <script> / 同仓 .js/.ts(x) 内联 axios/fetch('/api/..') -> frontend_api_call 节点。
   - 扫 Vue Router 路由表 ({ path, component, name }) -> frontend_route 节点 + renders 边
     (route -> component)。
-  - 跨层 calls_api 边: frontend_api_call -> 同仓 FastAPI backend_endpoint (URL 匹配),
-    统一走 _stack_scan.link_api_calls (单一真值源)。同仓后端节点仅作 URL 参照, 不并入
-    本结果 (backend 插件产正本)。
 
 按"技术栈/协议族"组织 (对齐 agent-provider-architecture 思路): Vue 是一类前端栈,
-复用 JS/TS 基座 (_stack_scan 的文件遍历 / url 解析 / 链接逻辑), 框架适配只加 Vue 规则,
+复用 JS/TS 基座 (_stack_scan 的文件遍历 / url 解析 规则), 框架适配只加 Vue 规则,
 不复制基座逻辑。第一版轻量正则, 不追求覆盖所有写法。
+
+注: calls_api (前端 -> 后端 endpoint) 不再由本插件产, 统一由 graph.ingest 的核心
+linker pass 跨所有后端插件 (fastapi/spring/node) 产, 单一 owner builtin.linker。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ PLUGIN_NAME = "builtin.vue"
 
 class VuePlugin(AnalyzerPlugin):
     """Vue 前端 -> frontend_component / frontend_route / frontend_api_call 节点
-    + renders / calls_api 边。"""
+    + renders 边 (calls_api 由核心 linker pass 跨插件统一产)。"""
 
     name = PLUGIN_NAME
     version = "0.1.0"
@@ -49,15 +49,4 @@ class VuePlugin(AnalyzerPlugin):
         )
         result.nodes.extend(route_nodes)
         result.edges.extend(route_edges)
-
-        # 3) 跨插件链接: 前端 api 调用 -> 同仓 FastAPI endpoint (URL 匹配)。
-        #    同仓后端节点仅作 URL 解析参照, 不并入本结果 (backend 插件产正本)。
-        api_nodes = [
-            n for n in scan_nodes
-            if n.kind == "frontend_api_call"
-        ]
-        backend_nodes = _stack_scan.scan_fastapi(repo, project_id)
-        result.edges.extend(
-            _stack_scan.link_api_calls(api_nodes, backend_nodes)
-        )
         return result

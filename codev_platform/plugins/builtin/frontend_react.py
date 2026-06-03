@@ -4,12 +4,12 @@ detect: repo 有 React 迹象 (package.json 含 react 依赖, 或存在 *.tsx); 
 analyze:
   - 扫前端 API 调用 (services/apis 导出函数 + 内联 axios/fetch) -> frontend_api_call 节点。
   - 扫调用了 api 的页面/组件 -> frontend_route 节点 + renders 边 (页面 -> api 调用)。
-  - 顺带 AST 扫同仓 FastAPI 路由 (仅用于 URL 解析, 不重复产 backend_endpoint 节点),
-    把 frontend_api_call --calls_api--> backend_endpoint 边产在本结果里 (per-plugin
-    ingest 模型下, 跨插件链接边须落在某一个插件的 AnalyzerResult)。链接逻辑统一走
-    _stack_scan.link_api_calls (单一真值源)。
 
 按"技术栈"组织: React 是一类前端栈, 任意采用它的仓都适用, 杜绝 per-project 脚本。
+
+注: 前端 calls_api -> 后端 endpoint 的跨层链接**不再由本插件产** (旧实现各前端插件
+只扫同仓 FastAPI 做参照, 链不到 Spring/Node/Java 端点)。统一由 graph.ingest 末尾的
+**核心 linker pass** 跨所有插件 (fastapi/spring/node) 产 calls_api, 单一 owner builtin.linker。
 """
 from __future__ import annotations
 
@@ -23,7 +23,8 @@ PLUGIN_NAME = "builtin.frontend_react"
 
 
 class FrontendReactPlugin(AnalyzerPlugin):
-    """React 前端 -> frontend_route / frontend_api_call 节点 + renders / calls_api 边。"""
+    """React 前端 -> frontend_route / frontend_api_call 节点 + renders 边
+    (calls_api 由核心 linker pass 跨插件统一产)。"""
 
     name = PLUGIN_NAME
     version = "0.1.0"
@@ -43,11 +44,4 @@ class FrontendReactPlugin(AnalyzerPlugin):
         )
         result.nodes.extend(page_nodes)
         result.edges.extend(page_edges)
-
-        # 跨插件链接: 前端 api 调用 -> 后端 endpoint (URL 匹配)。
-        # 同仓 FastAPI 节点仅作 URL 解析参照, 不并入本结果 (backend_fastapi 插件产正本)。
-        backend_nodes = _stack_scan.scan_fastapi(repo, project_id)
-        result.edges.extend(
-            _stack_scan.link_api_calls(api_nodes, backend_nodes)
-        )
         return result
