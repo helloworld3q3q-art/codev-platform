@@ -46,3 +46,5 @@ class SessionInfo(BaseModel):
 
     username: str
     orgId: str
+    # 可信角色清单 (后端从 membership/platform_admin 算, 不信 client); 前端 isAdminRole 消费做菜单显隐。
+    roles: list[str] = Field(default_factory=list, description="会话用户角色 (platform_admin/admin/member/viewer)")

@@ -57,6 +57,22 @@ def is_org_admin(sess: Session) -> bool:
     return role_allows(m.org_role, "admin")
 
 
+def resolve_session_roles(sess: Session) -> list[str]:
+    """会话用户的可信角色清单(供前端可见性, 不是鉴权闸)。
+
+    角色**只从后端可信源算**(platform_admin 白名单 + org membership), 绝不信 client。
+    输出去重保序: platform_admin → org 级角色(admin|member|viewer)。前端 isAdminRole 消费
+    platform_admin/admin 做菜单显隐; 真正鉴权仍是后端 require_org_role / scope decision。
+    """
+    roles: list[str] = []
+    if is_platform_admin(load_config(), sess.username):
+        roles.append("platform_admin")
+    m = resolve_membership(sess.org_id, sess.username, None)
+    if m.org_role is not None and m.org_role not in roles:
+        roles.append(m.org_role)
+    return roles
+
+
 def can_access_project(sess: Session, project_id: str, action: str) -> bool:
     """session 用户对 project_id 是否覆盖 action(read|write|admin)。org/platform admin bypass。"""
     if is_org_admin(sess):

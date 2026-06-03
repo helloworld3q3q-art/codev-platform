@@ -19,6 +19,7 @@ from codev_platform.web.schemas.auth import (
     TokenPair,
 )
 from codev_platform.web.security.deps import current_session
+from codev_platform.web.security.membership import resolve_session_roles
 from codev_platform.web.security.rsa_keys import get_keypair
 from codev_platform.web.security.sessions import Session
 from codev_platform.web.services.auth_service import AuthService
@@ -108,4 +109,8 @@ def current(
     request: Request,
     sess: Session = Depends(current_session),
 ) -> CommonResult[SessionInfo]:
-    return ok(SessionInfo(username=sess.username, orgId=sess.org_id), request_id=_rid(request))
+    roles = resolve_session_roles(sess)
+    return ok(
+        SessionInfo(username=sess.username, orgId=sess.org_id, roles=roles),
+        request_id=_rid(request),
+    )

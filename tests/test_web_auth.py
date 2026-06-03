@@ -107,3 +107,35 @@ def test_session_returns_current(client):
 
 def test_session_without_login_403(client):
     assert client.get("/api/v1/auth/session").status_code == 403
+
+
+def test_session_roles_member_default_empty(client):
+    """无 membership 记录的用户 → roles 空 (安全默认, 不臆造角色)。"""
+    _seed_user()
+    access = _login(client).json()["data"]["accessToken"]
+    r = client.get("/api/v1/auth/session", headers={"Authorization": f"Bearer {access}"})
+    assert r.status_code == 200
+    assert r.json()["data"]["roles"] == []
+
+
+def test_session_roles_org_admin_from_membership(client):
+    """org admin membership → roles 含 'admin' (后端从可信 member_store 算)。"""
+    from codev_platform.web.domain.accounts import OrgMember
+    from codev_platform.web.repositories.account_store import member_store
+
+    _seed_user()
+    member_store.upsert(OrgMember(org_id="orgA", username="alice", role="admin"))
+    access = _login(client).json()["data"]["accessToken"]
+    r = client.get("/api/v1/auth/session", headers={"Authorization": f"Bearer {access}"})
+    assert r.status_code == 200
+    assert "admin" in r.json()["data"]["roles"]
+
+
+def test_session_roles_platform_admin_from_config(client, monkeypatch):
+    """platform_admin 白名单命中 → roles 含 'platform_admin' (config/env 可信源, 不信 client)。"""
+    monkeypatch.setenv("CODEV_PLATFORM_ADMINS", "alice")
+    _seed_user()
+    access = _login(client).json()["data"]["accessToken"]
+    r = client.get("/api/v1/auth/session", headers={"Authorization": f"Bearer {access}"})
+    assert r.status_code == 200
+    assert "platform_admin" in r.json()["data"]["roles"]

@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
 
+import { isAdminRole } from '@/utils/role';
+
 export interface UserInfo {
   username?: string;
   userName?: string;
@@ -40,7 +42,7 @@ export default () => {
 
   const hasPerm = useCallback(
     (perm: string) => {
-      if (userInfo.roles?.includes('ADMIN')) return true;
+      if (isAdminRole(userInfo.roles)) return true;  // admin 旁路, 口径同 access.ts/menus
       return userInfo.permissions?.includes(perm) ?? false;
     },
     [userInfo.roles, userInfo.permissions],

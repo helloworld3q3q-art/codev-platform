@@ -54,7 +54,8 @@ export async function getInitialState(): Promise<{
     try {
       const res = await getSession();
       if (res.data?.username) {
-        userInfo = { username: res.data.username };
+        // roles 由后端从 membership/platform_admin 算 (可信源); 前端只消费做菜单显隐, 不自造角色。
+        userInfo = { username: res.data.username, roles: res.data.roles ?? [] };
         localStorage.setItem('user', JSON.stringify(userInfo));
         // 当前组织默认取会话 org (供 fetch 注入 X-Org-Id); 未手动切换前以此为准。
         if (res.data.orgId && !localStorage.getItem('current_org')) {
