@@ -768,6 +768,7 @@ interface RefreshRequest {
 interface SessionInfo {
   username: string;
   orgId: string;
+  roles?: string[]; // 会话用户角色 (platform_admin/admin/member/viewer)
 }
 
 // TableUsageRequest 请求参数
