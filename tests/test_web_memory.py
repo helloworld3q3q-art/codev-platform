@@ -112,6 +112,40 @@ def test_list_personal_scope_ref_forced_to_self(fake):
     assert fake.last_params["scope_ref"] == "alice"
 
 
+def test_list_personal_empty_scope_ref_ok(fake):
+    # 复现线上 bug: personal + 空 scopeRef (前端不让填) 不应 400, 路由用本人覆盖。
+    c = _client()
+    r = c.get("/api/v1/memory", headers=_HEADERS,
+              params={"scope": "personal", "scopeRef": "", "limit": 50})
+    assert r.status_code == 200
+    assert fake.last_params["scope_ref"] == "alice"
+
+
+def test_list_nonpersonal_empty_scope_ref_returns_empty(fake):
+    # 非 personal 未选 ref → 优雅返空, 不下发空 ref 给 agent (不 400)。
+    c = _client()
+    r = c.get("/api/v1/memory", headers=_HEADERS, params={"scope": "org", "scopeRef": ""})
+    assert r.status_code == 200
+    assert r.json()["data"] == []
+    assert fake.last_params is None  # agent 未被调用
+
+
+def test_write_personal_empty_scope_ref_ok(fake):
+    # personal 写入不传 scopeRef (前端隐藏该字段) → 路由用本人, 不 400。
+    c = _client()
+    r = c.post("/api/v1/memory", headers=_HEADERS, json={"scope": "personal", "content": "x"})
+    assert r.status_code == 200
+    assert fake.last_body["scope_ref"] == "alice"
+
+
+def test_write_nonpersonal_empty_scope_ref_400(fake):
+    # 非 personal 写入缺 scopeRef → 显式 invalid_params (而非静默写错 ref)。
+    c = _client()
+    r = c.post("/api/v1/memory", headers=_HEADERS, json={"scope": "org", "content": "x"})
+    assert r.status_code == 400
+    assert r.json()["errors"][0]["errorCode"] == "invalid_params"
+
+
 def test_agent_unreachable_returns_503(monkeypatch):
     monkeypatch.setattr(memory, "agent_client", FakeClient(raises=True))
     c = _client()

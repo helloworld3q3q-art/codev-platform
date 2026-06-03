@@ -13,7 +13,8 @@ class MemoryWriteRequest(BaseModel):
     """POST /api/v1/memory 写记忆 (代理 agent /memory)。"""
 
     scope: str = Field(..., min_length=1, description="org | team | project | personal")
-    scopeRef: str = Field(..., min_length=1, description="org='org' / team_id / project_id / user_id")
+    # personal 时可空 (路由强制用本人 user_id); 非 personal 由路由校验非空。
+    scopeRef: str = Field("", description="org='org' / team_id / project_id / user_id; personal 留空")
     content: str = Field(..., min_length=1, description="记忆内容")
     kind: str | None = Field(None, description="preference | fact | task ...")
     topicKey: str | None = Field(None, description="冲突检测键")

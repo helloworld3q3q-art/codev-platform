@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 
 from codev_platform.core.config import load_config
+from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.integrations.agent_client import AgentClient
@@ -41,8 +42,13 @@ def write_memory(
     ctx=Depends(require_project_access),
 ) -> CommonResult[MemoryItem]:
     identity, _project_id = ctx
-    # personal scopeRef 强制 = 本人 (红线); 其它 scope 用 client 给的 ref, 准入由 agent 决策。
-    scope_ref = identity.user_id if body.scope == "personal" else body.scopeRef
+    # personal scopeRef 强制 = 本人 (红线); 其它 scope 必须给 ref。
+    if body.scope == "personal":
+        scope_ref = identity.user_id
+    elif body.scopeRef:
+        scope_ref = body.scopeRef
+    else:
+        raise PlatformError(ErrorCode.INVALID_PARAMS, "scopeRef required for non-personal scope")
     payload = {
         "scope": body.scope, "scope_ref": scope_ref, "content": body.content,
         "kind": body.kind, "topic_key": body.topicKey, "ttl": body.ttl,
@@ -61,12 +67,18 @@ def write_memory(
 def list_memory(
     request: Request,
     scope: str = Query(..., min_length=1, description="org|team|project|personal"),
-    scopeRef: str = Query(..., min_length=1, description="该 scope 的 ref"),
+    scopeRef: str = Query("", description="该 scope 的 ref; personal 留空(自动用本人)"),
     limit: int = Query(100, ge=1, le=500, description="返回上限"),
     ctx=Depends(require_project_access),
 ) -> CommonResult[list[MemoryItem]]:
     identity, _project_id = ctx
-    ref = identity.user_id if scope == "personal" else scopeRef
+    # personal 强制本人; 非 personal 未给 ref 则返空 (用户尚未选 ref, 不下发空 ref 到 agent)。
+    if scope == "personal":
+        ref = identity.user_id
+    elif scopeRef:
+        ref = scopeRef
+    else:
+        return ok([], request_id=_rid(request))
     entries = agent_client.memory_list(identity, {"scope": scope, "scope_ref": ref, "limit": limit})
     items = entries if isinstance(entries, list) else entries.get("data", entries)
     return ok([MemoryItem.of(e) for e in items], request_id=_rid(request))
