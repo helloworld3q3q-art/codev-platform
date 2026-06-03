@@ -48,10 +48,13 @@ def build_app(
     public_paths: Iterable[str] = ("/health",),
     version: str = "0.1.0",
     cfg: dict | None = None,
+    authenticator=None,
 ) -> FastAPI:
     """建 app: 挂 routers + gateway 中间件 + RequestId + 统一异常处理。
 
     cfg 缺省走 load_config(); 测试可注入。public_paths 默认放行 /health。
+    authenticator 缺省按 cfg 选 (build_authenticator); web app 传 SessionAwareAuthenticator
+    包一层, 让 token 模式也认 web 登录 session token (双轨收口)。
     """
     from codev_platform.gateway import (
         AuthMiddleware,
@@ -71,7 +74,7 @@ def build_app(
         app.add_middleware(_rl.cls, **_rl.kwargs)
     app.add_middleware(
         AuthMiddleware,
-        authenticator=build_authenticator(_cfg),
+        authenticator=authenticator if authenticator is not None else build_authenticator(_cfg),
         public_paths=set(public_paths),
     )
     app.add_middleware(RequestIdMiddleware)  # 最外层: 标记所有响应 (含 401/异常)

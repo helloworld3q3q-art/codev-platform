@@ -40,6 +40,11 @@ def create_app(cfg: dict | None = None) -> FastAPI:
     bind_account_stores(_cfg)
     ensure_seed_admin(_cfg)
 
+    # 双轨收口: web 控制台用 session token 鉴权, 包一层 SessionAwareAuthenticator —— token 模式下
+    # 既认 web 登录 session token, 又保留 gateway 静态 token 给 MCP/程序化访问。
+    from codev_platform.gateway import build_authenticator
+    from codev_platform.web.security.session_authenticator import SessionAwareAuthenticator
+
     return build_app(
         title="codev-platform web",
         routers=[
@@ -55,6 +60,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         ],
         public_paths=_PUBLIC_PATHS,
         cfg=_cfg,
+        authenticator=SessionAwareAuthenticator(build_authenticator(_cfg)),
     )
 
 
