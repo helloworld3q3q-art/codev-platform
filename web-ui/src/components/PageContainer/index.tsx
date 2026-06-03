@@ -3,7 +3,7 @@ import {
   PageContainer as JPageContainer,
   type PageContainerProps as JPageContainerProps,
 } from '@jlogi/ui';
-import { getIntl, history } from '@umijs/max'; // 国际化
+import { history } from '@umijs/max';
 import { Route } from '@umijs/route-utils/dist/types';
 import { Breadcrumb } from 'antd';
 import React from 'react';
@@ -99,7 +99,8 @@ const PageContainer: React.FC<PageContainerProps> = ({
             .join('.');
           return {
             key: item.path,
-            title: getIntl().formatMessage({ id: `menu.${cumulativeName}` || '' }),
+            // locale 插件未启用（config.ts locale:false），直接用层级名作为面包屑标题
+            title: cumulativeName,
           };
         });
         return <Breadcrumb items={breadcrumbItems} />;

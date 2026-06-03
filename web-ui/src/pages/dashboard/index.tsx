@@ -44,7 +44,7 @@ export default function DashboardPage() {
           <StatisticCard statistic={{ title: 'CodeGraph 边', value: codegraph?.totalEdges ?? 0 }} />
         </StatisticCard.Group>
 
-        <ProCard title="平台健康" bordered classNames={{ root: 'i:mb-16' }}>
+        <ProCard title="平台健康" variant="outlined" classNames={{ root: 'i:mb-16' }}>
           <Descriptions column={2} size="small">
             <Descriptions.Item label="状态">
               <Tag color={healthOk ? 'green' : 'red'}>{health?.status ?? '未知'}</Tag>
@@ -58,7 +58,7 @@ export default function DashboardPage() {
           </Descriptions>
         </ProCard>
 
-        <ProCard title="当前项目图谱" bordered>
+        <ProCard title="当前项目图谱" variant="outlined">
           <Descriptions column={3} size="small">
             <Descriptions.Item label="CodeGraph 文件">{codegraph?.totalFiles ?? 0}</Descriptions.Item>
             <Descriptions.Item label="CodeGraph 节点">{codegraph?.totalNodes ?? 0}</Descriptions.Item>

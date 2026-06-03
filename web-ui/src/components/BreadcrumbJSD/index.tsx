@@ -5,9 +5,11 @@ import 'antd/lib/breadcrumb/style';
 import * as React from 'react';
 
 // 提到组件外部，避免每次 render 重建（react/jsx-no-bind）
-const renderBreadcrumbItem = (route: { breadcrumbName?: string; title?: string }) => (
-  <span>{route.breadcrumbName || route.title}</span>
-);
+// antd 6 itemRender 签名: (route, params, routes, paths) => ReactNode
+const renderBreadcrumbItem: BreadcrumbProps['itemRender'] = (route) => {
+  const item = route as { breadcrumbName?: string; title?: React.ReactNode };
+  return <span>{item.breadcrumbName || item.title}</span>;
+};
 
 /**
  * 禁用面包屑点击的通用组件

@@ -33,9 +33,13 @@ function defaultKindLabel(kind?: string): string {
 }
 
 // react-force-graph 要求 nodes/links 平坦字段；把 NodeDTO/EdgeDTO 透传 + 注入颜色/大小。
+// x/y/z 由 react-force-graph 物理仿真运行时回写到同一对象（声明为可选以便读取）。
 interface FGNode extends NodeDTO {
   color: string;
   val: number;
+  x?: number;
+  y?: number;
+  z?: number;
 }
 
 interface FGLink {
@@ -45,6 +49,11 @@ interface FGLink {
   color: string;
   particles: number;
 }
+
+// react-force-graph-3d 的 ref / 各 accessor prop 泛型与本地平坦节点形状不严格兼容，
+// 统一用该逃逸类型在 JSX 上断言（仅用于桥接第三方泛型，不扩散到业务逻辑）。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GraphAccessor = any;
 
 const LEGEND_ITEMS: Array<{ label: string; color: string }> = [
   { label: 'class / interface', color: '#1677ff' },
@@ -261,7 +270,8 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
 
   // 生成每个节点的文字标签 Sprite — 用 CanvasTexture 直接画到贴图，避免引入 three-spritetext。
   // nodeThreeObjectExtend=true 让 sprite 与默认球体共存。
-  const buildNodeSprite = useCallback((node: unknown): THREE.Object3D => {
+  // 返回 three 的 Object3D（three 未装类型声明，按 any 模块处理，故标注为 object）。
+  const buildNodeSprite = useCallback((node: unknown): object => {
     const n = node as { name?: string; color?: string; kind?: string };
     const rawName = n.name ?? '';
     if (!rawName) return new THREE.Object3D();
@@ -386,13 +396,15 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
       }}
     >
       <ForceGraph3D
-        ref={fgRef as React.Ref<unknown>}
+        // react-force-graph-3d 的 ref / accessor 泛型对自定义平坦节点形状过严，
+        // 用 GraphAccessor 局部放行（运行时节点是 FGNode/FGLink，字段均存在）。
+        ref={fgRef as GraphAccessor}
         graphData={graphData}
         {...(width !== undefined ? { width } : {})}
         {...(height !== undefined ? { height } : {})}
         backgroundColor="#0a1628"
-        nodeColor={accessNodeColor}
-        nodeVal={accessNodeVal}
+        nodeColor={accessNodeColor as GraphAccessor}
+        nodeVal={accessNodeVal as GraphAccessor}
         nodeLabel={handleNodeLabel}
         nodeThreeObject={buildNodeSprite}
         nodeThreeObjectExtend
@@ -410,7 +422,7 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
         enableNodeDrag
         enableNavigationControls
         showNavInfo={false}
-        onNodeClick={handleNodeClickInternal}
+        onNodeClick={handleNodeClickInternal as GraphAccessor}
         onNodeHover={handleNodeHover}
       />
       {showLegend ? <Legend /> : null}

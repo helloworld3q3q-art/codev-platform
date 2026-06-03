@@ -66,7 +66,7 @@ export default function JobsPage() {
 
   return (
     <PageContainer>
-      <ProCard title="提交索引重建" bordered classNames={{ root: 'i:mb-16' }}>
+      <ProCard title="提交索引重建" variant="outlined" classNames={{ root: 'i:mb-16' }}>
         <Space>
           <Select
             className="w-160"
@@ -80,7 +80,7 @@ export default function JobsPage() {
         </Space>
       </ProCard>
 
-      <ProCard title="查询任务状态" bordered>
+      <ProCard title="查询任务状态" variant="outlined">
         <Space className="mb-12">
           <Input
             className="w-320"

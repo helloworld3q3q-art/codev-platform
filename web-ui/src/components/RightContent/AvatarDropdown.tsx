@@ -45,7 +45,7 @@ export const AvatarDropdown: React.FC<GlobalHeaderRightProps> = ({ menu, childre
 
   // 退出登录，并保留当前页面作为重定向目标
   const loginOut = async () => {
-    await postLogout();
+    await postLogout({});
     clearUser();
     clearEnums();
     closeAllTabs();
