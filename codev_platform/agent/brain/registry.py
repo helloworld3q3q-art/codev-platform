@@ -19,6 +19,7 @@ from collections.abc import Callable
 
 from codev_platform.agent import config as acfg
 from codev_platform.agent.brain.base import LLMProvider
+from codev_platform.agent.policy import LoopPolicy
 
 # builder 统一签名:(api_key, model, base_url, name) -> LLMProvider
 Builder = Callable[[str, str, "str | None", str], LLMProvider]
@@ -32,6 +33,9 @@ class ProviderSpec:
     default_model: str = ""
     default_base_url: str | None = None
     openai_compatible: bool = False   # True = 可作为"未注册厂商"自动兜底的同类
+    # 内置行为档(每模型策略的 code 默认层, 同 default_model)。None = 用全局 LoopPolicy 默认。
+    # 弱模型(指令遵从差)在此调紧; config 可再覆盖。
+    default_loop_policy: LoopPolicy | None = None
 
 
 _REGISTRY: dict[str, ProviderSpec] = {}
@@ -70,7 +74,9 @@ register_provider(ProviderSpec("gpt", "OPENAI_API_KEY", _build_openai_compat,
                                openai_compatible=True))
 register_provider(ProviderSpec("deepseek", "DEEPSEEK_API_KEY", _build_openai_compat,
                                default_model="deepseek-chat", default_base_url="https://api.deepseek.com",
-                               openai_compatible=True))
+                               openai_compatible=True,
+                               # deepseek-chat 工具选型 / 收敛偏弱: 同工具上限调紧, 防变参 thrash。
+                               default_loop_policy=LoopPolicy(per_tool_cap=3)))
 register_provider(ProviderSpec("qwen", "DASHSCOPE_API_KEY", _build_openai_compat,
                                default_model="qwen-max",
                                default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -111,6 +117,29 @@ def get_provider(cfg: dict[str, Any] | None = None) -> LLMProvider:
         return spec.builder(key, model, base, name)
     except ImportError as e:
         raise RuntimeError(f"provider '{name}' 依赖未装(pip install -e .[agent]):{e}") from e
+
+
+def loop_policy(cfg: dict[str, Any] | None = None, name: str | None = None) -> LoopPolicy:
+    """解析某 provider 的循环行为档(策略)。优先级 (每字段独立):
+      config `agent.providers.<name>.loop.<f>` > `agent.loop.<f>` > (max_steps 兼容 `agent.max_steps`)
+      > spec.default_loop_policy.<f> > LoopPolicy() 全局默认。
+    加模型 / 调参只动 config 或 spec, loop 核心零改 (agent-provider §1/§4)。"""
+    cfg = cfg or acfg.agent_cfg()
+    name = name or acfg.provider_name(cfg)
+    spec = _REGISTRY.get(name)
+    base = (spec.default_loop_policy if spec and spec.default_loop_policy else LoopPolicy())
+
+    def _pick(field: str, legacy: tuple[str, ...] = ()) -> int:
+        for key in (f"agent.providers.{name}.loop.{field}", f"agent.loop.{field}", *legacy):
+            v = acfg.get(cfg, key)
+            if v is not None:
+                return int(v)
+        return int(getattr(base, field))
+
+    return LoopPolicy(
+        max_steps=_pick("max_steps", ("agent.max_steps",)),
+        per_tool_cap=_pick("per_tool_cap"),
+    )
 
 
 def list_providers(cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:

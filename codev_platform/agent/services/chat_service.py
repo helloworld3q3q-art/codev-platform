@@ -6,11 +6,12 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Callable
 
 from codev_platform.agent.brain.base import LLMProvider, Message
 from codev_platform.agent.loop import AgentLoop, AgentResult
+from codev_platform.agent.policy import LoopPolicy
 from codev_platform.agent.prompts import build_code_understanding_system
 from codev_platform.agent.recall_service import RecallService
 from codev_platform.agent.session import SessionStore
@@ -34,16 +35,20 @@ class ChatService:
         default_max_steps: Callable[[], int],
         recall: RecallService | None = None,
         recall_limit: int = 8,
+        loop_policy_factory: Callable[[str], LoopPolicy] | None = None,
     ) -> None:
         # provider_factory: 每次调用重解析 config(支持运行中切 provider)。
         # registry_factory(project_id): 按请求 project_id 建工具集(P2 多租户路由)。
         # recall: 分层记忆召回(M3),None = 未启用 memory(召回段不注入)。
+        # loop_policy_factory(provider_name): 每模型循环策略(步数 / 工具上限),None 时退回
+        #   仅用 default_max_steps 的全局默认(向后兼容 + 测试)。
         self._sessions = sessions
         self._registry_factory = registry_factory
         self._provider_factory = provider_factory
         self._default_max_steps = default_max_steps
         self._recall = recall
         self._recall_limit = recall_limit
+        self._loop_policy_factory = loop_policy_factory
 
     def ask(self, question: str, session_id: str | None = None,
             max_steps: int | None = None, user_id: str = "local",
@@ -61,7 +66,14 @@ class ChatService:
         # 把上下文 + 召回记忆注入 system prompt,让模型"知道"自己在哪个项目 / 为谁 + 遵循已知偏好
         system = build_code_understanding_system(
             project_id=project_id, user_id=user_id, org_id=org_id, memories=memories)
-        loop = AgentLoop(provider, registry, max_steps=max_steps or self._default_max_steps())
+        # 每模型策略:有 factory 走它(按 provider 名解析 spec 默认 ⊕ config),否则退回全局 max_steps。
+        if self._loop_policy_factory is not None:
+            policy = self._loop_policy_factory(provider.name)
+        else:
+            policy = LoopPolicy(max_steps=self._default_max_steps())
+        if max_steps:  # 本次请求显式覆盖步数(策略其余字段不变)
+            policy = replace(policy, max_steps=max_steps)
+        loop = AgentLoop(provider, registry, policy=policy)
         trace = Trace(sid, provider.name, provider.model)
         result = loop.run(question, history=history, trace=trace, system=system)
 

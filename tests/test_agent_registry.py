@@ -34,6 +34,21 @@ def test_register_new_provider_then_build(monkeypatch):
     assert p.name == "acme" and p.model == "acme-1" and p.base_url == "https://acme.test"
 
 
+def test_loop_policy_spec_default_config_override_and_global():
+    # 每模型策略:spec 内置默认 ⊕ config 覆盖 ⊕ 全局默认(加模型/调参不碰 loop 核心)。
+    # deepseek 内置 per_tool_cap=3(弱模型调紧)
+    p = reg.loop_policy({"agent": {"provider": "deepseek"}}, "deepseek")
+    assert p.per_tool_cap == 3 and p.max_steps == 12
+    # config 每字段覆盖优先(per-provider loop 块)
+    cfg = {"agent": {"provider": "deepseek",
+                     "providers": {"deepseek": {"loop": {"per_tool_cap": 7, "max_steps": 20}}}}}
+    p2 = reg.loop_policy(cfg, "deepseek")
+    assert p2.per_tool_cap == 7 and p2.max_steps == 20
+    # 无内置档的 provider → 全局 LoopPolicy 默认;legacy agent.max_steps 仍被尊重
+    p3 = reg.loop_policy({"agent": {"provider": "gpt", "max_steps": 9}}, "gpt")
+    assert p3.per_tool_cap == 4 and p3.max_steps == 9
+
+
 def test_unregistered_with_base_url_falls_back_to_openai_compat():
     # 未注册的厂商,只要 config 配了 base_url,就按 OpenAI 兼容自动兜底(零改代码)
     cfg = {"agent": {"provider": "newvendor",

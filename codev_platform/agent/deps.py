@@ -8,6 +8,7 @@ from __future__ import annotations
 from codev_platform.agent import config as acfg
 from codev_platform.agent.brain.base import LLMProvider
 from codev_platform.agent.brain.registry import get_provider as _get_provider
+from codev_platform.agent.brain.registry import loop_policy as _loop_policy
 from codev_platform.agent.services.chat_service import ChatService
 from codev_platform.agent.session import InMemorySessionStore, SessionStore
 from codev_platform.agent.tools import build_default_registry
@@ -181,5 +182,7 @@ def get_chat_service() -> ChatService:
             default_max_steps=lambda: acfg.max_steps(acfg.agent_cfg()),
             recall=get_recall_service(),
             recall_limit=acfg.get(cfg, "memory.recall_limit", 8),
+            # 每模型循环策略:按 provider 名解析 spec 内置档 ⊕ config 覆盖(运行中切 provider 也即时生效)。
+            loop_policy_factory=lambda name: _loop_policy(acfg.agent_cfg(), name),
         )
     return _chat_service

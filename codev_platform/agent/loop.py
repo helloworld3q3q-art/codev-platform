@@ -15,6 +15,7 @@ from codev_platform.agent.brain import (
     Message,
     ToolResult,
 )
+from codev_platform.agent.policy import LoopPolicy
 from codev_platform.agent.prompts import CODE_UNDERSTANDING_SYSTEM
 from codev_platform.agent.tools.base import ToolRegistry
 from codev_platform.agent.trace import Trace
@@ -43,10 +44,15 @@ def _summarize(text: str, limit: int = 280) -> str:
 
 
 class AgentLoop:
-    def __init__(self, provider: LLMProvider, registry: ToolRegistry, max_steps: int = 12) -> None:
+    def __init__(self, provider: LLMProvider, registry: ToolRegistry,
+                 policy: LoopPolicy | None = None, max_steps: int | None = None) -> None:
         self.provider = provider
         self.registry = registry
-        self.max_steps = max_steps
+        # policy 优先(每模型策略,见 agent-provider §1/§4);未给则从 max_steps 兜底建一个
+        # (向后兼容旧 max_steps= 调用 + 测试)。max_steps 既给又给 policy 时以 policy 为准。
+        if policy is None:
+            policy = LoopPolicy(max_steps=max_steps) if max_steps is not None else LoopPolicy()
+        self.policy = policy
 
     def run(self, question: str, history: list[Message] | None = None, trace: Trace | None = None,
             system: str | None = None) -> AgentResult:
@@ -59,8 +65,9 @@ class AgentLoop:
         steps: list[Step] = []
         total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         seen_calls: set[str] = set()  # 硬护栏:记录已执行过的 (tool, args) 指纹
+        tool_counts: dict[str, int] = {}  # 硬护栏:每工具实际执行次数 (防变参 thrash 同一工具)
 
-        for n in range(1, self.max_steps + 1):
+        for n in range(1, self.policy.max_steps + 1):
             turn: AssistantTurn = self.provider.chat(system_prompt, messages, specs)
             for k in ("input_tokens", "output_tokens"):
                 total_usage[k] = total_usage.get(k, 0) + int(turn.usage.get(k, 0) or 0)
@@ -76,7 +83,7 @@ class AgentLoop:
             # 有工具调用:记录 assistant 这轮,执行每个 call,把结果回灌
             messages.append(Message(role="assistant", content=turn.text,
                                     tool_calls=turn.tool_calls, extra=turn.extra))
-            near_limit = n >= self.max_steps - 1  # 倒数一步:提示强制收尾
+            near_limit = n >= self.policy.max_steps - 1  # 倒数一步:提示强制收尾
             for call in turn.tool_calls:
                 fp = f"{call.name}:{json.dumps(call.args, sort_keys=True, ensure_ascii=False)}"
                 tool = self.registry.get(call.name)
@@ -89,8 +96,19 @@ class AgentLoop:
                         content=(f"[loop guard] 你已用相同参数调用过 {call.name},结果不会变。"
                                  f"请换不同查法,或用已掌握的证据给出(部分)最终答案,不要重复同一调用。"),
                     )
+                elif tool_counts.get(call.name, 0) >= self.policy.per_tool_cap:
+                    # 硬护栏:同一工具调够上限 (变参 thrash 也算) → 拒绝执行,点名未试过的互补工具逼换视角
+                    untried = [s["name"] for s in specs
+                               if s["name"] != call.name and tool_counts.get(s["name"], 0) == 0]
+                    tip = ("；还没试过的互补工具:" + ", ".join(untried)) if untried else ""
+                    result = ToolResult(
+                        call_id=call.id, is_error=True,
+                        content=(f"[loop guard] {call.name} 已调用 {tool_counts[call.name]} 次,够了。"
+                                 f"换一类工具(换个视角){tip},或用现有证据给出最终答案,别再堆同一工具。"),
+                    )
                 else:
                     seen_calls.add(fp)
+                    tool_counts[call.name] = tool_counts.get(call.name, 0) + 1
                     result = tool.run(call.args)
                     result.call_id = call.id
                     if near_limit:
@@ -104,7 +122,7 @@ class AgentLoop:
 
         # 用尽 step 仍未收尾
         if trace:
-            trace.done("max_steps", self.max_steps)
+            trace.done("max_steps", self.policy.max_steps)
         return AgentResult(
             answer="(达到 max_steps 上限仍未得出最终答案;可提高 max_steps 或缩小问题)",
             steps=steps, usage=total_usage, stop_reason="max_steps",
