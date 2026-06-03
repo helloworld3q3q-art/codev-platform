@@ -7,7 +7,8 @@ import { postProjectsList } from '@/services/apis/projectapi';
 export interface DashboardData {
   health?: API.HealthData;
   codegraph?: API.CodegraphStatsResponse;
-  crosslink?: API.CrossLinkStatsResponse;
+  // cross-link 已并入统一图谱 (血缘重构), 这里展示统一图谱 store 的 stats。
+  unified?: API.UnifiedGraphStatsResponse;
   projectCount: number;
   orgCount: number;
 }
@@ -15,7 +16,7 @@ export interface DashboardData {
 export const DASHBOARD_DEFAULT: DashboardData = {
   health: undefined,
   codegraph: undefined,
-  crosslink: undefined,
+  unified: undefined,
   projectCount: 0,
   orgCount: 0,
 };
@@ -30,7 +31,7 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 }
 
 export async function loadDashboard(): Promise<DashboardData> {
-  const [health, codegraph, crosslink, projectCount, orgCount] = await Promise.all([
+  const [health, codegraph, unified, projectCount, orgCount] = await Promise.all([
     safe(async (): Promise<API.HealthData | undefined> => {
       const res = await getCheck();
       return res.data;
@@ -39,7 +40,7 @@ export async function loadDashboard(): Promise<DashboardData> {
       const res = await postStats();
       return res.data;
     }, undefined),
-    safe(async (): Promise<API.CrossLinkStatsResponse | undefined> => {
+    safe(async (): Promise<API.UnifiedGraphStatsResponse | undefined> => {
       const res = await postStats2();
       return res.data;
     }, undefined),
@@ -52,5 +53,5 @@ export async function loadDashboard(): Promise<DashboardData> {
       return res.total ?? 0;
     }, 0),
   ]);
-  return { health, codegraph, crosslink, projectCount, orgCount };
+  return { health, codegraph, unified, projectCount, orgCount };
 }

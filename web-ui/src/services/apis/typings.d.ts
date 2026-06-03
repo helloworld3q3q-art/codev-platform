@@ -165,51 +165,6 @@ interface CommonResult_CodegraphStatsResponse_ {
   requestId?: any;
 }
 
-// CommonResult_CrossLinkGraphResponse_ 响应数据
-interface CommonResult_CrossLinkGraphResponse_ {
-  result?: number;
-  message?: string;
-  data?: any;
-  errors?: ErrorItem[];
-  requestId?: any;
-}
-
-// CommonResult_CrossLinkSearchNodesResponse_ 响应数据
-interface CommonResult_CrossLinkSearchNodesResponse_ {
-  result?: number;
-  message?: string;
-  data?: any;
-  errors?: ErrorItem[];
-  requestId?: any;
-}
-
-// CommonResult_CrossLinkStatsResponse_ 响应数据
-interface CommonResult_CrossLinkStatsResponse_ {
-  result?: number;
-  message?: string;
-  data?: any;
-  errors?: ErrorItem[];
-  requestId?: any;
-}
-
-// CommonResult_CrossLinkTableRefsResponse_ 响应数据
-interface CommonResult_CrossLinkTableRefsResponse_ {
-  result?: number;
-  message?: string;
-  data?: any;
-  errors?: ErrorItem[];
-  requestId?: any;
-}
-
-// CommonResult_CrossLinkTablesResponse_ 响应数据
-interface CommonResult_CrossLinkTablesResponse_ {
-  result?: number;
-  message?: string;
-  data?: any;
-  errors?: ErrorItem[];
-  requestId?: any;
-}
-
 // CommonResult_HealthData_ 接口
 interface CommonResult_HealthData_ {
   result?: number;
@@ -363,15 +318,6 @@ interface CommonResult_dict_str__list_EnumItem___ {
   requestId?: any;
 }
 
-// CommonResult_list_CrossLinkEndpointLinkItem__ 接口
-interface CommonResult_list_CrossLinkEndpointLinkItem__ {
-  result?: number;
-  message?: string;
-  data?: any;
-  errors?: ErrorItem[];
-  requestId?: any;
-}
-
 // CommonResult_list_OrgSelectionItem__ 接口
 interface CommonResult_list_OrgSelectionItem__ {
   result?: number;
@@ -388,131 +334,6 @@ interface CommonResult_list_UserSelectionItem__ {
   data?: any;
   errors?: ErrorItem[];
   requestId?: any;
-}
-
-// CrossLinkEndpointLinkItem 接口
-interface CrossLinkEndpointLinkItem {
-  node?: any;
-  kind?: any;
-  path?: any;
-  line?: any;
-  url?: any;
-  direction?: any;
-  targets?: CrossLinkEndpointTarget[];
-  callers?: CrossLinkEndpointTarget[];
-}
-
-// CrossLinkEndpointLinkRequest 请求参数
-interface CrossLinkEndpointLinkRequest {
-  name?: any;
-}
-
-// CrossLinkEndpointTarget 接口
-interface CrossLinkEndpointTarget {
-  name?: any;
-  path?: any;
-  line?: any;
-  url?: any;
-  confidence?: any;
-  evidence?: any;
-}
-
-// CrossLinkGraphEdge 接口
-interface CrossLinkGraphEdge {
-  source?: any;
-  target?: any;
-  kind?: any;
-}
-
-// CrossLinkGraphNode 接口
-interface CrossLinkGraphNode {
-  id?: any;
-  kind?: any;
-  name?: any;
-  filePath?: any;
-  startLine?: any;
-  language?: any;
-}
-
-// CrossLinkGraphRequest 请求参数
-interface CrossLinkGraphRequest {
-  mode?: any;
-  kinds?: any;
-  excludeKinds?: any;
-  rels?: any;
-  excludeRels?: any;
-  limit?: any;
-}
-
-// CrossLinkGraphResponse 响应数据
-interface CrossLinkGraphResponse {
-  nodes?: CrossLinkGraphNode[];
-  edges?: CrossLinkGraphEdge[];
-  nodeCount?: number;
-  edgeCount?: number;
-}
-
-// CrossLinkNodeRef 接口
-interface CrossLinkNodeRef {
-  name?: any;
-  kind?: any;
-  path?: any;
-  line?: any;
-  confidence?: any;
-  evidence?: any;
-}
-
-// CrossLinkSearchHit 接口
-interface CrossLinkSearchHit {
-  name?: any;
-  kind?: any;
-  path?: any;
-  line?: any;
-  language?: any;
-  meta?: Record<string, any>;
-}
-
-// CrossLinkSearchNodesRequest 请求参数
-interface CrossLinkSearchNodesRequest {
-  query?: any;
-  kind?: any;
-  limit?: any;
-}
-
-// CrossLinkSearchNodesResponse 响应数据
-interface CrossLinkSearchNodesResponse {
-  query?: any;
-  kind?: any;
-  hits?: CrossLinkSearchHit[];
-}
-
-// CrossLinkStatsResponse 响应数据
-interface CrossLinkStatsResponse {
-  lastBuildAt?: any;
-  nodesByKind?: Record<string, number>;
-  edgesByRel?: Record<string, number>;
-}
-
-// CrossLinkTableRefsRequest 请求参数
-interface CrossLinkTableRefsRequest {
-  table?: any;
-}
-
-// CrossLinkTableRefsResponse 响应数据
-interface CrossLinkTableRefsResponse {
-  table?: any;
-  definers?: CrossLinkNodeRef[];
-  javaReaders?: CrossLinkNodeRef[];
-  javaWriters?: CrossLinkNodeRef[];
-  javaUpdaters?: CrossLinkNodeRef[];
-  pythonReaders?: CrossLinkNodeRef[];
-  pythonWriters?: CrossLinkNodeRef[];
-  pythonUpdaters?: CrossLinkNodeRef[];
-}
-
-// CrossLinkTablesResponse 响应数据
-interface CrossLinkTablesResponse {
-  tables?: string[];
 }
 
 // 枚举项响应 DTO。字段名 camelCase 对齐前端 (Java EnumItemDTO 同构)。

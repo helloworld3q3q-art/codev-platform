@@ -11,9 +11,10 @@ import { useModel } from '@umijs/max';
 import { Spin, message } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { postGraph2, postStats2 } from '@/services/apis/graphapi';
+
 import Graph3DCanvas from '../codegraph/graph/components/Graph3DCanvas';
 import type { NeighborsResponse, NodeDTO } from '../codegraph/common/types';
-import { fetchUnifiedGraph, fetchUnifiedStats } from './common/services';
 import type {
   UnifiedGraphNode,
   UnifiedGraphResponse,
@@ -40,7 +41,10 @@ const UnifiedGraphPage: React.FC = () => {
     setLoading(true);
     setSelectedNode(undefined);
     try {
-      const [graph, stats] = await Promise.all([fetchUnifiedGraph(), fetchUnifiedStats()]);
+      // 直接调生成的 API (postGraph2=/unified/graph, postStats2=/unified/stats), 自取 .data, 不套适配层。
+      const [graphRes, statsRes] = await Promise.all([postGraph2(), postStats2()]);
+      const graph = graphRes.data;
+      const stats = statsRes.data;
       setData({ graph, stats });
       // 默认全选所有出现过的 kind
       setSelectedKinds(Object.keys(stats?.nodesByKind ?? {}));

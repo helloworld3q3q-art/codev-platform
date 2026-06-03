@@ -30,7 +30,7 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
-  const { health, codegraph, crosslink, projectCount, orgCount } = data;
+  const { health, codegraph, unified, projectCount, orgCount } = data;
   const healthOk = health?.status === 'ok';
   const depItems = Object.entries(health?.dependencies ?? {});
 
@@ -63,11 +63,11 @@ export default function DashboardPage() {
             <Descriptions.Item label="CodeGraph 文件">{codegraph?.totalFiles ?? 0}</Descriptions.Item>
             <Descriptions.Item label="CodeGraph 节点">{codegraph?.totalNodes ?? 0}</Descriptions.Item>
             <Descriptions.Item label="CodeGraph 边">{codegraph?.totalEdges ?? 0}</Descriptions.Item>
-            <Descriptions.Item label="cross-link 节点类">
-              {Object.keys(crosslink?.nodesByKind ?? {}).length}
+            <Descriptions.Item label="统一图谱 节点类">
+              {Object.keys(unified?.nodesByKind ?? {}).length}
             </Descriptions.Item>
-            <Descriptions.Item label="cross-link 边类">
-              {Object.keys(crosslink?.edgesByRel ?? {}).length}
+            <Descriptions.Item label="统一图谱 边类">
+              {Object.keys(unified?.edgesByKind ?? {}).length}
             </Descriptions.Item>
           </Descriptions>
         </ProCard>

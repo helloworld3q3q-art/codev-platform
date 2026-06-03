@@ -52,56 +52,8 @@ export async function postGraph(data: Partial<API.any>): Promise<API.CommonResul
   });
 }
 
-// 跨层链路-统计
-export async function postStats2(): Promise<API.CommonResult_CrossLinkStatsResponse_> {
-  return await post<API.CommonResult_CrossLinkStatsResponse_>({
-    url: `${commonUrl}/api/v1/graph/cross-link/stats`,
-    data: {},
-  });
-}
-
-// 跨层链路-表清单
-export async function postTables(): Promise<API.CommonResult_CrossLinkTablesResponse_> {
-  return await post<API.CommonResult_CrossLinkTablesResponse_>({
-    url: `${commonUrl}/api/v1/graph/cross-link/tables`,
-    data: {},
-  });
-}
-
-// 跨层链路-表引用清单
-export async function postTableRefs(data: Partial<API.CrossLinkTableRefsRequest>): Promise<API.CommonResult_CrossLinkTableRefsResponse_> {
-  return await post<API.CommonResult_CrossLinkTableRefsResponse_>({
-    url: `${commonUrl}/api/v1/graph/cross-link/table-refs`,
-    data,
-  });
-}
-
-// 跨层链路-前后端 endpoint 关联
-export async function postEndpointLink(data: Partial<API.CrossLinkEndpointLinkRequest>): Promise<API.CommonResult_list_CrossLinkEndpointLinkItem__> {
-  return await post<API.CommonResult_list_CrossLinkEndpointLinkItem__>({
-    url: `${commonUrl}/api/v1/graph/cross-link/endpoint-link`,
-    data,
-  });
-}
-
-// 跨层链路-节点模糊检索
-export async function postSearchNodes(data: Partial<API.CrossLinkSearchNodesRequest>): Promise<API.CommonResult_CrossLinkSearchNodesResponse_> {
-  return await post<API.CommonResult_CrossLinkSearchNodesResponse_>({
-    url: `${commonUrl}/api/v1/graph/cross-link/search-nodes`,
-    data,
-  });
-}
-
-// 跨层链路-全图加载
-export async function postGraph2(data: Partial<API.any>): Promise<API.CommonResult_CrossLinkGraphResponse_> {
-  return await post<API.CommonResult_CrossLinkGraphResponse_>({
-    url: `${commonUrl}/api/v1/graph/cross-link/graph`,
-    data,
-  });
-}
-
 // 统一图谱-全图加载
-export async function postGraph3(): Promise<API.CommonResult_UnifiedGraphResponse_> {
+export async function postGraph2(): Promise<API.CommonResult_UnifiedGraphResponse_> {
   return await post<API.CommonResult_UnifiedGraphResponse_>({
     url: `${commonUrl}/api/v1/graph/unified/graph`,
     data: {},
@@ -109,7 +61,7 @@ export async function postGraph3(): Promise<API.CommonResult_UnifiedGraphRespons
 }
 
 // 统一图谱-统计
-export async function postStats3(): Promise<API.CommonResult_UnifiedGraphStatsResponse_> {
+export async function postStats2(): Promise<API.CommonResult_UnifiedGraphStatsResponse_> {
   return await post<API.CommonResult_UnifiedGraphStatsResponse_>({
     url: `${commonUrl}/api/v1/graph/unified/stats`,
     data: {},
