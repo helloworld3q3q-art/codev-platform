@@ -5,5 +5,12 @@
   "repo_path": "D:/WorkSpace/codev-platform",
   "rules_path": "rules",
   "memory_path": null,
-  "notes": "工具栈本体仓 — 既是 codev-platform pip 包来源, 也是一个可被 multi-tenant daemon 服务的 Claude Code workspace (.claude/project.json + .mcp.json 已配)。"
+  "notes": "工具栈本体仓 — 既是 codev-platform pip 包来源, 也是一个可被 multi-tenant daemon 服务的 Claude Code workspace (.claude/project.json + .mcp.json 已配)。",
+  "health": {
+    "_comment_reindex": "codev-platform 是 Python 工具栈本仓 (非 apps/*/src 业务布局), 默认 codegraph 模式匹配不到自己 → 补本仓布局, 让代码/前端改动自动触发 codegraph+ingest 刷新 graph store (否则 graph store 只能手动 reindex --ingest)。ext 是追加, 默认 apps/* 模式保留无害。",
+    "reindex_codegraph_patterns": [
+      "^codev_platform/.*\\.py$",
+      "^web-ui/src/.*\\.(ts|tsx)$"
+    ]
+  }
 }
