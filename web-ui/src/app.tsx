@@ -1,6 +1,6 @@
 import EnumLoader from '@/components/EnumLoader';
 import TabContainer from '@/components/TabContainer';
-import { MENU_ITEMS } from '@/menus';
+import { getVisibleMenuItems } from '@/menus';
 import { getSession } from '@/services/apis/authapi';
 import { postProjectsList } from '@/services/apis/projectapi';
 import type { UserInfo } from '@/models/user';
@@ -114,7 +114,8 @@ export const layout: RunTimeLayoutConfig = ({ initialState }) => {
     menu: {
       locale: false,
       // codev-platform admin: 静态菜单 (无后端 sys_menu 动态菜单系统; 接入后改回 request 拉取)。
-      request: async () => MENU_ITEMS,
+      // 审计日志按角色显隐 (仅管理员); 非管理员从菜单剔除, 后端 require_org_role 兜底。
+      request: async () => getVisibleMenuItems(initialState?.userInfo?.roles),
     },
     menuHeaderRender: false,
     rightContentRender: false,

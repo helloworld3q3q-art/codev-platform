@@ -8,6 +8,57 @@ interface ApiCallersRequest {
   endpointRef: string;
 }
 
+// 审计记录对外视图 (access.jsonl 单条)。
+interface AuditItem {
+  ts?: any; // 时间 ISO8601
+  service?: any; // 服务名
+  userId?: any; // 用户 ID
+  orgId?: any; // 组织 ID
+  via?: any; // 鉴权方式 (token / passthrough)
+  projectId?: any; // 项目 ID
+  allowed?: boolean; // 是否放行
+  reason?: any; // 判定原因
+}
+
+// POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选)。
+
+注: org 维度不在此声明 —— org_admin 强制只查本 org (路由注入 session org),
+platform_admin 可传 orgId 跨 org 查。
+interface AuditListRequest {
+  service?: any; // 服务名: codev-web / codev-agent
+  userId?: any; // 用户 ID
+  orgId?: any; // 组织 ID (仅 platform_admin 可指定; org_admin 忽略)
+  projectId?: any; // 项目 ID
+  allowed?: any; // 授权结果: true 放行 / false 拒绝
+  tsFrom?: any; // 起始时间 ISO8601 (含界)
+  tsTo?: any; // 结束时间 ISO8601 (含界)
+}
+
+// 对话结果 (agent ChatResponse 的 web 投影)。
+interface ChatData {
+  sessionId: string; // 会话 id (回填, 用于下轮)
+  answer: string; // 最终回答
+  steps?: ChatStep[]; // 推理 / 工具调用轨迹
+  usage?: Record<string, any>; // token / 调用统计
+  stopReason: string; // 收尾原因 (final / max_steps / ...)
+}
+
+// POST /api/v1/agent/chat 请求体。
+interface ChatRequest {
+  question: string; // 问题
+  sessionId?: any; // 多轮会话 id; 省略=新会话
+  maxSteps?: any; // 本次循环 step 上限; 省略走 agent config
+}
+
+// 单步轨迹 (对齐 agent.schemas.StepOut)。
+interface ChatStep {
+  n: number;
+  thought?: any;
+  tool?: any;
+  args?: any;
+  resultSummary?: any;
+}
+
 // 对齐 Java EdgeDTO。
 interface CodegraphEdge {
   id?: any;
@@ -116,6 +167,15 @@ interface CodegraphStatsResponse {
   byEdgeKind?: Record<string, number>;
 }
 
+// CommonResult_ChatData_ 接口
+interface CommonResult_ChatData_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_CodegraphFileTreeResponse_ 响应数据
 interface CommonResult_CodegraphFileTreeResponse_ {
   result?: number;
@@ -217,6 +277,15 @@ interface CommonResult_JobIdData_ {
 
 // CommonResult_MemberActionResult_ 接口
 interface CommonResult_MemberActionResult_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_MemoryItem_ 接口
+interface CommonResult_MemoryItem_ {
   result?: number;
   message?: string;
   data?: any;
@@ -334,6 +403,15 @@ interface CommonResult_UserItem_ {
 
 // CommonResult_dict_str__list_EnumItem___ 接口
 interface CommonResult_dict_str__list_EnumItem___ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_list_MemoryItem__ 接口
+interface CommonResult_list_MemoryItem__ {
   result?: number;
   message?: string;
   data?: any;
@@ -488,6 +566,30 @@ interface MemberRoleRequest {
   role: string; // 新角色 (MemberRoleEnum: viewer|member|admin)
 }
 
+// 记忆条目对外视图 (agent /memory 返回的投影)。
+interface MemoryItem {
+  id: string; // 记忆 ID
+  scope: string; // 作用域
+  scopeRef: string; // 作用域 ref
+  ownerUserId: string; // 写入者 user_id
+  content: string; // 记忆内容
+  orgId: string; // 所属租户
+  kind?: any; // 类型
+  topicKey?: any; // 冲突检测键
+  isRedline?: boolean; // org 硬约束
+  status?: string; // 状态
+}
+
+// POST /api/v1/memory 写记忆 (代理 agent /memory)。
+interface MemoryWriteRequest {
+  scope: string; // org | team | project | personal
+  scopeRef: string; // org='org' / team_id / project_id / user_id
+  content: string; // 记忆内容
+  kind?: any; // preference | fact | task ...
+  topicKey?: any; // 冲突检测键
+  ttl?: any; // 存活秒数 (省略=永久)
+}
+
 // create/update/status 写操作回执。
 interface OrgActionResult {
   code: string;
@@ -532,6 +634,19 @@ interface OrgUpdateRequest {
 // PageDepsRequest 请求参数
 interface PageDepsRequest {
   pageRef: string;
+}
+
+// PageResult_AuditItem_ 接口
+interface PageResult_AuditItem_ {
+  result?: number;
+  message?: string;
+  data?: AuditItem[];
+  currentPage?: number;
+  pageSize?: number;
+  total?: number;
+  totalPage?: number;
+  errors?: ErrorItem[];
+  requestId?: any;
 }
 
 // PageResult_JobDTO_ 数据传输对象
@@ -809,5 +924,12 @@ interface JobsGetDetailParams {
 interface PostJobsListParams {
   pageNumber?: number; // 页码, 从 1 起
   pageSize?: number; // 每页数量
+}
+
+// V1GetMemoryParams 查询参数
+interface V1GetMemoryParams {
+  scope: string; // org|team|project|personal
+  scopeRef: string; // 该 scope 的 ref
+  limit?: number; // 返回上限
 };
     }

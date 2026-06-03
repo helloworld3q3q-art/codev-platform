@@ -5,6 +5,8 @@ export default [
   { name: '仪表盘', path: '/dashboard', icon: 'DashboardOutlined', component: './dashboard' },
   { name: '项目管理', path: '/projects', icon: 'AppstoreOutlined', component: './projects' },
   { name: '任务中心', path: '/jobs', icon: 'ScheduleOutlined', component: './jobs' },
+  { name: 'AI 助手', path: '/agent', icon: 'RobotOutlined', component: './agent' },
+  { name: '记忆库', path: '/memory', icon: 'BulbOutlined', component: './memory' },
   // 代码图谱。路由保持扁平 (React Router 嵌套绝对子路径须以父路径开头),
   // "代码图谱" 父分组只在菜单 (src/menus.tsx) 体现, 子路径以 /codegraph/ 前缀归组。
   // 跨层链路已并入统一图谱 (2026-06-03 全栈血缘收敛: 按层筛选 + 节点详情面板的关联节点)。
@@ -19,5 +21,7 @@ export default [
   // "系统管理" 分组只在菜单 (src/menus.tsx) 体现, 不影响路由结构。
   { name: '组织管理', path: '/orgs', icon: 'TeamOutlined', component: './orgs' },
   { name: '用户管理', path: '/users', icon: 'UserOutlined', component: './users' },
+  // 审计日志归 "系统管理" 组 (菜单按角色显隐, 见 src/menus.tsx); 路由扁平不挂 /system 下。
+  { name: '审计日志', path: '/audit', icon: 'AuditOutlined', component: './system/audit' },
   { path: '*', component: './404' },
 ];

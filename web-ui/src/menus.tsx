@@ -1,11 +1,14 @@
 import {
   AppstoreOutlined,
+  AuditOutlined,
   BranchesOutlined,
+  BulbOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
   FileOutlined,
   FolderOutlined,
   PartitionOutlined,
+  RobotOutlined,
   SafetyOutlined,
   ScheduleOutlined,
   TableOutlined,
@@ -13,6 +16,8 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import type { MenuDataItem } from '@ant-design/pro-components';
+
+import { isAdminRole } from '@/utils/role';
 
 /**
  * 静态菜单配置（未接入后端权限系统时使用）。
@@ -27,6 +32,8 @@ export const MENU_ITEMS: MenuDataItem[] = [
   { name: '仪表盘', path: '/dashboard', icon: <DashboardOutlined /> },
   { name: '项目管理', path: '/projects', icon: <AppstoreOutlined /> },
   { name: '任务中心', path: '/jobs', icon: <ScheduleOutlined /> },
+  { name: 'AI 助手', path: '/agent', icon: <RobotOutlined /> },
+  { name: '记忆库', path: '/memory', icon: <BulbOutlined /> },
   {
     name: '代码图谱',
     path: '/codegraph',
@@ -47,9 +54,36 @@ export const MENU_ITEMS: MenuDataItem[] = [
     children: [
       { name: '组织管理', path: '/orgs', icon: <TeamOutlined /> },
       { name: '用户管理', path: '/users', icon: <UserOutlined /> },
+      // 审计日志: 仅管理员可见 (org admin / platform admin), 见 getVisibleMenuItems; 后端 require_org_role 兜底。
+      { name: '审计日志', path: '/audit', icon: <AuditOutlined /> },
     ],
   },
 ];
+
+// 仅管理员可见的菜单路径 (审计日志); 非管理员从菜单隐藏, 后端 require_org_role 仍是真正闸口。
+const ADMIN_ONLY_PATHS = new Set<string>(['/audit']);
+
+// 按角色过滤菜单: 非管理员剔除 ADMIN_ONLY_PATHS 项 (含 children 递归)。供 app.tsx menu.request 调用。
+export function getVisibleMenuItems(roles: string[] | undefined): MenuDataItem[] {
+  if (isAdminRole(roles)) {
+    return MENU_ITEMS;
+  }
+  function filter(items: MenuDataItem[]): MenuDataItem[] {
+    const result: MenuDataItem[] = [];
+    for (const item of items) {
+      if (item.path && ADMIN_ONLY_PATHS.has(item.path)) {
+        continue;
+      }
+      if (item.children?.length) {
+        result.push({ ...item, children: filter(item.children) });
+      } else {
+        result.push(item);
+      }
+    }
+    return result;
+  }
+  return filter(MENU_ITEMS);
+}
 
 /**
  * 按 path 递归查找菜单名称，未命中时返回 undefined。
