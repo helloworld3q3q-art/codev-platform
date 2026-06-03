@@ -15,12 +15,15 @@ from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, p
 from codev_platform.core.httpkit.pagination import PageParams, page_params
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.schemas.jobs import JobCancelRequest, JobDTO
+from codev_platform.web.services.index_service import make_reindex_dispatch_trigger
 from codev_platform.web.services.job_service import build_in_memory_job_service
 
 router = APIRouter()
 
 # 进程内默认 job service (内存 store + 模块级项目锁)。indexes.router import 同一实例。
-job_service = build_in_memory_job_service()
+# trigger 派 index_rebuild job 进真实 reindex 队列 (FileSpoolQueue, worker 消费) ——
+# 让 web "重建索引" 真触发重建, 而非空壳 (deep-audit-2026-06-03-review 净新增②)。
+job_service = build_in_memory_job_service(trigger=make_reindex_dispatch_trigger())
 
 
 def _rid(request: Request) -> str | None:

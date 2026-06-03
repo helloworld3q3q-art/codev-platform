@@ -117,3 +117,28 @@ P0 运营(现在就坏,原审计漏):
 ```
 
 与原审计差异:① 加 P0 运营止血(原审计漏的两条不通链路);② 簇1 真 P1 改为"projects 授权缺失"而非"未登录";③ 簇1 修复增加"双轨鉴权收口"前置;④ SQLAlchemy 降出第一/二波;⑤ broad except 定级按"是否真吞"细分。
+
+---
+
+## 六、收尾状态(2026-06-03 复核闭环)
+
+§五 排期逐项核到代码底层后的真实状态(✅=已落地并测 / ◻=运营决断非代码 / ⏳=按设计保留):
+
+| 项 | 状态 | 落地点 |
+|---|---|---|
+| P0 webhook.secret 决断 | ◻ **运营** | 代码已 fail-closed 正确(配 secret 即活 / 或显式下线);配密钥是部署动作,非代码改 |
+| P0 web rebuild 空壳接线 | ✅ | `index_service.make_reindex_dispatch_trigger` 把 index_rebuild job 派进真实 FileSpoolQueue(与 webhook 同队列, worker 消费);'all' 展开 runners.kinds();`jobs.py` 注入;submit 派发失败释放锁;`test_reindex_dispatch_trigger.py` 5 例 |
+| 1 双轨鉴权收口 | ✅ | `SessionAwareAuthenticator`(`8c6153c`) |
+| 2 projects 路由授权 | ✅ | list/detail/load/unload 带 `current_session`,register 带 `require_org_role("admin")`;service 逐项目 `_authorize_project` |
+| 3 logout 撤 access + register 原子写 | ✅ | `sessions.revoke` 撤 access+refresh + `revoke_user`;`project_write_repo` 用 `open(target,"x")` 排他写 |
+| 4 PG fallback prod fail-fast | ✅ | `bind_account_stores`:`except ImportError`→回退内存,`except Exception`+prod→raise |
+| 5 graph store project_id | ✅ | 写 `DELETE ... WHERE plugin=? AND project_id=?` + INSERT 强制入参 project_id;读 `WHERE project_id=?`(nodes) |
+| ✅ reindex runner timeout | ✅ | 本复核 §四 |
+| 6 TS 工具链 / 解 @ts-nocheck | ✅ | TS 4.9→5.4 + 清零类型错 + 移除 fetch.ts @ts-nocheck(`58256b1`/`5ce34a5`/`9260957`) |
+| 7 SQLAlchemy Core+Alembic | ✅ | rbac/account store 迁移 + tables.py 收口 + baseline migration(`0e6f220`/`c25066f`) |
+| 8 日志迁 data_root/logs + gitignore | ✅ | webhook.log / worker.log / MCP daemon 全走 `logs_dir()`;`.gitignore` `*.log` 覆盖,无 .log 入库 |
+| 9 broad except 区分上报型 vs 真吞型 | ⏳ **按设计保留** | 真吞的两处已收口:worker._log 是写日志失败兜底(可接受)、account_store fallback 已收窄 ImportError;MCP daemon 真静默 except 已加可观测(`2943742`)。`_checks.py` 多为上报型(原审计定级偏高)。剩余纯定性,无独立代码债 |
+
+**结论**:§五 12 项中 10 项已落地并测,1 项(webhook.secret)是运营决断,1 项(broad except)按设计保留。复核闭环。测试基线 786→**791 passed / 5 skipped**。
+
+**唯一待用户决断**:webhook.secret —— 配上则自动 reindex 链复活(配 `webhook.secret` + VCS 端同密钥),或显式下线只走 web rebuild(已真实)/ CLI。

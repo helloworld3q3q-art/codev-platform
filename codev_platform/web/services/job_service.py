@@ -65,8 +65,13 @@ class JobService:
             # 建 job 失败 → 立即释放锁, 不留死锁。
             self._locks.release(project_id, job_type)
             raise
-        # 触发 stub (本片 no-op); runner 失败不影响 job 已提交事实, 由后续轮询/worker 处理。
-        self._trigger(job)
+        # 触发 dispatch (web 默认派进真实 reindex 队列; 测试注 no-op)。派发失败 (如入队
+        # 写盘失败) → 释放锁让用户可重试, 与上面 create 失败同范式 (否则锁悬挂堵后续提交)。
+        try:
+            self._trigger(job)
+        except Exception:
+            self._locks.release(project_id, job_type)
+            raise
         return job
 
     def list_jobs(self, *, project_id: str | None, offset: int, limit: int) -> tuple[list[Job], int]:
