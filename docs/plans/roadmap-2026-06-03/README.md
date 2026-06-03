@@ -15,7 +15,8 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [next-plan-2026-06-03.md](next-plan-2026-06-03.md) | 主 plan:4 轨道(A 图谱收敛+影响分析 spearhead / B web-backend 收尾 / C Memory M1 起步 / D 技术债+质量+Demo)+ 依赖排期 + 成功指标 + 红线 | 规划完成,待执行 |
+| [next-plan-2026-06-03.md](next-plan-2026-06-03.md) | 主 plan:4 轨道(A 图谱收敛+影响分析 spearhead / B web-backend 收尾 / C Memory M1 起步 / D 技术债+质量+Demo)+ 依赖排期 + 成功指标 + 红线 | 执行中:**Track A spearhead(A1/A4/A5)✅ 交付** |
+| [daily-summary-2026-06-03.md](daily-summary-2026-06-03.md) | 首日日报:Track A 影响分析完整交付(桥接 + 引擎 + web API + agent 工具 + 对抗审计),766 passed | ✅ |
 
 ## 上一迭代继承速查
 
