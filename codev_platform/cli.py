@@ -750,6 +750,18 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    """起 web backend (FastAPI via uvicorn)。systemd 之外的本机/调试入口 (与 codev-web.service 同 app)。"""
+    try:
+        import uvicorn
+    except ImportError:
+        _eprint("缺 uvicorn: uv pip install --python <venv> uvicorn")
+        return 1
+    _print(f"启动 web backend: codev_platform.web.app:app @ {args.host}:{args.port}")
+    uvicorn.run("codev_platform.web.app:app", host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from codev_platform import __version__
     p = argparse.ArgumentParser(prog="codev-platform", description="多项目 AI 工具栈 CLI")
@@ -825,6 +837,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="start: 拉起后有界轮询直到全 OK 或超时 (退出码 0=全 OK, 非 0=有超时)")
     sp_mcp.add_argument("--timeout", type=int, default=60, help="start --wait: 轮询总超时秒数 (默认 60)")
     sp_mcp.set_defaults(func=cmd_serve_mcp)
+
+    sp_web = sub.add_parser("web", help="web backend 服务 (serve 起 FastAPI codev_platform.web.app)")
+    web_sub = sp_web.add_subparsers(dest="web_cmd", required=True)
+    sp_web_serve = web_sub.add_parser("serve", help="起 web backend (uvicorn, 默认 127.0.0.1:18088)")
+    sp_web_serve.add_argument("--host", default="127.0.0.1", help="绑定 host (0.0.0.0 对外须 token 模式)")
+    sp_web_serve.add_argument("--port", type=int, default=18088, help="端口 (默认 18088)")
+    sp_web_serve.set_defaults(func=cmd_web)
 
     sp_msrc = sub.add_parser("mcp-source", help="切换业务仓 .mcp.json 各 MCP 的源 (local 本机 / platform 服务器)")
     sp_msrc.add_argument("target", choices=["local", "platform"],
