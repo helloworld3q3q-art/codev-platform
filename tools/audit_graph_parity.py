@@ -45,7 +45,7 @@ from codev_platform.core.paths import (  # noqa: E402
     cross_link_db_path,
     cross_link_legacy_db_path,
 )
-from codev_platform.graph.impact import build_impact_graph, layer_of  # noqa: E402
+from codev_platform.graph.impact import build_impact_graph  # noqa: E402
 from codev_platform.graph.schema import EdgeKind, NodeKind  # noqa: E402
 from codev_platform.graph.store import graph_store_path  # noqa: E402
 

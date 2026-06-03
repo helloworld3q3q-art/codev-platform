@@ -10,8 +10,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from fastapi.routing import APIRoute  # noqa: E402
-
+from codev_platform.core.httpkit import duplicate_operation_ids  # noqa: E402
 from codev_platform.web.app import create_app  # noqa: E402
 
 _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
@@ -22,18 +21,15 @@ def _app():
 
 
 def test_operation_ids_unique():
+    # 复用 httpkit 共享去重助手 (test_web_graph 同款), 不在测试里重造一遍扫描逻辑。
     app = _app()
-    ops = [r.operation_id for r in app.routes if isinstance(r, APIRoute) and r.operation_id]
-    seen: dict[str, int] = {}
-    for o in ops:
-        seen[o] = seen.get(o, 0) + 1
-    dupes = {o: n for o, n in seen.items() if n > 1}
-    assert not dupes, f"重复 operationId (前端 pnpm run api 会生成错乱): {dupes}"
+    dupes = duplicate_operation_ids(app)
+    assert dupes == [], f"重复 operationId (前端 pnpm run api 会生成错乱): {dupes}"
 
 
 def test_openapi_generates_and_has_key_routes():
     app = _app()
-    spec = app.openapi()
+    spec = app.openapi()  # 不抛即视为 schema 可生成
     assert spec.get("openapi") and spec.get("paths")
     op_ids = {
         op["operationId"]
