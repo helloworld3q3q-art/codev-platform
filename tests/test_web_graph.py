@@ -267,7 +267,8 @@ def test_cross_link_graph_reads_store_when_present(tmp_path, monkeypatch):
     data = r.json()["data"]
     assert data["nodeCount"] == 2 and data["edgeCount"] == 1
     kinds = {n["kind"] for n in data["nodes"]}
-    assert kinds == {"table", "java_endpoint"}  # 还原成 cross-link 原始 kind
+    # table 还原成 cross-link 原始 kind; 后端端点统一语言中性 backend_endpoint
+    assert kinds == {"table", "backend_endpoint"}
     assert data["edges"][0]["kind"] == "queries_table"  # 还原成 cross-link 原始 rel
     names = {n["name"] for n in data["nodes"]}
     assert names == {"store_table", "GET /api/x"}
@@ -284,7 +285,7 @@ def test_cross_link_stats_reads_store_when_present(tmp_path, monkeypatch):
     r = c.post("/api/v1/graph/cross-link/stats", headers=_HEADERS, json={})
     assert r.status_code == 200
     data = r.json()["data"]
-    assert data["nodesByKind"] == {"table": 1, "java_endpoint": 1}
+    assert data["nodesByKind"] == {"table": 1, "backend_endpoint": 1}
     assert data["edgesByRel"] == {"queries_table": 1}
 
 

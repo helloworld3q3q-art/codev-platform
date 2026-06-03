@@ -38,7 +38,7 @@ export type NodeKind =
   | 'type_alias'
   | 'frontend_page'
   | 'frontend_api'
-  | 'java_endpoint'
+  | 'backend_endpoint'
   | 'java_method'
   | 'python_method'
   | 'flyway_migration'

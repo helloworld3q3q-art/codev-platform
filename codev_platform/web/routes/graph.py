@@ -54,9 +54,16 @@ def _is_missing(exc: PlatformError) -> bool:
 
 
 def _crosslink_kind(node: GraphNode) -> str | None:
-    """从统一节点还原 cross-link 原始 kind; 非 cross-link 节点 (无留底) 返回 None。"""
+    """从统一节点还原 cross-link 原始 kind; 非 cross-link 节点 (无留底) 返回 None。
+
+    后端端点统一用语言中性 'backend_endpoint' (cross-link DB 历史叫 java_endpoint,
+    业务仓 scanner 命名), 其余 kind 原样还原 (table / frontend_api / ...)。
+    """
     raw = node.meta.get("cross_link_kind")
-    return str(raw) if raw else None
+    if not raw:
+        return None
+    k = str(raw)
+    return "backend_endpoint" if k == "java_endpoint" else k
 
 
 def _crosslink_rel(edge: GraphEdge) -> str:

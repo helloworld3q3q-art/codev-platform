@@ -35,7 +35,7 @@ const GRAPH_FILTERS: GraphFilter[] = [
   { key: 'overview', label: '跨层总览', mode: 'overview', limit: 3000, primary: true },
   { key: 'frontend_page', label: '前端页面', mode: 'kind', kinds: ['frontend_page'], limit: 5000, primary: true },
   { key: 'frontend_api', label: '前端接口', mode: 'kind', kinds: ['frontend_api'], limit: 5000, primary: true },
-  { key: 'java_endpoint', label: 'Java 接口', mode: 'kind', kinds: ['java_endpoint'], limit: 5000, primary: true },
+  { key: 'backend_endpoint', label: '后端端点', mode: 'kind', kinds: ['backend_endpoint'], limit: 5000, primary: true },
   { key: 'table', label: '数据表', mode: 'kind', kinds: ['table'], limit: 5000, primary: true },
   { key: 'java_method', label: 'Java 方法', mode: 'kind', kinds: ['java_method'], limit: 3000 },
   { key: 'python_method', label: 'Python 方法', mode: 'kind', kinds: ['python_method'], limit: 5000 },

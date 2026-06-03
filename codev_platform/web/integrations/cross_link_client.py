@@ -84,6 +84,24 @@ def _escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+# cross-link sqlite 历史把后端 HTTP 端点的 kind 存成 'java_endpoint' (业务仓 scanner
+# 命名), 语义其实是"后端端点"通用槽位 (Python/Java/Node 端点同槽)。对外 API 契约统一用
+# 语言中性的 'backend_endpoint'; DB 列值 / 内部 SQL / 节点 id 仍保持 java_endpoint
+# (不动业务仓写侧)。仅在读边界做 kind 双向翻译。
+_DB_ENDPOINT_KIND = "java_endpoint"
+_API_ENDPOINT_KIND = "backend_endpoint"
+
+
+def _kind_to_api(kind: str | None) -> str | None:
+    """DB 原始 kind → 对外 kind (java_endpoint → backend_endpoint)。"""
+    return _API_ENDPOINT_KIND if kind == _DB_ENDPOINT_KIND else kind
+
+
+def _kind_to_db(kind: str) -> str:
+    """对外 kind → DB 查询 kind (backend_endpoint → java_endpoint)。"""
+    return _DB_ENDPOINT_KIND if kind == _API_ENDPOINT_KIND else kind
+
+
 class CrossLinkClient:
     """per-request 只读客户端。用 with 管理连接。"""
 
@@ -112,7 +130,7 @@ class CrossLinkClient:
         c = self.conn
         row = c.execute("select value from build_meta where key = 'last_build_at'").fetchone()
         last_build = row[0] if row is not None else None
-        nodes_by_kind = {r["k"]: r["c"] for r in c.execute(
+        nodes_by_kind = {_kind_to_api(r["k"]): r["c"] for r in c.execute(
             "select kind as k, count(*) as c from nodes group by kind order by kind") if r["k"] is not None}
         edges_by_rel = {r["k"]: r["c"] for r in c.execute(
             "select rel as k, count(*) as c from edges group by rel order by rel") if r["k"] is not None}
@@ -175,7 +193,7 @@ class CrossLinkClient:
             meta = _parse_meta(src["meta_json"])
             kind = src["kind"]
             item = {
-                "node": qname, "kind": kind, "path": src["path"], "line": src["line"],
+                "node": qname, "kind": _kind_to_api(kind), "path": src["path"], "line": src["line"],
                 "url": meta.get("url"), "targets": [], "callers": [],
             }
             if kind == "frontend_api":
@@ -225,12 +243,12 @@ class CrossLinkClient:
         params: list = [like]
         if k.lower() != "all":
             sql += "and kind = ? "
-            params.append(k)
+            params.append(_kind_to_db(k))
         sql += "order by kind, name limit ?"
         params.append(lim)
         rows = self.conn.execute(sql, params).fetchall()
         hits = [
-            {"name": r["name"], "kind": r["kind"], "path": r["path"], "line": r["line"],
+            {"name": r["name"], "kind": _kind_to_api(r["kind"]), "path": r["path"], "line": r["line"],
              "language": r["language"], "meta": _parse_meta(r["meta_json"])}
             for r in rows
         ]
@@ -268,8 +286,9 @@ class CrossLinkClient:
 
     def _graph_filtered(self, limit: int, mode: str, kinds, exclude_kinds, rels, exclude_rels) -> dict:
         c = self.conn
-        include_kinds = _norm_set(kinds)
-        exclude_k = _norm_set(exclude_kinds)
+        # 入参 kind 翻译回 DB 值 (前端传 backend_endpoint → 查 java_endpoint)。
+        include_kinds = {_kind_to_db(k) for k in _norm_set(kinds)}
+        exclude_k = {_kind_to_db(k) for k in _norm_set(exclude_kinds)}
         include_rels = _norm_set(rels)
         exclude_r = _norm_set(exclude_rels)
         if mode == "overview":
@@ -312,7 +331,9 @@ class CrossLinkClient:
 
     @staticmethod
     def _graph_node(r: sqlite3.Row) -> dict:
+        # id 用 DB 原始 kind (与 edge 端点 's.kind||:||id' 一致, 不能翻译);
+        # kind 字段对外翻译成语言中性值 (java_endpoint → backend_endpoint)。
         return {
-            "id": f"{r['kind']}:{r['id']}", "kind": r["kind"], "name": r["name"],
+            "id": f"{r['kind']}:{r['id']}", "kind": _kind_to_api(r["kind"]), "name": r["name"],
             "filePath": r["path"], "startLine": r["line"], "language": r["language"],
         }
