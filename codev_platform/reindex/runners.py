@@ -44,6 +44,24 @@ def _venv_python(cfg: dict) -> str:
     return str(_vp(cfg))
 
 
+# 单 reindex 子进程的墙钟上限 (deep-audit-2026-06-03 P2#4): worker 串行消费,
+# 任一 runner 无界挂死 (外部 CLI / 模型加载 / SQLite 锁 / 网络 / git 卡住) 会堵住
+# 整个队列。config 驱动: reindex.runner_timeout_sec; <=0 = 显式禁用 (无界, 老行为)。
+_DEFAULT_RUNNER_TIMEOUT_SEC = 1800  # 30min 上限 (大仓 chroma embedding 留足余量)
+_TIMEOUT_RC = 124  # 与 GNU timeout 约定一致; worker 视 rc!=0 且 !=2 → 丢弃防死循环
+
+
+def _runner_timeout(cfg: dict) -> float | None:
+    """从 config 解析 runner 墙钟上限 (秒)。非法值回默认; <=0 返回 None = 禁用。"""
+    from codev_platform.core.config import get as _cfg_get
+    raw = _cfg_get(cfg or {}, "reindex.runner_timeout_sec", _DEFAULT_RUNNER_TIMEOUT_SEC)
+    try:
+        t = float(raw)
+    except (TypeError, ValueError):
+        return float(_DEFAULT_RUNNER_TIMEOUT_SEC)
+    return t if t > 0 else None
+
+
 class CliReindexRunner:
     """通用 runner: 委托 `python -m codev_platform.cli reindex <flag> --repo <repo>`。
 
@@ -58,7 +76,18 @@ class CliReindexRunner:
     def run(self, project_id: str, repo: Path, cfg: dict) -> int:
         py = _venv_python(cfg)
         cmd = [py, "-m", "codev_platform.cli", "reindex", self._flag, "--repo", str(repo)]
-        return subprocess.run(cmd).returncode
+        timeout = _runner_timeout(cfg)
+        try:
+            return subprocess.run(cmd, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            # 超时 → 子进程已被 kill; 返回 rc=124 让 worker 丢弃该 job, 避免挂死任务
+            # 永久阻塞串行队列队头 (挂过一次大概率再挂, 不重试)。
+            print(
+                f"[reindex:{self.kind}] timeout {timeout}s killed "
+                f"(project={project_id}, repo={repo}) -> rc={_TIMEOUT_RC}",
+                file=sys.stderr,
+            )
+            return _TIMEOUT_RC
 
 
 class CodegraphReindexRunner(CliReindexRunner):
