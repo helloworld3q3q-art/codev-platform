@@ -31,6 +31,14 @@ def _find_db(project_id: str | None = None) -> Path | None:
     P2 多租户:project_id 给定 → 按 meta.json repo_path 找该项目仓的 .codegraph;
     None → 从 cwd 向上找(agent 在某仓内运行,单项目兼容)。"""
     if project_id:
+        # 优先平台集中路径 (data_root/codegraph_ext/<pid>/codegraph/codegraph.db) —— 环境无关。
+        # 不走 meta.json repo_path: 它是异机绝对路径 (如 Windows 'D:/...'), WSL 跑的 agent 解析不到 →
+        # 误报 "未建索引"。codegraph 数据 2026-05-30 起集中到平台, 这里是真值源。
+        from codev_platform.core.paths import codegraph_db_path
+        cand = codegraph_db_path(project_id)
+        if cand.is_file():
+            return cand
+        # 回退: 业务仓内 .codegraph junction (未迁移到平台集中存放的旧部署)。
         from codev_platform.agent.tools._project import repo_path_of
         repo = repo_path_of(project_id)
         if repo is not None:

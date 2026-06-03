@@ -24,6 +24,19 @@ def test_specs_shape():
         assert spec["input_schema"]["type"] == "object"
 
 
+def test_find_db_uses_centralized_platform_path(tmp_path, monkeypatch):
+    # codegraph 数据 2026-05-30 起集中到平台: _find_db 应走
+    # data_root/codegraph_ext/<pid>/codegraph/codegraph.db, 不依赖 meta.json repo_path
+    # (跨机绝对路径会失效 —— WSL 跑的 agent 读到 Windows 'D:/...' 路径解析不到 → 误报未建索引)。
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    from codev_platform.agent.tools.codegraph import _find_db
+    pid = "demo-proj"
+    db = tmp_path / "codegraph_ext" / pid / "codegraph" / "codegraph.db"
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b"")
+    assert _find_db(pid) == db
+
+
 def test_registry_rejects_nameless_tool():
     class Bad(Tool):
         name = ""
