@@ -449,6 +449,75 @@ def _scan_python_orm(
     return nodes, edges
 
 
+# 测试夹具路径: tests/ 目录 / test_*.py / *_test.py / conftest.py。这些文件里的
+# CREATE TABLE / Table() / DML 是测试夹具, 不是生产 schema, 扫进图谱会造幽灵表/幽灵 reader。
+# 仅在 sql 插件**表定义/访问扫描**层过滤 (不动全局 _stack_scan._SKIP_DIRS —— 那是目录剪枝,
+# 改它会让别的插件也看不到测试代码)。
+_RE_TEST_PATH = re.compile(
+    r"(^|/)tests?/|(^|/)test_[^/]*\.py$|(^|/)[^/]*_test\.py$|(^|/)conftest\.py$"
+)
+
+
+def _is_test_path(rel: str) -> bool:
+    return bool(_RE_TEST_PATH.search(rel))
+
+
+def _core_column_type(call: ast.Call) -> str | None:
+    """SQLAlchemy Core Column("name", Type, ...) 的类型名 = 第二个位置实参 (第一个是列名串)。"""
+    if len(call.args) >= 2:
+        t = call.args[1]
+        if isinstance(t, ast.Call):
+            return _call_attr_chain(t)
+        if isinstance(t, ast.Name):
+            return t.id
+        if isinstance(t, ast.Attribute):
+            return t.attr
+    return None
+
+
+def _scan_python_core_tables(
+    src: str, rel: str, project_id: str
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """AST 扫 SQLAlchemy Core **imperative** Table() 定义 -> db_table / db_column。
+
+    形态: `<var> = Table("orgs", metadata, Column("org_id", Text, ...), Column(...), ...)`。
+    表名 = 第一个 str 位置实参; 列名 = 每个 Column(...) 的第一个 str 位置实参 (Core 列名是
+    显式串, 区别于 declarative 的 `col = Column(Type)` 用属性名)。source=sqlalchemy-core,
+    是本仓 web/db/tables.py 的权威表来源 (替代从 DML 推断的无源桩)。
+    """
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:
+        logger.warning("python core-table parse fail %s: %s", rel, exc)
+        return nodes, edges
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        if _call_attr_chain(node.value) != "Table" or not node.value.args:
+            continue
+        table = _str_const(node.value.args[0])
+        if not table or not _plausible_table(table.lower()):
+            continue
+        cols: list[tuple[str, str | None]] = []
+        for a in node.value.args[1:]:
+            if isinstance(a, ast.Call) and _call_attr_chain(a) == "Column" and a.args:
+                cname = _str_const(a.args[0])
+                if cname:
+                    cols.append((cname, _core_column_type(a)))
+        t_nodes, t_edges = _emit_table_nodes(
+            table, cols, rel=rel, line=node.lineno, language="python",
+            project_id=project_id,
+            table_meta={"dialect": "unknown", "source": "sqlalchemy-core"},
+            col_meta={"dialect": "unknown", "source": "sqlalchemy-core"},
+        )
+        nodes.extend(t_nodes)
+        edges.extend(t_edges)
+    return nodes, edges
+
+
 def _sa_column_type(call: ast.Call) -> str | None:
     """SQLAlchemy Column(Integer, ...) 第一个位置实参的类型名 (尽力, 无则 None)。"""
     for arg in call.args:
@@ -858,6 +927,8 @@ class SqlPlugin(AnalyzerPlugin):
                 logger.warning("read fail %s: %s", f, exc)
                 continue
             rel = _stack_scan._rel(f, repo)
+            if _is_test_path(rel):  # 测试夹具 .sql 不当生产表
+                continue
             dialect = _detect_dialect(text, f.name)
             _absorb(*_scan_sql_file(text, rel, dialect, project_id))
 
@@ -871,6 +942,8 @@ class SqlPlugin(AnalyzerPlugin):
                 logger.warning("read fail %s: %s", f, exc)
                 continue
             rel = _stack_scan._rel(f, repo)
+            if _is_test_path(rel):  # 测试夹具 .py 不当生产表/访问源 (治幽灵表 + 幽灵 reader)
+                continue
             py_srcs.append((rel, src))
             # Pass 2: python-ddl (字符串字面量里的 CREATE TABLE; 正则直扫全文)。
             if _RE_CREATE_TABLE.search(src):
@@ -879,9 +952,13 @@ class SqlPlugin(AnalyzerPlugin):
                     src, rel, dialect, project_id,
                     language="python", source="python-ddl",
                 ))
-            # Pass 3: ORM (AST; 仅当文件含 ORM 迹象时才解析, 省 AST 开销)。
+            # Pass 3: ORM declarative (AST; 仅当文件含 ORM 迹象时才解析, 省 AST 开销)。
             if any(hint in src for hint in _ORM_HINTS):
                 _absorb(*_scan_python_orm(src, rel, project_id))
+            # Pass 3.5: SQLAlchemy Core imperative Table() (本仓 web/db/tables.py 权威表来源,
+            # declarative 扫描漏它)。廉价短路: 仅含 'Table(' 的文件才 AST 解析。
+            if "Table(" in src:
+                _absorb(*_scan_python_core_tables(src, rel, project_id))
 
         # Pass 4: .py DML 读写血缘 —— **必须在所有 DDL 之后** (known_tables 完整, 才能
         # 区分"已定义表 (连边)"与"未定义表 (建 inferred stub)", 不会用 stub 覆盖真表)。
@@ -901,7 +978,10 @@ class SqlPlugin(AnalyzerPlugin):
             except OSError as exc:
                 logger.warning("read fail %s: %s", f, exc)
                 continue
-            java_srcs.append((_stack_scan._rel(f, repo), src))
+            rel = _stack_scan._rel(f, repo)
+            if _is_test_path(rel):  # 测试夹具 .java 不当生产表/访问源
+                continue
+            java_srcs.append((rel, src))
 
         # 4b: 注解 SQL (@Select/@Insert/@Update/@Delete raw SQL)。
         for rel, src in java_srcs:
