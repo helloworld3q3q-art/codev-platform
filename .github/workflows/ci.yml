@@ -18,7 +18,8 @@ jobs:
           python-version: '3.13'
 
       - name: Install ruff
-        run: pip install ruff
+        # 钉死版本: lint gate 须可复现, 防新版 ruff 在 select 的 B/UP 类加规则致意外变红。
+        run: pip install ruff==0.15.15
 
       # Phase 1 逐步收敛: 先 gate 产品代码 codev_platform (规则/ignore 见 pyproject [tool.ruff])。
       # tests/ + tools/ + scripts/ 留 Phase 2 (E501 行长全仓暂缓)。
