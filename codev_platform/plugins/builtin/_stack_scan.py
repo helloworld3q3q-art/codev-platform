@@ -714,10 +714,23 @@ def _join_url(base: str, path: str) -> str:
     return _norm_url(joined) or "/"
 
 
-def _spring_class_base(text: str) -> str:
-    """类级 @RequestMapping base path: 取第一个 class 声明之前出现的映射 path。"""
-    class_pos = text.find("class ")
-    head = text[:class_pos] if class_pos != -1 else text
+# 类/接口声明 (行首 + 可选修饰符), 比裸 text.find("class ") 稳健:
+# 不被注释里的 "class " / getClass() / 字符串误触发。
+_RE_JAVA_TYPEDECL = re.compile(
+    r"(?m)^[ \t]*(?:public\s+|final\s+|abstract\s+|sealed\s+|non-sealed\s+)*"
+    r"(?:class|interface|enum|record)\s+\w+",
+)
+
+
+def _spring_class_pos(text: str) -> int:
+    """类/接口声明的起始下标 (找不到回 len, 即全文都算类级之前)。"""
+    m = _RE_JAVA_TYPEDECL.search(text)
+    return m.start() if m else len(text)
+
+
+def _spring_class_base(text: str, class_pos: int) -> str:
+    """类级 @RequestMapping base path: 取类声明之前 (head) 出现的映射 path。"""
+    head = text[:class_pos]
     for m in _RE_SPRING_MAPPING.finditer(head):
         path = _spring_ann_path(m.group("args") or "")
         if path is not None:
@@ -754,15 +767,19 @@ def scan_spring(repo: Path, project_id: str) -> list[GraphNode]:
         if not _RE_SPRING_CONTROLLER.search(text):
             continue  # 只在 Controller 类里找端点。
         rel = _rel(f, repo)
-        base = _spring_class_base(text)
+        class_pos = _spring_class_pos(text)
+        base = _spring_class_base(text, class_pos)
         for m in _RE_SPRING_MAPPING.finditer(text):
             ann = m.group("ann")
             args = m.group("args") or ""
+            # 类级 @RequestMapping (声明之前) 仅作 base, 不产端点 —— 按**位置**判定,
+            # 不按 path==base (避免方法级 path 恰等于 base 的真端点被误跳)。
+            if ann == "RequestMapping" and m.start() < class_pos:
+                continue
             if ann == "RequestMapping":
-                # 类级那条 (无方法 path 或就是 base) 跳过, 只收方法级。
                 path = _spring_ann_path(args)
-                if path is None or path == base:
-                    continue
+                if path is None:
+                    continue  # 方法级 @RequestMapping 无 path 字面量 (罕见) -> 跳过。
                 method = _spring_req_method(args)
             elif ann in _SPRING_METHOD_ANN:
                 method = _SPRING_METHOD_ANN[ann]

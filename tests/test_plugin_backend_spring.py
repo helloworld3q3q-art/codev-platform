@@ -96,6 +96,43 @@ def test_node_id_matches_fastapi_shape_for_linker(tmp_path: Path) -> None:
         assert n.id == f"{PID}:backend_endpoint:{n.meta['http_method']}:{n.meta['url']}"
 
 
+_EDGE_CTRL = """\
+package com.x.controller;
+
+// This controller class handles foo (note: the word class appears in this comment).
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/foo")
+public class FooController {
+
+    // 无 path 的方法 -> 映射到类 base 本身 (资源根, 常见 REST 模式) = GET /api/foo。
+    @GetMapping
+    public Result root() { return null; }
+
+    // 方法级 @RequestMapping (有 method) -> 不再被"path==base"误跳; Spring 语义为 base+path。
+    @RequestMapping(value = "/list", method = RequestMethod.GET)
+    public Result list() { return null; }
+
+    @GetMapping("/sub")
+    public Result sub() { return null; }
+}
+"""
+
+
+def test_class_base_robust_against_comment_and_method_requestmapping(tmp_path: Path) -> None:
+    _write(tmp_path, "src/FooController.java", _EDGE_CTRL)
+    nodes = _stack_scan.scan_spring(tmp_path, PID)
+    by = {(n.meta["http_method"], n.meta["url"]) for n in nodes}
+    # base 不被注释里的 "class" 提前截断 -> 仍是 /api/foo (健壮的类声明定位)。
+    assert all(n.meta["base_path"] == "/api/foo" for n in nodes)
+    # 无 path 方法映射到资源根 = base 本身。
+    assert ("GET", "/api/foo") in by
+    # 方法级 @RequestMapping(含 method) 不再被误跳, 按 Spring 语义 base+path。
+    assert ("GET", "/api/foo/list") in by
+    assert ("GET", "/api/foo/sub") in by
+
+
 def test_registry_autodiscovers_spring() -> None:
     from codev_platform.plugins import registry
 
