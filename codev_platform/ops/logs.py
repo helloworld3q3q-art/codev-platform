@@ -6,7 +6,7 @@
 脱敏的 (见 obslog), 原样打印, 不额外读 config secret。
 
 source 归属:
-  chroma/cross-link/codegraph : 各包目录 mcp_server.log (MCP server 进程日志)
+  chroma/cross-link/codegraph : data_root/logs/<prefix>_mcp_server.log (MCP server 进程日志)
   serve-mcp                   : mcp_serve_logs/*.log (serve-mcp spawn 的端点日志)
   audit                       : core.audit.audit_log_path()
   webhook/reindex             : systemd 服务, 输出走 journal (journalctl -u codev-webhook /
@@ -26,21 +26,23 @@ _JOURNAL_SERVICES = {
 
 
 def log_sources() -> dict[str, Path]:
-    """name -> 平台侧日志文件路径 (纯定位, 用包定位; 延迟 import 避免依赖运行态)。
+    """name -> 平台侧日志文件路径 (延迟 import 避免依赖运行态)。
 
-    chroma/cross-link/codegraph 各取包目录下 mcp_server.log; audit 取审计 jsonl。
+    注: logs_dir() 会按需创建 data_root/logs 目录 (幂等, gitignored), 故本函数有建目录副作用。
+
+    chroma/cross-link/codegraph 各取 data_root/logs/<prefix>_mcp_server.log (前缀防多
+    daemon 同名碰撞; 与各 daemon 的 _log_file() 同源); audit 取审计 jsonl。
     serve-mcp spawn 日志是一个**目录** (mcp_serve_logs/), 不在此返回单文件 ——
     由 run_logs 单独展开列其 *.log (每端点一文件)。
     """
-    import codev_platform.chroma as _chroma
-    import codev_platform.cross_link as _cl
-    import codev_platform.codegraph as _cg
     from codev_platform.core.audit import audit_log_path
+    from codev_platform.core.paths import logs_dir
 
+    ld = logs_dir()
     return {
-        "chroma": Path(_chroma.__file__).parent / "mcp_server.log",
-        "cross-link": Path(_cl.__file__).parent / "mcp_server.log",
-        "codegraph": Path(_cg.__file__).parent / "mcp_server.log",
+        "chroma": ld / "chroma_mcp_server.log",
+        "cross-link": ld / "cross_link_mcp_server.log",
+        "codegraph": ld / "codegraph_mcp_server.log",
         "audit": audit_log_path(),
     }
 

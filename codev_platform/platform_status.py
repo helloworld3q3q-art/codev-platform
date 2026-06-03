@@ -10,12 +10,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from codev_platform.core.config import get as _cfg_get, env_or_config
+
+logger = logging.getLogger(__name__)
 
 
 def _repo_root() -> Path:
@@ -37,7 +40,8 @@ def _sqlite_counts(db: Path, *tables: str) -> Any:
         for t in tables:
             res[t] = cur.execute(f"SELECT count(*) FROM {t}").fetchone()[0] if t in names else -1
         conn.close()
-    except Exception:  # noqa: BLE001 - best effort
+    except Exception as exc:  # noqa: BLE001 - best effort
+        logger.debug("_sqlite_counts(%s) 失败(返回 None): %s", db, exc)
         return None
     return res
 
@@ -110,7 +114,8 @@ def _self_project_id(repo_root: Path) -> str | None:
     if pj.is_file():
         try:
             return json.loads(pj.read_text(encoding="utf-8")).get("project_id")
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("_self_project_id 读 %s 失败(返回 None): %s", pj, exc)
             return None
     return None
 
@@ -123,8 +128,10 @@ def _usage_7d(repo_root: Path) -> dict[str, dict[str, int]]:
         k = pid or "(legacy)"
         usage.setdefault(k, {"search_docs": 0, "cross_link": 0, "codegraph": 0})[key] += 1
 
+    from codev_platform.core.paths import logs_dir
     for path, key in (
-        (repo_root / "codev_platform" / "chroma" / "search_recall.jsonl", "search_docs"),
+        # search_recall.jsonl 已迁 data_root/logs (与 _obslog 写入一致); 其余 usage.jsonl 未迁。
+        (logs_dir() / "search_recall.jsonl", "search_docs"),
         (repo_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl", "cross_link"),
         (repo_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl", "codegraph"),
     ):

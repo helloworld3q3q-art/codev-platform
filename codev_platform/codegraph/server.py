@@ -79,15 +79,21 @@ _CG_SSE_PORT = int(os.getenv("CODEGRAPH_SSE_PORT", "18091"))
 # dev (默认全量) / prod (脱敏) —— 见 core.obslog。模块加载时解析一次。
 _LOG_MODE = logging_mode(load_config())
 
-_LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
 _USAGE_LOG = Path(__file__).resolve().parent / "codegraph_usage.jsonl"
+
+
+def _log_file() -> Path:
+    # 落 data_root/logs (非 import 包目录: wheel/只读安装也可写, 见 core.paths.logs_dir)。
+    # 文件名加 codegraph_ 前缀, 与 chroma / cross_link daemon 的同名日志区分, 防多 daemon 碰撞。
+    from codev_platform.core.paths import logs_dir
+    return logs_dir() / "codegraph_mcp_server.log"
 
 
 def _flog(msg: str) -> None:
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     try:
-        with _LOG_FILE.open("a", encoding="utf-8") as f:
+        with _log_file().open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass

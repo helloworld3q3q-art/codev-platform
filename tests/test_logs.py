@@ -4,15 +4,16 @@ from __future__ import annotations
 from codev_platform.ops import logs as L
 
 
-def test_log_sources_keys_and_package_located():
+def test_log_sources_keys_and_data_root_located():
     src = L.log_sources()
     assert {"chroma", "cross-link", "codegraph", "audit"} <= set(src)
-    # 用包定位: chroma/cross-link/codegraph 指向各包目录的 mcp_server.log
-    for name in ("chroma", "cross-link", "codegraph"):
-        assert src[name].name == "mcp_server.log"
-    # 各 MCP server 日志在不同包目录下
-    assert src["chroma"].parent != src["cross-link"].parent
-    assert src["chroma"].parent != src["codegraph"].parent
+    # 落 data_root/logs, 文件名带 <prefix>_ 前缀防多 daemon 同名碰撞
+    assert src["chroma"].name == "chroma_mcp_server.log"
+    assert src["cross-link"].name == "cross_link_mcp_server.log"
+    assert src["codegraph"].name == "codegraph_mcp_server.log"
+    # 三者同一 logs 目录, 靠文件名前缀区分 (不再靠包目录)
+    assert src["chroma"].parent == src["cross-link"].parent == src["codegraph"].parent
+    assert src["chroma"].parent.name == "logs"
 
 
 def test_tail_file_missing_returns_empty(tmp_path):

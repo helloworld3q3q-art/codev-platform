@@ -239,8 +239,8 @@ def index(force: bool = False) -> tuple[int, int]:
         try:
             client.delete_collection(COLLECTION_NAME)
             logger.info("--force：已删除旧 collection %s", COLLECTION_NAME)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("--force 删除 collection %s 跳过(可能不存在): %s", COLLECTION_NAME, exc)
         # 清 manifest,后续走 full rebuild 路径
         manifest = _empty_manifest()
         manifest_loaded = False
@@ -258,8 +258,8 @@ def index(force: bool = False) -> tuple[int, int]:
                     "chromadb.PersistentClient(path='data/chroma').delete_collection('platform_docs')\"",
                     COLLECTION_NAME,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("legacy collection 探测跳过: %s", exc)
         manifest, manifest_loaded = _load_manifest()
 
     files = discover_files()
@@ -272,8 +272,8 @@ def index(force: bool = False) -> tuple[int, int]:
         try:
             client.delete_collection(COLLECTION_NAME)
             logger.info("manifest 不存在或不可用: 已清空旧 collection,准备全量回填")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("bootstrap 清空 collection %s 跳过(可能不存在): %s", COLLECTION_NAME, exc)
 
     # 先用文件内容 sha256 算变更 — 不加载模型,纯 IO 操作 ~毫秒级
     changed_files, deleted_rels, new_sha_map = _scan_changes(files, manifest)
@@ -322,8 +322,8 @@ def index(force: bool = False) -> tuple[int, int]:
         logger.warning("  新: %s", current_params)
         try:
             client.delete_collection(COLLECTION_NAME)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("params 不一致 rebuild 删 collection %s 跳过(可能不存在): %s", COLLECTION_NAME, exc)
         manifest = _empty_manifest()
         changed_files = list(files)
         deleted_rels = []

@@ -162,7 +162,8 @@ def cmd_health(args: argparse.Namespace) -> int:
     usage_pid = args.project or None
     scope = f", project={usage_pid}" if usage_pid else ""
     r.section(f"--- usage stats (last 7 days{scope}) ---")
-    recall_file = cdv_root / "codev_platform" / "chroma" / "search_recall.jsonl"
+    from codev_platform.core.paths import logs_dir
+    recall_file = logs_dir() / "search_recall.jsonl"  # 迁出包目录后与 _obslog 写入路径一致
     cl_usage = cdv_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl"
     cg_usage = cdv_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
     _usage_search_recall(r, recall_file, usage_pid)

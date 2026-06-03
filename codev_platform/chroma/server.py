@@ -136,8 +136,8 @@ def _project_last_indexed_iso(project_id: str) -> str | None:
     if pp.exists():
         try:
             return datetime.fromtimestamp(pp.stat().st_mtime, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 — stamp mtime 读失败: 不致命, 但记一笔便于排查
+            _flog(f"[last_indexed] project={project_id} per-project stamp mtime 读失败: {exc!s}")
     # fallback: 全局 stamp 仅对启动默认 project 准确, 其它返 None (避免误导)
     if project_id != PROJECT_ID:
         return None
@@ -145,7 +145,8 @@ def _project_last_indexed_iso(project_id: str) -> str | None:
         return None
     try:
         return datetime.fromtimestamp(_STAMP_PATH.stat().st_mtime, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — 全局 stamp mtime 读失败: 同上
+        _flog(f"[last_indexed] project={project_id} global stamp mtime 读失败: {exc!s}")
         return None
 
 

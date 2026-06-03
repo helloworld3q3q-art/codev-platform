@@ -9,37 +9,46 @@ import os
 import sys
 from pathlib import Path
 
-# 额外把启动 / 每次 query 日志写到固定文件，便于"观察模型起作用"
-_LOG_FILE = Path(__file__).resolve().parent / "mcp_server.log"
-# 召回质量分析日志:每次 search_docs 一行 JSON,后续可 jq 分析 top-5 distance 漂移
-_RECALL_LOG = Path(__file__).resolve().parent / "search_recall.jsonl"
-
 _LOG_MAX_BYTES = int(os.getenv("PLATFORM_LOG_MAX_BYTES", str(5 * 1024 * 1024)))  # 5 MiB
+
+
+def _log_file() -> Path:
+    # 落 data_root/logs (非 import 包目录: wheel/只读安装也可写, 见 core.paths.logs_dir)。
+    # 文件名加 chroma_ 前缀, 与 codegraph / cross_link daemon 的同名日志区分, 防多 daemon 碰撞。
+    from codev_platform.core.paths import logs_dir
+    return logs_dir() / "chroma_mcp_server.log"
+
+
+def _recall_log_file() -> Path:
+    # 召回质量分析日志:每次 search_docs 一行 JSON,后续可 jq 分析 top-5 distance 漂移。
+    from codev_platform.core.paths import logs_dir
+    return logs_dir() / "search_recall.jsonl"
 
 
 def _maybe_rotate_log() -> None:
     """日志超过 _LOG_MAX_BYTES 时滚动到 .1 (单备份, 防长跑 daemon 撑爆磁盘)。失败静默。"""
     try:
-        if _LOG_FILE.exists() and _LOG_FILE.stat().st_size > _LOG_MAX_BYTES:
-            bak = _LOG_FILE.with_suffix(_LOG_FILE.suffix + ".1")
+        log_file = _log_file()
+        if log_file.exists() and log_file.stat().st_size > _LOG_MAX_BYTES:
+            bak = log_file.with_suffix(log_file.suffix + ".1")
             try:
                 if bak.exists():
                     bak.unlink()
             except Exception:
                 pass
-            _LOG_FILE.replace(bak)
+            log_file.replace(bak)
     except Exception:
         pass
 
 
 def _flog(msg: str) -> None:
-    """同时写文件 + stderr。文件路径：tools/chroma/mcp_server.log"""
+    """同时写文件 + stderr。文件路径:data_root/logs/chroma_mcp_server.log"""
     import datetime
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     try:
         _maybe_rotate_log()
-        with _LOG_FILE.open("a", encoding="utf-8") as f:
+        with _log_file().open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass
@@ -55,7 +64,7 @@ def _log_recall(record: dict) -> None:
     """JSONL 召回日志:每行一个 query。失败静默(不阻塞查询)。"""
     try:
         import json as _json
-        with _RECALL_LOG.open("a", encoding="utf-8") as f:
+        with _recall_log_file().open("a", encoding="utf-8") as f:
             f.write(_json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass

@@ -245,17 +245,18 @@ def deliver_alerts(alerts: list[str], cfg) -> None:
 # --------------------------------------------------------------------------
 def _source_paths() -> dict[str, Path]:
     """按包定位 4 个 jsonl + audit。延迟 import 避免聚合层依赖运行态。"""
-    import codev_platform.chroma as _chroma
     import codev_platform.cross_link as _cl
     import codev_platform.codegraph as _cg
     from codev_platform.core.audit import audit_log_path
 
-    chroma_dir = Path(_chroma.__file__).parent
+    from codev_platform.core.paths import logs_dir
     cl_dir = Path(_cl.__file__).parent
     cg_dir = Path(_cg.__file__).parent
     return {
         "audit": audit_log_path(),
-        "chroma": chroma_dir / "search_recall.jsonl",
+        # search_recall.jsonl 已迁出包目录到 data_root/logs (与 _obslog 写入路径一致);
+        # cross_link/codegraph 的 usage.jsonl 未迁移, 仍在各自包目录。
+        "chroma": logs_dir() / "search_recall.jsonl",
         "cross-link": cl_dir / "cross_link_usage.jsonl",
         "codegraph": cg_dir / "codegraph_usage.jsonl",
     }
