@@ -371,7 +371,10 @@ def _check_cross_layer(
             elif lag <= 1:
                 r.line("cross_layer", "OK", base + " (lag <=1d)")
             else:
-                r.line("cross_layer", "WARN", base + f" (lag {lag}d vs {latest_src[0].name})")
+                # A3: cross_layer 已退役自动重建 (统一图谱 store 为真值源, parity 达标),
+                # 落后于源是预期的 (仅手动 reindex --cross-link 才刷新) → INFO, 不再 WARN 误报。
+                r.line("cross_layer", "INFO",
+                       base + f" (lag {lag}d; A3 退役自动重建, store 为真值源, 手动 --cross-link 可刷)")
         else:
             r.line("cross_layer", "OK", base)
     elif not has_cl:

@@ -54,11 +54,14 @@ def _project_for_repo(cfg: dict, repo: str) -> str | None:
 
 
 def _scopes_for(pid: str, changed: list[str]) -> list[str]:
-    """改动文件 → reindex scope (复用 ops/reindex 的分类, 单一真值源)。"""
+    """改动文件 → 自动 reindex scope (复用 ops/reindex 分类 + 退役过滤, 单一真值源)。
+
+    A3: cross_link 已退役不自动重建 (auto_reindex_kinds 滤掉), webhook 与本地 hook 同源。
+    """
     from codev_platform.ops import _common as C
-    from codev_platform.ops.reindex import classify_scopes
+    from codev_platform.ops.reindex import auto_reindex_kinds, classify_scopes
     pats = C.reindex_patterns(C.meta_health(pid))
-    return list(classify_scopes(changed, pats).keys())
+    return auto_reindex_kinds(classify_scopes(changed, pats))
 
 
 def webhook_port(cfg: dict | None = None) -> int:
