@@ -95,6 +95,20 @@ README 核心卖点 **"改一处 → 跨层影响清单"** 打通,数据地基(�
 
 **测试基线 → 791 passed / 5 skipped**(786→791,+5 dispatch trigger 测试),全程零回归。
 
-### 待用户决断
-1. **webhook.secret** — 配上则自动 reindex 链复活,或显式下线(只走已修真实的 web rebuild / CLI)。
-2. **CI 加 lint** — 是否单开一轮引入 ruff(会暴露大量历史项,需逐步收敛)。
+### 两个待决断项的落地(本会话续 3)
+
+用户"依次做吧",两项均闭环:
+
+#### 1. webhook.secret — 实查发现**早已在跑**(无需配置)
+- 经 WSL 实地核(非看陈旧文档):secret 已配(config 6/2 改)+ 3 项目 webhook_repo 映射齐 + `codev-webhook` 服务 active/enabled(19099 healthz 200)+ Gitea(同在 WSL)webhook id=2 active、投递全 succeed。
+- **本会话多次 push 实测被自动 enqueue reindex**(碰索引文件→`enqueue ['chroma']`,只碰非索引→正确跳过)。review 文档"secret 未配/链瘫痪"**陈旧结论已更正**。
+- 唯一小噪音:>8MB 超大 push 被 413(web-ui 重生成类大 commit,本无 reindex scope,无害)。
+- 教训:复核文档(deep-audit-review)写于陈旧 webhook.log 时点,据它判"未配"是误判;**配置类结论必须实查 live 态**。
+
+#### 2. CI 引入 ruff lint(Phase 1,`56f0fc3`/`db1f0bb`)
+- 配置 `[tool.ruff]`:select F/E/W/UP/B;ignore E501(行长 1356)+ E402(本仓刻意晚 import);FastAPI `Depends` 豁免 B008;`chroma.server`/`mcp_serve` 两个 re-export hub `per-file-ignores` 保护(防 F401 删穿业务仓 shim)。
+- **清零**:50 自动修 + 16 手动修 —— `orgs.py` 5 处 `Depends(require_org_role("admin"))` 提模块级单例(对齐 projects.py)、`gateway/auth` %-format→f-string、`dotnet` 取末匹配改 list、清 unused import/var/loop。`codev_platform` **0 findings**。
+- CI 独立 `lint` job gate `codev_platform`,ruff **钉死 0.15.15** 保证可复现。
+- **逐步收敛**:tests/ + tools/(~42 项)+ E501 行长留 Phase 2;mypy 另立。
+
+**测试基线维持 791 passed / 5 skipped**,ruff 自动+手动改 + orgs 单例重构 + re-export 删减零回归。三份审计代码侧全部闭环。
