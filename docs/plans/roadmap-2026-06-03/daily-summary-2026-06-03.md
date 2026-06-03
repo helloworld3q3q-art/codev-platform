@@ -112,3 +112,26 @@ README 核心卖点 **"改一处 → 跨层影响清单"** 打通,数据地基(�
 - **逐步收敛**:tests/ + tools/(~42 项)+ E501 行长留 Phase 2;mypy 另立。
 
 **测试基线维持 791 passed / 5 skipped**,ruff 自动+手动改 + orgs 单例重构 + re-export 删减零回归。三份审计代码侧全部闭环。
+
+---
+
+## cross-link 彻底退役 → 统一图谱 store 单一真值源(本会话续 4）
+
+把"找前端API↔端点↔表 跨层链路"这件事的旧数据底座（cross_layer.sqlite + build_index.py）整套退役，所有查询收敛到统一图谱 store。三个 MCP（platform-docs/codegraph/cross-link）格局不变，cross-link 只换了背后的数据来源，业务仓 `.mcp.json` 无感。
+
+### 前置：parity 对账达标
+- 旧库 cross_layer 退役的红线是「store 没覆盖全前不许退」。为达标：clone openclaw 业务仓到 WSL（`~/WorkSpace/platform`）→ 跑 `reindex --ingest` 把桥接边从 **0 补到 155** → 跑 `tools/audit_graph_parity.py`：端点 143≥132 / 表 122≥69 / 前端→端点 143≥132 / **端点→表可达 187≥185**，四项 store 全 ≥ cross_layer，**达标**，红线解除。
+- 副产物：openclaw 影响分析从此真完整（端点→函数→表全通）。
+
+### 两条战线
+- **战线 B（`39b0889`）** codev-agent 工具去重：agent 工具集里 `cross_link`（读旧库）与 `impact`（读 store）重复，退役 `cross_link`，留 store 原生 `impact`（table_usage/api_callers/page_dependencies）。删 `agent/tools/cross_link.py` + 改 prompt/测试。830 passed。
+- **战线 A（`64817e8`，审计 PASS 无 BLOCKER）** cross-link MCP 4 工具全收敛 store：`find_table_refs`/`find_endpoint_link`（A6 已 store-first）+ 新写 `search_nodes`/`cross_link_stats` 的 store 版 + `find_table_refs` 补 definers（从 db_table 源文件）+ dispatch 改纯 store（store 缺失→INDEX_MISSING，**删 cross_layer fallback**）+ 删旧库死码 + kind 词汇换 store。服务名/端口 18086/4 工具名/required 全不变 → 业务仓兼容。净删 337 行旧码。835 passed。
+
+### A3 退役 cross-link 自动重建（`c3f9b83`，前置）
+- parity 达标 + web 确认不读 cross_layer（只 codegraph.db + store）→ 停 cross_layer 自动重建：`auto_reindex_kinds` 滤掉退役 scope，post-commit/webhook 两个自动入队方共用；手动 `--cross-link` + runner 保留。health `cross_layer` lag>1d 由 WARN 降 INFO（落后是预期）。审计 PASS。
+
+### 服务同步（替换后让运行态用上新码）
+- systemd 系统单元（无 sudo）→ kill MainPID + Restart=always 自动重起新码。
+- cross-link MCP（19086）7016→7846 store-only 代码 live；webhook（19099）A3 生效；web 后端（18088）latest；全部 healthz/openapi 验证通过。
+
+**整条链闭环**：A1 桥接 → A2 parity 达标 → A6（2 工具 store-first）→ A3（停自动重建）→ 战线 B（agent 去重）→ 战线 A（MCP 4 工具纯 store）。cross_layer.sqlite + build_index.py 彻底退役，跨层链路单一真值源 = 统一图谱 store。测试基线 791 → **835 passed**，全程零回归。
