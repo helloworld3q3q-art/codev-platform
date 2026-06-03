@@ -215,3 +215,20 @@ StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprec
 4. 增加跳过目录的性能回归测试。
 5. 考虑把分析真实 `REPO_ROOT` 的插件测试标记为集成测试，避免拖慢普通单元测试。
 
+---
+
+## 整改状态（2026-06-03 收尾）
+
+逐项核到代码底层 / 实测后的真实状态：
+
+| 项 | 状态 | 依据 |
+|---|---|---|
+| **P1** `_stack_scan.py` rglob 进大目录 | ✅ **已修+测** | 全面改用 `_walk_pruned`（`os.walk` + `dirnames[:]` 原地剪枝 `_SKIP_DIRS` + 隐藏目录），所有入口（`_iter_files`/`_iter_named`/`_has_file_with_suffix`）共用，无 `rglob`。回归测试 `test_sql_detect_skips_build_dirs`（node_modules 内 .sql 不命中）。**实测全量 `pytest tests/` 25s 791 passed**（审计时 124s 超时）—— 性能问题已解 |
+| **P2** CI 无超时保护 | ✅ **已修** | `pytest-timeout` 进 dev extras；CI `--timeout=120 --timeout-method=thread`（thread 法跨 windows/ubuntu/macos 一致）。实测带 flag 全量 791 passed 23.93s，无用例触顶 |
+| **P2** 本地 `.venv` 缺 pytest | ◻ **环境/运维** | `.venv` 是 chroma 重 ML 环境；纯逻辑测试走 system python 3.14（pytest 9.0.3）或 `.venv` 装 `.[dev]`。非代码债。运维主线走 WSL `.venv`（见 [[codev-platform-ops-via-wsl]]）|
+| **P2** CI 加 lint/类型检查 | ⏳ **更大改造，另立** | 仅"建议"非阻塞。项目暂无 lint 基线，引入 ruff 会一次性暴露大量历史项，需单独一轮。不在本次范围（不假称完成）|
+| **P3** README/pyproject 中文乱码 | ◻ **误报** | 字节探测：两文件均无 BOM UTF-8，`python` 读取正常解码（`[build-system]` 清晰）。审计看到的乱码是 PowerShell 终端显示编码问题（审计自身已存疑），**文件无问题** |
+| **P3** Starlette/TestClient 弃用警告 | ⏳ **依赖跟踪** | 上游 `httpx`→`httpx2` 迁移警告，非本仓代码问题。待 FastAPI/Starlette 生态稳定后跟进，当前仅 1 条 warning 不影响测试 |
+
+**结论**：两个 P1/P2 实质代码项（栈扫描剪枝 + CI 超时）已修并测；其余为环境/误报/依赖跟踪/更大改造另立。本审计代码侧闭环。
+

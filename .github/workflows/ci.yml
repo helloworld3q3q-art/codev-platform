@@ -26,7 +26,9 @@ jobs:
         run: pip install -e .
 
       - name: Install pytest
-        run: pip install pytest
+        run: pip install pytest pytest-timeout
 
       - name: Run tests
-        run: python -m pytest tests/ -q
+        # --timeout: 单测墙钟上限, 防个别用例挂死 (如插件全仓扫描进大目录) 静默堵住整个 CI。
+        # thread 方法跨平台一致 (signal 仅 Unix; CI 含 windows/macos)。
+        run: python -m pytest tests/ -q --timeout=120 --timeout-method=thread

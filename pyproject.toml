@@ -29,8 +29,9 @@ runtime = [
     "httptools>=0.7.1",
     "cryptography>=48.0.0",
 ]
-# dev: 仅纯逻辑单测所需(pytest)。不拉 runtime 重依赖(torch/chromadb)。
-dev = ["pytest>=7"]
+# dev: 仅纯逻辑单测所需(pytest + 超时保护)。不拉 runtime 重依赖(torch/chromadb)。
+# pytest-timeout: 单测墙钟上限, 防个别用例挂死 (如插件全仓扫描) 静默堵住整个 CI。
+dev = ["pytest>=7", "pytest-timeout>=2"]
 # agent: HTTP 服务 + LLM provider + search_docs 的 MCP client。
 # Claude 必装;openai 供 GPT/DeepSeek/Qwen 共用;mcp 供 search_docs 工具连 chroma daemon
 # (SSE client)—— 漏了它 search_docs 会 ModuleNotFoundError(codegraph/cross_link 走 sqlite 不受影响)。
