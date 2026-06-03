@@ -16,6 +16,7 @@
 | 文件 | 内容 | 状态 |
 |---|---|---|
 | [next-plan-2026-06-03.md](next-plan-2026-06-03.md) | 主 plan:4 轨道(A 图谱收敛+影响分析 spearhead / B web-backend 收尾 / C Memory M1 起步 / D 技术债+质量+Demo)+ 依赖排期 + 成功指标 + 红线 | 执行中:**Track A spearhead(A1/A4/A5)✅ 交付** |
+| [b1-agent-memory-audit-routes-2026-06-03.md](b1-agent-memory-audit-routes-2026-06-03.md) | **Track B/B1 实施方案**:web 暴露 agent/memory/audit 三路由。结论=优化复用现有 agent 子系统(独立进程 codev-agent:8848,ChatService/memory/ACL 已成熟)——chat/memory 经新 agent_client **代理**(web 当鉴权前门,不重写、不引 LLM 重依赖),audit **新建只读 repo**(读 access.jsonl)。含服务间信任(internal_token)、分步实施、测试、红线 | 方案完成,待执行 |
 | [daily-summary-2026-06-03.md](daily-summary-2026-06-03.md) | 首日日报:Track A 影响分析完整交付(桥接 + 引擎 + web API + agent 工具 + 对抗审计),766 passed | ✅ |
 
 ## 上一迭代继承速查
