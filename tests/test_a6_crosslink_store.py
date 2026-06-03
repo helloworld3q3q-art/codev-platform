@@ -129,6 +129,17 @@ def test_find_endpoint_link_endpoint_to_callers_from_store(store_hit):
     assert [c["name"] for c in r["callers"]] == ["postUsers"]
 
 
+def test_find_endpoint_link_classname_dot_method_falls_back_to_handler(store_hit):
+    # store 端点按 handler 名 (createUser) 命名; 传 cross_layer 旧约定全名 ClassName.method
+    # → 全名没命中时退到取最后一段 (createUser) 匹配 (gap 修复)。
+    r = _call(_PID, "find_endpoint_link", {"name": "UserController.createUser"})
+    assert r["source"] == "graph_store"
+    assert r["kind"] == "java_endpoint"
+    assert r["node"] == "createUser"          # 实际命中的 store 节点名
+    assert r["query"] == "UserController.createUser"  # 原始入参留痕
+    assert [c["name"] for c in r["callers"]] == ["postUsers"]
+
+
 def test_search_nodes_from_store(store_hit):
     # name 子串 (NOCASE), 无 kind 过滤
     r = _call(_PID, "search_nodes", {"query": "user"})

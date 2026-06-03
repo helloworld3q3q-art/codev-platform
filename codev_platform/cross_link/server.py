@@ -230,15 +230,16 @@ async def list_tools() -> list[Tool]:
             name="find_endpoint_link",
             description=(
                 "前后端双向 endpoint 关联：传 frontend_api 函数名（如 'postStocksPage'）"
-                "查它调到的 Java endpoint；传 java_endpoint 名（如 'StockController.page'）"
-                "查它被哪些前端调。自动按名称推断方向。"
+                "查它调到的后端 endpoint；传后端 endpoint 名查它被哪些前端调。自动推断方向。"
+                "endpoint 名优先用 handler 方法名（如 'page' / 'login'）；也兼容 'ClassName.method'"
+                "（全名没命中时自动退到取最后一段 handler 匹配）。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "frontend_api 函数名 或 java_endpoint 全名（ClassName.methodName）",
+                        "description": "frontend_api 函数名 或 后端 endpoint handler 名（如 'page'，亦兼容 'ClassName.method'）",
                     },
                 },
                 "required": ["name"],
@@ -247,8 +248,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="search_nodes",
             description=(
-                "模糊搜索节点（按 name 含子串）。可按 kind 过滤。"
-                "返回 [{name, kind, path, line, language, meta}, ...] 最多 50 条。"
+                "模糊搜索**统一图谱跨层节点**（端点 / 表 / 前端调用 / 桥接到表的后端函数），按 name 含子串、"
+                "可按 kind 过滤，返回 [{name, kind, path, line, language, meta}, ...] 最多 50 条。"
+                "注意：只含跨层相关节点，不是全量符号索引（getter/POJO 等样板方法不在内）——"
+                "找任意代码符号请用 codegraph_search。"
             ),
             inputSchema={
                 "type": "object",
@@ -406,6 +409,12 @@ def _find_endpoint_link_via_store(pid: str, qname: str) -> dict | list[dict] | N
         g = build_impact_graph(store_conn, pid)
         fe_matches = g.find_nodes_by_name(qname, NodeKind.FRONTEND_API_CALL.value)
         ep_matches = g.find_nodes_by_name(qname, NodeKind.BACKEND_ENDPOINT.value)
+        # store 的 backend_endpoint 按 handler 方法名命名 (如 'login'), 但工具文档允许传
+        # cross_layer 旧约定的 'ClassName.method' (如 'AuthController.login') → 全名没命中时
+        # 退到取最后一段 (handler) 再匹配, 兼容旧入参形态。
+        if not ep_matches and "." in qname:
+            tail = qname.rsplit(".", 1)[-1]
+            ep_matches = g.find_nodes_by_name(tail, NodeKind.BACKEND_ENDPOINT.value)
         if not fe_matches and not ep_matches:
             return None
 
@@ -423,7 +432,7 @@ def _find_endpoint_link_via_store(pid: str, qname: str) -> dict | list[dict] | N
                     "confidence": 1.0, "evidence": "graph_store",
                 })
             results.append({
-                "node": qname, "kind": "frontend_api",
+                "node": src.name, "query": qname, "kind": "frontend_api",
                 "url": (src.meta or {}).get("url"),
                 "path": src.file, "line": src.line,
                 "direction": "frontend -> java",
@@ -443,7 +452,7 @@ def _find_endpoint_link_via_store(pid: str, qname: str) -> dict | list[dict] | N
                     "confidence": 1.0, "evidence": "graph_store",
                 })
             results.append({
-                "node": qname, "kind": "java_endpoint",
+                "node": src.name, "query": qname, "kind": "java_endpoint",
                 "url": (src.meta or {}).get("url"),
                 "path": src.file, "line": src.line,
                 "direction": "java <- frontend",
