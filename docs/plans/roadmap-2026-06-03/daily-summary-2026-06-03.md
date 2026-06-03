@@ -73,3 +73,28 @@ README 核心卖点 **"改一处 → 跨层影响清单"** 打通,数据地基(�
 ### 待办坑(记下)
 - **openclaw store 需 reindex --ingest** 补桥接边(A2 检出端点→表可达=0;补后 parity 达标可退役 cross-link)。
 - **WSL+PG 测试隔离**:D3 兄弟报 WSL 下 `test_web_projects`/`test_web_filtering` 8 个 fail(Windows 全绿)—— 疑 PG backend 激活时账户 store 全局态跨测试泄漏,待查(env-specific,非代码逻辑 bug)。
+
+---
+
+## 影响分析前端页 + 三份审计收尾(本会话续 2)
+
+### 影响分析前端页(`fbb1b79`)— Track A 的消费面补齐
+- `pnpm run api` 生成 `reportsapi.ts`(reportImpact/tableUsage/pageDependencies/apiCallers)后,建 `web-ui/src/pages/impact/` 单页接它,补齐 README 核心卖点"改一处→跨层影响清单"的**前端入口**。
+- 结构:`index.tsx` 轻聚合(查询类型 Radio + Input.Search + 调 reportsapi 直取 `.data`)+ `utils.ts` 归一化 4 种响应壳 + `components/{LayerGroups,ResultPanel}.tsx`(按层分组 + 风险徽章 high/medium/low + 可读 summary + 同名歧义候选)。
+- 规则遵循:不碰 `src/services`、`useState/useCallback/useEffect`(无 useRequest)、antd6(`Card.classNames.root` 加 `i:`)、UnoCSS(baseFontSize=4)、组件命名。路由 `/codegraph/impact` 归代码图谱组。tsc=0 / eslint=0。
+
+### deep-audit-2026-06-03-review §五 收尾(`0439879`)— P0 web rebuild 空壳接线
+- 逐项核到代码底层:§五 12 项中 **10 项早已落地**(双轨收口/projects 授权/logout 撤 access/register 原子写 `open "x"`/PG fallback fail-fast/graph store 三向 project_id/runner timeout/SQLAlchemy/TS 解 @ts-nocheck/日志迁 logs_dir + gitignore)。
+- **本轮新做唯一真实代码项**:`index_service.make_reindex_dispatch_trigger` 把 `index_rebuild:<kind>` job 派进真实 `FileSpoolQueue`(与 webhook 同队列,worker 消费),修原 `_noop_trigger` 空壳(净新增②);'all' 展开 `runners.kinds()`;`jobs.py` 注入;`submit()` 派发失败释放锁防悬挂。5 测试。
+- 剩 webhook.secret(运营决断)+ broad except(设计保留)。复核文档补 §六。
+
+### codev-platform-audit-report 插件性能(`5efef01`)— CI 超时加固
+- **P1** `_stack_scan.py` rglob 进大目录:核实**早已修**(全面改 `_walk_pruned` os.walk 剪枝),回归测试 `test_sql_detect_skips_build_dirs` 在册;实测全量 124s 超时→**25s** 已解。
+- **P2** CI 无超时保护:**本轮修** —— `pytest-timeout` 进 dev extras + CI `--timeout=120 --timeout-method=thread`(跨平台一致)。
+- P3 README/pyproject 乱码 = **误报**(文件无 BOM UTF-8 正常解码,PowerShell 显示问题);.venv 缺 pytest = 环境;lint = 更大改造另立。
+
+**测试基线 → 791 passed / 5 skipped**(786→791,+5 dispatch trigger 测试),全程零回归。
+
+### 待用户决断
+1. **webhook.secret** — 配上则自动 reindex 链复活,或显式下线(只走已修真实的 web rebuild / CLI)。
+2. **CI 加 lint** — 是否单开一轮引入 ruff(会暴露大量历史项,需逐步收敛)。
