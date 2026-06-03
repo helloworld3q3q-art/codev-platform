@@ -536,6 +536,48 @@ def _owner_func(ranges: list[tuple[int, int, str]], lineno: int) -> str | None:
     return best
 
 
+def _emit_table_access(
+    func_id: str,
+    writes: set[str],
+    reads: set[str],
+    project_id: str,
+    known_tables: set[str],
+    seen_stub: set[str],
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """给定一个函数 + 它读写的表集, 产 reads/writes_table 边 (+ 未定义表的 inferred stub)。
+
+    Python / Java DML 扫描共用 (单一真值源, 不重复实现表访问边逻辑)。
+    """
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    access = (
+        [(t, EdgeKind.WRITES_TABLE.value) for t in sorted(writes)]
+        + [(t, EdgeKind.READS_TABLE.value) for t in sorted(reads)]
+    )
+    for table, edge_kind in access:
+        table_id = f"{project_id}:db_table:{table}"
+        if table not in known_tables and table not in seen_stub:
+            seen_stub.add(table)
+            nodes.append(
+                GraphNode(
+                    id=table_id,
+                    kind=NodeKind.DB_TABLE.value,
+                    name=table,
+                    project_id=project_id,
+                    meta={"source": "dml-inferred", "inferred": True},
+                )
+            )
+        edges.append(
+            GraphEdge(
+                source=func_id,
+                target=table_id,
+                kind=edge_kind,
+                meta={"evidence": f"{edge_kind} {table}"},
+            )
+        )
+    return nodes, edges
+
+
 def _scan_python_dml(
     src: str, rel: str, project_id: str, known_tables: set[str]
 ) -> tuple[list[GraphNode], list[GraphEdge]]:
@@ -578,31 +620,100 @@ def _scan_python_dml(
                     meta={"db_access": True},
                 )
             )
-        access = (
-            [(t, EdgeKind.WRITES_TABLE.value) for t in sorted(writes)]
-            + [(t, EdgeKind.READS_TABLE.value) for t in sorted(reads)]
+        a_nodes, a_edges = _emit_table_access(
+            func_id, writes, reads, project_id, known_tables, seen_stub
         )
-        for table, edge_kind in access:
-            table_id = f"{project_id}:db_table:{table}"
-            if table not in known_tables and table not in seen_stub:
-                seen_stub.add(table)
-                nodes.append(
-                    GraphNode(
-                        id=table_id,
-                        kind=NodeKind.DB_TABLE.value,
-                        name=table,
-                        project_id=project_id,
-                        meta={"source": "dml-inferred", "inferred": True},
-                    )
-                )
-            edges.append(
-                GraphEdge(
-                    source=func_id,
-                    target=table_id,
-                    kind=edge_kind,
-                    meta={"evidence": f"{edge_kind} {table} in {owner}()"},
+        nodes.extend(a_nodes)
+        edges.extend(a_edges)
+    return nodes, edges
+
+
+# ============================ Java 注解 SQL (MyBatis) DML ============================
+#
+# openclaw 等 Java 后端用 MyBatis @Select/@Insert/@Update/@Delete("...SQL...") 注解承载
+# raw SQL (无 XML mapper)。扫这些注解里的 SQL 字符串 -> backend_function(language=java)
+# 节点 + reads/writes_table 边, 补"表 -> Java 后端读"这一跳 (cross_link 退场后不丢)。
+# MyBatis-Plus BaseMapper 的隐式 CRUD (无显式 SQL) 不在本版覆盖范围 (需 @TableName 实体
+# 解析, 留后续)。
+
+_RE_JAVA_SQL_ANN = re.compile(r"@(?:Select|Insert|Update|Delete)\s*\(", re.ASCII)
+_RE_JAVA_STR = re.compile(r'"([^"]*)"')
+_JAVA_KW_DML = frozenset({"if", "for", "while", "switch", "return", "new", "catch"})
+
+
+def _qa_paren(text: str, open_idx: int) -> tuple[str | None, int]:
+    """从 '(' 起取配对 ')' 间内容, 尊重单/双引号 (SQL 串内括号不计)。返回 (内容, 闭括号下标)。"""
+    depth = 0
+    quote: str | None = None
+    for i in range(open_idx, len(text)):
+        ch = text[i]
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_idx + 1:i], i
+    return None, len(text)
+
+
+def _java_method_after(text: str, pos: int) -> str | None:
+    """注解闭括号之后第一处方法声明的方法名 (跳过修饰符 / 后续注解 / 返回类型)。"""
+    window = text[pos:pos + 400]
+    for m in re.finditer(r"([A-Za-z_]\w*)\s*\(", window):
+        name = m.group(1)
+        if name not in _JAVA_KW_DML:
+            return name
+    return None
+
+
+def _scan_java_dml(
+    src: str, rel: str, project_id: str, known_tables: set[str]
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """扫 .java 里 @Select/@Insert/@Update/@Delete 注解的 SQL -> backend_function + 读写边。"""
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    seen_func: set[str] = set()
+    seen_stub: set[str] = set()
+    for m in _RE_JAVA_SQL_ANN.finditer(src):
+        open_idx = m.end() - 1
+        arg, close_idx = _qa_paren(src, open_idx)
+        if arg is None:
+            continue
+        # 注解参数里所有字符串字面量拼成完整 SQL (MyBatis 允许 {"line1","line2"})。
+        sql = " ".join(_RE_JAVA_STR.findall(arg))
+        if not sql.strip():
+            continue
+        writes, reads = _sql_table_access(sql)
+        if not writes and not reads:
+            continue
+        line = src.count("\n", 0, m.start()) + 1
+        method = _java_method_after(src, close_idx) or f"<{rel.rsplit('/', 1)[-1]}>"
+        func_id = f"{project_id}:backend_function:{rel}:{method}"
+        if func_id not in seen_func:
+            seen_func.add(func_id)
+            nodes.append(
+                GraphNode(
+                    id=func_id,
+                    kind=NodeKind.BACKEND_FUNCTION.value,
+                    name=method,
+                    project_id=project_id,
+                    file=rel,
+                    line=line,
+                    language="java",
+                    meta={"db_access": True},
                 )
             )
+        a_nodes, a_edges = _emit_table_access(
+            func_id, writes, reads, project_id, known_tables, seen_stub
+        )
+        nodes.extend(a_nodes)
+        edges.extend(a_edges)
     return nodes, edges
 
 
@@ -630,6 +741,14 @@ class SqlPlugin(AnalyzerPlugin):
             if any(hint in text for hint in _ORM_HINTS):
                 return True
             if _RE_CREATE_TABLE.search(text):
+                return True
+        # 4) Java MyBatis 注解 SQL (@Select/@Insert/... raw SQL) 也算 DB 栈。
+        for f in _stack_scan._iter_files(repo, (".java",)):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if _RE_JAVA_SQL_ANN.search(text):
                 return True
         return False
 
@@ -696,5 +815,17 @@ class SqlPlugin(AnalyzerPlugin):
             if not _RE_HAS_SQL.search(src):  # 廉价短路: 无 DML 动词文件跳过 AST。
                 continue
             _absorb(*_scan_python_dml(src, rel, project_id, known_tables))
+
+        # Pass 4b: .java 注解 SQL DML (MyBatis @Select/@Insert/... raw SQL) -> 表读写血缘。
+        for f in _stack_scan._iter_files(repo, (".java",)):
+            try:
+                src = f.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.warning("read fail %s: %s", f, exc)
+                continue
+            if not _RE_JAVA_SQL_ANN.search(src):  # 廉价短路: 无 SQL 注解文件跳过。
+                continue
+            rel = _stack_scan._rel(f, repo)
+            _absorb(*_scan_java_dml(src, rel, project_id, known_tables))
 
         return result

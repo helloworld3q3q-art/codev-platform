@@ -100,6 +100,45 @@ def test_edges_point_to_existing_nodes(tmp_path: Path) -> None:
         assert e.target in ids
 
 
+_MAPPER = """\
+package com.openclaw.stock.admin.mapper;
+
+import org.apache.ibatis.annotations.*;
+
+@Mapper
+public interface OrderMapper {
+    @Select("SELECT order_id, amount FROM orders WHERE amount > #{min}")
+    List<Order> listBig(@Param("min") long min);
+
+    @Insert("INSERT INTO audit_log (msg) VALUES (#{msg})")
+    int writeAudit(@Param("msg") String msg);
+}
+"""
+
+
+def test_java_annotation_sql_read_write(tmp_path: Path) -> None:
+    (tmp_path / "schema.sql").write_text(_SCHEMA, encoding="utf-8")
+    (tmp_path / "OrderMapper.java").write_text(_MAPPER, encoding="utf-8")
+    r = SqlPlugin().analyze(tmp_path, PID)
+
+    reads = _edges(r, EdgeKind.READS_TABLE.value)
+    writes = _edges(r, EdgeKind.WRITES_TABLE.value)
+    assert (f"{PID}:backend_function:OrderMapper.java:listBig", f"{PID}:db_table:orders") in reads
+    assert (f"{PID}:backend_function:OrderMapper.java:writeAudit", f"{PID}:db_table:audit_log") in writes
+
+    jfuncs = [
+        n for n in r.nodes
+        if n.kind == NodeKind.BACKEND_FUNCTION.value and n.language == "java"
+    ]
+    assert {"listBig", "writeAudit"} <= {n.name for n in jfuncs}
+
+
+def test_java_sql_detect(tmp_path: Path) -> None:
+    (tmp_path / "OrderMapper.java").write_text(_MAPPER, encoding="utf-8")
+    # 纯 Java 注解 SQL (无 .sql 文件) 也应被 sql 插件 detect。
+    assert SqlPlugin().detect(tmp_path) is True
+
+
 def test_module_level_sql_owner_is_file(tmp_path: Path) -> None:
     (tmp_path / "m.py").write_text(
         'q = "SELECT id FROM users"\n', encoding="utf-8"
