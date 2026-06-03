@@ -1,20 +1,19 @@
-"""A6: cross-link MCP find_table_refs / find_endpoint_link 改读统一图谱 store。
+"""cross-link MCP 4 工具全部只读统一图谱 store (store-only, 无 cross_layer fallback)。
 
-两路覆盖:
-  1. store 命中 —— 造 graph_store (db_table + backend_function reads/writes_table 边,
-     frontend_api_call --calls_api--> backend_endpoint), 验 store 优先返回 (source=graph_store)。
-  2. store 缺失 fallback —— store 文件不存在时退回 cross_layer 旧查询 (source 不为 graph_store)。
+覆盖:
+  1. store 命中 —— find_table_refs / find_endpoint_link / search_nodes / cross_link_stats
+     从 graph_store 读 (db_table + backend_function reads/writes_table 边,
+     frontend_api_call --calls_api--> backend_endpoint)。
+  2. store 缺失 / 空 / 无此节点 —— 返回 INDEX_MISSING 友好错误 (不再 fallback cross_layer)。
 """
 from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 
 import pytest
 
 from codev_platform.cross_link import server as srv
-from codev_platform.cross_link.schema import SCHEMA_SQL
 from codev_platform.graph.schema import (
     AnalyzerResult,
     EdgeKind,
@@ -30,31 +29,6 @@ _PID = "store-proj"
 # ---------------------------------------------------------------- 工具
 
 
-def _build_cross_layer(path, table: str, writer: str) -> None:
-    """造一个最小 cross_layer.sqlite (旧库): 1 表 + 1 python writer + writes_table 边。"""
-    conn = sqlite3.connect(path)
-    conn.executescript(SCHEMA_SQL)
-    cur = conn.cursor()
-    cur.execute("INSERT INTO nodes(kind, name, path) VALUES('table', ?, NULL)", (table,))
-    tid = cur.lastrowid
-    cur.execute(
-        "INSERT INTO nodes(kind, name, path, line, language) "
-        "VALUES('python_method', ?, 'w.py', 7, 'python')",
-        (writer,),
-    )
-    wid = cur.lastrowid
-    cur.execute(
-        "INSERT INTO edges(src_id, rel, dst_id, confidence, evidence) "
-        "VALUES(?, 'writes_table', ?, 1.0, 'test')",
-        (wid, tid),
-    )
-    cur.execute(
-        "INSERT INTO build_meta(key, value) VALUES('last_build_at', '2026-06-03T00:00:00')"
-    )
-    conn.commit()
-    conn.close()
-
-
 def _build_store(store_path) -> None:
     """造 graph_store: 表 users; java reader + python writer; 前端→端点 calls_api。"""
     c = open_store(_PID, path=store_path)
@@ -64,7 +38,8 @@ def _build_store(store_path) -> None:
     ep = f"{_PID}:backend_endpoint:POST:/users"
     fe = f"{_PID}:frontend_api_call:src/UserPage.tsx:postUsers"
     nodes = [
-        GraphNode(id=tb, kind=NodeKind.DB_TABLE.value, name="users", project_id=_PID),
+        GraphNode(id=tb, kind=NodeKind.DB_TABLE.value, name="users", project_id=_PID,
+                  file="db/migration/V3__users.sql"),
         GraphNode(id=java_fn, kind=NodeKind.BACKEND_FUNCTION.value, name="selectUsers",
                   project_id=_PID, file="UserMapper.java", line=10, language="java"),
         GraphNode(id=py_fn, kind=NodeKind.BACKEND_FUNCTION.value, name="save_user",
@@ -96,8 +71,8 @@ def _call(pid, name, args):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_conns(monkeypatch):
-    """隔离全局连接缓存, 防止污染其它测试。"""
+def _isolate(monkeypatch):
+    """隔离全局连接缓存 + 默认 project, 防污染其它测试。"""
     monkeypatch.setattr(srv, "_conns", {})
     monkeypatch.setattr(srv, "_init_errors", {})
     monkeypatch.setattr(srv, "_missing_db", {})
@@ -109,19 +84,12 @@ def _isolate_conns(monkeypatch):
 
 @pytest.fixture
 def store_hit(tmp_path, monkeypatch):
-    """graph_store 存在且有数据 → store 优先路径。cross_layer 也在 (但应被 store 抢先)。"""
+    """graph_store 存在且有数据 → 4 工具从 store 读。"""
     store_path = tmp_path / "store" / f"{_PID}.sqlite"
     store_path.parent.mkdir(parents=True)
     _build_store(store_path)
-    # 让 _open_graph_store_for 走到这个 store: patch graph_store_path
     from codev_platform.graph import store as store_mod
     monkeypatch.setattr(store_mod, "graph_store_path", lambda pid: store_path)
-
-    # cross_layer 也建一个 (内容不同), 命中 store 时它不该被用到
-    cl = tmp_path / "cl" / "cross_layer.sqlite"
-    cl.parent.mkdir(parents=True)
-    _build_cross_layer(cl, "users", "legacy_writer")
-    monkeypatch.setattr(srv, "_db_path_for", lambda pid: cl)
     return store_path
 
 
@@ -132,14 +100,13 @@ def test_find_table_refs_served_from_store(store_hit):
     assert [x["name"] for x in r["java_readers"]] == ["selectUsers"]
     # python writer 桶到 python_writers
     assert [x["name"] for x in r["python_writers"]] == ["save_user"]
-    # 不是旧库的 legacy_writer (证明走了 store 而非 cross_layer)
-    all_names = [
-        x["name"]
-        for k, v in r.items()
-        if isinstance(v, list)
-        for x in v
-    ]
-    assert "legacy_writer" not in all_names
+
+
+def test_find_table_refs_definers_from_table_file(store_hit):
+    r = _call(_PID, "find_table_refs", {"table": "users"})
+    # definers 取 db_table 节点 file 的文件名
+    assert [d["name"] for d in r["definers"]] == ["V3__users.sql"]
+    assert r["definers"][0]["path"] == "db/migration/V3__users.sql"
 
 
 def test_find_table_refs_case_insensitive_in_store(store_hit):
@@ -162,55 +129,82 @@ def test_find_endpoint_link_endpoint_to_callers_from_store(store_hit):
     assert [c["name"] for c in r["callers"]] == ["postUsers"]
 
 
-def test_table_absent_in_store_falls_back(store_hit, tmp_path, monkeypatch):
-    """store 存在但无此表 → fallback 到 cross_layer (那里有 legacy_writer)。"""
-    # cross_layer 用另一个表名, store 里没有 → find_table_refs("t_legacy") 应 fallback
-    cl = tmp_path / "cl2" / "cross_layer.sqlite"
-    cl.parent.mkdir(parents=True)
-    _build_cross_layer(cl, "t_legacy", "legacy_writer")
-    monkeypatch.setattr(srv, "_db_path_for", lambda pid: cl)
-    r = _call(_PID, "find_table_refs", {"table": "t_legacy"})
-    assert r.get("source") != "graph_store"
-    assert [x["name"] for x in r["python_writers"]] == ["legacy_writer"]
+def test_search_nodes_from_store(store_hit):
+    # name 子串 (NOCASE), 无 kind 过滤
+    r = _call(_PID, "search_nodes", {"query": "user"})
+    names = {h["name"] for h in r["hits"]}
+    # selectUsers / createUser / postUsers / save_user(无 user 子串, 不应命中)
+    assert "selectUsers" in names
+    assert "createUser" in names
+    assert "postUsers" in names
+    # kind 过滤 (store NodeKind 值)
+    r2 = _call(_PID, "search_nodes", {"query": "user", "kind": "backend_endpoint"})
+    assert [h["name"] for h in r2["hits"]] == ["createUser"]
+    assert r2["hits"][0]["kind"] == "backend_endpoint"
 
 
-# ---------------------------------------------------------------- 路 2: store 缺失 fallback
+def test_search_nodes_limit(store_hit):
+    r = _call(_PID, "search_nodes", {"query": "user", "limit": 1})
+    assert len(r["hits"]) == 1
+
+
+def test_cross_link_stats_from_store(store_hit):
+    s = _call(_PID, "cross_link_stats", {})
+    assert s["project_id"] == _PID
+    assert "store-proj.sqlite" in s["db_path"]
+    assert s["nodes_by_kind"].get("backend_function") == 2
+    assert s["nodes_by_kind"].get("db_table") == 1
+    assert s["edges_by_kind"].get("reads_table") == 1
+    assert s["edges_by_kind"].get("writes_table") == 1
+    assert s["edges_by_kind"].get("calls_api") == 1
+    # build_meta 来自 ingest_meta (graph/store.stats)
+    assert "plugins" in s["build_meta"]
+    assert s["build_meta"]["totals"]["nodes"] == 5
+
+
+# ---------------------------------------------------------------- 路 2: store 缺失/空/无节点 → INDEX_MISSING
+
+
+def _expect_missing(r):
+    assert "error" in r
+    assert "统一图谱 store" in r["error"]
 
 
 @pytest.fixture
 def store_missing(tmp_path, monkeypatch):
-    """graph_store 文件不存在 → 退回 cross_layer 旧查询。"""
+    """graph_store 文件不存在 → 全部 INDEX_MISSING。"""
     missing = tmp_path / "nostore" / f"{_PID}.sqlite"  # 不创建
     from codev_platform.graph import store as store_mod
     monkeypatch.setattr(store_mod, "graph_store_path", lambda pid: missing)
-
-    cl = tmp_path / "cl" / "cross_layer.sqlite"
-    cl.parent.mkdir(parents=True)
-    _build_cross_layer(cl, "users", "legacy_writer")
-    monkeypatch.setattr(srv, "_db_path_for", lambda pid: cl)
-    return cl
+    return missing
 
 
-def test_find_table_refs_fallback_when_store_missing(store_missing):
-    r = _call(_PID, "find_table_refs", {"table": "users"})
-    # 旧 payload 无 source=graph_store 标记
-    assert r.get("source") != "graph_store"
-    assert [x["name"] for x in r["python_writers"]] == ["legacy_writer"]
+def test_all_tools_missing_when_store_absent(store_missing):
+    _expect_missing(_call(_PID, "find_table_refs", {"table": "users"}))
+    _expect_missing(_call(_PID, "find_endpoint_link", {"name": "postUsers"}))
+    _expect_missing(_call(_PID, "search_nodes", {"query": "user"}))
+    _expect_missing(_call(_PID, "cross_link_stats", {}))
 
 
-def test_empty_store_falls_back(tmp_path, monkeypatch):
-    """store 文件存在但空 (无节点) → 视同缺失, fallback 到 cross_layer。"""
+def test_empty_store_is_missing(tmp_path, monkeypatch):
+    """store 文件存在但空 (无节点) → 视同缺失 → INDEX_MISSING。"""
     empty = tmp_path / "empty" / f"{_PID}.sqlite"
     empty.parent.mkdir(parents=True)
     open_store(_PID, path=empty).close()  # 建表但不写数据
     from codev_platform.graph import store as store_mod
     monkeypatch.setattr(store_mod, "graph_store_path", lambda pid: empty)
 
-    cl = tmp_path / "cl" / "cross_layer.sqlite"
-    cl.parent.mkdir(parents=True)
-    _build_cross_layer(cl, "users", "legacy_writer")
-    monkeypatch.setattr(srv, "_db_path_for", lambda pid: cl)
+    _expect_missing(_call(_PID, "find_table_refs", {"table": "users"}))
+    _expect_missing(_call(_PID, "cross_link_stats", {}))
 
-    r = _call(_PID, "find_table_refs", {"table": "users"})
-    assert r.get("source") != "graph_store"
-    assert [x["name"] for x in r["python_writers"]] == ["legacy_writer"]
+
+def test_table_absent_in_store_is_missing(store_hit):
+    """store 存在但无此表 → INDEX_MISSING (不再 fallback cross_layer)。"""
+    r = _call(_PID, "find_table_refs", {"table": "t_does_not_exist"})
+    _expect_missing(r)
+
+
+def test_endpoint_absent_in_store_is_missing(store_hit):
+    """store 存在但无此 endpoint 节点 → INDEX_MISSING。"""
+    r = _call(_PID, "find_endpoint_link", {"name": "noSuchNode"})
+    _expect_missing(r)

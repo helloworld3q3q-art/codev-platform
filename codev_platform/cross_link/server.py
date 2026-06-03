@@ -195,11 +195,13 @@ def _current_conn() -> sqlite3.Connection | None:
 
 server: Server = Server("cross-link")
 
+# 统一图谱 store NodeKind 值 (graph/schema.py:NodeKind) + "all" 不过滤。
 NODE_KINDS = [
-    "table", "column", "flyway_migration",
-    "java_method", "java_endpoint",
-    "python_method",
-    "frontend_api",
+    "project", "file",
+    "frontend_route", "frontend_component", "frontend_api_call",
+    "backend_endpoint", "backend_function",
+    "db_table", "db_column",
+    "wiki_page", "jira_issue", "feishu_doc", "git_commit", "pull_request",
     "all",
 ]
 
@@ -210,8 +212,8 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="find_table_refs",
             description=(
-                "一站汇总某 table 的所有跨层引用（Flyway 定义者 + Java reader/writer/updater + "
-                "Python reader/writer/updater）。改字段前必查。"
+                "一站汇总某 table 的所有跨层引用（定义该表的迁移/源文件 + Java reader/writer/updater + "
+                "Python reader/writer/updater，java/python 分桶按节点 language 字段）。改字段前必查。"
             ),
             inputSchema={
                 "type": "object",
@@ -274,7 +276,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="cross_link_stats",
-            description="数据库概览：nodes/edges by kind/rel + build_meta（含 last_build_at）。",
+            description="统一图谱 store 概览：nodes_by_kind + edges_by_kind + build_meta（各 plugin ingest 元数据）。",
             inputSchema={"type": "object", "properties": {}},
         ),
     ]
@@ -290,16 +292,16 @@ def _ok(payload: Any) -> list[TextContent]:
 
 
 # ----------------------------------------------------------------------
-# 统一图谱 store 优先路径 (A6) —— find_table_refs / find_endpoint_link 改读
-# graph_store (data/graph_store/<pid>.sqlite), 复用 graph/impact.py 的 BFS 查询。
-# store 缺失 / 空 / 异常 → 返回 None, 调用方 fallback 回 cross_layer 旧查询 (兼容期)。
+# 统一图谱 store 唯一数据源 —— 4 个工具全部只读 graph_store
+# (data/graph_store/<pid>.sqlite), 复用 graph/impact.py 的 BFS 查询。
+# store 缺失 / 空 / 异常 → 返回 None, 调用方回 INDEX_MISSING 友好错误 (不再 fallback cross_layer)。
 # ----------------------------------------------------------------------
 
 
 def _open_graph_store_for(pid: str) -> sqlite3.Connection | None:
-    """打开当前 pid 的统一图谱 store。文件缺失 / 空表 / 任何异常 → None (触发 fallback)。
+    """打开当前 pid 的统一图谱 store。文件缺失 / 空表 / 任何异常 → None。
 
-    _EXPLICIT_KEY (无 project 的显式 DB 覆盖) 不映射到 store, 直接回 None 走旧库。
+    _EXPLICIT_KEY (无 project 的显式 DB 覆盖) 不映射到 store, 直接回 None。
     """
     if pid == _EXPLICIT_KEY:
         return None
@@ -326,7 +328,7 @@ def _find_table_refs_via_store(pid: str, table: str) -> dict | None:
     store 节点是中性 kind (backend_function / backend_endpoint / frontend_api_call),
     无 java/python 之分 → 按节点 language 字段 (java/python) 桶分到 java_*/python_*。
     reader/writer/updater 由"函数直连表"的边 kind (reads/writes/updates_table) 区分。
-    返回 None = store 无此表 (或异常), 让调用方 fallback。
+    返回 None = store 无此表 (或异常), 调用方回 INDEX_MISSING。
     """
     store_conn = _open_graph_store_for(pid)
     if store_conn is None:
@@ -367,10 +369,17 @@ def _find_table_refs_via_store(pid: str, table: str) -> dict | None:
                 "confidence": 1.0, "evidence": "graph_store",
                 "meta": dict(n.meta or {}),
             })
+        # definers: db_table 节点的 .file = CREATE TABLE 源 (迁移文件)。
+        # store 不单独物化 flyway_migration 节点 → 用表节点自身的 file 当定义来源。
+        if tnode.file:
+            definers.append({
+                "name": Path(tnode.file).name,
+                "path": tnode.file,
+            })
         payload = {
             "table": table,
             "source": "graph_store",
-            "definers": definers,  # store 暂不物化 flyway definer → 空 (兼容字段)
+            "definers": definers,  # 定义该表的迁移/源文件 (取自 db_table 节点 file)
             **buckets,
         }
         return payload
@@ -386,7 +395,7 @@ def _find_endpoint_link_via_store(pid: str, qname: str) -> dict | list[dict] | N
 
     frontend_api_call → 正向取它依赖的 backend_endpoint (targets);
     backend_endpoint → 反向取调它的 frontend (callers)。
-    返回 None = store 无此节点 (或异常), 让调用方 fallback。
+    返回 None = store 无此节点 (或异常), 调用方回 INDEX_MISSING。
     """
     store_conn = _open_graph_store_for(pid)
     if store_conn is None:
@@ -451,28 +460,82 @@ def _find_endpoint_link_via_store(pid: str, qname: str) -> dict | list[dict] | N
         store_conn.close()
 
 
-def _list_edge_sources(
-    conn: sqlite3.Connection, table: str, rel: str, src_kind: str,
-) -> list[dict]:
-    cur = conn.execute(
-        """SELECT n.name, n.path, n.line, n.kind, e.confidence, e.evidence, n.meta_json
-           FROM nodes t
-           JOIN edges e ON e.dst_id = t.id AND e.rel = ?
-           JOIN nodes n ON n.id = e.src_id AND n.kind = ?
-           WHERE t.kind = 'table' AND t.name = ? AND t.path IS NULL
-           ORDER BY n.name, n.line""",
-        (rel, src_kind, table),
-    )
-    out: list[dict] = []
-    for r in cur.fetchall():
-        meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
-        out.append({
-            "name": r["name"], "kind": r["kind"],
-            "path": r["path"], "line": r["line"],
-            "confidence": r["confidence"], "evidence": r["evidence"],
-            "meta": meta,
-        })
-    return out
+def _search_nodes_via_store(
+    pid: str, query: str, kind: str, limit: int,
+) -> dict | None:
+    """统一图谱 store 的节点模糊搜索: name LIKE (NOCASE) + 可选 kind 过滤 + limit。
+
+    kind 词汇用 store NodeKind 值 (db_table / backend_function / ...);'all' 不过滤。
+    返回 {query, kind, hits:[{name,kind,path,line,language,meta}]} 或 None (store 缺失)。
+    """
+    store_conn = _open_graph_store_for(pid)
+    if store_conn is None:
+        return None
+    try:
+        params: list[Any] = [pid, f"%{query}%"]
+        sql = (
+            "SELECT name, kind, file, line, language, meta_json FROM nodes "
+            "WHERE project_id = ? AND name LIKE ? COLLATE NOCASE"
+        )
+        if kind and kind != "all":
+            sql += " AND kind = ?"
+            params.append(kind)
+        sql += " ORDER BY kind, name LIMIT ?"
+        params.append(limit)
+        out: list[dict] = []
+        for r in store_conn.execute(sql, params):
+            meta = json.loads(r[5]) if r[5] else {}
+            out.append({
+                "name": r[0], "kind": r[1],
+                "path": r[2], "line": r[3],
+                "language": r[4],
+                "meta": meta,
+            })
+        return {"query": query, "kind": kind, "hits": out}
+    except Exception as exc:  # noqa: BLE001
+        _flog(f"[store] search_nodes failed pid={pid} q={query!r}: {exc!s}")
+        return None
+    finally:
+        store_conn.close()
+
+
+def _cross_link_stats_via_store(pid: str) -> dict | None:
+    """统一图谱 store 概览: 按 kind 计 nodes / edges + store 路径 + ingest_meta。
+
+    返回 {project_id, db_path(store路径), nodes_by_kind, edges_by_kind, build_meta}
+    或 None (store 缺失)。build_meta 取 ingest_meta (各 plugin 最近 ingest 元数据)。
+    """
+    store_conn = _open_graph_store_for(pid)
+    if store_conn is None:
+        return None
+    try:
+        from codev_platform.graph.store import graph_store_path, stats as _store_stats
+        nodes_by_kind = {
+            r[0]: r[1]
+            for r in store_conn.execute(
+                "SELECT kind, COUNT(*) FROM nodes WHERE project_id = ? GROUP BY kind",
+                (pid,),
+            )
+        }
+        edges_by_kind = {
+            r[0]: r[1]
+            for r in store_conn.execute(
+                "SELECT kind, COUNT(*) FROM edges GROUP BY kind"
+            )
+        }
+        build_meta = _store_stats(store_conn)
+        return {
+            "project_id": pid,
+            "db_path": str(graph_store_path(pid)),
+            "nodes_by_kind": dict(sorted(nodes_by_kind.items(), key=lambda x: -x[1])),
+            "edges_by_kind": dict(sorted(edges_by_kind.items(), key=lambda x: -x[1])),
+            "build_meta": build_meta,
+        }
+    except Exception as exc:  # noqa: BLE001
+        _flog(f"[store] cross_link_stats failed pid={pid}: {exc!s}")
+        return None
+    finally:
+        store_conn.close()
 
 
 @server.call_tool()
@@ -504,32 +567,14 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
         })
 
 
+_NO_STORE_MSG = "该项目无统一图谱 store, 请先 reindex --ingest"
+
+
 async def _dispatch(name: str, args: dict) -> list[TextContent]:
     pid = _active_pid()
 
-    # A6: find_table_refs / find_endpoint_link 优先读统一图谱 store; store 命中即返回。
-    # store 缺失 / 空 / 无此节点 / 异常 → 落到下方 cross_layer 旧查询 (兼容期兜底)。
-    if name == "find_table_refs":
-        table = (args.get("table") or "").strip()
-        if not table:
-            return _err("table 不能为空", ErrorCode.INVALID_PARAMS)
-        store_payload = _find_table_refs_via_store(pid, table)
-        if store_payload is not None:
-            _flog(f"[find_table_refs] table={table!r} served from graph_store")
-            return _ok(store_payload)
-    elif name == "find_endpoint_link":
-        qname0 = (args.get("name") or "").strip()
-        if not qname0:
-            return _err("name 不能为空", ErrorCode.INVALID_PARAMS)
-        store_link = _find_endpoint_link_via_store(pid, qname0)
-        if store_link is not None:
-            _flog(f"[find_endpoint_link] name={qname0!r} served from graph_store")
-            return _ok(store_link)
-
-    conn = _current_conn()
-    if conn is None:
-        return _err(_error_for(_active_pid()) or "cross_layer DB 未初始化", ErrorCode.INDEX_MISSING)
-
+    # 4 个工具全部只读统一图谱 store (graph_store/<pid>.sqlite); store 缺失 / 空 / 无此
+    # 节点 → INDEX_MISSING 友好错误, 不再 fallback cross_layer。
     import time as _t
     _t0 = _t.perf_counter()
     try:
@@ -538,98 +583,25 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             if not table:
                 return _err("table 不能为空", ErrorCode.INVALID_PARAMS)
             _flog(f"[find_table_refs] table={table!r}")
-            # Flyway definers
-            cur = conn.execute(
-                """SELECT n.name, n.path FROM nodes t
-                   JOIN edges e ON e.dst_id = t.id AND e.rel = 'defines_table'
-                   JOIN nodes n ON n.id = e.src_id AND n.kind = 'flyway_migration'
-                   WHERE t.kind = 'table' AND t.name = ? AND t.path IS NULL
-                   ORDER BY n.name""",
-                (table,),
-            )
-            definers = [{"name": r["name"], "path": r["path"]} for r in cur.fetchall()]
-            payload = {
-                "table": table,
-                "definers":         definers,
-                "java_readers":     _list_edge_sources(conn, table, "queries_table", "java_method"),
-                "java_writers":     _list_edge_sources(conn, table, "writes_table",  "java_method"),
-                "java_updaters":    _list_edge_sources(conn, table, "updates_table", "java_method"),
-                "python_readers":   _list_edge_sources(conn, table, "reads_table",   "python_method"),
-                "python_writers":   _list_edge_sources(conn, table, "writes_table",  "python_method"),
-                "python_updaters":  _list_edge_sources(conn, table, "updates_table", "python_method"),
-            }
-            counts = {k: len(v) for k, v in payload.items() if isinstance(v, list)}
+            store_payload = _find_table_refs_via_store(pid, table)
+            if store_payload is None:
+                return _err(_NO_STORE_MSG, ErrorCode.INDEX_MISSING)
+            counts = {k: len(v) for k, v in store_payload.items() if isinstance(v, list)}
             _ms = (_t.perf_counter() - _t0) * 1000
-            _flog(f"[find_table_refs] counts={counts} took={_ms:.1f}ms")
-            return _ok(payload)
+            _flog(f"[find_table_refs] counts={counts} took={_ms:.1f}ms (graph_store)")
+            return _ok(store_payload)
 
         if name == "find_endpoint_link":
             qname = (args.get("name") or "").strip()
             if not qname:
                 return _err("name 不能为空", ErrorCode.INVALID_PARAMS)
             _flog(f"[find_endpoint_link] name={qname!r}")
-            # 判断是 frontend_api 还是 java_endpoint
-            cur = conn.execute(
-                "SELECT id, kind, path, line, meta_json FROM nodes WHERE name = ? "
-                "AND kind IN ('frontend_api', 'java_endpoint')",
-                (qname,),
-            )
-            src_rows = cur.fetchall()
-            if not src_rows:
-                return _err(f"未找到节点 '{qname}'（kind 必须是 frontend_api / java_endpoint）", ErrorCode.INVALID_PARAMS)
-            results: list[dict] = []
-            for src in src_rows:
-                meta = json.loads(src["meta_json"]) if src["meta_json"] else {}
-                if src["kind"] == "frontend_api":
-                    # frontend → java
-                    cur2 = conn.execute(
-                        """SELECT j.name, j.path, j.line, j.meta_json, e.confidence, e.evidence
-                           FROM nodes j
-                           JOIN edges e ON e.dst_id = j.id AND e.rel = 'calls_api'
-                           WHERE e.src_id = ? AND j.kind = 'java_endpoint'""",
-                        (src["id"],),
-                    )
-                    targets = []
-                    for r in cur2.fetchall():
-                        tmeta = json.loads(r["meta_json"]) if r["meta_json"] else {}
-                        targets.append({
-                            "name": r["name"], "path": r["path"], "line": r["line"],
-                            "url": tmeta.get("url"),
-                            "confidence": r["confidence"], "evidence": r["evidence"],
-                        })
-                    results.append({
-                        "node": qname, "kind": "frontend_api",
-                        "url": meta.get("url"),
-                        "path": src["path"], "line": src["line"],
-                        "direction": "frontend -> java",
-                        "targets": targets,
-                    })
-                else:  # java_endpoint
-                    cur2 = conn.execute(
-                        """SELECT f.name, f.path, f.line, f.meta_json, e.confidence, e.evidence
-                           FROM nodes f
-                           JOIN edges e ON e.src_id = f.id AND e.rel = 'calls_api'
-                           WHERE e.dst_id = ? AND f.kind = 'frontend_api'""",
-                        (src["id"],),
-                    )
-                    callers = []
-                    for r in cur2.fetchall():
-                        fmeta = json.loads(r["meta_json"]) if r["meta_json"] else {}
-                        callers.append({
-                            "name": r["name"], "path": r["path"], "line": r["line"],
-                            "url": fmeta.get("url"),
-                            "confidence": r["confidence"], "evidence": r["evidence"],
-                        })
-                    results.append({
-                        "node": qname, "kind": "java_endpoint",
-                        "url": meta.get("url"),
-                        "path": src["path"], "line": src["line"],
-                        "direction": "java <- frontend",
-                        "callers": callers,
-                    })
+            store_link = _find_endpoint_link_via_store(pid, qname)
+            if store_link is None:
+                return _err(_NO_STORE_MSG, ErrorCode.INDEX_MISSING)
             _ms = (_t.perf_counter() - _t0) * 1000
-            _flog(f"[find_endpoint_link] results={len(results)} took={_ms:.1f}ms")
-            return _ok(results if len(results) > 1 else results[0])
+            _flog(f"[find_endpoint_link] took={_ms:.1f}ms (graph_store)")
+            return _ok(store_link)
 
         if name == "search_nodes":
             query = (args.get("query") or "").strip()
@@ -638,49 +610,18 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             kind = args.get("kind", "all")
             limit = max(1, min(50, int(args.get("limit", 20))))
             _flog(f"[search_nodes] q={query!r} kind={kind} limit={limit}")
-            params: list[Any] = [f"%{query}%"]
-            sql = ("SELECT name, kind, path, line, language, meta_json FROM nodes "
-                   "WHERE name LIKE ? COLLATE NOCASE")
-            if kind != "all":
-                sql += " AND kind = ?"
-                params.append(kind)
-            sql += " ORDER BY kind, name LIMIT ?"
-            params.append(limit)
-            cur = conn.execute(sql, params)
-            out: list[dict] = []
-            for r in cur.fetchall():
-                meta = json.loads(r["meta_json"]) if r["meta_json"] else {}
-                out.append({
-                    "name": r["name"], "kind": r["kind"],
-                    "path": r["path"], "line": r["line"],
-                    "language": r["language"],
-                    "meta": meta,
-                })
+            store_payload = _search_nodes_via_store(pid, query, kind, limit)
+            if store_payload is None:
+                return _err(_NO_STORE_MSG, ErrorCode.INDEX_MISSING)
             _ms = (_t.perf_counter() - _t0) * 1000
-            _flog(f"[search_nodes] hits={len(out)} took={_ms:.1f}ms")
-            return _ok({"query": query, "kind": kind, "hits": out})
+            _flog(f"[search_nodes] hits={len(store_payload['hits'])} took={_ms:.1f}ms (graph_store)")
+            return _ok(store_payload)
 
         if name == "cross_link_stats":
-            nodes_by_kind = {
-                r["kind"]: r["c"]
-                for r in conn.execute("SELECT kind, COUNT(*) c FROM nodes GROUP BY kind")
-            }
-            edges_by_rel = {
-                r["rel"]: r["c"]
-                for r in conn.execute("SELECT rel, COUNT(*) c FROM edges GROUP BY rel")
-            }
-            meta = {
-                r["key"]: r["value"]
-                for r in conn.execute("SELECT key, value FROM build_meta")
-            }
-            payload = {
-                "project_id": _active_pid(),
-                "db_path": str(_db_path_for(None if _active_pid() == _EXPLICIT_KEY else _active_pid())),
-                "nodes_by_kind": dict(sorted(nodes_by_kind.items(), key=lambda x: -x[1])),
-                "edges_by_rel":  dict(sorted(edges_by_rel.items(), key=lambda x: -x[1])),
-                "build_meta": meta,
-            }
-            return _ok(payload)
+            store_payload = _cross_link_stats_via_store(pid)
+            if store_payload is None:
+                return _err(_NO_STORE_MSG, ErrorCode.INDEX_MISSING)
+            return _ok(store_payload)
 
         return _err(f"未知 tool: {name}", ErrorCode.INVALID_PARAMS)
     except Exception as exc:
