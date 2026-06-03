@@ -137,14 +137,16 @@ def main() -> int:
     # ---- 5. 清理自造数据 ----
     print("\n[5] 清理测试数据")
     try:
-        with store._write_pool.connection() as conn:
-            conn.execute("DELETE FROM project_access WHERE project_id = ANY(%s)", ([pid, pid2],))
-            conn.execute("DELETE FROM projects WHERE project_id = ANY(%s)", ([pid, pid2],))
-            conn.execute("DELETE FROM team_members WHERE team_id=%s", (tid,))
-            conn.execute("DELETE FROM teams WHERE team_id=%s", (tid,))
-            conn.execute("DELETE FROM org_members WHERE user_id=%s", (uid,))
-            conn.execute("DELETE FROM users WHERE user_id=%s", (uid,))
-            conn.execute("DELETE FROM orgs WHERE org_id = ANY(%s)", ([org, org2],))
+        from sqlalchemy import delete
+        from codev_platform.web.db import tables as _t
+        with store._write_engine.begin() as conn:
+            conn.execute(delete(_t.project_access).where(_t.project_access.c.project_id.in_([pid, pid2])))
+            conn.execute(delete(_t.projects).where(_t.projects.c.project_id.in_([pid, pid2])))
+            conn.execute(delete(_t.team_members).where(_t.team_members.c.team_id == tid))
+            conn.execute(delete(_t.teams).where(_t.teams.c.team_id == tid))
+            conn.execute(delete(_t.org_members).where(_t.org_members.c.user_id == uid))
+            conn.execute(delete(_t.users).where(_t.users.c.user_id == uid))
+            conn.execute(delete(_t.orgs).where(_t.orgs.c.org_id.in_([org, org2])))
         _ok("已清理 verify-* 测试数据")
     except Exception as ex:  # noqa: BLE001
         print(f"  [WARN] 清理失败(不影响验证结论): {ex}")

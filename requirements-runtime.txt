@@ -28,3 +28,8 @@ watchfiles>=1.2.0
 websockets>=16.0
 httptools>=0.7.1
 cryptography>=48.0.0
+
+# web 业务 PG 库 SQLAlchemy Core 迁移(account_store_pg / rbac_store_pg)+ Alembic migration。
+# 与 psycopg 同属 PG 栈;缺则 store 优雅回退内存(同 .[agent] extra)。
+sqlalchemy>=2.0
+alembic>=1.13
