@@ -132,7 +132,9 @@ def _find_handler(
     for nid, nf in cands:
         if nf == ep_file:
             return nid
-    return cands[0][0]  # 同名跨文件兜底取第一个
+    # 无同文件命中: 唯一同名才用 (安全); 多个同名歧义 → 放弃挂边 (宁缺毋滥, 桥接置信本就 0.7,
+    # 防 Java 同名方法跨 Controller 误挂)。
+    return cands[0][0] if len(cands) == 1 else None
 
 
 def _reachable(adj: dict[str, list[str]], start_id: str) -> set[str]:

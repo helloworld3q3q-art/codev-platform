@@ -104,3 +104,32 @@ def test_bridge_failsoft_when_codegraph_missing(tmp_path):
 
 def test_bridge_empty_inputs():
     assert bridge_endpoints_to_functions("p", [], [], codegraph_db=None) == []
+
+
+def test_bridge_skips_ambiguous_cross_file_handler(tmp_path):
+    # handler "handle" 在两个文件都有, 都不等于 ep_file -> 歧义放弃挂边 (宁缺毋滥)
+    cg = tmp_path / "codegraph.db"
+    _make_codegraph(
+        cg,
+        nodes=[("cg:h1", "handle", "x.py", "function"),
+               ("cg:h2", "handle", "y.py", "function"),
+               ("cg:r", "repo", "repo.py", "function")],
+        edges=[("cg:h1", "cg:r", "calls")],
+    )
+    ep = _endpoint("handle", "api.py")  # 与两个 handler 文件都不同
+    fn = _func("repo", "repo.py")
+    assert bridge_endpoints_to_functions("p", [ep], [fn], codegraph_db=cg) == []
+
+
+def test_bridge_unique_cross_file_handler_still_links(tmp_path):
+    # handler 唯一同名但跨文件 -> 仍挂边 (安全)
+    cg = tmp_path / "codegraph.db"
+    _make_codegraph(
+        cg,
+        nodes=[("cg:h", "handle", "x.py", "function"), ("cg:r", "repo", "repo.py", "function")],
+        edges=[("cg:h", "cg:r", "calls")],
+    )
+    ep = _endpoint("handle", "api.py")
+    fn = _func("repo", "repo.py")
+    edges = bridge_endpoints_to_functions("p", [ep], [fn], codegraph_db=cg)
+    assert len(edges) == 1 and edges[0].target == fn.id

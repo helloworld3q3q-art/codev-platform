@@ -32,11 +32,14 @@ def _rid(request: Request) -> str | None:
 
 
 def _open_store_ro(project_id: str) -> sqlite3.Connection | None:
-    """只读打开统一图谱 store; 文件不存在返回 None。"""
+    """只读打开统一图谱 store; 文件不存在 / 打不开返回 None (统一降级 found=False)。"""
     path = graph_store_path(project_id)
     if not path.exists():
         return None
-    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
 
 
 @router.post(
@@ -55,6 +58,8 @@ def report_impact(request: Request, body: S.ImpactRequest,
                   request_id=_rid(request))
     try:
         r = I.generate_impact_report(conn, project_id, body.nodeRef)
+    except sqlite3.Error:
+        r = {"found": False, "summary": "统一图谱 store 读取失败"}  # 损坏/锁 → graceful, 不 500
     finally:
         conn.close()
     return ok(
@@ -62,6 +67,7 @@ def report_impact(request: Request, body: S.ImpactRequest,
             found=r["found"], target=r.get("target"), impact=r.get("impact"),
             risk=r.get("risk"), layersAffected=r.get("layersAffected", []),
             total=r.get("total", 0), summary=r.get("summary", ""),
+            ambiguous=r.get("ambiguous", []),
         ),
         request_id=_rid(request),
     )
@@ -74,6 +80,8 @@ def _query(request: Request, project_id: str, fn, *args) -> CommonResult:
         return ok(S.GraphQueryResponse(found=False), request_id=_rid(request))
     try:
         r = fn(conn, project_id, *args)
+    except sqlite3.Error:
+        r = {"found": False}  # 损坏/锁 → graceful, 不 500
     finally:
         conn.close()
     return ok(S.GraphQueryResponse(found=r.get("found", False), data=r), request_id=_rid(request))

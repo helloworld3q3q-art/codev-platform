@@ -32,6 +32,7 @@ class ImpactReportResponse(BaseModel):
     layersAffected: list[str] = Field(default_factory=list)
     total: int = 0
     summary: str = ""                   # 人类可读 markdown
+    ambiguous: list[dict] = Field(default_factory=list)  # 名字歧义时的候选 (用 id 消歧)
 
 
 class GraphQueryResponse(BaseModel):

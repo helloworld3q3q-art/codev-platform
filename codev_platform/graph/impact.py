@@ -43,15 +43,13 @@ class ImpactGraph:
     fwd: dict[str, list[tuple[str, str]]] = field(default_factory=dict)   # id -> [(target, kind)]
     rev: dict[str, list[tuple[str, str]]] = field(default_factory=dict)   # id -> [(source, kind)]
 
-    def find_by_name(self, name: str, kind: str | None = None) -> GraphNode | None:
-        """按 name (可选 kind) 找节点。表名大小写不敏感。"""
+    def find_nodes_by_name(self, name: str, kind: str | None = None) -> list[GraphNode]:
+        """按 name (可选 kind) 找**全部**同名节点 (大小写不敏感)。供歧义检测。"""
         low = name.strip().lower()
-        for n in self.nodes.values():
-            if kind is not None and n.kind != kind:
-                continue
-            if (n.name or "").lower() == low:
-                return n
-        return None
+        return [
+            n for n in self.nodes.values()
+            if (kind is None or n.kind == kind) and (n.name or "").lower() == low
+        ]
 
 
 def build_impact_graph(conn, project_id: str) -> ImpactGraph:
@@ -107,11 +105,28 @@ def _grouped(reached: list[tuple[GraphNode, int, str]]) -> dict:
             "counts": counts, "total": len(reached)}
 
 
-def _resolve(g: ImpactGraph, ref: str, kind: str | None) -> GraphNode | None:
-    """ref 既可是节点 id, 也可是 name (后者按 kind 找)。"""
+def _resolve(g: ImpactGraph, ref: str, kind: str | None) -> tuple[GraphNode | None, list[GraphNode]]:
+    """解析 ref (id 优先, 否则按 name 找)。返回 (命中节点 | None, 歧义候选)。
+
+    id 精确命中 → (node, [])。按 name 唯一命中 → (node, [])。按 name 多个命中 →
+    (None, candidates) (歧义, 让调用方用 id 消歧)。无命中 → (None, [])。
+    """
     if ref in g.nodes:
-        return g.nodes[ref]
-    return g.find_by_name(ref, kind)
+        return g.nodes[ref], []
+    matches = g.find_nodes_by_name(ref, kind)
+    if len(matches) == 1:
+        return matches[0], []
+    if len(matches) > 1:
+        return None, matches  # 歧义
+    return None, []
+
+
+def _not_found(ref_key: str, ref: str, ambiguous: list[GraphNode]) -> dict:
+    """统一的未命中/歧义返回。歧义时回候选 (含 file) 让调用方用 id 消歧。"""
+    out: dict = {"found": False, ref_key: ref}
+    if ambiguous:
+        out["ambiguous"] = [_node_brief(n) for n in ambiguous]
+    return out
 
 
 # ---------------------------------------------------------------- 4 个查询入口
@@ -119,9 +134,9 @@ def _resolve(g: ImpactGraph, ref: str, kind: str | None) -> GraphNode | None:
 def find_impact(conn, project_id: str, node_ref: str) -> dict:
     """改 node_ref (id 或 name) → 跨层**被波及**集合 (反向 BFS, 谁依赖它)。"""
     g = build_impact_graph(conn, project_id)
-    node = _resolve(g, node_ref, None)
+    node, ambig = _resolve(g, node_ref, None)
     if node is None:
-        return {"found": False, "ref": node_ref}
+        return _not_found("ref", node_ref, ambig)
     reached = _traverse(g, node.id, reverse=True)
     return {"found": True, "target": _node_brief(node), "impact": _grouped(reached)}
 
@@ -129,9 +144,9 @@ def find_impact(conn, project_id: str, node_ref: str) -> dict:
 def find_table_usage(conn, project_id: str, table: str) -> dict:
     """给表名 → 哪些函数/端点/前端用它 (反向 BFS, 从 db_table 出发)。"""
     g = build_impact_graph(conn, project_id)
-    node = _resolve(g, table, NodeKind.DB_TABLE.value)
+    node, ambig = _resolve(g, table, NodeKind.DB_TABLE.value)
     if node is None:
-        return {"found": False, "table": table}
+        return _not_found("table", table, ambig)
     reached = _traverse(g, node.id, reverse=True)
     return {"found": True, "table": _node_brief(node), "usage": _grouped(reached)}
 
@@ -139,9 +154,9 @@ def find_table_usage(conn, project_id: str, table: str) -> dict:
 def find_page_dependencies(conn, project_id: str, page_ref: str) -> dict:
     """给前端页/组件 → 它依赖的端点/函数/表 (正向 BFS)。"""
     g = build_impact_graph(conn, project_id)
-    node = _resolve(g, page_ref, None)
+    node, ambig = _resolve(g, page_ref, None)
     if node is None:
-        return {"found": False, "page": page_ref}
+        return _not_found("page", page_ref, ambig)
     reached = _traverse(g, node.id, reverse=False)
     return {"found": True, "page": _node_brief(node), "dependsOn": _grouped(reached)}
 
@@ -149,9 +164,9 @@ def find_page_dependencies(conn, project_id: str, page_ref: str) -> dict:
 def find_api_callers(conn, project_id: str, endpoint_ref: str) -> dict:
     """给端点 → 哪些前端调它 (反向 BFS, 仅取 frontend 层)。"""
     g = build_impact_graph(conn, project_id)
-    node = _resolve(g, endpoint_ref, NodeKind.BACKEND_ENDPOINT.value)
+    node, ambig = _resolve(g, endpoint_ref, NodeKind.BACKEND_ENDPOINT.value)
     if node is None:
-        return {"found": False, "endpoint": endpoint_ref}
+        return _not_found("endpoint", endpoint_ref, ambig)
     reached = _traverse(g, node.id, reverse=True)
     callers = [(n, d, v) for (n, d, v) in reached if layer_of(n.kind) == "frontend"]
     return {"found": True, "endpoint": _node_brief(node),
@@ -167,7 +182,12 @@ def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
     """
     r = find_impact(conn, project_id, node_ref)
     if not r["found"]:
-        return {"found": False, "ref": node_ref, "summary": f"未找到节点: {node_ref}"}
+        ambig = r.get("ambiguous", [])
+        if ambig:
+            summary = f"节点名 '{node_ref}' 有 {len(ambig)} 个同名候选, 请用 id 指定 (见 ambiguous)"
+        else:
+            summary = f"未找到节点: {node_ref}"
+        return {"found": False, "ref": node_ref, "summary": summary, "ambiguous": ambig}
     target, impact = r["target"], r["impact"]
     counts, total = impact["counts"], impact["total"]
     layers_hit = [lyr for lyr in ("frontend", "backend", "database") if counts.get(lyr)]

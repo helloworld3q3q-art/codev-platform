@@ -83,3 +83,18 @@ def test_find_api_callers_returns_frontend(conn):
 def test_unknown_ref_not_found(conn):
     assert find_impact(conn, _PID, "nope")["found"] is False
     assert find_table_usage(conn, _PID, "ghost")["found"] is False
+
+
+def test_ambiguous_name_returns_candidates(tmp_path):
+    # 两个同名端点 list (不同文件) -> 按 name 解析歧义, 回候选; 用 id 才能消歧
+    c = open_store("p2", path=tmp_path / "g2.sqlite")
+    n1 = GraphNode(id="p2:backend_endpoint:GET:/a/list", kind=NodeKind.BACKEND_ENDPOINT.value,
+                   name="list", project_id="p2", file="a.py")
+    n2 = GraphNode(id="p2:backend_endpoint:GET:/b/list", kind=NodeKind.BACKEND_ENDPOINT.value,
+                   name="list", project_id="p2", file="b.py")
+    upsert_result(c, "p2", AnalyzerResult(nodes=[n1, n2], plugin="test"))
+    r = find_api_callers(c, "p2", "list")
+    assert r["found"] is False and len(r["ambiguous"]) == 2
+    assert {a["file"] for a in r["ambiguous"]} == {"a.py", "b.py"}
+    # 精确 id 仍可解析
+    assert find_api_callers(c, "p2", n1.id)["found"] is True
