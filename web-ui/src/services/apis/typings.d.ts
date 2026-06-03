@@ -3,6 +3,11 @@ declare namespace API {
   // any 类型定义
 type any = any;
 
+// ApiCallersRequest 请求参数
+interface ApiCallersRequest {
+  endpointRef: string;
+}
+
 // 对齐 Java EdgeDTO。
 interface CodegraphEdge {
   id?: any;
@@ -165,8 +170,26 @@ interface CommonResult_CodegraphStatsResponse_ {
   requestId?: any;
 }
 
+// CommonResult_GraphQueryResponse_ 响应数据
+interface CommonResult_GraphQueryResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_HealthData_ 接口
 interface CommonResult_HealthData_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_ImpactReportResponse_ 响应数据
+interface CommonResult_ImpactReportResponse_ {
   result?: number;
   message?: string;
   data?: any;
@@ -358,6 +381,12 @@ interface ErrorItem {
   field?: any;
 }
 
+// table-usage / page-deps / api-callers 通用容器 (结构随查询不同, data 透传)。
+interface GraphQueryResponse {
+  found?: boolean;
+  data?: any;
+}
+
 // HTTPValidationError 接口
 interface HTTPValidationError {
   detail?: ValidationError[];
@@ -368,6 +397,23 @@ interface HealthData {
   status?: string;
   service?: string;
   dependencies?: Record<string, string>;
+}
+
+// ImpactReportResponse 响应数据
+interface ImpactReportResponse {
+  found?: boolean;
+  target?: any;
+  impact?: any;
+  risk?: any;
+  layersAffected?: string[];
+  total?: number;
+  summary?: string;
+  ambiguous?: Record<string, any>[];
+}
+
+// ImpactRequest 请求参数
+interface ImpactRequest {
+  nodeRef: string;
 }
 
 // POST /api/v1/indexes/rebuild 请求体。
@@ -481,6 +527,11 @@ interface OrgUpdateRequest {
   code: string; // 组织编码
   name?: any; // 组织名称
   description?: any; // 描述
+}
+
+// PageDepsRequest 请求参数
+interface PageDepsRequest {
+  pageRef: string;
 }
 
 // PageResult_JobDTO_ 数据传输对象
@@ -602,6 +653,11 @@ interface RefreshRequest {
 interface SessionInfo {
   username: string;
   orgId: string;
+}
+
+// TableUsageRequest 请求参数
+interface TableUsageRequest {
+  table: string;
 }
 
 // 登录 / 刷新返回的 token 对。
