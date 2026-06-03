@@ -133,6 +133,47 @@ def test_java_annotation_sql_read_write(tmp_path: Path) -> None:
     assert {"listBig", "writeAudit"} <= {n.name for n in jfuncs}
 
 
+_ENTITY = """\
+package com.x.domain.entity;
+import com.baomidou.mybatisplus.annotation.TableName;
+
+@TableName("orders")
+public class OrderEntity {
+    private Long orderId;
+}
+"""
+_BASEMAPPER = """\
+package com.x.mapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+
+public interface OrderEntityMapper extends BaseMapper<OrderEntity> {
+}
+"""
+
+
+def test_mybatis_plus_basemapper_table_access(tmp_path: Path) -> None:
+    (tmp_path / "schema.sql").write_text(_SCHEMA, encoding="utf-8")
+    (tmp_path / "OrderEntity.java").write_text(_ENTITY, encoding="utf-8")
+    (tmp_path / "OrderEntityMapper.java").write_text(_BASEMAPPER, encoding="utf-8")
+    r = SqlPlugin().analyze(tmp_path, PID)
+
+    mapper_id = f"{PID}:backend_function:OrderEntityMapper.java:OrderEntityMapper"
+    reads = _edges(r, EdgeKind.READS_TABLE.value)
+    writes = _edges(r, EdgeKind.WRITES_TABLE.value)
+    # BaseMapper<OrderEntity> -> @TableName("orders") -> 读写 orders (CRUD 粗粒度)。
+    assert (mapper_id, f"{PID}:db_table:orders") in reads
+    assert (mapper_id, f"{PID}:db_table:orders") in writes
+
+    mapper = next(
+        n for n in r.nodes
+        if n.kind == NodeKind.BACKEND_FUNCTION.value and n.name == "OrderEntityMapper"
+    )
+    assert mapper.meta.get("mybatis_plus") is True
+    # 粗粒度推断置信度 < 1。
+    edge = next(e for e in r.edges if e.source == mapper_id and e.kind == "reads_table")
+    assert edge.confidence < 1.0
+
+
 def test_java_sql_detect(tmp_path: Path) -> None:
     (tmp_path / "OrderMapper.java").write_text(_MAPPER, encoding="utf-8")
     # 纯 Java 注解 SQL (无 .sql 文件) 也应被 sql 插件 detect。
