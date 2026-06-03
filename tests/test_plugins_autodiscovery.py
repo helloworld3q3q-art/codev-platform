@@ -2,7 +2,7 @@
 
 核心断言:_discover_builtins 扫 plugins/builtin/ 目录, 自动注册其中 AnalyzerPlugin
 子类。验证手段:
-1. 已知三个内置插件 (cross_link / frontend_react / backend_fastapi) 都被发现。
+1. 已知内置插件 (sql / frontend_react / backend_fastapi / backend_spring) 都被发现。
 2. 往 builtin 包目录临时丢一个新插件模块 -> 不改 registry 即被发现 (build agent 免改)。
 3. 共享工具模块 (_stack_scan, 下划线开头) 不被当插件。
 4. 一个坏模块 (import 期抛错) 只 warning + 跳过, 不阻断其余发现。
@@ -32,11 +32,12 @@ def _clean_registry():
 
 
 def test_known_builtins_autodiscovered():
-    """三个已知内置插件无需在 registry 手工列出即被发现。"""
+    """已知内置插件无需在 registry 手工列出即被发现 (stack 插件单一真值源)。"""
     names = registered_names()
-    assert "builtin.cross_link" in names
+    assert "builtin.sql" in names
     assert "builtin.frontend_react" in names
     assert "builtin.backend_fastapi" in names
+    assert "builtin.backend_spring" in names
 
 
 def test_underscore_module_not_treated_as_plugin():
@@ -105,8 +106,8 @@ def test_bad_module_isolated(tmp_path):
     try:
         clear_registry()
         names = registered_names()
-        # 坏模块被跳过, 三个正常内置插件仍在。
-        assert "builtin.cross_link" in names
+        # 坏模块被跳过, 正常内置插件仍在。
+        assert "builtin.sql" in names
         assert "builtin.frontend_react" in names
         assert "builtin.backend_fastapi" in names
     finally:
