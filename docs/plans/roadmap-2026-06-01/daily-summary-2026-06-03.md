@@ -40,16 +40,32 @@ endpoint/api/table)。收敛成单一实现,删 cross_link,全走统一 store:
 - **java_endpoint→backend_endpoint 语言中性化**:cross-link 读边界翻译,纯 Python 端点不再误标 Java(`fix(graph)`)。
 - **P1 Spring 端点插件**:扫 `@RestController`+`@*Mapping`→backend_endpoint(java);openclaw 真仓 143 端点(cross_link 132,近 parity)。
 - **P2 sql 扩 Python DML**:AST 扫 raw SQL→backend_function + writes/reads_table(上游写库函数→表→读库函数);openclaw writes 172/reads 641。
-- **P2b sql 扩 Java MyBatis 注解 SQL**:`@Select/@Insert` 等→表读写,补 Java 后端读(BaseMapper 隐式 CRUD 留后续)。
-- **P3 核心 linker pass**:ingest 末尾跨所有后端插件产 calls_api(单一 owner `builtin.linker`),修前端链不到 Java/Spring 缺口;openclaw 529 calls_api。
-- **P4 cross_link 适配器插件退场 + 生产者归属防复发闸**:`plugins/ownership.py`(kind→owner 单一真值)+ `test_plugin_owner_uniqueness`。**两库重建确认 cross_link rows=0,每 kind 单一 owner**;openclaw 节点 ~6800→2053 干净,codev→361。
-- 坑:删插件后旧行成 orphan,须 `rm graph_store/<pid>.sqlite*` 重建(已重建)。
-- 测试基线 680 → **705 passed**。提交区间 `8649722 … cce2385`。
+- **P2b sql 扩 Java MyBatis 注解 SQL**:`@Select/@Insert` 等→表读写,补 Java 后端读。
+- **P2c sql 解析 MyBatis-Plus BaseMapper**:`BaseMapper<Entity>`→实体 `@TableName`→表(隐式 CRUD,粗粒度 conf=0.6),闭合最后 Java 表读 gap;openclaw Java mapper reads 248(cross_link 旧 236)。
+- **P3 核心 linker pass**:ingest 末尾跨所有后端插件产 calls_api(单一 owner `builtin.linker`),修前端链不到 Java/Spring 缺口。
+- **P4 cross_link 适配器插件退场 + 生产者归属防复发闸**:`plugins/ownership.py`(kind→owner 单一真值)+ `test_plugin_owner_uniqueness`。
+- **P4 收尾·跨层链路并入统一图谱**:KindFilter 改按层分组(前端/后端/数据库)+ 整层切换;节点详情面板加"关联节点"(用 store 边 reads/writes_table/calls_api/defines_column 还原表引用/端点关联);删 `/codegraph/crosslink` 路由+菜单+页。
+- **死代码清理**:删 cross_link 适配器(`graph/adapters/cross_link.py`)+ `web/integrations/cross_link_client.py` + graph.py 的 6 个 `/cross-link` 路由及 helper + web/schemas cross-link DTO + 前端 services/types 残留。统一图谱(store)成跨业务链路唯一入口。(注:需跑 `pnpm run api` 重生成 typings)
+- 坑:删插件后旧行成 orphan,须 `rm graph_store/<pid>.sqlite*` 重建(已对两库重建,cross_link rows=0)。openclaw 节点 ~6800→**2097 干净**,codev→361。
+- **整体审计**:全量 pytest **688 passed** + 前端 tsc(src 0 错)+ 真实 store 完整性(dangling/orphan/归属违规/语义重复 全 0)+ 独立对抗 review;查出并修 2 个 Spring 边际 bug(`_spring_class_base` 用 `find("class ")` 脆弱 → 行首类型声明正则;方法级 `@RequestMapping` path==base 被误跳 → 改按注解位置区分)。
+- 测试基线 680 → **688 passed**。提交区间 `8649722 … a8451be`。
 
 ## 六、待办
 
-1. ~~前端 `跨层链路` 页并入统一图谱~~ ✅ 已做(KindFilter 按层分组 + 详情面板关联节点 + 删冗余页)。
-2. ~~MyBatis-Plus BaseMapper 隐式 CRUD 表读~~ ✅ 已做(P2c:BaseMapper<Entity>→@TableName→表,openclaw Java reads 248,闭合最后 Java 表读 gap)。Java/.NET 语言基座 `_java_scan` 仍待抽。
+血缘专题已闭环(P1–P4 + 清理 + 审计全 ✅)。零碎收尾:
+1. `pnpm run api` 重生成 typings(去掉已删的 cross-link 接口孤儿声明)。
+2. Java/.NET 语言基座 `_java_scan` 抽象(Spring/MyBatis 扫描各自正则,可统一);MyBatis-Plus 按调用点细分读/写(现粗粒度 conf=0.6)。
 3. 真实验证 webhook 自动链路(下次 push 看 `tail /tmp` 日志 + `reindex-queue status`)。
-4. demo 项目(CRM Vue/React/Java/FastAPI)做 POC 演示数据(plan Phase 7)。
-5. 统一图谱 db_column 过密(openclaw 1088)→ KindFilter 按层分组 / db_column 默认折叠。
+4. 统一图谱 db_column 过密(openclaw 1088)—— 已加按层筛选可关数据库层,后续可做 db_column 默认折叠。
+
+## 七、整轮 roadmap 剩余盘点(2026-06-03 核实)
+
+本轮(模块化核心+插件化扩展)粗略 **已做 ~25 项 / 未做 ~30 项**。血缘专题是唯一全完成子专题。剩余大块:
+
+- **web-backend(Phase 0-6 骨架已搭,差收尾)**:Phase 7 agent/memory/reports/audit 路由 + integrations(cross_link/chroma/agent/reindex client)、Reports 模块、Phase 8 契约测试、退役 Java codegraph-api 切流、`web serve` CLI 子命令。
+- **Agent Memory 平台化(M0 仅 doctor,M1-M7 基本全空)**:M1 任务记忆闭环(task_id)、M2 Context Engineering、M3 生命周期治理、M4 多租户审计闭环、M5 性能压测、M6 业务 connector、M7 多模态。
+- **插件化平台(Phase 0-4 已做)**:**Phase 5 影响分析链路**(`find_impact/find_api_callers/find_table_usage/find_page_dependencies/generate_impact_report` + 报告)、Phase 6 Wiki/Jira/飞书 connector、Phase 7 Demo 项目、Phase 8 私有化 POC 包。
+- **重构收尾**:`test_file_size_budget.py` 静态断言、agent FastAPI 路由补 `code` 字段、chroma `_state/_http` 叶子(非硬需求)。
+
+**三大缺口**:① 影响分析报告链路(Phase 5 + Reports + Agent 工具)—— README 定义的核心商业价值,统一图谱数据已备齐正好做地基;② Agent Memory 平台化;③ Demo + POC 包。
+**逻辑下一步** = Phase 5 影响分析(吃刚做完的统一图谱节点+跨层边,做"改一处影响哪些前端/后端/表"的 Agent 工具 + 报告)。

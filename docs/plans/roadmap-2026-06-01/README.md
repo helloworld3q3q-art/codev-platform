@@ -30,7 +30,7 @@ Vue/React 页面
 | [modular-core-plugin-extension-decision-2026-06-02.md](modular-core-plugin-extension-decision-2026-06-02.md) | 架构命名和边界决策: 哪些能力做核心模块，哪些能力做客户插件，codegraph/cross-link/Memory/报告如何归类 | 已定 |
 | [stack-adapter-taxonomy-2026-06-02.md](stack-adapter-taxonomy-2026-06-02.md) | 栈适配器三层 taxonomy(语言基座 × 框架适配 × DB 方言)+ 各插件统一 NodeKind/EdgeKind 契约 + detect 约定 + registry 自动发现(扫 builtin/ 目录,新增插件文件即生效,build agent 免改 registry)。供后续 Vue/Express/Spring/ASP.NET/SQL 框架插件并行落地 | 已定/自动发现已落地 |
 | [deployment-2026-06-01.md](deployment-2026-06-01.md) | Phase 0 部署骨架: 安全默认、本机最小启动、memory PG (Docker Compose)、systemd 常驻 (serve-mcp install-systemd)、Windows WSL 注意、远程部署 checklist。汇总既有命令真值源, 不发明命令 | Phase 0 底座 |
-| [unified-graph-lineage-2026-06-03/](unified-graph-lineage-2026-06-03/) | **统一图谱·全栈血缘收敛**: 把"跨业务链路"支柱收敛成单一实现(删 cross_link 适配器, 全走 stack 插件 + 核心 linker), 单系统四层血缘 上游→SQL→后端→前端。P1 Spring 端点插件 / P2 sql 扩 DML / P3 linker pass / P4 parity 删 cross_link + 并页 + 防复发 | P1 进行中 |
+| [unified-graph-lineage-2026-06-03/](unified-graph-lineage-2026-06-03/) | **统一图谱·全栈血缘收敛**: 把"跨业务链路"支柱收敛成单一实现(删 cross_link 适配器, 全走 stack 插件 + 核心 linker), 单系统四层血缘 上游→SQL→后端→前端。P1 Spring 插件 / P2 sql 扩 Python+Java DML / P2c MyBatis-Plus / P3 linker pass / P4 删 cross_link + 并页 + 死代码清理 + 防复发 | ✅ 全完成(688 passed + 审计) |
 
 ## 迭代日报
 
