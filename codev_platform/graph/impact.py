@@ -157,3 +157,42 @@ def find_api_callers(conn, project_id: str, endpoint_ref: str) -> dict:
     return {"found": True, "endpoint": _node_brief(node),
             "callers": [_node_brief(n, d, v) for (n, d, v) in callers],
             "count": len(callers)}
+
+
+def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
+    """改 node_ref → 一份可读跨层影响报告 (A5)。
+
+    含: 目标节点 + 按层受影响清单 + 风险等级 + 人类可读 summary (markdown)。
+    风险口径: 触及前端且跨 ≥2 层 = high;有下游 = medium;无下游 = low。
+    """
+    r = find_impact(conn, project_id, node_ref)
+    if not r["found"]:
+        return {"found": False, "ref": node_ref, "summary": f"未找到节点: {node_ref}"}
+    target, impact = r["target"], r["impact"]
+    counts, total = impact["counts"], impact["total"]
+    layers_hit = [lyr for lyr in ("frontend", "backend", "database") if counts.get(lyr)]
+
+    lines = [f"改动 **{target['name']}** ({target['kind']} / {target['layer']} 层) 的跨层影响:"]
+    if total == 0:
+        lines.append("- 无下游依赖 (孤立节点或叶子, 改动影响面局限本身)。")
+    else:
+        for lyr in ("frontend", "backend", "database"):
+            items = impact["byLayer"].get(lyr)
+            if items:
+                names = sorted({i["name"] for i in items})
+                preview = ", ".join(names[:10]) + (" ..." if len(names) > 10 else "")
+                lines.append(f"- {lyr} 层 {len(items)} 个受影响: {preview}")
+
+    if "frontend" in layers_hit and len(layers_hit) >= 2:
+        risk = "high"
+    elif total > 0:
+        risk = "medium"
+    else:
+        risk = "low"
+    lines.append(f"\n风险: **{risk}** (跨 {len(layers_hit)} 层: {', '.join(layers_hit) or '无'})")
+
+    return {
+        "found": True, "target": target, "impact": impact,
+        "risk": risk, "layersAffected": layers_hit, "total": total,
+        "summary": "\n".join(lines),
+    }

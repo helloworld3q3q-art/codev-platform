@@ -17,6 +17,7 @@ from codev_platform.web.routes import (
     jobs,
     orgs,
     projects,
+    reports,
     users,
 )
 
@@ -57,6 +58,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             graph.router,
             jobs.router,
             indexes.router,
+            reports.router,
         ],
         public_paths=_PUBLIC_PATHS,
         cfg=_cfg,
