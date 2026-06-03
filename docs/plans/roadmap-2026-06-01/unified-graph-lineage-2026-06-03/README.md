@@ -29,9 +29,25 @@
 | 期 | 内容 | 状态 |
 |---|---|---|
 | P1 | Spring 端点插件(Java 后端节点) | ✅ 已落地+真仓验证(stock-admin-api 131 端点 vs cross_link 132,近 parity) |
-| P2 | sql 插件扩 DML → writes_table / reads_table(上游→表→后端) | ⬜ |
-| P3 | 核心 linker pass 接进 ingest(前端→后端 calls_api) | ⬜ |
-| P4 | parity 对账 → 删 cross_link + 并页 + 防复发测试 | ⬜ |
+| P2 | sql 插件扩 DML → writes_table / reads_table(上游→表→后端) | ✅ Python DML(openclaw writes 172 / reads 641) |
+| P2b | sql 插件扫 Java MyBatis 注解 SQL → 表读写(补 Java 后端读) | ✅ @Select/@Insert 等;BaseMapper 隐式 CRUD 留后续 |
+| P3 | 核心 linker pass 接进 ingest(前端→后端 calls_api,单一 owner builtin.linker) | ✅ 前端可链 FastAPI+Spring(openclaw 529 calls_api) |
+| P4 | 删 cross_link 适配器插件 + 生产者归属防复发闸 | ✅ store 单一来源(cross_link rows=0,每 kind 单 owner) |
+| P4-余 | 前端 `跨层链路` 页并入统一图谱(视图预设 + table-refs/endpoint-link 进详情面板) | ⬜ 余留(后端 dedup 已完成,该页现回落 legacy cross_layer 视图,非破) |
+
+## 收敛结果(2026-06-03 实测)
+
+| 项目 | 删前(含 cross_link 重复) | 删后(stack+linker 单一源) |
+|---|---|---|
+| openclaw 节点 | ~6800(5441 cross_link + dup) | **2053 干净** |
+| codev 节点 | ~378(102 cross_link + dup) | **361 干净** |
+| 每 kind owner | 2 套(cross_link + stack)重复 | 单一 owner |
+
+## ⚠️ 运维坑:删插件后须**重建 store**
+
+`upsert_result` 只删改"本轮 ingest 到的插件"行;**已退场插件**(builtin.cross_link)的旧行
+不会被清,成 orphan。删插件后必须 `rm data/graph_store/<pid>.sqlite*` 再 ingest 重建
+(store 是派生缓存,可安全重建)。本轮已对 openclaw / codev 两库重建确认 cross_link rows=0。
 
 ## 铁律
 

@@ -32,9 +32,24 @@
 
 `serve-mcp install-systemd` + 自加 `codev-web.service`(18088 绑 0.0.0.0),`install.sh` 先释放手动端口再装。**8 个 unit 全 enabled + active**:MCP×3(chroma/cross-link/codegraph)、codev-reindex(worker)、codev-webhook、codev-agent、codev-web、clock-resync timer。`wsl --shutdown`/重启电脑后全自动拉起,崩溃 Restart=always。
 
-## 五、待办
+## 五、统一图谱·全栈血缘收敛(晚,专题 [`unified-graph-lineage-2026-06-03/`](unified-graph-lineage-2026-06-03/))
 
-1. cross-link 页展示**完整统一图谱**(纯插件节点 frontend_react/fastapi 在 store 但 task2 只筛 cross_link_kind):需扩 task2 映射或做统一图谱视图(注意与 cross_link 适配器去重)。
-2. Spring(Java)适配器未建(6 栈差它一个);Java/.NET 语言基座 `_java_scan` 待抽。
+发现"跨业务链路"支柱有**两套生产者重复灌库**(cross_link 适配器 + stack 插件各产同一批
+endpoint/api/table)。收敛成单一实现,删 cross_link,全走统一 store:
+
+- **java_endpoint→backend_endpoint 语言中性化**:cross-link 读边界翻译,纯 Python 端点不再误标 Java(`fix(graph)`)。
+- **P1 Spring 端点插件**:扫 `@RestController`+`@*Mapping`→backend_endpoint(java);openclaw 真仓 143 端点(cross_link 132,近 parity)。
+- **P2 sql 扩 Python DML**:AST 扫 raw SQL→backend_function + writes/reads_table(上游写库函数→表→读库函数);openclaw writes 172/reads 641。
+- **P2b sql 扩 Java MyBatis 注解 SQL**:`@Select/@Insert` 等→表读写,补 Java 后端读(BaseMapper 隐式 CRUD 留后续)。
+- **P3 核心 linker pass**:ingest 末尾跨所有后端插件产 calls_api(单一 owner `builtin.linker`),修前端链不到 Java/Spring 缺口;openclaw 529 calls_api。
+- **P4 cross_link 适配器插件退场 + 生产者归属防复发闸**:`plugins/ownership.py`(kind→owner 单一真值)+ `test_plugin_owner_uniqueness`。**两库重建确认 cross_link rows=0,每 kind 单一 owner**;openclaw 节点 ~6800→2053 干净,codev→361。
+- 坑:删插件后旧行成 orphan,须 `rm graph_store/<pid>.sqlite*` 重建(已重建)。
+- 测试基线 680 → **705 passed**。提交区间 `8649722 … cce2385`。
+
+## 六、待办
+
+1. **前端 `跨层链路` 页并入统一图谱**(P4 余留):该页现回落 legacy cross_layer 视图(非破);目标做成统一图谱的视图预设 + table-refs/endpoint-link 进节点详情面板。
+2. MyBatis-Plus BaseMapper 隐式 CRUD 的表读(需 `@TableName` 实体解析);Java/.NET 语言基座 `_java_scan` 待抽。
 3. 真实验证 webhook 自动链路(下次 push 看 `tail /tmp` 日志 + `reindex-queue status`)。
 4. demo 项目(CRM Vue/React/Java/FastAPI)做 POC 演示数据(plan Phase 7)。
+5. 统一图谱 db_column 过密(openclaw 1088)→ KindFilter 按层分组 / db_column 默认折叠。
