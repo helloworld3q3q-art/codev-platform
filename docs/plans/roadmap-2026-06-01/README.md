@@ -31,6 +31,7 @@ Vue/React 页面
 | [stack-adapter-taxonomy-2026-06-02.md](stack-adapter-taxonomy-2026-06-02.md) | 栈适配器三层 taxonomy(语言基座 × 框架适配 × DB 方言)+ 各插件统一 NodeKind/EdgeKind 契约 + detect 约定 + registry 自动发现(扫 builtin/ 目录,新增插件文件即生效,build agent 免改 registry)。供后续 Vue/Express/Spring/ASP.NET/SQL 框架插件并行落地 | 已定/自动发现已落地 |
 | [deployment-2026-06-01.md](deployment-2026-06-01.md) | Phase 0 部署骨架: 安全默认、本机最小启动、memory PG (Docker Compose)、systemd 常驻 (serve-mcp install-systemd)、Windows WSL 注意、远程部署 checklist。汇总既有命令真值源, 不发明命令 | Phase 0 底座 |
 | [unified-graph-lineage-2026-06-03/](unified-graph-lineage-2026-06-03/) | **统一图谱·全栈血缘收敛**: 把"跨业务链路"支柱收敛成单一实现(删 cross_link 适配器, 全走 stack 插件 + 核心 linker), 单系统四层血缘 上游→SQL→后端→前端。P1 Spring 插件 / P2 sql 扩 Python+Java DML / P2c MyBatis-Plus / P3 linker pass / P4 删 cross_link + 并页 + 死代码清理 + 防复发 | ✅ 全完成(688 passed + 审计) |
+| [sqlalchemy-migration-plan-2026-06-03.md](sqlalchemy-migration-plan-2026-06-03.md) | 来自 0603 复核审计第三波技术债 #6: PG 业务写库 (account_store_pg + rbac_store_pg, 7 表) 从 psycopg 裸 SQL 迁 SQLAlchemy Core + Alembic。①web/db/{engine,tables} 集中表定义 ②Alembic init + baseline ③store 内部改 select()/insert() (接口不变) ④schema-parity fixture ⑤回滚/兼容。图谱 SQLite 只读 raw SQL 保留不动 | 规划中(技术债大重构) |
 
 ## 迭代日报
 
