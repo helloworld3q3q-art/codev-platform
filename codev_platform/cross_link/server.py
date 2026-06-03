@@ -289,6 +289,168 @@ def _ok(payload: Any) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
 
 
+# ----------------------------------------------------------------------
+# 统一图谱 store 优先路径 (A6) —— find_table_refs / find_endpoint_link 改读
+# graph_store (data/graph_store/<pid>.sqlite), 复用 graph/impact.py 的 BFS 查询。
+# store 缺失 / 空 / 异常 → 返回 None, 调用方 fallback 回 cross_layer 旧查询 (兼容期)。
+# ----------------------------------------------------------------------
+
+
+def _open_graph_store_for(pid: str) -> sqlite3.Connection | None:
+    """打开当前 pid 的统一图谱 store。文件缺失 / 空表 / 任何异常 → None (触发 fallback)。
+
+    _EXPLICIT_KEY (无 project 的显式 DB 覆盖) 不映射到 store, 直接回 None 走旧库。
+    """
+    if pid == _EXPLICIT_KEY:
+        return None
+    try:
+        from codev_platform.graph.store import graph_store_path, open_store
+        p = graph_store_path(pid)
+        if not p.exists():
+            return None
+        conn = open_store(pid)
+        # 空 store (无节点) 视同缺失 → fallback, 避免返回空壳掩盖旧库真数据。
+        n = conn.execute("SELECT COUNT(*) FROM nodes WHERE project_id = ?", (pid,)).fetchone()[0]
+        if not n:
+            conn.close()
+            return None
+        return conn
+    except Exception as exc:  # noqa: BLE001 — store 任何问题都退回旧库, 不阻断查询
+        _flog(f"[store] open failed pid={pid}: {exc!s} -> fallback cross_layer")
+        return None
+
+
+def _find_table_refs_via_store(pid: str, table: str) -> dict | None:
+    """用 graph store 反向 BFS 汇总某表引用, 重组成与旧 find_table_refs 兼容的 payload。
+
+    store 节点是中性 kind (backend_function / backend_endpoint / frontend_api_call),
+    无 java/python 之分 → 按节点 language 字段 (java/python) 桶分到 java_*/python_*。
+    reader/writer/updater 由"函数直连表"的边 kind (reads/writes/updates_table) 区分。
+    返回 None = store 无此表 (或异常), 让调用方 fallback。
+    """
+    store_conn = _open_graph_store_for(pid)
+    if store_conn is None:
+        return None
+    try:
+        from codev_platform.graph.impact import build_impact_graph
+        from codev_platform.graph.schema import EdgeKind, NodeKind
+        g = build_impact_graph(store_conn, pid)
+        # 解析 table 节点 (按 name, db_table kind; 大小写不敏感)
+        matches = g.find_nodes_by_name(table, NodeKind.DB_TABLE.value)
+        if not matches:
+            return None
+        tnode = matches[0]
+
+        _REL_BUCKET = {
+            EdgeKind.READS_TABLE.value: "readers",
+            EdgeKind.WRITES_TABLE.value: "writers",
+            EdgeKind.UPDATES_TABLE.value: "updaters",
+        }
+        buckets: dict[str, list[dict]] = {
+            "java_readers": [], "java_writers": [], "java_updaters": [],
+            "python_readers": [], "python_writers": [], "python_updaters": [],
+        }
+        definers: list[dict] = []
+        # 表的入边 (rev): (source_fn_id, edge_kind) —— 谁直接 reads/writes/updates 本表。
+        for src_id, ekind in g.rev.get(tnode.id, ()):
+            slot = _REL_BUCKET.get(ekind)
+            if slot is None:
+                continue
+            n = g.nodes.get(src_id)
+            if n is None:
+                continue
+            lang = (n.language or "").lower()
+            prefix = "java" if lang == "java" else "python"
+            buckets[f"{prefix}_{slot}"].append({
+                "name": n.name, "kind": n.kind,
+                "path": n.file, "line": n.line,
+                "confidence": 1.0, "evidence": "graph_store",
+                "meta": dict(n.meta or {}),
+            })
+        payload = {
+            "table": table,
+            "source": "graph_store",
+            "definers": definers,  # store 暂不物化 flyway definer → 空 (兼容字段)
+            **buckets,
+        }
+        return payload
+    except Exception as exc:  # noqa: BLE001
+        _flog(f"[store] find_table_refs failed pid={pid} table={table!r}: {exc!s} -> fallback")
+        return None
+    finally:
+        store_conn.close()
+
+
+def _find_endpoint_link_via_store(pid: str, qname: str) -> dict | list[dict] | None:
+    """用 graph store 双向查 endpoint 关联, 重组成与旧 find_endpoint_link 兼容的结构。
+
+    frontend_api_call → 正向取它依赖的 backend_endpoint (targets);
+    backend_endpoint → 反向取调它的 frontend (callers)。
+    返回 None = store 无此节点 (或异常), 让调用方 fallback。
+    """
+    store_conn = _open_graph_store_for(pid)
+    if store_conn is None:
+        return None
+    try:
+        from codev_platform.graph.impact import build_impact_graph, layer_of
+        from codev_platform.graph.schema import NodeKind
+        g = build_impact_graph(store_conn, pid)
+        fe_matches = g.find_nodes_by_name(qname, NodeKind.FRONTEND_API_CALL.value)
+        ep_matches = g.find_nodes_by_name(qname, NodeKind.BACKEND_ENDPOINT.value)
+        if not fe_matches and not ep_matches:
+            return None
+
+        results: list[dict] = []
+        for src in fe_matches:
+            # frontend -> 正向直连 backend_endpoint
+            targets = []
+            for tgt_id, _ek in g.fwd.get(src.id, ()):
+                n = g.nodes.get(tgt_id)
+                if n is None or n.kind != NodeKind.BACKEND_ENDPOINT.value:
+                    continue
+                targets.append({
+                    "name": n.name, "path": n.file, "line": n.line,
+                    "url": (n.meta or {}).get("url"),
+                    "confidence": 1.0, "evidence": "graph_store",
+                })
+            results.append({
+                "node": qname, "kind": "frontend_api",
+                "url": (src.meta or {}).get("url"),
+                "path": src.file, "line": src.line,
+                "direction": "frontend -> java",
+                "source": "graph_store",
+                "targets": targets,
+            })
+        for src in ep_matches:
+            # endpoint -> 反向直连 frontend caller
+            callers = []
+            for s_id, _ek in g.rev.get(src.id, ()):
+                n = g.nodes.get(s_id)
+                if n is None or layer_of(n.kind) != "frontend":
+                    continue
+                callers.append({
+                    "name": n.name, "path": n.file, "line": n.line,
+                    "url": (n.meta or {}).get("url"),
+                    "confidence": 1.0, "evidence": "graph_store",
+                })
+            results.append({
+                "node": qname, "kind": "java_endpoint",
+                "url": (src.meta or {}).get("url"),
+                "path": src.file, "line": src.line,
+                "direction": "java <- frontend",
+                "source": "graph_store",
+                "callers": callers,
+            })
+        if not results:
+            return None
+        return results if len(results) > 1 else results[0]
+    except Exception as exc:  # noqa: BLE001
+        _flog(f"[store] find_endpoint_link failed pid={pid} name={qname!r}: {exc!s} -> fallback")
+        return None
+    finally:
+        store_conn.close()
+
+
 def _list_edge_sources(
     conn: sqlite3.Connection, table: str, rel: str, src_kind: str,
 ) -> list[dict]:
@@ -343,6 +505,27 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
 
 async def _dispatch(name: str, args: dict) -> list[TextContent]:
+    pid = _active_pid()
+
+    # A6: find_table_refs / find_endpoint_link 优先读统一图谱 store; store 命中即返回。
+    # store 缺失 / 空 / 无此节点 / 异常 → 落到下方 cross_layer 旧查询 (兼容期兜底)。
+    if name == "find_table_refs":
+        table = (args.get("table") or "").strip()
+        if not table:
+            return _err("table 不能为空", ErrorCode.INVALID_PARAMS)
+        store_payload = _find_table_refs_via_store(pid, table)
+        if store_payload is not None:
+            _flog(f"[find_table_refs] table={table!r} served from graph_store")
+            return _ok(store_payload)
+    elif name == "find_endpoint_link":
+        qname0 = (args.get("name") or "").strip()
+        if not qname0:
+            return _err("name 不能为空", ErrorCode.INVALID_PARAMS)
+        store_link = _find_endpoint_link_via_store(pid, qname0)
+        if store_link is not None:
+            _flog(f"[find_endpoint_link] name={qname0!r} served from graph_store")
+            return _ok(store_link)
+
     conn = _current_conn()
     if conn is None:
         return _err(_error_for(_active_pid()) or "cross_layer DB 未初始化", ErrorCode.INDEX_MISSING)
