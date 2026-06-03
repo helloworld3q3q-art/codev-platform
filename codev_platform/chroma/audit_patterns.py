@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 # indexer 在同 package 内 (codev_platform.chroma.indexer)
 from codev_platform.chroma.indexer import DOC_PATTERNS, PLATFORM_ROOT  # noqa: E402
@@ -45,7 +44,6 @@ def find_uncovered_docs_subdirs() -> list[str]:
         if not md_files:
             continue  # 空目录跳过
         sample = md_files[0]
-        rel_sample = sample.relative_to(PLATFORM_ROOT).as_posix()
         covered = False
         for pattern in DOC_PATTERNS:
             for match in PLATFORM_ROOT.glob(pattern):

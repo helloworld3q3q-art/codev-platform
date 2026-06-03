@@ -22,7 +22,7 @@ class JobDTO(BaseModel):
     updatedAt: float = Field(..., description="更新时间 (epoch 秒)")
 
     @classmethod
-    def of(cls, job: Job) -> "JobDTO":
+    def of(cls, job: Job) -> JobDTO:
         return cls(
             jobId=job.job_id,
             projectId=job.project_id,

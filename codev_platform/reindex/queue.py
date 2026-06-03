@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
+from collections.abc import AsyncIterator
 
 _SEP = "__"
 

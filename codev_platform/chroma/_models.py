@@ -23,7 +23,7 @@ _client = None
 _model = None  # shared embedding model (multi-tenant: 同模型服务所有 project)
 _use_query_prompt = False
 _global_init_error: str | None = None  # model load failure (跨 project 共享)
-_gpu_sem: "asyncio.Semaphore | None" = None  # lazy init in event loop
+_gpu_sem: asyncio.Semaphore | None = None  # lazy init in event loop
 
 
 def _ensure_model():
@@ -96,7 +96,7 @@ def _encode_query(query: str):
     return vec.tolist()
 
 
-def _get_gpu_sem() -> "asyncio.Semaphore":
+def _get_gpu_sem() -> asyncio.Semaphore:
     """Lazy init GPU semaphore (must be inside event loop)."""
     global _gpu_sem
     if _gpu_sem is None:

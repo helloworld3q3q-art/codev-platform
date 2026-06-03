@@ -14,7 +14,7 @@
 """
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 from codev_platform.gateway.auth import Authenticator, Identity
 from codev_platform.web.security.sessions import session_store

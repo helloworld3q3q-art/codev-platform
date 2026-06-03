@@ -15,12 +15,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 # ---- 配置 ----
 
@@ -68,9 +67,6 @@ from codev_platform.chroma.chunking import (  # noqa: E402
     CHUNK_TARGET_MAX,
     chunk_text,
     file_sha256 as _file_sha256_from_codev,
-    hard_split,
-    split_by_heading,
-    split_by_paragraph,
 )
 
 # manifest schema version — 改 chunk 策略 / metadata 结构时升级,自动触发 full rebuild
@@ -402,7 +398,9 @@ def index(force: bool = False) -> tuple[int, int]:
             if len(ids_buf) >= BATCH:
                 _flush()
                 logger.info("已处理 %d chunks", total)
-                ids_buf.clear(); docs_buf.clear(); metas_buf.clear()
+                ids_buf.clear()
+                docs_buf.clear()
+                metas_buf.clear()
         file_chunk_counts[rel] = per_file_count
 
     if ids_buf:

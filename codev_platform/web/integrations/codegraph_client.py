@@ -108,7 +108,7 @@ class CodegraphClient:
         self._path = _db_path(project_id, db_path)
         self._conn: sqlite3.Connection | None = None
 
-    def __enter__(self) -> "CodegraphClient":
+    def __enter__(self) -> CodegraphClient:
         self._conn = _connect_ro(self._path)
         return self
 

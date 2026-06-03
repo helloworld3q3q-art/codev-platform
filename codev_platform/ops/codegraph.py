@@ -226,7 +226,6 @@ def cmd_codegraph(args: argparse.Namespace) -> int:
             C.out(f"{pid.ljust(24)} {tag.ljust(14)} {plat if plat.exists() else '-'}")
         return 0
 
-    fn = link_project if args.action == "link" else unlink_project
     rc = 0
     for pid, repo in projects:
         if args.action == "link":

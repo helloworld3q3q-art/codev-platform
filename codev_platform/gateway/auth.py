@@ -12,7 +12,8 @@ import hmac
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
+from collections.abc import Mapping
 
 from codev_platform.core import identity as _identity
 from codev_platform.core.config import get as _cfg_get
@@ -194,12 +195,12 @@ def deploy_policy_error(cfg: dict | None, host: str) -> str | None:
         return None
     mode = _cfg_get(c, "deployment.mode", "dev")
     if mode == "prod":
-        return ("deployment.mode=prod 但 gateway.auth_mode=%s —— prod 模式必须 auth_mode=token "
-                "(见 config.example.json)。" % auth_mode)
+        return (f"deployment.mode=prod 但 gateway.auth_mode={auth_mode} —— prod 模式必须 auth_mode=token "
+                "(见 config.example.json)。")
     url = _cfg_get(c, "platform.url", None)
     if url and not _url_is_loopback(str(url)):
-        return ("platform.url=%s 指向远程(非 localhost) 但 gateway.auth_mode=%s —— "
-                "对外暴露必须 auth_mode=token (见 config.example.json)。" % (url, auth_mode))
+        return (f"platform.url={url} 指向远程(非 localhost) 但 gateway.auth_mode={auth_mode} —— "
+                "对外暴露必须 auth_mode=token (见 config.example.json)。")
     return None
 
 

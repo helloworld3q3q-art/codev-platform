@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from pathlib import Path
 
 from .schema import DB_PATH
 
@@ -30,7 +29,7 @@ class CrossLayerDB:
         self.conn.row_factory = sqlite3.Row
 
     @classmethod
-    def default(cls) -> "CrossLayerDB":
+    def default(cls) -> CrossLayerDB:
         if not DB_PATH.exists():
             raise FileNotFoundError(
                 f"cross_layer DB 不存在: {DB_PATH}; 先跑 python -m cross_link.build_index"

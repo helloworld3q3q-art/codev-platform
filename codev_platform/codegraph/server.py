@@ -204,7 +204,7 @@ class _Backend:
 
 
 _backends: dict[str, _Backend] = {}
-_current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextVar(
+_current_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_codegraph_project_id", default=None
 )
 _TOOLS_CACHE: list[Tool] | None = None  # codegraph 工具集跨项目一致, 发现一次即缓存

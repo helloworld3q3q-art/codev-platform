@@ -12,7 +12,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 from dataclasses import dataclass
-from typing import Mapping, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
+from collections.abc import Mapping
 
 
 @dataclass(frozen=True)
@@ -31,19 +32,19 @@ class WebhookProvider(Protocol):
         放行策略 (本机信任 opt-out) 在 server 层 (webhook.allow_insecure), provider 不做策略。"""
         ...
 
-    def parse(self, headers: Mapping[str, str], payload: dict) -> "PushEvent | None":
+    def parse(self, headers: Mapping[str, str], payload: dict) -> PushEvent | None:
         """push 事件 → PushEvent; 非 push (ping / 其它事件) 返回 None。"""
         ...
 
 
-_REGISTRY: dict[str, "WebhookProvider"] = {}
+_REGISTRY: dict[str, WebhookProvider] = {}
 
 
-def register(provider: "WebhookProvider") -> None:
+def register(provider: WebhookProvider) -> None:
     _REGISTRY[provider.name] = provider
 
 
-def get_provider(name: str) -> "WebhookProvider | None":
+def get_provider(name: str) -> WebhookProvider | None:
     return _REGISTRY.get(name)
 
 
@@ -76,7 +77,7 @@ class GiteaProvider:
         mac = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(mac, sig)
 
-    def parse(self, headers: Mapping[str, str], payload: dict) -> "PushEvent | None":
+    def parse(self, headers: Mapping[str, str], payload: dict) -> PushEvent | None:
         if (_hdr(headers, "X-Gitea-Event") or "").lower() != "push":
             return None
         repo = ((payload.get("repository") or {}).get("full_name") or "").strip()
@@ -97,7 +98,7 @@ class GitlabProvider:
         token = _hdr(headers, "X-Gitlab-Token") or ""
         return hmac.compare_digest(token, secret)
 
-    def parse(self, headers: Mapping[str, str], payload: dict) -> "PushEvent | None":
+    def parse(self, headers: Mapping[str, str], payload: dict) -> PushEvent | None:
         if (_hdr(headers, "X-Gitlab-Event") or "") != "Push Hook":
             return None
         repo = ((payload.get("project") or {}).get("path_with_namespace") or "").strip()

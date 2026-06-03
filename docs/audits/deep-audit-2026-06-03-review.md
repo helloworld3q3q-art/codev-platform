@@ -126,7 +126,7 @@ P0 运营(现在就坏,原审计漏):
 
 | 项 | 状态 | 落地点 |
 |---|---|---|
-| P0 webhook.secret 决断 | ◻ **运营** | 代码已 fail-closed 正确(配 secret 即活 / 或显式下线);配密钥是部署动作,非代码改 |
+| P0 webhook.secret 决断 | ✅ **已配+实测在跑** | 复核当时据陈旧 webhook.log 误判为"未配"。2026-06-03 实查 WSL live config:secret 已配 + 3 项目 webhook_repo 映射齐;`codev-webhook` 服务 active/enabled(19099 healthz 200);Gitea webhook id=2 active,投递 succeed=1;**本会话多次 push 实测被自动 enqueue reindex**。原"链瘫痪"结论作废 |
 | P0 web rebuild 空壳接线 | ✅ | `index_service.make_reindex_dispatch_trigger` 把 index_rebuild job 派进真实 FileSpoolQueue(与 webhook 同队列, worker 消费);'all' 展开 runners.kinds();`jobs.py` 注入;submit 派发失败释放锁;`test_reindex_dispatch_trigger.py` 5 例 |
 | 1 双轨鉴权收口 | ✅ | `SessionAwareAuthenticator`(`8c6153c`) |
 | 2 projects 路由授权 | ✅ | list/detail/load/unload 带 `current_session`,register 带 `require_org_role("admin")`;service 逐项目 `_authorize_project` |
@@ -139,6 +139,6 @@ P0 运营(现在就坏,原审计漏):
 | 8 日志迁 data_root/logs + gitignore | ✅ | webhook.log / worker.log / MCP daemon 全走 `logs_dir()`;`.gitignore` `*.log` 覆盖,无 .log 入库 |
 | 9 broad except 区分上报型 vs 真吞型 | ⏳ **按设计保留** | 真吞的两处已收口:worker._log 是写日志失败兜底(可接受)、account_store fallback 已收窄 ImportError;MCP daemon 真静默 except 已加可观测(`2943742`)。`_checks.py` 多为上报型(原审计定级偏高)。剩余纯定性,无独立代码债 |
 
-**结论**:§五 12 项中 10 项已落地并测,1 项(webhook.secret)是运营决断,1 项(broad except)按设计保留。复核闭环。测试基线 786→**791 passed / 5 skipped**。
+**结论**:§五 12 项中 **11 项已落地并测**(含 webhook.secret 实查在跑),1 项(broad except)按设计保留。复核闭环。测试基线 786→**791 passed / 5 skipped**。
 
-**唯一待用户决断**:webhook.secret —— 配上则自动 reindex 链复活(配 `webhook.secret` + VCS 端同密钥),或显式下线只走 web rebuild(已真实)/ CLI。
+**遗留小项(非阻塞)**:webhook 接收器 8MB body 上限偶尔挡住超大 push(web-ui 重生成类大 commit, 本无 reindex scope, 丢弃无害);如需覆盖可再抬上限。

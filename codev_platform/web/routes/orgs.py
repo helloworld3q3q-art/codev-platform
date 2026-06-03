@@ -36,6 +36,9 @@ router = APIRouter()
 
 _TAG = "OrgAPI-组织管理"
 
+# org admin 授权依赖单例 (模块级, 避免在参数默认值里现调 require_org_role —— 同 projects.py 范式)。
+_require_admin = require_org_role("admin")
+
 
 def _service() -> OrgService:
     return OrgService()
@@ -108,7 +111,7 @@ def get_org_detail(
 def update_org(
     request: Request,
     body: OrgUpdateRequest,
-    _sess=Depends(require_org_role("admin")),
+    _sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[OrgActionResult]:
     result = svc.update_org(code=body.code, name=body.name, description=body.description)
@@ -125,7 +128,7 @@ def update_org(
 def set_org_status(
     request: Request,
     body: OrgStatusRequest,
-    _sess=Depends(require_org_role("admin")),
+    _sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[OrgActionResult]:
     return ok(svc.set_status(code=body.code, status=body.status), request_id=_rid(request))
@@ -177,7 +180,7 @@ def list_org_members(
 def add_org_member(
     request: Request,
     body: MemberAddRequest,
-    _sess=Depends(require_org_role("admin")),
+    _sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[MemberActionResult]:
     result = svc.add_member(code=body.code, username=body.username, role=body.role)
@@ -194,7 +197,7 @@ def add_org_member(
 def remove_org_member(
     request: Request,
     body: MemberRemoveRequest,
-    _sess=Depends(require_org_role("admin")),
+    _sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[MemberActionResult]:
     result = svc.remove_member(code=body.code, username=body.username)
@@ -211,7 +214,7 @@ def remove_org_member(
 def set_org_member_role(
     request: Request,
     body: MemberRoleRequest,
-    _sess=Depends(require_org_role("admin")),
+    _sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[MemberActionResult]:
     result = svc.set_member_role(code=body.code, username=body.username, role=body.role)

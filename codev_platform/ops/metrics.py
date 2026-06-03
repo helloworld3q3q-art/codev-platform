@@ -21,7 +21,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 _SINCE_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -165,8 +165,8 @@ def to_prometheus(summary: MetricsSummary) -> str:
 
     audit = summary.per_source.get("audit", {})
     metric("codev_audit_requests_total", "gauge", "audit log entries in window", [
-        (f'result="allowed"', audit.get("allowed", 0)),
-        (f'result="denied"', audit.get("denied", 0)),
+        ('result="allowed"', audit.get("allowed", 0)),
+        ('result="denied"', audit.get("denied", 0)),
     ])
     metric("codev_audit_deny_rate", "gauge", "audit deny rate in window",
            [("", audit.get("deny_rate", 0.0))])

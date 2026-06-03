@@ -5,6 +5,26 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: ruff (codev_platform)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      # Phase 1 逐步收敛: 先 gate 产品代码 codev_platform (规则/ignore 见 pyproject [tool.ruff])。
+      # tests/ + tools/ + scripts/ 留 Phase 2 (E501 行长全仓暂缓)。
+      - name: Ruff check
+        run: python -m ruff check codev_platform
+
   test:
     name: pytest (${{ matrix.os }} / py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

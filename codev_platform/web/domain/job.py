@@ -51,19 +51,19 @@ class Job:
     def is_cancellable(self) -> bool:
         return self.status in _CANCELLABLE
 
-    def _to(self, status: str, *, error: str | None = None) -> "Job":
+    def _to(self, status: str, *, error: str | None = None) -> Job:
         return replace(self, status=status, updated_at=time.time(), error=error)
 
-    def to_running(self) -> "Job":
+    def to_running(self) -> Job:
         return self._to(JobStatusEnum.RUNNING.value)
 
-    def to_succeeded(self) -> "Job":
+    def to_succeeded(self) -> Job:
         return self._to(JobStatusEnum.SUCCEEDED.value)
 
-    def to_failed(self, error: str) -> "Job":
+    def to_failed(self, error: str) -> Job:
         return self._to(JobStatusEnum.FAILED.value, error=error)
 
-    def to_cancelled(self) -> "Job":
+    def to_cancelled(self) -> Job:
         return self._to(JobStatusEnum.CANCELLED.value)
 
 

@@ -116,7 +116,6 @@ def _cmd_doctor(cfg) -> int:
         return 1
 
     # 3. 能否连通 + 关键表是否存在
-    read_dsn = get(cfg, "memory.pg_dsn_read") or None
     try:
         import psycopg
 

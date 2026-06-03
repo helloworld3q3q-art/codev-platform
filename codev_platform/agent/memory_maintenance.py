@@ -11,7 +11,7 @@ LLM 融合走**注入式 `fuse_fn`**(`list[str] -> str`):编排逻辑(取组/写
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from codev_platform.agent.memory_store import MemoryEntry, MemoryStore
 

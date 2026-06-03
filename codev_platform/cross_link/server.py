@@ -129,7 +129,7 @@ _init_errors: dict[str, str] = {}            # project_id -> **硬**加载失败
 _missing_db: dict[str, str] = {}             # project_id -> DB 文件缺失 (瞬时, 每次重查; 见 _ensure_conn_for)
 
 # asyncio 单线程, dict 操作原子, 不上锁。stdio 模式 contextvar 不设 → fallback PROJECT_ID。
-_current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextVar(
+_current_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_cross_link_project_id", default=None
 )
 

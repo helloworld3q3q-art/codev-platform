@@ -59,7 +59,6 @@ def _ensure_reranker():
         from transformers import AutoTokenizer, AutoModelForCausalLM
         _flog(f"[reranker] loading {RERANKER_MODEL} device={RERANKER_DEVICE}")
         _reranker_tok = AutoTokenizer.from_pretrained(RERANKER_MODEL, padding_side="left")
-        import torch
         dtype = _torch_dtype(RERANKER_DTYPE, RERANKER_DEVICE)
 
         def _load_reranker_model():

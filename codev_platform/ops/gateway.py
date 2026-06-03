@@ -205,7 +205,7 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         servers = data.get("mcpServers", {})
         bearer = f"Bearer ${{{args.env}}}"
         changed = 0
-        for name, conf in servers.items():
+        for conf in servers.values():
             if not isinstance(conf, dict):
                 continue
             if args.remove:

@@ -24,14 +24,14 @@ class ReindexRunner(Protocol):
         ...
 
 
-_REGISTRY: dict[str, "ReindexRunner"] = {}
+_REGISTRY: dict[str, ReindexRunner] = {}
 
 
-def register(runner: "ReindexRunner") -> None:
+def register(runner: ReindexRunner) -> None:
     _REGISTRY[runner.kind] = runner
 
 
-def get_runner(kind: str) -> "ReindexRunner | None":
+def get_runner(kind: str) -> ReindexRunner | None:
     return _REGISTRY.get(kind)
 
 

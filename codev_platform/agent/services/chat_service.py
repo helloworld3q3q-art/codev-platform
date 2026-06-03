@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 
 from codev_platform.agent.brain.base import LLMProvider, Message
 from codev_platform.agent.loop import AgentLoop, AgentResult

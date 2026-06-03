@@ -205,9 +205,8 @@ def _scan_controllers_in_file(
         head_start = _class_head_start(src, cm.start())
         head = src[head_start: cm.start()]
         prefix = ""
-        tmpl_m = None
-        for tmpl_m in _RE_ROUTE_TMPL.finditer(head):
-            pass  # 取最后一个 (最贴近类声明的) [Route]。
+        tmpls = list(_RE_ROUTE_TMPL.finditer(head))
+        tmpl_m = tmpls[-1] if tmpls else None  # 取最后一个 (最贴近类声明的) [Route]。
         if tmpl_m:
             prefix = _expand_route_tmpl(tmpl_m.group("tmpl"), class_name)
 

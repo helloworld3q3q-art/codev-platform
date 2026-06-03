@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 
 from codev_platform.core.errors import PlatformError
-from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode
 
 logger = logging.getLogger(__name__)
 

@@ -103,7 +103,7 @@ class _ProjectState:
     """Per-project runtime state for multi-tenant daemon."""
     project_id: str
     collection: Any = None  # chroma Collection
-    bm25_index: "BM25Index | None" = None
+    bm25_index: BM25Index | None = None
     last_stamp_mtime: float = 0.0
     init_error: str | None = None
     active_collection_name: str | None = None  # 实际使用的 collection 名 (prefixed 或 legacy)
@@ -153,7 +153,7 @@ def _project_last_indexed_iso(project_id: str) -> str | None:
 # _to_iso 已抽到 _helpers.py (上方 import re-export)。
 
 # contextvar 把 SSE session 跟 project_id 绑定; tool handler 通过它路由
-_current_project_id: contextvars.ContextVar["str | None"] = contextvars.ContextVar(
+_current_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_current_project_id", default=None
 )
 
@@ -187,7 +187,7 @@ def _load_project_state(project_id: str, reason: str) -> _ProjectState:
                     f"重跑 index_docs.py 后会写入新命名 collection。"
                 )
             except Exception:
-                raise exc
+                raise exc from None
         else:
             raise
 

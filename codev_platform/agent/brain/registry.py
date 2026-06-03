@@ -14,7 +14,8 @@ config.py 只做通用读取,不含 provider 名表。
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from codev_platform.agent import config as acfg
 from codev_platform.agent.brain.base import LLMProvider

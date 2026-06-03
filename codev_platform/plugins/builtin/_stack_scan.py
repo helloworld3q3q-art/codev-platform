@@ -55,7 +55,7 @@ def _iter_files(repo: Path, suffixes: tuple[str, ...]) -> list[Path]:
     """
     out: list[Path] = []
     suffix_set = set(suffixes)
-    for dirpath, dirnames, filenames in _walk_pruned(repo):
+    for dirpath, _dirnames, filenames in _walk_pruned(repo):
         base = Path(dirpath)
         for name in filenames:
             if Path(name).suffix in suffix_set:
