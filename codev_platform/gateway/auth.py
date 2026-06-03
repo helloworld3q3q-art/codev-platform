@@ -74,6 +74,23 @@ class Identity:
     all_projects: bool = False
 
 
+def identity_from_internal_claims(claims: Mapping[str, Any]) -> Identity:
+    """已验签的服务间 X-Identity claims → Identity (via='internal')。
+
+    claims 来自 core.service_identity.verify_identity (web 前门签发, 已过期/验签校验)。
+    project 白名单解析复用 token 模式语义: all_projects=True 无视 projects; 否则按 list 过滤。
+    """
+    raw = claims.get("projects")
+    projects: frozenset[str] = frozenset(str(p) for p in raw) if isinstance(raw, (list, tuple)) else frozenset()
+    return Identity(
+        user_id=str(claims.get("user_id") or "unknown"),
+        org_id=str(claims.get("org_id") or "default"),
+        via="internal",
+        projects=projects,
+        all_projects=bool(claims.get("all_projects", False)),
+    )
+
+
 @runtime_checkable
 class Authenticator(Protocol):
     def authenticate(self, headers: Mapping[str, str]) -> Identity:

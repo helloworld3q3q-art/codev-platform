@@ -45,11 +45,14 @@
   },
 
   "agent": {
-    "_comment": "agent HTTP 服务 (codev-platform agent serve)。provider 选大脑; api_key 留空则走 env (ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)。安全红线: 真 key 只写本机 ~/.codev-platform/config.json, 绝不进仓; 本样板只放占位符。session_backend: memory(默认,进程内,重启丢) | pg(持久化到 memory.pg_dsn)。",
+    "_comment": "agent HTTP 服务 (codev-platform agent serve)。provider 选大脑; api_key 留空则走 env (ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)。安全红线: 真 key 只写本机 ~/.codev-platform/config.json, 绝不进仓; 本样板只放占位符。session_backend: memory(默认,进程内,重启丢) | pg(持久化到 memory.pg_dsn)。base_url —— codev-web 前门代理 chat/memory 到 agent 的地址 (默认 http://127.0.0.1:8848, agent 绑 127.0.0.1)。internal_secret —— web↔agent 服务间 X-Identity 信物的 HMAC 密钥 (web 签发 / agent 验签, 短时效令牌, 非对外鉴权); 空=不启 X-Identity 通道 (web 代理需配); 安全红线: 真值只写本机 config / env, 绝不进仓。timeout_sec —— web 代理调 agent 的超时秒数 (默认 30)。",
     "provider": "claude",
     "model": "claude-opus-4-7",
     "max_steps": 12,
     "session_backend": "memory",
+    "base_url": "http://127.0.0.1:8848",
+    "internal_secret": "",
+    "timeout_sec": 30,
     "providers": {
       "claude":   { "api_key": "" },
       "gpt":      { "base_url": "https://api.openai.com/v1",        "model": "gpt-4o",        "api_key": "" },

@@ -91,6 +91,22 @@ def test_passthrough_no_project_scope_allowed():
     assert d.advisory is True
 
 
+def test_internal_identity_web_vouched_allowed():
+    # via=internal = web 前门已 require_project_access 鉴权 + HMAC 验签的服务间信物;
+    # token 模式下也直接放行(不看白名单/org), 且非 advisory(审计必记)。
+    d = can_access(_token_cfg(), _ident(via="internal", projects=frozenset(), all_projects=False),
+                   "openclaw-stock")
+    assert d.allowed is True
+    assert d.advisory is False
+
+
+def test_internal_identity_allowed_even_on_org_mismatch():
+    # internal 信物跨 org 也放行(web 前门已判, 含 platform_admin bypass 场景)。
+    cfg = {"gateway": {"auth_mode": "token"}, "projects": {"openclaw-stock": {"org_id": "orgX"}}}
+    d = can_access(cfg, _ident(via="internal", org_id="orgA"), "openclaw-stock")
+    assert d.allowed is True
+
+
 # ---- memory_scope_access ----
 
 def test_memory_personal_self_allowed():

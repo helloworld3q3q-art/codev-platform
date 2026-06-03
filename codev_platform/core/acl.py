@@ -23,6 +23,12 @@ class AccessDecision:
 def can_access(cfg: dict | None, identity, project_id: str | None) -> AccessDecision:
     """身份能否访问 project_id。3 MCP + agent + memory 五处共用的唯一真值源。
     passthrough(dev) 恒放行(advisory);token(prod) 硬校验两道闸。"""
+    # 服务间内部信物(via=internal): web 前门已认证并经 require_project_access 鉴权后, 用
+    # HMAC internal_secret 签发、被 agent 中间件验签通过才写入。agent 无 web 的 RBAC 成员数据,
+    # 不能独立复算逐项目授权 → 信任已验签的 web 授权。纵深 = HMAC 验签 + web 前置鉴权 + 内网 127.0.0.1。
+    # 任何 auth_mode 下都成立(internal 身份本身即"已授权"凭证)。
+    if getattr(identity, "via", None) == "internal":
+        return AccessDecision(True, "web-vouched internal identity")
     mode = _cfg_get(cfg or {}, "gateway.auth_mode", "passthrough")
     if mode != "token":
         return AccessDecision(True, "passthrough(dev): advisory allow", advisory=True)

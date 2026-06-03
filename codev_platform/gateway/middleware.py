@@ -21,7 +21,8 @@ from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 
 from codev_platform.core.ratelimit import SlidingWindowLimiter, default_key_from_scope
-from codev_platform.gateway.auth import Authenticator, Unauthorized
+from codev_platform.core.service_identity import verify_identity
+from codev_platform.gateway.auth import Authenticator, Unauthorized, identity_from_internal_claims
 
 _log = logging.getLogger("codev_platform.gateway")
 
@@ -46,21 +47,38 @@ def _path_is_public(path: str, public_exact: set[str]) -> bool:
 class AuthMiddleware:
     """纯 ASGI 认证拦截。挂载方式同普通中间件;对 SSE/流式安全,高并发轻量。"""
 
-    def __init__(self, app, authenticator: Authenticator, public_paths: Iterable[str] = ()) -> None:
+    def __init__(self, app, authenticator: Authenticator, public_paths: Iterable[str] = (),
+                 internal_secret: str | None = None) -> None:
         self.app = app
         self._auth = authenticator
+        # 服务间信物密钥 (web 前门 → agent 后端)。配了才启 X-Identity 通道; 空=维持原行为。
+        self._internal_secret = internal_secret or None
         # 规整 public 前缀: 统一去尾斜杠, 按 path 段边界匹配 (防 startswith 子串/穿越绕过)
         self._public_exact = _normalize_public_paths(public_paths)
 
     def _is_public(self, path: str) -> bool:
         return _path_is_public(path, self._public_exact)
 
+    def _internal_identity(self, headers: Headers):
+        """X-Identity 验签通过 → Identity; 无 header / 未配 secret / 验签失败 → None (回退原认证)。"""
+        if not self._internal_secret:
+            return None
+        token = headers.get("x-identity")
+        if not token:
+            return None
+        claims = verify_identity(token, self._internal_secret)
+        return identity_from_internal_claims(claims) if claims is not None else None
+
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or self._is_public(scope.get("path", "")):
             await self.app(scope, receive, send)
             return
+        headers = Headers(scope=scope)
         try:
-            identity = self._auth.authenticate(Headers(scope=scope))
+            # 服务间信物优先: web 前门已认证身份经 X-Identity 直接采信, 不破坏 passthrough/token 回退。
+            identity = self._internal_identity(headers)
+            if identity is None:
+                identity = self._auth.authenticate(headers)
         except Unauthorized as exc:
             # 静态 401 body —— 不回显异常内文 (避免反射用户输入 / 泄漏内部校验规则);详情只落服务端日志
             _log.info("[gateway] 401 path=%s: %s", scope.get("path"), exc)

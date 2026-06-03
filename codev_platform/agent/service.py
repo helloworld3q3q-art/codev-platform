@@ -17,7 +17,7 @@ def create_app() -> FastAPI:
 
     # 统一请求拦截(认证 → request.state.identity)。passthrough(单人)放行解析,
     # token 模式(M6)对非公开端点 401。/health 公开(存活探针)。模块在 gateway/,此处只挂载。
-    from codev_platform.core.config import load_config
+    from codev_platform.core.config import get as _cfg_get, load_config
     from codev_platform.gateway import AuthMiddleware, build_authenticator, maybe_rate_limit_middleware
     _cfg = load_config()
     # FastAPI add_middleware 是栈式 (后加的在外层)。要让 Auth 外层先设 identity、
@@ -29,6 +29,8 @@ def create_app() -> FastAPI:
         AuthMiddleware,
         authenticator=build_authenticator(_cfg),
         public_paths={"/health"},
+        # 服务间信物: web 前门 (codev-web) 用同一 secret 签 X-Identity, agent 验签即采信。
+        internal_secret=_cfg_get(_cfg, "agent.internal_secret", "") or None,
     )
     return app
 
