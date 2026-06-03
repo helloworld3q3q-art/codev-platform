@@ -135,3 +135,32 @@ README 核心卖点 **"改一处 → 跨层影响清单"** 打通,数据地基(�
 - cross-link MCP（19086）7016→7846 store-only 代码 live；webhook（19099）A3 生效；web 后端（18088）latest；全部 healthz/openapi 验证通过。
 
 **整条链闭环**：A1 桥接 → A2 parity 达标 → A6（2 工具 store-first）→ A3（停自动重建）→ 战线 B（agent 去重）→ 战线 A（MCP 4 工具纯 store）。cross_layer.sqlite + build_index.py 彻底退役，跨层链路单一真值源 = 统一图谱 store。测试基线 791 → **835 passed**，全程零回归。
+
+---
+
+## store vs cross_layer 实测对账 + gap 修复（本会话续 5）
+
+「cross-link 收敛 store 后，store 比旧 cross_layer 还缺什么」—— 不空谈，拿 openclaw 真库（store + cross_layer 都在 WSL）逐维度实测对比，写了临时脚本查 set-containment / language 填充率 / definers 覆盖。
+
+### 实测结果（openclaw）
+
+| 维度 | store | cross_layer | 判定 |
+|---|---|---|---|
+| 表 | 122 | 69 | ✅ cross 的 69 张全在 store（多 53）|
+| definers | 80 张表有源文件(66%) | 52 张有 flyway 定义者 | ✅ store 反而更广 |
+| java/python 区分 | language: java 177 / python 353（**无空值**）| 显式 kind | ✅ 填满，分桶可靠 |
+| 方法/函数 | 489 | 4177 | ⚠️ 设计取舍（见下）|
+| 端点命名 | handler 名 `login` | `AuthController.login` | ❌→✅ 真 gap，已修 |
+
+### gap（真 bug，已修 `79443b0`）
+store backend_endpoint 按 **handler 方法名**命名（`login`/`createUser`），cross_layer 旧约定是 `ClassName.method`（`AuthController.login`）。`find_endpoint_link` 工具文档写传 `ClassName.methodName` → store 查不到。
+- 修：全名未命中时退到取最后一段（handler）再匹配；结果加 `query` 字段留原始入参痕，`node` 用实际命中节点名。
+- 工具描述同步：endpoint 入参优先 handler 名、兼容 ClassName.method。
+- **真库实测验证**：`find_endpoint_link("AuthController.login")` → 命中 `node='login' url='/v1/auth/login' callers=1`。836 passed。
+
+### 方法级缩水 = 职责分工，不改代码（doc 引导）
+store 489 vs cross 4177，漏的 4165 全是 Lombok/POJO 样板（`equals`/`getId`/`canEqual`/`hashCode`）—— 不碰表、不挂端点，对跨层链路零价值。真正碰表的方法由 sql 插件扫全量 SQL 产出（reads_table 889 / writes_table 222 边），无遗漏。
+- 决策：**不把 4000+ 方法灌回 store**（违反 plan 红线「不灌方法级」+ bloat + 重复 codegraph 职责）。
+- `search_nodes` 描述讲清：搜的是「统一图谱跨层节点（端点/表/前端/桥接函数）」非全量符号，**找任意符号用 codegraph_search**。职责边界：search_nodes=跨层图谱，codegraph_search=全量符号。
+
+**结论**：store 对 cross_layer 实测无真缺口 —— 表/definers/语言全覆盖，端点命名兼容已补，方法级是正确取舍。cross-link 收敛 store 真完整闭环。`79443b0`。
