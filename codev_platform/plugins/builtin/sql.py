@@ -36,6 +36,7 @@ from pathlib import Path
 
 from codev_platform.graph.schema import (
     AnalyzerResult,
+    EdgeKind,
     GraphEdge,
     GraphNode,
     NodeKind,
@@ -473,6 +474,138 @@ def _django_db_table(cls: ast.ClassDef) -> str | None:
     return None
 
 
+# ============================ Python DML (表读写血缘 P2) ============================
+#
+# 扫 .py 里 SQL 字符串字面量 (cursor.execute / conn.execute 等的 raw SQL), 把"哪个函数
+# 读/写哪张表"连成血缘: 上游 pipeline 写库函数 --writes_table--> 表 --reads_table-->
+# 读库函数。这是 unified-graph-lineage 四层血缘里"上游数据 → SQL → 后端"两段的来源。
+# 第一版只解析字符串常量里的 raw SQL (openclaw pipeline 主用 %s 参数 + 字面量表名);
+# f-string / ORM DML 留后续。
+
+# 一段字符串是否 DML/查询 (动词起手; 排除 CREATE 等 DDL —— DDL 走 Pass2)。
+_RE_IS_SQL = re.compile(r"^\s*(?:insert|update|delete|select|replace|with)\b", re.IGNORECASE | re.ASCII)
+# 文件级廉价短路 (无下列子串直接跳过 AST 解析)。
+_RE_HAS_SQL = re.compile(r"insert\s+into|update\s+\w|delete\s+from|\bselect\b", re.IGNORECASE | re.ASCII)
+_RE_DML_INSERT = re.compile(r"\binsert\s+(?:or\s+\w+\s+)?into\s+([`\"\[]?[\w.]+)", re.IGNORECASE | re.ASCII)
+_RE_DML_UPDATE = re.compile(r"\bupdate\s+(?:only\s+)?([`\"\[]?[\w.]+)", re.IGNORECASE | re.ASCII)
+_RE_DML_DELETE = re.compile(r"\bdelete\s+from\s+([`\"\[]?[\w.]+)", re.IGNORECASE | re.ASCII)
+_RE_DML_FROM = re.compile(r"\bfrom\s+([`\"\[]?[\w.]+)", re.IGNORECASE | re.ASCII)
+_RE_DML_JOIN = re.compile(r"\bjoin\s+([`\"\[]?[\w.]+)", re.IGNORECASE | re.ASCII)
+# FROM 后非真实表的 token (子查询别名 / 关键字)。
+_NON_TABLE = frozenset({"select", "dual", "where", "set", "values", "table", "only", "lateral"})
+
+
+def _plausible_table(t: str) -> bool:
+    return bool(t) and t not in _NON_TABLE and not t.isdigit() and len(t) >= 2
+
+
+def _sql_table_access(sql: str) -> tuple[set[str], set[str]]:
+    """从一段 SQL 解析 (写表集, 读表集), 表名 lower 归一。同串里写优先 (reads 去掉写表)。"""
+    writes: set[str] = set()
+    reads: set[str] = set()
+    for rx in (_RE_DML_INSERT, _RE_DML_UPDATE, _RE_DML_DELETE):
+        for m in rx.finditer(sql):
+            t = _unquote(m.group(1)).lower()
+            if _plausible_table(t):
+                writes.add(t)
+    for rx in (_RE_DML_FROM, _RE_DML_JOIN):
+        for m in rx.finditer(sql):
+            t = _unquote(m.group(1)).lower()
+            if _plausible_table(t):
+                reads.add(t)
+    reads -= writes
+    return writes, reads
+
+
+def _func_ranges(tree: ast.AST) -> list[tuple[int, int, str]]:
+    """收集所有 (异步)函数的 (lineno, end_lineno, name), 用于把 SQL 串归属到最内层函数。"""
+    out: list[tuple[int, int, str]] = []
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out.append((n.lineno, getattr(n, "end_lineno", n.lineno), n.name))
+    return out
+
+
+def _owner_func(ranges: list[tuple[int, int, str]], lineno: int) -> str | None:
+    """含 lineno 的最内层函数名 (无则 None = 模块级)。"""
+    best: str | None = None
+    best_start = -1
+    for start, end, name in ranges:
+        if start <= lineno <= end and start > best_start:
+            best, best_start = name, start
+    return best
+
+
+def _scan_python_dml(
+    src: str, rel: str, project_id: str, known_tables: set[str]
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """AST 扫 .py 里 SQL 字符串常量 -> backend_function 节点 + reads/writes_table 边。
+
+    known_tables: 已建 db_table 名 lower 集合。命中即连边; 未命中建 inferred stub
+    db_table (血缘不断, meta source=dml-inferred), 由 caller 的 _absorb 跨文件去重。
+    """
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:
+        logger.warning("python dml parse fail %s: %s", rel, exc)
+        return nodes, edges
+    ranges = _func_ranges(tree)
+    seen_func: set[str] = set()
+    seen_stub: set[str] = set()
+    for node in ast.walk(tree):
+        s = _str_const(node)
+        if not s or not _RE_IS_SQL.match(s):
+            continue
+        writes, reads = _sql_table_access(s)
+        if not writes and not reads:
+            continue
+        lineno = getattr(node, "lineno", 1)
+        owner = _owner_func(ranges, lineno) or f"<{rel.rsplit('/', 1)[-1]}>"
+        func_id = f"{project_id}:backend_function:{rel}:{owner}"
+        if func_id not in seen_func:
+            seen_func.add(func_id)
+            nodes.append(
+                GraphNode(
+                    id=func_id,
+                    kind=NodeKind.BACKEND_FUNCTION.value,
+                    name=owner,
+                    project_id=project_id,
+                    file=rel,
+                    line=lineno,
+                    language="python",
+                    meta={"db_access": True},
+                )
+            )
+        access = (
+            [(t, EdgeKind.WRITES_TABLE.value) for t in sorted(writes)]
+            + [(t, EdgeKind.READS_TABLE.value) for t in sorted(reads)]
+        )
+        for table, edge_kind in access:
+            table_id = f"{project_id}:db_table:{table}"
+            if table not in known_tables and table not in seen_stub:
+                seen_stub.add(table)
+                nodes.append(
+                    GraphNode(
+                        id=table_id,
+                        kind=NodeKind.DB_TABLE.value,
+                        name=table,
+                        project_id=project_id,
+                        meta={"source": "dml-inferred", "inferred": True},
+                    )
+                )
+            edges.append(
+                GraphEdge(
+                    source=func_id,
+                    target=table_id,
+                    kind=edge_kind,
+                    meta={"evidence": f"{edge_kind} {table} in {owner}()"},
+                )
+            )
+    return nodes, edges
+
+
 class SqlPlugin(AnalyzerPlugin):
     """SQL / 数据库栈 -> db_table / db_column 节点 + contains 边 (方言走 meta["dialect"])。"""
 
@@ -533,6 +666,8 @@ class SqlPlugin(AnalyzerPlugin):
             _absorb(*_scan_sql_file(text, rel, dialect, project_id))
 
         # Pass 2 + 3: .py 源 —— 内嵌 CREATE TABLE 字符串 + SQLAlchemy/Django ORM。
+        # 同时缓存 (rel, src) 供 Pass 4 复用 (不重复读盘)。
+        py_srcs: list[tuple[str, str]] = []
         for f in _stack_scan._iter_files(repo, (".py",)):
             try:
                 src = f.read_text(encoding="utf-8")
@@ -540,6 +675,7 @@ class SqlPlugin(AnalyzerPlugin):
                 logger.warning("read fail %s: %s", f, exc)
                 continue
             rel = _stack_scan._rel(f, repo)
+            py_srcs.append((rel, src))
             # Pass 2: python-ddl (字符串字面量里的 CREATE TABLE; 正则直扫全文)。
             if _RE_CREATE_TABLE.search(src):
                 dialect = _detect_dialect(src, f.name)
@@ -550,5 +686,15 @@ class SqlPlugin(AnalyzerPlugin):
             # Pass 3: ORM (AST; 仅当文件含 ORM 迹象时才解析, 省 AST 开销)。
             if any(hint in src for hint in _ORM_HINTS):
                 _absorb(*_scan_python_orm(src, rel, project_id))
+
+        # Pass 4: .py DML 读写血缘 —— **必须在所有 DDL 之后** (known_tables 完整, 才能
+        # 区分"已定义表 (连边)"与"未定义表 (建 inferred stub)", 不会用 stub 覆盖真表)。
+        known_tables = {
+            n.name.lower() for n in result.nodes if n.kind == NodeKind.DB_TABLE.value
+        }
+        for rel, src in py_srcs:
+            if not _RE_HAS_SQL.search(src):  # 廉价短路: 无 DML 动词文件跳过 AST。
+                continue
+            _absorb(*_scan_python_dml(src, rel, project_id, known_tables))
 
         return result
