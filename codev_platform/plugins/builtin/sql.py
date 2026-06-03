@@ -518,6 +518,245 @@ def _scan_python_core_tables(
     return nodes, edges
 
 
+# ===================== SQLAlchemy Core DML 读写血缘 (P2) =====================
+#
+# 本仓 web/repositories/*_pg.py 不写 raw SQL, 全走 Core builder:
+#   o = tables.orgs
+#   conn.execute(select(o.c.org_id).where(o.c.org_id == code))   # 读 orgs
+#   conn.execute(insert(t).values(...))                           # 写 t
+#   conn.execute(delete(om).where(...))                           # 写 om
+#   _insert(table).values(...).on_conflict_do_update(...)         # upsert = 读+写
+#   _upsert_stmt(tables.orgs, ...)                                # 调用方写 orgs (跨函数传表)
+# _scan_python_dml 的字符串正则看不到这些 (无 SQL 字面量), 故新加 AST builder 扫描,
+# 把"哪个函数读/写哪张表"接进 endpoint->表 链路。两阶段别名: 全局 <var>=Table("x") +
+# 函数内 o=tables.x / o=x。表解析不到的实参一律放弃 (不产错边)。
+
+# DML builder 函数名 (callee 末段)。
+_CORE_READ_FN = frozenset({"select"})
+_CORE_WRITE_FN = frozenset({"insert", "delete"})
+_CORE_UPDATE_FN = frozenset({"update"})
+# upsert 方法 (链式调在 insert(...) 之上, 受表为外层 insert 的实参)。
+_CORE_UPSERT_METHOD = frozenset({"on_conflict_do_update", "on_conflict_do_nothing"})
+# join 类方法 (receiver + 首参根变量都是被读的表)。
+_CORE_JOIN_METHOD = frozenset({"join", "outerjoin"})
+
+
+def _scan_python_core_table_vars(src: str) -> dict[str, str]:
+    """全局预扫一个 .py: `<var> = Table("realname", ...)` -> {var名 -> 真表名}。
+
+    DML 别名解析的第一阶段 (跨文件汇总): `from db import tables; o = tables.orgs` 里的
+    `tables.orgs` 经此映射 (orgs->orgs) 解析。动态表名 `Table(var)` (首参非字符串常量) 放弃。
+    """
+    out: dict[str, str] = {}
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return out
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        if _call_attr_chain(node.value) != "Table" or not node.value.args:
+            continue
+        table = _str_const(node.value.args[0])
+        if not table or not _plausible_table(table.lower()):
+            continue
+        for tgt in node.targets:
+            if isinstance(tgt, ast.Name):
+                out[tgt.id] = table.lower()
+    return out
+
+
+def _c_chain_root(node: ast.expr) -> str | None:
+    """取 `.c` 链根变量名: `o.c.org_id` -> 'o'; `om.c.user_id` -> 'om'。
+
+    形态 Attribute(attr=col, value=Attribute(attr='c', value=Name(root)))。
+    不含 `.c` 段 (如裸 Name / 非列引用) -> None。
+    """
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        if cur.attr == "c" and isinstance(cur.value, ast.Name):
+            return cur.value.id
+        cur = cur.value
+    return None
+
+
+def _local_table_aliases(
+    func: ast.AST, core_table_vars: dict[str, str]
+) -> dict[str, str]:
+    """函数体内局部别名: `o = tables.orgs` / `o = orgs` -> {o -> 真表名}。
+
+    经全局 core_table_vars 二次解析:
+      - `o = tables.orgs`  : Attribute(attr='orgs') -> core_table_vars['orgs']
+      - `o = orgs`         : Name('orgs')           -> core_table_vars['orgs']
+    解析不到的赋值跳过 (不引入错别名)。
+    """
+    local: dict[str, str] = {}
+    for stmt in ast.walk(func):
+        if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
+            continue
+        tgt = stmt.targets[0]
+        if not isinstance(tgt, ast.Name):
+            continue
+        val = stmt.value
+        real: str | None = None
+        if isinstance(val, ast.Attribute):  # o = tables.orgs
+            real = core_table_vars.get(val.attr)
+        elif isinstance(val, ast.Name):  # o = orgs
+            real = core_table_vars.get(val.id)
+        if real:
+            local[tgt.id] = real
+    return local
+
+
+def _resolve_table_arg(
+    arg: ast.expr, local: dict[str, str], core_table_vars: dict[str, str]
+) -> str | None:
+    """把一个实参解析成真表名: Name -> 查 local 再查全局; Attribute(tables.X) -> 查全局。
+
+    解不到返回 None (调用方放弃该实参, 不产错边)。动态表名 (非 Name/Attribute) 也 None。
+    """
+    if isinstance(arg, ast.Name):
+        return local.get(arg.id) or core_table_vars.get(arg.id)
+    if isinstance(arg, ast.Attribute):  # tables.orgs
+        return core_table_vars.get(arg.attr)
+    return None
+
+
+def _scan_core_dml_in_func(
+    func: ast.AST,
+    local: dict[str, str],
+    core_table_vars: dict[str, str],
+) -> tuple[set[str], set[str]]:
+    """遍历一个函数体所有 ast.Call, 按 builder 类型累积 (writes, reads) 表集。
+
+    - select(...)            读: 每个实参的 .c 链根 -> 解析表。
+    - .select_from/.join/.. : 读: receiver + 首参根变量 -> 解析表。
+    - insert(t) / delete(t)  写: 首位置实参解析表。
+    - update(t)              写 (updates_table 语义, 这里并入 writes)。
+    - on_conflict_*          读+写: 外层 insert(...) 的表 (链式 receiver 上溯)。
+    跨函数传表: 任意 Call 的位置实参是 tables.X / 已知表 Name -> 归本函数写 (覆盖 _upsert_stmt
+    这类把 tables.orgs 传进去的调用点; helper 内部形参 table 因解不到而自动放弃)。
+    """
+    writes: set[str] = set()
+    reads: set[str] = set()
+    for call in ast.walk(func):
+        if not isinstance(call, ast.Call):
+            continue
+        fn = _call_attr_chain(call)
+        if fn in _CORE_READ_FN:
+            for a in call.args:
+                root = _c_chain_root(a)
+                if root:
+                    t = local.get(root) or core_table_vars.get(root)
+                    if t:
+                        reads.add(t)
+        elif fn in _CORE_JOIN_METHOD and isinstance(call.func, ast.Attribute):
+            recv = _resolve_table_arg(call.func.value, local, core_table_vars)
+            if recv:
+                reads.add(recv)
+            if call.args:
+                joined = _resolve_table_arg(call.args[0], local, core_table_vars)
+                if joined:
+                    reads.add(joined)
+        elif fn in _CORE_WRITE_FN and call.args:
+            t = _resolve_table_arg(call.args[0], local, core_table_vars)
+            if t:
+                writes.add(t)
+        elif fn in _CORE_UPDATE_FN and call.args:
+            t = _resolve_table_arg(call.args[0], local, core_table_vars)
+            if t:
+                writes.add(t)
+        elif fn in _CORE_UPSERT_METHOD and isinstance(call.func, ast.Attribute):
+            t = _upsert_outer_table(call.func.value, local, core_table_vars)
+            if t:
+                writes.add(t)
+                reads.add(t)
+        # 跨函数传表: 调用点把 tables.X / 已知表 Name 作位置实参 -> 本函数写该表。
+        # (_upsert_stmt(tables.orgs, ...) / 其它 helper(tables.users, ...))
+        if fn not in _CORE_READ_FN and fn not in _CORE_JOIN_METHOD:
+            for a in call.args:
+                if isinstance(a, ast.Attribute):
+                    t = core_table_vars.get(a.attr)
+                    if t:
+                        writes.add(t)
+    reads -= writes
+    return writes, reads
+
+
+def _upsert_outer_table(
+    recv: ast.expr, local: dict[str, str], core_table_vars: dict[str, str]
+) -> str | None:
+    """从 `_insert(table).values(...).on_conflict_*` 的 receiver 链上溯到 insert(...) 的表实参。
+
+    receiver 是一串 Attribute/Call 链; 找到 callee 末段是 insert 的 Call, 取其首位置实参解析表。
+    helper 内部的 `_insert(table)` 形参 table 解不到 -> None (放弃, 由调用点 tables.X 兜)。
+    """
+    cur = recv
+    while isinstance(cur, ast.Call):
+        fn = _call_attr_chain(cur)
+        if fn in _CORE_WRITE_FN and cur.args:  # insert(...)
+            return _resolve_table_arg(cur.args[0], local, core_table_vars)
+        # 上溯链式 receiver: insert(t).values(...) -> .values 的 receiver 是 insert(t)。
+        if isinstance(cur.func, ast.Attribute):
+            cur = cur.func.value
+        else:
+            break
+    return None
+
+
+def _scan_python_core_dml(
+    src: str,
+    rel: str,
+    project_id: str,
+    known_tables: set[str],
+    core_table_vars: dict[str, str],
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """AST 扫 .py 里 SQLAlchemy Core DML builder -> backend_function 节点 + reads/writes_table 边。
+
+    节点产法 / 函数归属镜像 _scan_python_dml: 每个含 DML builder 的(异步)函数产一个
+    backend_function 节点, 出边走 _emit_table_access (confidence=0.9, 区别于 raw SQL 的 1.0)。
+    模块级 (函数外) 的 Core DML 罕见, 暂不处理 (本仓全在方法体内)。
+    """
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:
+        logger.warning("python core-dml parse fail %s: %s", rel, exc)
+        return nodes, edges
+    seen_func: set[str] = set()
+    seen_stub: set[str] = set()
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _local_table_aliases(func, core_table_vars)
+        writes, reads = _scan_core_dml_in_func(func, local, core_table_vars)
+        if not writes and not reads:
+            continue
+        func_id = f"{project_id}:backend_function:{rel}:{func.name}"
+        if func_id not in seen_func:
+            seen_func.add(func_id)
+            nodes.append(
+                GraphNode(
+                    id=func_id,
+                    kind=NodeKind.BACKEND_FUNCTION.value,
+                    name=func.name,
+                    project_id=project_id,
+                    file=rel,
+                    line=func.lineno,
+                    language="python",
+                    meta={"db_access": True, "core_dml": True},
+                )
+            )
+        a_nodes, a_edges = _emit_table_access(
+            func_id, writes, reads, project_id, known_tables, seen_stub,
+            confidence=0.9,
+        )
+        nodes.extend(a_nodes)
+        edges.extend(a_edges)
+    return nodes, edges
+
+
 def _sa_column_type(call: ast.Call) -> str | None:
     """SQLAlchemy Column(Integer, ...) 第一个位置实参的类型名 (尽力, 无则 None)。"""
     for arg in call.args:
@@ -934,7 +1173,10 @@ class SqlPlugin(AnalyzerPlugin):
 
         # Pass 2 + 3: .py 源 —— 内嵌 CREATE TABLE 字符串 + SQLAlchemy/Django ORM。
         # 同时缓存 (rel, src) 供 Pass 4 复用 (不重复读盘)。
+        # core_table_vars: 全局 `<var> = Table("x")` -> {var -> 表名}, 供 Core DML 别名解析
+        # (Pass 4.5)。跨文件汇总 —— tables.py 定义 orgs, *_pg.py 里 o=tables.orgs 才能解析。
         py_srcs: list[tuple[str, str]] = []
+        core_table_vars: dict[str, str] = {}
         for f in _stack_scan._iter_files(repo, (".py",)):
             try:
                 src = f.read_text(encoding="utf-8")
@@ -945,6 +1187,8 @@ class SqlPlugin(AnalyzerPlugin):
             if _is_test_path(rel):  # 测试夹具 .py 不当生产表/访问源 (治幽灵表 + 幽灵 reader)
                 continue
             py_srcs.append((rel, src))
+            if "Table(" in src:  # 廉价短路: 仅含 Table( 的文件参与全局别名预扫。
+                core_table_vars.update(_scan_python_core_table_vars(src))
             # Pass 2: python-ddl (字符串字面量里的 CREATE TABLE; 正则直扫全文)。
             if _RE_CREATE_TABLE.search(src):
                 dialect = _detect_dialect(src, f.name)
@@ -969,6 +1213,18 @@ class SqlPlugin(AnalyzerPlugin):
             if not _RE_HAS_SQL.search(src):  # 廉价短路: 无 DML 动词文件跳过 AST。
                 continue
             _absorb(*_scan_python_dml(src, rel, project_id, known_tables))
+
+        # Pass 4.5: .py SQLAlchemy Core DML builder 读写血缘 (select/insert/update/delete)。
+        # 也在 known_tables 完整后跑 (同 Pass 4 理由)。廉价短路: 文件含 builder 调用形态才解析。
+        for rel, src in py_srcs:
+            if not (
+                "select(" in src or "insert(" in src
+                or "update(" in src or "delete(" in src
+            ):
+                continue
+            _absorb(*_scan_python_core_dml(
+                src, rel, project_id, known_tables, core_table_vars
+            ))
 
         # Pass 4b/4c: .java —— 注解 SQL DML + MyBatis-Plus BaseMapper CRUD 表访问血缘。
         java_srcs: list[tuple[str, str]] = []
