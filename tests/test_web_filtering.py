@@ -55,17 +55,40 @@ class _FakeProjectRead:
 
 
 def test_projects_list_filters_by_org(monkeypatch):
+    """org 隔离 (新模型): org admin 看本 org + 公开项目; platform admin 看全部。"""
+    from codev_platform.web.security import membership as mem
     from codev_platform.web.services import project_service as ps
+    from codev_platform.web.domain.accounts import OrgMember
+    from codev_platform.web.repositories.account_store import (
+        get_member_store,
+        reset_account_stores,
+    )
+    from codev_platform.web.security.sessions import Session
     from codev_platform.web.services.project_service import ProjectService
 
-    # p1→orgA, p2→orgB, pub 无 org_id = 公开 (全 org 可见)。
+    # p1→orgA, p2→orgB, pub 无 org_id = 公开 (本 org admin 可见)。
     cfg = {"projects": {"p1": {"org_id": "orgA"}, "p2": {"org_id": "orgB"}}}
     monkeypatch.setattr(ps, "load_config", lambda: cfg)
+    monkeypatch.setattr(mem, "load_config", lambda: cfg)
+    # platform admin 仅 "super"; 其余按 org 角色判。
+    monkeypatch.setattr(ps, "is_platform_admin", lambda c, u: u == "super")
+    monkeypatch.setattr(mem, "is_platform_admin", lambda c, u: u == "super")
+
+    reset_account_stores()
+    get_member_store().upsert(OrgMember(org_id="orgA", username="a", role="admin"))
+    get_member_store().upsert(OrgMember(org_id="orgB", username="b", role="admin"))
     svc = ProjectService(read_repo=_FakeProjectRead())
 
-    a, _ = svc.list_projects(org_id="orgA", offset=0, limit=50)
-    assert {i.code for i in a} == {"p1", "pub"}
-    b, _ = svc.list_projects(org_id="orgB", offset=0, limit=50)
-    assert {i.code for i in b} == {"p2", "pub"}
-    allp, tall = svc.list_projects(org_id=None, offset=0, limit=50)  # 不过滤
-    assert tall == 3 and {i.code for i in allp} == {"p1", "p2", "pub"}
+    def _sess(org, user):
+        return Session(session_id="t", username=user, org_id=org,
+                       access_expires_at=9e18, refresh_expires_at=9e18)
+
+    try:
+        a, _ = svc.list_projects(sess=_sess("orgA", "a"), offset=0, limit=50)
+        assert {i.code for i in a} == {"p1", "pub"}
+        b, _ = svc.list_projects(sess=_sess("orgB", "b"), offset=0, limit=50)
+        assert {i.code for i in b} == {"p2", "pub"}
+        allp, tall = svc.list_projects(sess=_sess("any", "super"), offset=0, limit=50)
+        assert tall == 3 and {i.code for i in allp} == {"p1", "p2", "pub"}
+    finally:
+        reset_account_stores()

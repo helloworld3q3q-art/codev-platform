@@ -9,10 +9,13 @@ from __future__ import annotations
 from codev_platform.core.config import get as _cfg_get
 from codev_platform.core.config import load_config
 from codev_platform.core.errors import ErrorCode, PlatformError
+from codev_platform.core.platform_admin import is_platform_admin
 from codev_platform.core.project_id import ProjectIdError, validate
 from codev_platform.web.repositories.project_read_repo import ProjectReadRepository
 from codev_platform.web.repositories.project_write_repo import ProjectWriteRepository
 from codev_platform.web.schemas.projects import ProjectActionResult, ProjectListItem
+from codev_platform.web.security.membership import can_access_project, is_org_admin
+from codev_platform.web.security.sessions import Session
 
 
 def _project_in_org(cfg: dict, row: dict, org_id: str) -> bool:
@@ -34,22 +37,27 @@ class ProjectService:
         self._write = write_repo or ProjectWriteRepository()
 
     def list_projects(
-        self, *, org_id: str | None = None, filter_org_id: str | None = None,
+        self, *, sess: Session, filter_org_id: str | None = None,
         keyword: str | None = None, offset: int, limit: int
     ) -> tuple[list[ProjectListItem], int]:
-        """分页列出已登记项目。
+        """分页列出**当前会话可见**的项目 (org 隔离 + 逐项目可见性)。
 
-        org_id: 当前请求 org (来自 X-Org-Id), 按归属过滤 (None 不过滤; 项目无 org_id = 公开)。
-        filter_org_id: 查询条件指定的组织, 进一步收窄到该 org 名下项目。
+        - platform_admin: 看全部 (跨 org)。
+        - org admin: 看本 org 全部项目。
+        - 普通成员: 仅本 org 内、且自己有 project_role 的项目。
+        filter_org_id: 在可见集内进一步收窄到该组织 (项目无 org_id = 公开, 全 org 可见)。
         keyword: 模糊匹配 code / name (大小写不敏感)。
         """
         rows = self._read.list_projects()
-        if org_id is not None or filter_org_id is not None:
-            cfg = load_config()
-            if org_id is not None:
-                rows = [r for r in rows if _project_in_org(cfg, r, org_id)]
-            if filter_org_id is not None:
-                rows = [r for r in rows if _project_in_org(cfg, r, filter_org_id)]
+        cfg = load_config()
+        if not is_platform_admin(cfg, sess.username):
+            # org 隔离: 只留本 org (含公开) 项目
+            rows = [r for r in rows if _project_in_org(cfg, r, sess.org_id)]
+            # 逐项目可见性: 非 org admin 只看自己有 project_role 的项目
+            if not is_org_admin(sess):
+                rows = [r for r in rows if can_access_project(sess, r["code"], "read")]
+        if filter_org_id is not None:
+            rows = [r for r in rows if _project_in_org(cfg, r, filter_org_id)]
         if keyword:
             kw = keyword.strip().lower()
             if kw:
@@ -61,13 +69,27 @@ class ProjectService:
         items = [self._to_item(r) for r in page]
         return items, total
 
-    def get_detail(self, code: str) -> ProjectListItem:
-        """项目详情。未登记 → PROJECT_UNKNOWN。"""
+    def get_detail(self, code: str, sess: Session) -> ProjectListItem:
+        """项目详情。未登记 → PROJECT_UNKNOWN; 无 read 权限 → ACCESS_DENIED。"""
         code = self._validate_code(code)
         row = self._read.get_project_detail(code)
         if row is None:
             raise PlatformError(ErrorCode.PROJECT_UNKNOWN, f"project not found: {code}")
+        self._authorize_project(sess, row, "read")
         return self._to_item(row)
+
+    def _authorize_project(self, sess: Session, row: dict, action: str) -> None:
+        """项目级授权闸: org 隔离(项目 org != 会话 org 则拒) + 逐项目 role_allows(action)。
+
+        platform_admin 跨 org 放行; org admin / 有授予 project_role 的成员按 rank 判 action。
+        """
+        cfg = load_config()
+        if is_platform_admin(cfg, sess.username):
+            return
+        if not _project_in_org(cfg, row, sess.org_id):
+            raise PlatformError(ErrorCode.ACCESS_DENIED, "项目不属于当前组织")
+        if not can_access_project(sess, row["code"], action):
+            raise PlatformError(ErrorCode.ACCESS_DENIED, f"需要项目 {action} 权限")
 
     def register_project(self, *, code: str, name: str,
                          repo_path: str | None, description: str | None,
@@ -86,21 +108,23 @@ class ProjectService:
                                      repo_path=repo_path, description=description, org_id=org_id)
         return ProjectActionResult(code=code, loaded=False, status="ACTIVE")
 
-    def load_project(self, code: str) -> ProjectActionResult:
-        """加载项目 (置运行态)。未登记 → PROJECT_UNKNOWN。幂等。"""
+    def load_project(self, code: str, sess: Session) -> ProjectActionResult:
+        """加载项目 (置运行态)。未登记 → PROJECT_UNKNOWN; 无 write 权限 → ACCESS_DENIED。幂等。"""
         code = self._validate_code(code)
         row = self._read.get_project_detail(code)
         if row is None:
             raise PlatformError(ErrorCode.PROJECT_UNKNOWN, f"project not found: {code}")
+        self._authorize_project(sess, row, "write")
         loaded = self._write.set_loaded(code, True)
         return ProjectActionResult(code=code, loaded=loaded, status=row.get("status", "ACTIVE"))
 
-    def unload_project(self, code: str) -> ProjectActionResult:
-        """卸载项目 (清运行态)。未登记 → PROJECT_UNKNOWN。幂等。"""
+    def unload_project(self, code: str, sess: Session) -> ProjectActionResult:
+        """卸载项目 (清运行态)。未登记 → PROJECT_UNKNOWN; 无 write 权限 → ACCESS_DENIED。幂等。"""
         code = self._validate_code(code)
         row = self._read.get_project_detail(code)
         if row is None:
             raise PlatformError(ErrorCode.PROJECT_UNKNOWN, f"project not found: {code}")
+        self._authorize_project(sess, row, "write")
         loaded = self._write.set_loaded(code, False)
         return ProjectActionResult(code=code, loaded=loaded, status=row.get("status", "ACTIVE"))
 

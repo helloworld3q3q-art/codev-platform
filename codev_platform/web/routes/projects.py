@@ -16,11 +16,17 @@ from codev_platform.web.schemas.projects import (
     ProjectLoadRequest,
     ProjectRegisterRequest,
 )
+from codev_platform.web.security.deps import current_session, require_org_role
+from codev_platform.web.security.sessions import Session
 from codev_platform.web.services.project_service import ProjectService
 
 router = APIRouter()
 
 _TAG = "ProjectAPI-项目管理"
+
+# register/load/unload 的管理面授权: list/detail 仅需登录态 (current_session) + service 内逐项目闸;
+# register 是组织级动作 (在本 org 建新项目) → 需 org admin。load/unload 的逐项目 write 闸在 service。
+_require_admin = require_org_role("admin")
 
 
 def _service() -> ProjectService:
@@ -42,16 +48,14 @@ def list_projects(
     request: Request,
     body: ProjectListRequest | None = None,
     svc: ProjectService = Depends(_service),
+    sess: Session = Depends(current_session),
 ) -> PageResult[ProjectListItem]:
     # 参数走 POST body (前端 ResizableTable 发 body, 非 query); 空 body 用默认。
-    # 按当前 org 过滤 (org 来自 X-Org-Id, gateway 解析进 identity.org_id; 项目无 org_id = 公开);
-    # body.orgId 查询条件进一步收窄到指定组织; body.keyword 模糊 code/name。
+    # 可见性按登录会话: org 隔离 + 逐项目 (service.list_projects 内判); body.orgId 在可见集内再收窄。
     b = body or ProjectListRequest()
-    identity = getattr(request.state, "identity", None)
-    org_id = getattr(identity, "org_id", None)
     offset = (b.pageNumber - 1) * b.pageSize
     items, total = svc.list_projects(
-        org_id=org_id, filter_org_id=b.orgId, keyword=b.keyword,
+        sess=sess, filter_org_id=b.orgId, keyword=b.keyword,
         offset=offset, limit=b.pageSize,
     )
     return page(items, page_number=b.pageNumber, page_size=b.pageSize,
@@ -69,10 +73,16 @@ def register_project(
     request: Request,
     body: ProjectRegisterRequest,
     svc: ProjectService = Depends(_service),
+    sess: Session = Depends(_require_admin),
 ) -> CommonResult[ProjectActionResult]:
-    # orgId 缺省归当前请求 org (X-Org-Id → identity.org_id), 显式传则按所选组织。
-    identity = getattr(request.state, "identity", None)
-    org_id = body.orgId or getattr(identity, "org_id", None)
+    # 组织级动作: 须 org admin (_require_admin)。新项目归属当前会话 org (防非超管跨 org 建项目);
+    # 仅 platform_admin 可用 body.orgId 指定其它目标组织。
+    from codev_platform.core.config import load_config
+    from codev_platform.core.platform_admin import is_platform_admin
+    if body.orgId and is_platform_admin(load_config(), sess.username):
+        org_id = body.orgId
+    else:
+        org_id = sess.org_id
     result = svc.register_project(code=body.code, name=body.name,
                                   repo_path=body.repoPath, description=body.description,
                                   org_id=org_id)
@@ -90,8 +100,9 @@ def get_project_detail(
     request: Request,
     code: str = Query(..., min_length=1, max_length=64, description="项目编码"),
     svc: ProjectService = Depends(_service),
+    sess: Session = Depends(current_session),
 ) -> CommonResult[ProjectListItem]:
-    return ok(svc.get_detail(code), request_id=_rid(request))
+    return ok(svc.get_detail(code, sess), request_id=_rid(request))
 
 
 @router.post(
@@ -105,8 +116,9 @@ def load_project(
     request: Request,
     body: ProjectLoadRequest,
     svc: ProjectService = Depends(_service),
+    sess: Session = Depends(current_session),
 ) -> CommonResult[ProjectActionResult]:
-    return ok(svc.load_project(body.code), request_id=_rid(request))
+    return ok(svc.load_project(body.code, sess), request_id=_rid(request))
 
 
 @router.post(
@@ -120,5 +132,6 @@ def unload_project(
     request: Request,
     body: ProjectLoadRequest,
     svc: ProjectService = Depends(_service),
+    sess: Session = Depends(current_session),
 ) -> CommonResult[ProjectActionResult]:
-    return ok(svc.unload_project(body.code), request_id=_rid(request))
+    return ok(svc.unload_project(body.code, sess), request_id=_rid(request))
