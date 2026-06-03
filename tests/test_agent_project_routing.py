@@ -73,6 +73,6 @@ def test_build_registry_accepts_project_id():
     # project_id 透传不报错;工具实例带上 project_id
     reg = build_default_registry("some-project")
     names = {t.name for t in reg.all()}
-    assert "cross_link_table_refs" in names and "codegraph_search" in names and "search_docs" in names
+    assert "table_usage" in names and "codegraph_search" in names and "search_docs" in names
     for tool in reg.all():
         assert getattr(tool, "project_id", "MISSING") == "some-project"
