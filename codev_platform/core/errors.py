@@ -76,3 +76,20 @@ def to_http_payload(err: PlatformError) -> tuple[dict, int]:
     使本模块不依赖具体 web 框架。
     """
     return {"error": err.message, "code": err.code.value}, err.http_status
+
+
+def to_http_detail(message_or_err, code: ErrorCode = ErrorCode.INTERNAL) -> dict:
+    """FastAPI `HTTPException(status, detail=<this>)` 的机器可读 detail 体。
+
+    返回 `{"error": <稳定文案>, "code": <machine>, "detail": <稳定文案>}`:
+    - `error` / `code`: 新增机器可读字段 (前端/脚本判 code, 不靠文案 substring)。
+    - `detail`: **过渡兼容** —— FastAPI 把它包成 `{"detail": <this>}`, 旧 playground 读
+      `data.detail.error || data.detail` 仍可显示; 值复用 message, **不放 str(e) 原文**
+      (内部异常原文只进 logger)。
+    传 PlatformError 用其 message+code; 传裸 str 配 code (默认 internal)。
+    """
+    if isinstance(message_or_err, PlatformError):
+        msg, c = message_or_err.message, message_or_err.code.value
+    else:
+        msg, c = str(message_or_err), code.value
+    return {"error": msg, "code": c, "detail": msg}

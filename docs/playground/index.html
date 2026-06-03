@@ -70,8 +70,15 @@ $("go").onclick = async () => {
     let data; try { data = JSON.parse(text); } catch { data = null; }
     if (!resp.ok) {
       ans.className = "err";
-      const detail = data && data.detail ? data.detail : text;
-      ans.textContent = "请求失败(HTTP " + resp.status + "):" + detail +
+      // 错误体形状(过渡兼容):FastAPI 把 to_http_detail() 包成
+      //   { detail: { error, code, detail } }  —— detail 既是对象也带稳定文案串。
+      // 取文案优先级:data.error(顶层) > data.detail.error / detail.detail > 字符串 detail > raw text。
+      const d = data && data.detail;
+      const msg = (data && data.error)
+        || (d && typeof d === "object" ? (d.error || d.detail) : d)
+        || text;
+      const code = (data && data.code) || (d && typeof d === "object" ? d.code : null);
+      ans.textContent = "请求失败(HTTP " + resp.status + (code ? " · " + code : "") + "):" + msg +
         (resp.status === 503 ? "\n提示:后端缺 provider key,检查 config.agent.providers。" : "") +
         (resp.status === 403 ? "\n提示:project 访问被拒,检查 token / project_id。" : "");
       return;

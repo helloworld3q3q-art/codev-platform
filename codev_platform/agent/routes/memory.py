@@ -5,7 +5,7 @@ memory PG 未配 → 503。权限校验(allowed)是 M5,这里先不拦(单人期
 """
 from __future__ import annotations
 
-import sys
+import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -16,10 +16,12 @@ from codev_platform.core import identity
 from codev_platform.core.acl import AccessDecision, can_access, memory_scope_access
 from codev_platform.core.audit import audit_access
 from codev_platform.core.config import load_config
+from codev_platform.core.errors import ErrorCode, to_http_detail
 from codev_platform.core.rbac import memory_scope_decision
 from codev_platform.gateway.auth import Identity
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
 
 
 def _scope_decision(org_id: str, user_id: str, scope: str, scope_ref: str | None,
@@ -78,14 +80,19 @@ def _to_out(e: MemoryEntry) -> MemoryEntryOut:
 @router.post("/memory", response_model=MemoryEntryOut)
 def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     store = deps.get_memory_store()
-    if store is None:
-        raise HTTPException(status_code=503, detail="memory PG 未启用(配 memory.pg_dsn + session_backend)")
-    if req.scope not in SCOPES:
-        raise HTTPException(status_code=400, detail=f"scope 须为 {SCOPES}")
+    if store is None:  # PG 未配 → DEPENDENCY_MISSING(503)
+        raise HTTPException(status_code=503, detail=to_http_detail(
+            "memory store not configured (set memory.pg_dsn + session_backend)",
+            ErrorCode.DEPENDENCY_MISSING))
+    if req.scope not in SCOPES:  # 入参非法 → INVALID_PARAMS(400)
+        raise HTTPException(status_code=400, detail=to_http_detail(
+            f"scope must be one of {sorted(SCOPES)}", ErrorCode.INVALID_PARAMS))
     try:  # 非法 X-Org-Id / X-User-Id → 400
         org_id, user_id = _resolve_identity(request)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:  # 入参非法 → INVALID_PARAMS;str(e) 仅日志
+        _log.warning("memory.write identity rejected: %s", e)
+        raise HTTPException(status_code=400, detail=to_http_detail(
+            "invalid X-Org-Id / X-User-Id", ErrorCode.INVALID_PARAMS)) from e
     # personal 作用域的 scope_ref 恒为写入者 user_id(plan §3.2 语义)——强制对齐,
     # 不信任 client 传的 scope_ref,杜绝"以别人名义写个人记忆"。其它作用域用 client 给的 ref。
     scope_ref = user_id if req.scope == "personal" else req.scope_ref
@@ -94,8 +101,9 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     _ident = _effective_identity(request, org_id, user_id)
     _dec = _scope_decision(org_id, user_id, req.scope, scope_ref, _ident)
     audit_access("agent-memory", _ident, scope_ref, _dec)
-    if not _dec.allowed:
-        raise HTTPException(status_code=403, detail="forbidden: memory scope access denied")
+    if not _dec.allowed:  # 权限 → ACCESS_DENIED(403)
+        raise HTTPException(status_code=403, detail=to_http_detail(
+            "forbidden: memory scope access denied", ErrorCode.ACCESS_DENIED))
     entry = MemoryEntry(
         id="", scope=req.scope, scope_ref=scope_ref, owner_user_id=user_id,
         content=req.content, org_id=org_id, kind=req.kind, topic_key=req.topic_key,
@@ -103,9 +111,10 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     )
     try:
         eid = store.write(entry)
-    except Exception as e:  # noqa: BLE001 — DB 错转 503;完整异常只进 server 日志,不回客户端(防泄漏拓扑)
-        print(f"[memory.write] {type(e).__name__}: {e}", file=sys.stderr)
-        raise HTTPException(status_code=503, detail="memory store unavailable") from e
+    except Exception as e:  # noqa: BLE001 — DB 错转 503 UPSTREAM_UNAVAILABLE;完整异常只进日志,不回客户端(防泄漏拓扑)
+        _log.warning("memory.write store error: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=503, detail=to_http_detail(
+            "memory store unavailable", ErrorCode.UPSTREAM_UNAVAILABLE)) from e
     entry.id = eid
     return _to_out(entry)
 
@@ -118,22 +127,27 @@ def list_memory(
     limit: int = Query(100, ge=1, le=500),
 ) -> list[MemoryEntryOut]:
     store = deps.get_memory_store()
-    if store is None:
-        raise HTTPException(status_code=503, detail="memory PG 未启用")
+    if store is None:  # PG 未配 → DEPENDENCY_MISSING(503)
+        raise HTTPException(status_code=503, detail=to_http_detail(
+            "memory store not configured", ErrorCode.DEPENDENCY_MISSING))
     # ACL 统一闸 (单一真值源 core/acl.py): personal 只能读本人 / project token 越权 → 403,
     # org/team passthrough 放行 token deny。recall ≠ read,隐私边界与 write 同源。
     try:  # 非法 X-Org-Id / X-User-Id → 400
         org_id, user_id = _resolve_identity(request)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:  # 入参非法 → INVALID_PARAMS;str(e) 仅日志
+        _log.warning("memory.list identity rejected: %s", e)
+        raise HTTPException(status_code=400, detail=to_http_detail(
+            "invalid X-Org-Id / X-User-Id", ErrorCode.INVALID_PARAMS)) from e
     _ident = _effective_identity(request, org_id, user_id)
     _dec = _scope_decision(org_id, user_id, scope, scope_ref, _ident)
     audit_access("agent-memory", _ident, scope_ref, _dec)
-    if not _dec.allowed:
-        raise HTTPException(status_code=403, detail="forbidden: memory scope access denied")
+    if not _dec.allowed:  # 权限 → ACCESS_DENIED(403)
+        raise HTTPException(status_code=403, detail=to_http_detail(
+            "forbidden: memory scope access denied", ErrorCode.ACCESS_DENIED))
     try:
         entries = store.list_scope(scope, scope_ref, org_id=org_id, limit=limit)
-    except Exception as e:  # noqa: BLE001 — 同 write:完整异常只进 server 日志
-        print(f"[memory.list] {type(e).__name__}: {e}", file=sys.stderr)
-        raise HTTPException(status_code=503, detail="memory store unavailable") from e
+    except Exception as e:  # noqa: BLE001 — 同 write:完整异常只进日志,转 503 UPSTREAM_UNAVAILABLE
+        _log.warning("memory.list store error: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=503, detail=to_http_detail(
+            "memory store unavailable", ErrorCode.UPSTREAM_UNAVAILABLE)) from e
     return [_to_out(e) for e in entries]
