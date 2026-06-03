@@ -69,3 +69,25 @@ endpoint/api/table)。收敛成单一实现,删 cross_link,全走统一 store:
 
 **三大缺口**:① 影响分析报告链路(Phase 5 + Reports + Agent 工具)—— README 定义的核心商业价值,统一图谱数据已备齐正好做地基;② Agent Memory 平台化;③ Demo + POC 包。
 **逻辑下一步** = Phase 5 影响分析(吃刚做完的统一图谱节点+跨层边,做"改一处影响哪些前端/后端/表"的 Agent 工具 + 报告)。
+
+## 八、deep-audit-2026-06-03 安全/质量全面整改(后续会话)
+
+> 对 [`docs/audits/deep-audit-2026-06-03.md`](../../audits/deep-audit-2026-06-03.md) **12 项发现全部闭环** + 源码级复核。测试基线 688 → **740 passed / 5 skipped**,前端 tsc **0 错误**。
+> 复核文档 [`deep-audit-2026-06-03-review.md`](../../audits/deep-audit-2026-06-03-review.md)(逐条修正定级 + 6 个净新增发现)。
+
+**审计的审计**:12 项现象复现全属实,但原审计"定级偏高 + 漏看链路运行时是否真的通"。净新增 6 发现:① projects 修复撞 session/gateway **双 token** 模型;② web `/indexes/rebuild` 是 `_noop_trigger` **空壳**;③ graph 幂等 `DELETE WHERE plugin` **project-blind**;④ webhook 链(后查实 **WSL 19099 一直正常**,Windows 18099 是影子日志,原"链死了"判断错);⑤ 413 已修(8MB);⑥ 平台自助重建路径仅剩手动 CLI。
+
+**P1 安全(3/3 ✅)**:
+- **projects 两级 RBAC**:org 隔离 + 逐项目 `role_allows`(复用 `core/rbac` 单一真值;新增 `web/security/membership.py` 统一 prod PG `project_access` + dev 内存 `OrgMember.project_roles`)。
+- logout 撤 access(session_id 关联 access/refresh);register 原子 `open(x)`;PG fail-fast(prod 配 PG 失败 RuntimeError,dev/ImportError 回退);均补回归测试。
+- **双轨收口**:`SessionAwareAuthenticator` 包 gateway 认证器 —— token 模式 web 走 session token、gateway token 留 MCP。
+
+**P2(6/6 ✅)**:reindex runner timeout(超时 kill+rc=124 防串行队头阻塞)/ graph 节点级 project_id 隔离(写强制+读过滤+DELETE 带 project)/ **业务 PG 库迁 SQLAlchemy Core**(rbac+account store 裸 SQL→`select/insert`,`_SCHEMA` 收口 `web/db/tables.py`,**方言感知 upsert**,sqlite 内存引擎集成测试覆盖 fetch_membership,+ **Alembic baseline 7 表与 tables.py 0-diff**)/ 前端 TS 4.9→5.4(tsc **36→0**,删 8 个 stock-admin-web 死模板组件)/ 前端 403 会话失效清 token 跳登录 / PG fail-fast。
+
+**P3(3/3 ✅)**:webhook/worker + 3 个 MCP daemon `mcp_server.log` 迁 `data_root/logs`(distinct 前缀)/ 移除 `@ts-nocheck`(fetch.ts 清 0 错 + 删死模板 DemoSelect;`.umi/` 生成物不算)/ 真静默 broad except 加可观测(6 处,上报型保留避噪)。
+
+**对抗式审计(派兄弟)**:前端 0 issue(403 正则 `/会话|未登录/` vs 后端全部 9 条文案 → **0 误判/0 漏判**);后端查出 **1 HIGH**(`search_recall.jsonl` 写迁了但 3 个读取方未迁 → ops/health+metrics+platform_status 对齐 writer 修复)+ 1 LOW(docstring)。
+
+**依赖**:Windows 测试 python + WSL venv 各装 `sqlalchemy 2.0.50` + `alembic`(进 `pyproject`/`requirements-runtime`)。
+
+**提交区间** `b67d7f2 … 2943742`(13 commit;runner-timeout 在并发会话 `64b0dae`)。全推 Gitea + WSL `/home/helloworld/work/codev-platform` ff-pull 同步 + codegraph reindex,MCP 索引验证含 `resolve_membership`/`SessionAwareAuthenticator` 新符号。
