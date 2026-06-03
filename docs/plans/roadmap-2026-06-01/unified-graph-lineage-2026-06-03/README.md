@@ -28,7 +28,7 @@
 
 | 期 | 内容 | 状态 |
 |---|---|---|
-| P1 | Spring 端点插件(Java 后端节点) | ⏳ 进行中 |
+| P1 | Spring 端点插件(Java 后端节点) | ✅ 已落地+真仓验证(stock-admin-api 131 端点 vs cross_link 132,近 parity) |
 | P2 | sql 插件扩 DML → writes_table / reads_table(上游→表→后端) | ⬜ |
 | P3 | 核心 linker pass 接进 ingest(前端→后端 calls_api) | ⬜ |
 | P4 | parity 对账 → 删 cross_link + 并页 + 防复发测试 | ⬜ |
