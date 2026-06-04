@@ -93,9 +93,10 @@
   },
 
   "mcp": {
-    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。三套均多租户单端点 + ?project_id= 路由。cross_link_sse_port: cross-link 端口(默认 18086)。codegraph_sse_port: codegraph 多租户代理端口(默认 18091, 方案 B 平台自写代理, 按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` 后端并转发; 不再 per-project 一个端口/一个 mcp-proxy)。",
+    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。多租户单端点 + ?project_id= 路由。cross_link_sse_port: cross-link 端口(默认 18086)。codegraph_sse_port: codegraph 多租户代理端口(默认 18091, 方案 B 平台自写代理, 按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` 后端并转发)。graph_sse_port: 统一图谱 MCP(impact 跨层影响 + A1 业务域查询, 默认 18092)。",
     "cross_link_sse_port": 18086,
-    "codegraph_sse_port": 18091
+    "codegraph_sse_port": 18091,
+    "graph_sse_port": 18092
   },
 
   "mcp_sources": {
