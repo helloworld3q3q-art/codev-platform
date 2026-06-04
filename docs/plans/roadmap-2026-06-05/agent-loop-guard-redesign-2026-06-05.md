@@ -1,8 +1,13 @@
 # Agent Loop Guard 重构 — 工具分类护栏(2026-06-05)
 
-> 状态:📋 待启动(plan)
+> 状态:✅ 已落地(P0–P3 全部实现 + 测试, 2026-06-04)。
 > 来源:`aa.txt`(2026-06-04 修复后重跑实测)+ 5 专家两轮会诊(loop 控制 / 务实 / 红队 ×2 / 架构)。
 > 关联:`.claude/rules/agent-provider-architecture.md §4`(弱模型代码护栏)、`codev_platform/agent/loop.py`、`codev_platform/agent/policy.py`。
+>
+> **落地落点**:
+> - P0 module 枚举 = 选**方案②**(`chroma/_schema.py` 去掉 `module` 硬 enum → 自由字符串 + 描述引导 `list_collections`;`_build_where` 对未知 module 优雅返空)+ loop 无效调用防线。
+> - P1/P2/P3:`agent/loop.py` 三分类护栏(`READONLY`/`RETRIEVAL`/`other`)+ `agent/policy.py` `LoopPolicy` 新 7 字段 + `brain/registry.py` 能力档矩阵(`_STRONG`/`_MID`/`_WEAK`)接进 `loop_policy()._pick`(`per_tool_cap` 保 deprecated 别名)。
+> - 测试:`tests/test_agent_loop_guard.py`(+10 新例,三分类 / offset 零增量 / novelty / 无效调用 / 充分性门)、`tests/test_agent_registry.py`(档位 + 逐字段覆盖 + 别名 + 全局默认)。`pytest` 203 agent/chroma 例全绿。
 
 ---
 

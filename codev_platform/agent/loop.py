@@ -2,10 +2,19 @@
 
 只依赖 brain.base 的中性类型 + tools.base 的 Tool 抽象,不知道底下是哪家模型。
 这是"换模型零改核心"的落点。
+
+护栏(2026-06-05 重构, agent-loop-guard-redesign plan): 按工具语义三分类施策, **模型无关**,
+模型差异 100% 落在 LoopPolicy 数值/开关上(agent-provider §1 铁律, loop.py 无任何模型名 if-else):
+  - 只读类(READONLY): 读不同文件=确定进展 → 归一化 distinct-path 上限(高)+ 总读软顶, 同 path 判零增量。
+  - 检索类(RETRIEVAL): query 换词可绕指纹 → distinct-args 上限 + 输出侧零增量(结果哈希不变即无进展)。
+  - 无效调用类: 连续 K 次参数报错(路径不存在/非法 module 等)→ 回灌合法值 + 强制换路, 不放行无限重试。
+所有阈值/开关来自 LoopPolicy(registry 按 provider 逐字段解析), 本文件只读策略不判模型。
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +28,39 @@ from codev_platform.agent.policy import LoopPolicy
 from codev_platform.agent.prompts import CODE_UNDERSTANDING_SYSTEM
 from codev_platform.agent.tools.base import ToolRegistry
 from codev_platform.agent.trace import Trace
+
+# 工具语义分类(loop 内常量, 不进 config —— 这是"哪个工具是哪类"的事实, 非可调策略)。
+# 不在两集合里的工具(remember / 未知工具)按"其它"处理: 套 distinct-args 上限, 不做输出侧 novelty。
+READONLY_TOOLS = frozenset({"read_file", "list_dir"})
+RETRIEVAL_TOOLS = frozenset({
+    "search_docs",
+    "codegraph_search", "codegraph_callers", "codegraph_callees",
+    "impact_analysis", "table_usage", "page_dependencies", "api_callers",
+})
+
+
+def _classify(name: str) -> str:
+    if name in READONLY_TOOLS:
+        return "readonly"
+    if name in RETRIEVAL_TOOLS:
+        return "retrieval"
+    return "other"
+
+
+def _norm_path_arg(args: Any) -> str | None:
+    """只读类按归一化 path 判 distinct(忽略 offset/limit/max_bytes), 同文件改 offset 刷读=零增量。"""
+    if not isinstance(args, dict):
+        return None
+    p = args.get("path")
+    if not isinstance(p, str) or not p.strip():
+        return None
+    return p.strip().replace("\\", "/").strip("/").lower()
+
+
+def _result_hash(content: str) -> str:
+    """归一化结果哈希(裁全部空白 + 小写)。仅用于检索类输出侧零增量判定 —— 换空格/标点/大小写绕不过。"""
+    norm = re.sub(r"\s+", "", content or "").lower()
+    return hashlib.sha1(norm.encode("utf-8", "replace")).hexdigest()
 
 
 @dataclass
@@ -38,9 +80,110 @@ class AgentResult:
     stop_reason: str = "answered"
 
 
+@dataclass
+class _GuardState:
+    """单次 run 的护栏累积状态。"""
+    seen_calls: set[str] = field(default_factory=set)          # exact (tool,args) 指纹 → 精确重复拦
+    tool_counts: dict[str, int] = field(default_factory=dict)  # 非只读工具 distinct-args 执行次数
+    readonly_paths: set[str] = field(default_factory=set)      # 成功读到的归一化 distinct path(distinct cap + 充分性门)
+    readonly_total: int = 0                                    # 只读工具总执行次数(含失败尝试; 软顶)
+    retrieval_hashes: dict[str, set[str]] = field(default_factory=dict)   # name -> 见过的结果哈希集
+    retrieval_no_progress: dict[str, int] = field(default_factory=dict)   # name -> 连续零增量次数
+    consecutive_invalid: int = 0                               # 连续无效调用(参数报错/路径不存在)计数
+
+
 def _summarize(text: str, limit: int = 280) -> str:
     text = (text or "").strip().replace("\n", " ")
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _precheck(policy: LoopPolicy, specs: list[dict], st: _GuardState,
+              name: str, fp: str, args: Any) -> str | None:
+    """执行前护栏: 返回拦截提示(不执行)或 None(放行)。"""
+    klass = _classify(name)
+
+    # 精确重复(同 tool+args): 任何类都拦, 结果不会变。
+    if fp in st.seen_calls:
+        return (f"[loop guard] 你已用相同参数调用过 {name},结果不会变。"
+                f"请换不同查法,或用已掌握的证据给出(部分)最终答案,不要重复同一调用。")
+
+    if klass == "readonly":
+        np = _norm_path_arg(args)
+        if np is not None and np in st.readonly_paths:
+            return (f"[loop guard] 该文件/目录({np})你已读过(忽略 offset/limit 视为同一处),"
+                    f"结果不会变。换一个未读的文件,或用现有内容收尾。")
+        if st.readonly_total >= policy.readonly_total_cap:
+            return (f"[loop guard] 已读取文件/目录 {st.readonly_total} 次,够了。"
+                    f"请基于已读到的内容给出最终答案,不要继续漫无目的地读。")
+        if np is not None and len(st.readonly_paths) >= policy.readonly_distinct_cap:
+            return (f"[loop guard] 已读取 {len(st.readonly_paths)} 个不同文件,够多了。"
+                    f"请基于已读内容收尾,或换检索类工具定位关键处再精准读。")
+        return None
+
+    # 检索类: 连续零增量已达上限 → 不再放行同工具(硬拒, 逼收尾)。
+    if klass == "retrieval" and st.retrieval_no_progress.get(name, 0) >= policy.no_progress_limit:
+        return (f"[loop guard] {name} 连续多次检索结果无新增信息,继续查同一工具无意义。"
+                f"请换一类工具或换实质不同的查法,或用现有证据立即收尾。")
+
+    # distinct-args 上限(检索类 + 其它类共用 retrieval_distinct_cap; 防变参 thrash 同一工具)。
+    if st.tool_counts.get(name, 0) >= policy.retrieval_distinct_cap:
+        untried = [s["name"] for s in specs
+                   if s["name"] != name and st.tool_counts.get(s["name"], 0) == 0
+                   and s["name"] not in READONLY_TOOLS]
+        tip = ("；还没试过的工具:" + ", ".join(untried)) if untried else ""
+        return (f"[loop guard] {name} 已调用 {st.tool_counts[name]} 次,够了。"
+                f"换一类工具(换个视角){tip},或用现有证据给出最终答案,别再堆同一工具。")
+    return None
+
+
+def _postprocess(policy: LoopPolicy, st: _GuardState, name: str, fp: str,
+                 args: Any, result: ToolResult, near_limit: bool) -> None:
+    """执行后: 记账(指纹/计数)+ 无效调用追踪 + 检索输出侧零增量 + 倒数步收尾提示。"""
+    klass = _classify(name)
+    st.seen_calls.add(fp)
+
+    if klass == "readonly":
+        st.readonly_total += 1
+        if not result.is_error:
+            np = _norm_path_arg(args)
+            if np is not None:
+                st.readonly_paths.add(np)  # 仅成功读计入 distinct(充分性门只认真读到的)
+    else:
+        st.tool_counts[name] = st.tool_counts.get(name, 0) + 1
+
+    if result.is_error:
+        # 无效调用类: 参数报错 / 路径不存在 / 非法 module 等 → 连续累计, 达阈值回灌合法值 + 强制换路。
+        st.consecutive_invalid += 1
+        if st.consecutive_invalid >= policy.invalid_call_limit:
+            result.content += (
+                f"\n\n[loop guard] 你已连续 {st.consecutive_invalid} 次调用参数无效"
+                f"(文件不存在 / 目录不存在 / 非法 module 等)。停止用错误参数重试:"
+                f"先用 list_dir 确认路径、用 list_collections 看本项目合法 module,或直接换一类工具。"
+                f"不要在无效参数上空转。")
+        return
+
+    st.consecutive_invalid = 0
+    # 输出侧零增量(仅检索类 + 开了 novelty_check; 只读读不同文件天然 novel, 不套)。
+    if klass == "retrieval" and policy.novelty_check:
+        h = _result_hash(result.content)
+        seen = st.retrieval_hashes.setdefault(name, set())
+        if h in seen:
+            st.retrieval_no_progress[name] = st.retrieval_no_progress.get(name, 0) + 1
+            cnt = st.retrieval_no_progress[name]
+            if cnt >= policy.no_progress_limit:
+                result.content += (f"\n\n[loop guard] 该检索连续 {cnt} 次返回与之前相同的结果,"
+                                   f"没有新信息。立即基于现有证据收尾,不要再换词重查。")
+            else:
+                result.content += ("\n\n[loop guard] 本次检索结果与之前重复,无新增。"
+                                   "换实质不同的查法或换工具,别靠换同义词重查。")
+        else:
+            seen.add(h)
+            st.retrieval_no_progress[name] = 0
+
+    if near_limit:
+        result.content += ("\n\n[loop guard] 步数即将用尽,请基于现有证据立即给出最终答案"
+                           "(已解决的部分先答,未解决的标注清楚)。不要脑补/编造未读到的文件内容,"
+                           "没读到就如实说明,不要再调用工具。")
 
 
 class AgentLoop:
@@ -64,8 +207,7 @@ class AgentLoop:
         specs = self.registry.specs()
         steps: list[Step] = []
         total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
-        seen_calls: set[str] = set()  # 硬护栏:记录已执行过的 (tool, args) 指纹
-        tool_counts: dict[str, int] = {}  # 硬护栏:每工具实际执行次数 (防变参 thrash 同一工具)
+        guard = _GuardState()
 
         for n in range(1, self.policy.max_steps + 1):
             turn: AssistantTurn = self.provider.chat(system_prompt, messages, specs)
@@ -89,41 +231,27 @@ class AgentLoop:
                 tool = self.registry.get(call.name)
                 if tool is None:
                     result = ToolResult(call_id=call.id, content=f"未知工具: {call.name}", is_error=True)
-                elif fp in seen_calls:
-                    # 硬护栏:同 tool+args 重复调用 → 不再执行,回灌提示逼其换路或收尾
-                    result = ToolResult(
-                        call_id=call.id, is_error=True,
-                        content=(f"[loop guard] 你已用相同参数调用过 {call.name},结果不会变。"
-                                 f"请换不同查法,或用已掌握的证据给出(部分)最终答案,不要重复同一调用。"),
-                    )
-                elif tool_counts.get(call.name, 0) >= self.policy.per_tool_cap:
-                    # 硬护栏:同一工具调够上限 (变参 thrash 也算) → 拒绝执行,点名未试过的互补工具逼换视角
-                    untried = [s["name"] for s in specs
-                               if s["name"] != call.name and tool_counts.get(s["name"], 0) == 0]
-                    tip = ("；还没试过的互补工具:" + ", ".join(untried)) if untried else ""
-                    result = ToolResult(
-                        call_id=call.id, is_error=True,
-                        content=(f"[loop guard] {call.name} 已调用 {tool_counts[call.name]} 次,够了。"
-                                 f"换一类工具(换个视角){tip},或用现有证据给出最终答案,别再堆同一工具。"),
-                    )
                 else:
-                    seen_calls.add(fp)
-                    tool_counts[call.name] = tool_counts.get(call.name, 0) + 1
-                    result = tool.run(call.args)
-                    result.call_id = call.id
-                    if near_limit:
-                        result.content += ("\n\n[loop guard] 步数即将用尽,请基于现有证据立即给出最终答案"
-                                           "(已解决的部分先答,未解决的标注清楚),不要再调用工具。")
+                    block = _precheck(self.policy, specs, guard, call.name, fp, call.args)
+                    if block is not None:
+                        result = ToolResult(call_id=call.id, content=block, is_error=True)
+                    else:
+                        result = tool.run(call.args)
+                        result.call_id = call.id
+                        _postprocess(self.policy, guard, call.name, fp, call.args, result, near_limit)
                 summary = _summarize(result.content)
                 steps.append(Step(n, turn.text, call.name, call.args, summary))
                 if trace:
                     trace.step(n, _summarize(turn.text or ""), call.name, call.args, summary)
                 messages.append(Message(role="tool", content=result.content, tool_call_id=call.id))
 
-        # 用尽 step 仍未收尾
+        # 用尽 step 仍未收尾。读取充分性门:几乎没真读到文件 → 疑似卡无效调用, 区分"空转" vs"读够了"。
         if trace:
             trace.done("max_steps", self.policy.max_steps)
-        return AgentResult(
-            answer="(达到 max_steps 上限仍未得出最终答案;可提高 max_steps 或缩小问题)",
-            steps=steps, usage=total_usage, stop_reason="max_steps",
-        )
+        if len(guard.readonly_paths) < self.policy.min_read_for_finish:
+            answer = ("(达到 max_steps 上限仍未收尾;且几乎没读到文件——疑似卡在无效调用 / 参数错误。"
+                      "建议核对工具参数:路径用 list_dir 确认、module 用 list_collections 看合法值,"
+                      "改对参数后再试,而非凭不足的信息下结论。)")
+        else:
+            answer = "(达到 max_steps 上限仍未得出最终答案;可提高 max_steps 或缩小问题)"
+        return AgentResult(answer=answer, steps=steps, usage=total_usage, stop_reason="max_steps")

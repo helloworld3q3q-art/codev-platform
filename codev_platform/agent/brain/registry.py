@@ -66,21 +66,34 @@ def _build_openai_compat(api_key: str, model: str, base_url: str | None, name: s
     return OpenAICompatProvider(api_key=api_key, model=model, base_url=base_url, name=name)
 
 
+# ---- 能力档默认矩阵(护栏逻辑模型无关, 参数按模型能力分档; 见 agent-loop-guard-redesign plan §六)----
+# 强模型指令遵从好 / 自控强 → 少管(关 novelty + 宽 cap, 避免误伤探索);弱模型 → 严管防换词空转。
+# 加模型 = 选一档进 spec(或纯 config 逐字段覆盖), loop.py 一行不动。
+_STRONG = LoopPolicy(retrieval_distinct_cap=12, no_progress_limit=5,
+                     novelty_check=False, readonly_total_cap=30)
+_MID = LoopPolicy(retrieval_distinct_cap=8, no_progress_limit=3,
+                  novelty_check=True, readonly_total_cap=25)
+_WEAK = LoopPolicy(retrieval_distinct_cap=6, no_progress_limit=3,
+                   novelty_check=True, readonly_total_cap=20)
+
 # ---- 内置 provider 声明(加内置厂商在此加一行)----
 register_provider(ProviderSpec("claude", "ANTHROPIC_API_KEY", _build_anthropic,
-                               default_model="claude-opus-4-7"))
+                               default_model="claude-opus-4-7",
+                               default_loop_policy=_STRONG))
 register_provider(ProviderSpec("gpt", "OPENAI_API_KEY", _build_openai_compat,
                                default_model="gpt-4o", default_base_url="https://api.openai.com/v1",
-                               openai_compatible=True))
+                               openai_compatible=True,
+                               default_loop_policy=_STRONG))
 register_provider(ProviderSpec("deepseek", "DEEPSEEK_API_KEY", _build_openai_compat,
                                default_model="deepseek-chat", default_base_url="https://api.deepseek.com",
                                openai_compatible=True,
-                               # deepseek-chat 工具选型 / 收敛偏弱: 同工具上限调紧, 防变参 thrash。
-                               default_loop_policy=LoopPolicy(per_tool_cap=3)))
+                               # deepseek-chat 工具选型 / 收敛偏弱: 弱档严管, 防变参 thrash + 换词空转。
+                               default_loop_policy=_WEAK))
 register_provider(ProviderSpec("qwen", "DASHSCOPE_API_KEY", _build_openai_compat,
                                default_model="qwen-max",
                                default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                               openai_compatible=True))
+                               openai_compatible=True,
+                               default_loop_policy=_MID))
 
 
 def _spec_for(name: str, cfg: dict[str, Any]) -> ProviderSpec:
@@ -120,25 +133,44 @@ def get_provider(cfg: dict[str, Any] | None = None) -> LLMProvider:
 
 
 def loop_policy(cfg: dict[str, Any] | None = None, name: str | None = None) -> LoopPolicy:
-    """解析某 provider 的循环行为档(策略)。优先级 (每字段独立):
-      config `agent.providers.<name>.loop.<f>` > `agent.loop.<f>` > (max_steps 兼容 `agent.max_steps`)
+    """解析某 provider 的循环行为档(策略)。每字段独立按优先级解析:
+      config `agent.providers.<name>.loop.<f>` > `agent.loop.<f>` > (legacy 别名同两级)
       > spec.default_loop_policy.<f> > LoopPolicy() 全局默认。
-    加模型 / 调参只动 config 或 spec, loop 核心零改 (agent-provider §1/§4)。"""
+    加模型 / 调参只动 config 或 spec, loop 核心零改 (agent-provider §1/§4)。
+    deprecated: `per_tool_cap` 作 `retrieval_distinct_cap` 的别名(两级 config 都认), 不破存量配置。"""
     cfg = cfg or acfg.agent_cfg()
     name = name or acfg.provider_name(cfg)
     spec = _REGISTRY.get(name)
     base = (spec.default_loop_policy if spec and spec.default_loop_policy else LoopPolicy())
 
-    def _pick(field: str, legacy: tuple[str, ...] = ()) -> int:
-        for key in (f"agent.providers.{name}.loop.{field}", f"agent.loop.{field}", *legacy):
+    def _raw(field: str, legacy_keys: tuple[str, ...] = ()) -> Any:
+        # 先按 provider 维度 + global 维度找 field, 再找 legacy 别名键, 都没有则回退 base。
+        for key in (f"agent.providers.{name}.loop.{field}", f"agent.loop.{field}", *legacy_keys):
             v = acfg.get(cfg, key)
             if v is not None:
-                return int(v)
-        return int(getattr(base, field))
+                return v
+        return getattr(base, field)
 
+    def _int(field: str, legacy_keys: tuple[str, ...] = ()) -> int:
+        return int(_raw(field, legacy_keys))
+
+    def _bool(field: str) -> bool:
+        v = _raw(field)
+        if isinstance(v, str):
+            return v.strip().lower() in ("1", "true", "yes", "on")
+        return bool(v)
+
+    # retrieval_distinct_cap 兼容旧 per_tool_cap 别名(provider 与 global 两级)。
+    _cap_legacy = (f"agent.providers.{name}.loop.per_tool_cap", "agent.loop.per_tool_cap")
     return LoopPolicy(
-        max_steps=_pick("max_steps", ("agent.max_steps",)),
-        per_tool_cap=_pick("per_tool_cap"),
+        max_steps=_int("max_steps", ("agent.max_steps",)),
+        retrieval_distinct_cap=_int("retrieval_distinct_cap", _cap_legacy),
+        no_progress_limit=_int("no_progress_limit"),
+        novelty_check=_bool("novelty_check"),
+        readonly_distinct_cap=_int("readonly_distinct_cap"),
+        readonly_total_cap=_int("readonly_total_cap"),
+        invalid_call_limit=_int("invalid_call_limit"),
+        min_read_for_finish=_int("min_read_for_finish"),
     )
 
 

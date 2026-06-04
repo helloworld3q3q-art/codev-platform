@@ -14,7 +14,12 @@ from codev_platform.core.errors import ErrorCode, to_mcp_error
 
 
 CATEGORIES = ["rule", "incident", "tooling_incident", "design", "operations", "claude_md", "skill", "doc", "tool_doc", "memory", "dev_log", "all"]
-MODULES = ["platform", "stock-admin-api", "stock-admin-web", "stock-pipeline", "all"]
+# 注: module 不再做 schema 硬 enum —— 各 project 已索引的子模块集是逐项目动态值
+# (stock-* 项目有 stock-admin-*, codev-platform 有 web-ui 等), 写死 enum 会把合法 module 当非法拒掉
+# (2026-06-04 实测: codev-platform 项目 module="web-ui" 被 enum 拒)。改为自由字符串 +
+# _build_where 对未知 module 优雅返空(不报错)。常见值见下 (仅文档提示, 非校验白名单);
+# 要看某项目真实模块集用 list_collections 的 by_module。
+MODULES = ["platform", "stock-admin-api", "stock-admin-web", "stock-pipeline", "web-ui"]
 
 
 def tool_definitions() -> list[Tool]:
@@ -45,9 +50,12 @@ def tool_definitions() -> list[Tool]:
                     },
                     "module": {
                         "type": "string",
-                        "enum": MODULES,
                         "default": "all",
-                        "description": "子模块过滤",
+                        "description": (
+                            "子模块过滤(自由字符串, 逐项目动态值, 无效值返空不报错)。"
+                            "常见: " + ", ".join(MODULES) + "。"
+                            "不确定本项目有哪些模块 → 先用 list_collections 看 by_module。"
+                        ),
                     },
                 },
                 "required": ["query"],

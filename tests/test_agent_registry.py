@@ -34,19 +34,52 @@ def test_register_new_provider_then_build(monkeypatch):
     assert p.name == "acme" and p.model == "acme-1" and p.base_url == "https://acme.test"
 
 
-def test_loop_policy_spec_default_config_override_and_global():
-    # 每模型策略:spec 内置默认 ⊕ config 覆盖 ⊕ 全局默认(加模型/调参不碰 loop 核心)。
-    # deepseek 内置 per_tool_cap=3(弱模型调紧)
-    p = reg.loop_policy({"agent": {"provider": "deepseek"}}, "deepseek")
-    assert p.per_tool_cap == 3 and p.max_steps == 12
-    # config 每字段覆盖优先(per-provider loop 块)
-    cfg = {"agent": {"provider": "deepseek",
-                     "providers": {"deepseek": {"loop": {"per_tool_cap": 7, "max_steps": 20}}}}}
-    p2 = reg.loop_policy(cfg, "deepseek")
-    assert p2.per_tool_cap == 7 and p2.max_steps == 20
-    # 无内置档的 provider → 全局 LoopPolicy 默认;legacy agent.max_steps 仍被尊重
-    p3 = reg.loop_policy({"agent": {"provider": "gpt", "max_steps": 9}}, "gpt")
-    assert p3.per_tool_cap == 4 and p3.max_steps == 9
+def test_loop_policy_capability_tiers():
+    # 能力档默认矩阵(agent-loop-guard-redesign plan §六): 强档关 novelty + 宽 cap, 弱档严管。
+    pc = reg.loop_policy({"agent": {"provider": "claude"}}, "claude")
+    assert pc.novelty_check is False and pc.retrieval_distinct_cap == 12 and pc.no_progress_limit == 5
+    pg = reg.loop_policy({"agent": {"provider": "gpt"}}, "gpt")
+    assert pg.novelty_check is False and pg.retrieval_distinct_cap == 12
+    pq = reg.loop_policy({"agent": {"provider": "qwen"}}, "qwen")
+    assert pq.novelty_check is True and pq.retrieval_distinct_cap == 8 and pq.readonly_total_cap == 25
+    pd = reg.loop_policy({"agent": {"provider": "deepseek"}}, "deepseek")
+    assert pd.novelty_check is True and pd.retrieval_distinct_cap == 6 and pd.readonly_total_cap == 20
+    assert pd.max_steps == 12  # 未覆盖字段走全局默认
+
+
+def test_loop_policy_per_field_override():
+    # (a) 每个新字段都能经 agent.providers.<name>.loop.<f> 逐字段覆盖(含 bool)。
+    cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"loop": {
+        "retrieval_distinct_cap": 9, "no_progress_limit": 7, "novelty_check": False,
+        "readonly_distinct_cap": 33, "readonly_total_cap": 44,
+        "invalid_call_limit": 5, "min_read_for_finish": 4, "max_steps": 20}}}}}
+    p = reg.loop_policy(cfg, "deepseek")
+    assert (p.retrieval_distinct_cap == 9 and p.no_progress_limit == 7 and p.novelty_check is False
+            and p.readonly_distinct_cap == 33 and p.readonly_total_cap == 44
+            and p.invalid_call_limit == 5 and p.min_read_for_finish == 4 and p.max_steps == 20)
+    # 全局 agent.loop.<f> 维度(非 provider 专属)也能覆盖 bool。
+    p2 = reg.loop_policy({"agent": {"provider": "qwen", "loop": {"novelty_check": False}}}, "qwen")
+    assert p2.novelty_check is False
+
+
+def test_loop_policy_per_tool_cap_deprecated_alias():
+    # (c) per_tool_cap 别名向后兼容: 旧 config / 旧构造仍映射 retrieval_distinct_cap。
+    cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"loop": {"per_tool_cap": 7}}}}}
+    p = reg.loop_policy(cfg, "deepseek")
+    assert p.retrieval_distinct_cap == 7 and p.per_tool_cap == 7
+    # 全局维度别名亦认
+    p2 = reg.loop_policy({"agent": {"provider": "qwen", "loop": {"per_tool_cap": 5}}}, "qwen")
+    assert p2.retrieval_distinct_cap == 5 and p2.per_tool_cap == 5
+
+
+def test_loop_policy_unspecced_provider_uses_global_default():
+    # (d) config-only 新厂商(无 spec 档)→ 全局 LoopPolicy 裸默认, 不串到别家档位。
+    cfg = {"agent": {"provider": "newco", "providers": {"newco": {"base_url": "https://x.test"}}}}
+    p = reg.loop_policy(cfg, "newco")
+    assert p.retrieval_distinct_cap == 8 and p.novelty_check is True and p.max_steps == 12
+    # legacy agent.max_steps 仍被尊重(有 spec 的 gpt 走强档默认 cap, max_steps 从 legacy 取)。
+    p2 = reg.loop_policy({"agent": {"provider": "gpt", "max_steps": 9}}, "gpt")
+    assert p2.max_steps == 9 and p2.retrieval_distinct_cap == 12
 
 
 def test_unregistered_with_base_url_falls_back_to_openai_compat():
