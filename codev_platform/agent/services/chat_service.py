@@ -92,10 +92,18 @@ class ChatService:
         finally:
             reset_run_context(_ctx_token)
 
+        # 工具调用流随 assistant 消息持久化(存 extra,经 payload JSONB 往返),
+        # 历史会话重载时可回看(前端 ToolFlow)。extra 是中性透传袋, store 无需感知 steps 结构。
+        steps_payload = [
+            {"n": s.n, "thought": s.thought, "tool": s.tool,
+             "args": s.args, "result_summary": s.result_summary}
+            for s in result.steps
+        ]
         self._sessions.append(
             sid, user_id,
             Message(role="user", content=question),
-            Message(role="assistant", content=result.answer),
+            Message(role="assistant", content=result.answer,
+                    extra={"steps": steps_payload} if steps_payload else {}),
             org_id=org_id,
         )
         return ChatOutcome(session_id=sid, result=result)

@@ -81,11 +81,25 @@ class SessionItem(BaseModel):
 
 
 class SessionMessageItem(BaseModel):
-    """历史消息 (agent MessageOut 的 web 投影)。"""
+    """历史消息 (agent MessageOut 的 web 投影)。assistant 携带工具调用流 steps。"""
 
     role: str = Field(..., description="user | assistant")
     content: str = Field("", description="消息正文")
+    steps: list[ChatStep] = Field(default_factory=list, description="工具调用流(assistant)")
 
     @classmethod
     def of(cls, raw: dict) -> SessionMessageItem:
-        return cls(role=raw.get("role", ""), content=raw.get("content", ""))
+        return cls(
+            role=raw.get("role", ""),
+            content=raw.get("content", ""),
+            steps=[
+                ChatStep(
+                    n=s.get("n", 0),
+                    thought=s.get("thought"),
+                    tool=s.get("tool"),
+                    args=s.get("args"),
+                    resultSummary=s.get("result_summary"),
+                )
+                for s in (raw.get("steps") or [])
+            ],
+        )

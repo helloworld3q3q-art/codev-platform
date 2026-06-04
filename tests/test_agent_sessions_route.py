@@ -64,6 +64,26 @@ def test_messages_filters_empty_and_tool_rows(monkeypatch):
     assert msgs[1]["content"] == "最终回答"
 
 
+def test_messages_surface_persisted_steps(monkeypatch):
+    store = InMemorySessionStore()
+    sid = store.new("alice")
+    store.append(sid, "alice",
+                 Message(role="user", content="查代码"),
+                 Message(role="assistant", content="结果如下",
+                         extra={"steps": [
+                             {"n": 1, "thought": "想查", "tool": "codegraph_search",
+                              "args": {"q": "X"}, "result_summary": "找到"},
+                         ]}))
+    c = _client(monkeypatch, store)
+    r = c.get("/sessions/messages", params={"session_id": sid}, headers={"X-User-Id": "alice"})
+    msgs = r.json()
+    assert msgs[0]["role"] == "user" and msgs[0]["steps"] == []  # user 无工具流
+    asst = msgs[1]
+    assert asst["role"] == "assistant" and len(asst["steps"]) == 1
+    assert asst["steps"][0]["tool"] == "codegraph_search"
+    assert asst["steps"][0]["result_summary"] == "找到"
+
+
 def test_org_user_isolation(monkeypatch):
     store = InMemorySessionStore()
     _seed(store, user="alice", org="orgA")

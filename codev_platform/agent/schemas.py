@@ -45,10 +45,11 @@ class SessionOut(BaseModel):
 
 
 class MessageOut(BaseModel):
-    """历史消息(GET /sessions/messages 单项)。仅暴露 UI 渲染所需字段。"""
+    """历史消息(GET /sessions/messages 单项)。assistant 携带工具调用流 steps(从 extra 还原)。"""
 
     role: str
     content: str
+    steps: list[StepOut] = Field(default_factory=list)
 
 
 class ProviderOut(BaseModel):

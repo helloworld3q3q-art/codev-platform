@@ -12,11 +12,21 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from codev_platform.agent import deps
 from codev_platform.agent.routes._deps import resolve_user_org
-from codev_platform.agent.schemas import MessageOut, SessionOut
+from codev_platform.agent.schemas import MessageOut, SessionOut, StepOut
 from codev_platform.core.errors import ErrorCode, to_http_detail
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
+
+
+def _steps_of(msg) -> list[StepOut]:
+    """assistant 消息 extra 里持久化的工具调用流 → StepOut(回看历史用)。"""
+    raw = (msg.extra or {}).get("steps") or []
+    return [
+        StepOut(n=s.get("n", 0), thought=s.get("thought"), tool=s.get("tool"),
+                args=s.get("args"), result_summary=s.get("result_summary"))
+        for s in raw
+    ]
 
 
 def _identity_or_400(request: Request) -> tuple[str, str]:
@@ -54,7 +64,7 @@ def list_session_messages(
     msgs = deps.get_sessions().get(session_id, user_id, org_id=org_id)
     # 只回 UI 要渲染的对话轮:user / assistant 且有正文(中间纯 tool-call 轮 content 为空,过滤)。
     return [
-        MessageOut(role=m.role, content=m.content)
+        MessageOut(role=m.role, content=m.content, steps=_steps_of(m))
         for m in msgs
         if m.role in ("user", "assistant") and (m.content or "").strip()
     ]

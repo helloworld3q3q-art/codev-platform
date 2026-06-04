@@ -158,6 +158,23 @@ def test_session_messages_proxies_and_envelope():
     assert params["session_id"] == "s1"
 
 
+def test_session_messages_maps_steps():
+    fake = _FakeAgentClient(raw=[
+        {"role": "user", "content": "查", "steps": []},
+        {"role": "assistant", "content": "ok", "steps": [
+            {"n": 1, "thought": "t", "tool": "search", "args": {"q": "x"}, "result_summary": "done"}]},
+    ])
+    agent.agent_client = fake
+    c = _client(_PASSTHROUGH_CFG)
+    r = c.get("/api/v1/agent/sessions/messages", params={"sessionId": "s1"}, headers=_HEADERS)
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data[0]["steps"] == []
+    step = data[1]["steps"][0]
+    assert step["tool"] == "search"
+    assert step["resultSummary"] == "done"  # snake_case → camelCase 投影
+
+
 def test_sessions_downstream_unavailable_is_503():
     fake = _FakeAgentClient(exc=PlatformError(ErrorCode.UPSTREAM_UNAVAILABLE, "agent 后端不可达"))
     agent.agent_client = fake

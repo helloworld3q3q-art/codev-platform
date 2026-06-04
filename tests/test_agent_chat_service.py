@@ -60,6 +60,46 @@ def test_ask_returns_outcome_with_session():
     assert out.result.stop_reason == "answered"
 
 
+def test_ask_persists_tool_steps_into_assistant_extra():
+    """工具调用流随 assistant 消息 extra 持久化(历史会话可回看 ToolFlow)。"""
+    from codev_platform.agent.brain import AssistantTurn, LLMProvider, ToolCall, ToolResult
+    from codev_platform.agent.tools.base import Tool
+
+    class _ScriptProvider(LLMProvider):
+        name, model = "fake", "m"
+
+        def __init__(self, script):
+            self._s = list(script)
+
+        def chat(self, system, messages, tools):
+            return self._s.pop(0)
+
+    class _Echo(Tool):
+        name = "echo"
+        description = "e"
+        input_schema = {"type": "object", "properties": {"v": {"type": "string"}}}
+
+        def run(self, args):
+            return ToolResult(call_id="", content="echoed")
+
+    def _reg(_pid):
+        r = ToolRegistry()
+        r.register(_Echo())
+        return r
+
+    provider = _ScriptProvider([
+        AssistantTurn(text=None, tool_calls=[ToolCall("c1", "echo", {"v": "x"})], stop_reason="tool_use"),
+        AssistantTurn(text="done", tool_calls=[], stop_reason="end"),
+    ])
+    store = InMemorySessionStore()
+    svc = ChatService(sessions=store, registry_factory=_reg,
+                      provider_factory=lambda: provider, default_max_steps=lambda: 5)
+    out = svc.ask("q", user_id="u")
+    asst = [m for m in store.get(out.session_id, "u") if m.role == "assistant"][-1]
+    assert asst.extra.get("steps"), "assistant 消息应带 steps"
+    assert any(s["tool"] == "echo" for s in asst.extra["steps"])
+
+
 def test_session_continuity():
     svc = _service()
     out1 = svc.ask("q1")
