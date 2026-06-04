@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS memory_entries (
   supersedes    UUID REFERENCES memory_entries(id),
   extra         JSONB NOT NULL DEFAULT '{}',
   ttl_at        TIMESTAMPTZ,                     -- 遗忘:到期自动 archive(M4)
+  task_id       TEXT,                            -- M1 任务记忆:关联任务标识(需求/工单/会话任务)
+  task_state    TEXT,                            -- M1:active | blocked | done | archived
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -35,7 +37,7 @@ CREATE INDEX IF NOT EXISTS ix_mem_topic
   ON memory_entries (org_id, topic_key, status);
 """
 
-_COLS = "id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, is_redline, status, supersedes, extra"
+_COLS = "id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, is_redline, status, supersedes, extra, task_id, task_state"
 
 
 def _row_to_entry(r: tuple) -> MemoryEntry:
@@ -43,6 +45,7 @@ def _row_to_entry(r: tuple) -> MemoryEntry:
         id=str(r[0]), org_id=r[1], scope=r[2], scope_ref=r[3], owner_user_id=r[4],
         content=r[5], kind=r[6], topic_key=r[7], is_redline=r[8], status=r[9],
         supersedes=str(r[10]) if r[10] else None, extra=r[11] or {},
+        task_id=r[12], task_state=r[13],
     )
 
 
@@ -66,6 +69,12 @@ class SqlMemoryStore(MemoryStore):
                 self._read_pool.open()
             with self._write_pool.connection() as conn:
                 conn.execute(_SCHEMA)
+                # M1 迁移:旧表补 task 列(CREATE IF NOT EXISTS 不改已存在表), 再建依赖该列的索引
+                # (索引必须在 ALTER 之后, 否则旧库列未在时 CREATE INDEX 会失败)。
+                conn.execute("ALTER TABLE memory_entries ADD COLUMN IF NOT EXISTS task_id TEXT")
+                conn.execute("ALTER TABLE memory_entries ADD COLUMN IF NOT EXISTS task_state TEXT")
+                conn.execute("CREATE INDEX IF NOT EXISTS ix_mem_task "
+                             "ON memory_entries (org_id, task_id, status)")
             self._schema_ready = True
 
     # ---- 写路径(主库)----
@@ -79,11 +88,12 @@ class SqlMemoryStore(MemoryStore):
             conn.execute(
                 "INSERT INTO memory_entries "
                 "(id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "
-                " is_redline, status, supersedes, ttl_at, extra) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
+                " is_redline, status, supersedes, ttl_at, extra, task_id, task_state) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)",
                 (eid, entry.org_id, entry.scope, entry.scope_ref, entry.owner_user_id,
                  entry.content, entry.kind, entry.topic_key, entry.is_redline, entry.status,
-                 entry.supersedes, entry.ttl_at, json.dumps(entry.extra or {}, ensure_ascii=False)),
+                 entry.supersedes, entry.ttl_at, json.dumps(entry.extra or {}, ensure_ascii=False),
+                 entry.task_id, entry.task_state),
             )
         return eid
 
@@ -108,12 +118,13 @@ class SqlMemoryStore(MemoryStore):
                 conn.execute(
                     "INSERT INTO memory_entries "
                     "(id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "
-                    " is_redline, status, supersedes, ttl_at, extra) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)",
+                    " is_redline, status, supersedes, ttl_at, extra, task_id, task_state) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)",
                     (eid, new_entry.org_id, new_entry.scope, new_entry.scope_ref, new_entry.owner_user_id,
                      new_entry.content, new_entry.kind, new_entry.topic_key, new_entry.is_redline,
                      new_entry.status, old_id, new_entry.ttl_at,
-                     json.dumps(new_entry.extra or {}, ensure_ascii=False)),
+                     json.dumps(new_entry.extra or {}, ensure_ascii=False),
+                     new_entry.task_id, new_entry.task_state),
                 )
         return eid
 

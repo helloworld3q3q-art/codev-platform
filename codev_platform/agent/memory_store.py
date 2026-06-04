@@ -38,6 +38,8 @@ class MemoryEntry:
     supersedes: str | None = None
     ttl_at: datetime | None = None  # 遗忘:到期自动 archive(M4);None = 永久
     extra: dict[str, Any] = field(default_factory=dict)
+    task_id: str | None = None      # M1 任务记忆:关联任务标识(需求/工单/会话任务/Jira issue)
+    task_state: str | None = None   # M1:active | blocked | done | archived(None=非任务记忆)
 
 
 class MemoryStore(ABC):

@@ -15,20 +15,22 @@ def test_entry_defaults():
     e = MemoryEntry(id="1", scope="project", scope_ref="p1", owner_user_id="alice", content="x")
     assert e.org_id == "default" and e.status == "active" and e.is_redline is False
     assert e.extra == {} and e.supersedes is None
+    assert e.task_id is None and e.task_state is None  # M1:非任务记忆默认 None
 
 
 def test_row_to_entry():
     row = ("uuid-1", "acme", "personal", "alice", "alice", "我喜欢简洁",
-           "preference", "style", True, "active", None, {"k": "v"})
+           "preference", "style", True, "active", None, {"k": "v"}, "task-9", "active")
     e = _row_to_entry(row)
     assert e.id == "uuid-1" and e.org_id == "acme" and e.scope == "personal"
     assert e.owner_user_id == "alice" and e.is_redline is True and e.extra == {"k": "v"}
     assert e.supersedes is None
+    assert e.task_id == "task-9" and e.task_state == "active"  # M1 列映射
 
 
 def test_row_to_entry_with_supersedes():
     row = ("new", "default", "project", "p1", "bob", "新值", None, None, False,
-           "active", "old-id", {})
+           "active", "old-id", {}, None, None)
     e = _row_to_entry(row)
     assert e.supersedes == "old-id"
 
