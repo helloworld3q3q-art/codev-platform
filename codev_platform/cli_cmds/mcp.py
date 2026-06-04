@@ -1,0 +1,175 @@
+"""MCP / daemon 编排子命令 (daemon / serve-mcp / mcp-source) —— 从 cli.py 拆出。"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+from codev_platform.cli_cmds._shared import _eprint, _print
+from codev_platform.core.project_id import CONFIG_RELPATH, ProjectIdError, validate
+
+
+def cmd_daemon(args: argparse.Namespace) -> int:
+    """chroma daemon 生命周期: status (查 /health) / stop (按 pid 杀)。
+
+    spawn 由业务项目首次 Claude session 经 launcher 自动完成, 不在此处 start —
+    避免脱离 project_id 上下文起一个无主 daemon。stop 后下次 session 会重新拉起。
+    """
+    from codev_platform.chroma import launcher  # 复用 health/port 逻辑
+    health = launcher._fetch_daemon_health()
+    if args.action == "status":
+        if health is None:
+            _print(f"daemon: DOWN ({launcher.DAEMON_URL})")
+            _print("提示: 打开业务项目任一 Claude Code 会话会自动拉起 daemon。")
+            return 1
+        proc = health.get("process") or {}
+        _print(f"daemon: {health.get('status', '?').upper()} pid={proc.get('pid')} "
+               f"uptime={proc.get('uptime_sec')}s rss={proc.get('rss_mb')}MiB")
+        _print(f"  model={health.get('model')} reranker={health.get('reranker')} "
+               f"sse_sessions={health.get('sse_sessions')}")
+        for p in health.get("loaded_projects", []):
+            _print(f"  [{p.get('project_id')}] chunks={p.get('chunks')} "
+                   f"bm25={p.get('bm25')} last_indexed={p.get('last_indexed_at')}")
+        return 0
+    if args.action == "stop":
+        if health is None:
+            _print("daemon 未运行, 无需 stop。")
+            return 0
+        pid = (health.get("process") or {}).get("pid")
+        if not pid:
+            _eprint("daemon /health 未返回 pid (旧版 daemon?), 无法自动 stop。请手动结束进程。")
+            return 1
+        import subprocess
+        if sys.platform == "win32":
+            rc = subprocess.call(["taskkill", "/PID", str(pid), "/F"])
+        else:
+            rc = subprocess.call(["kill", str(pid)])
+        _print(f"stop pid={pid} rc={rc}。下次 Claude session 会重新拉起。")
+        return rc
+    return 1
+
+
+def cmd_serve_mcp(args: argparse.Namespace) -> int:
+    """平台 MCP 端点编排: status (探测) / start (幂等拉起 cross-link + 各项目 codegraph)。
+
+    chroma daemon 由业务仓 Claude 会话经 launcher 自 spawn, 本命令不拉起它, 只报状态。
+    """
+    from codev_platform.core.config import load_config
+    from codev_platform import mcp_serve
+    cfg = load_config()
+    if args.action == "status":
+        rows = mcp_serve.probe_all(cfg, diagnose=True)
+        _print(f"{'endpoint'.ljust(22)} {'kind'.ljust(11)} {'port'.ljust(6)} status   reason / sse_url")
+        _print("-" * 90)
+        any_down = False
+        for r in rows:
+            mark = "OK  " if r["status"] == "ok" else "DOWN"
+            if r["status"] != "ok" and not r["self_spawned"]:
+                any_down = True
+            tail = r["sse_url"] if r["status"] == "ok" else (r.get("reason") or r["sse_url"])
+            _print(f"{r['name'].ljust(22)} {r['kind'].ljust(11)} {str(r['port']).ljust(6)} "
+                   f"{mark}     {tail}")
+        return 1 if any_down else 0
+    if args.action == "start":
+        results = mcp_serve.ensure_serving(cfg)
+        for r in results:
+            extra = r.get("error") or r.get("note") or ""
+            pid = f" pid={r['pid']}" if r.get("pid") else ""
+            _print(f"  {r['name'].ljust(22)} {r['action']}{pid}  {extra}")
+        _print()
+        if getattr(args, "wait", False):
+            timeout = float(getattr(args, "timeout", 60) or 60)
+            _print(f"等待端点就绪 (--wait, 超时 {int(timeout)}s) ...")
+            waited = mcp_serve.wait_until_serving(cfg, timeout=timeout)
+            any_timeout = False
+            for w in waited:
+                if w["status"] == "ok":
+                    _print(f"  {w['name'].ljust(22)} OK")
+                else:
+                    any_timeout = True
+                    _print(f"  {w['name'].ljust(22)} 超时  {w.get('reason') or ''}")
+            return 1 if any_timeout else 0
+        _print("提示: codegraph 端点需 ~2-5s 起来; 再跑 `codev-platform serve-mcp status` 确认。")
+        return 0
+    if args.action == "install-systemd":
+        # 以普通用户跑: 按 config 生成 systemd unit(端口/路径都来自 iter_endpoints),
+        # 写到 ~/codev-systemd/, 再打印唯一一条 sudo 命令装进 /etc/systemd/system 并 enable。
+        # 不在此直接 sudo —— 普通用户跑能读对用户的 config(sudo 会切到 root 的 HOME/config)。
+        import getpass
+        user = getattr(args, "user", None) or os.environ.get("SUDO_USER") or getpass.getuser()
+        r = mcp_serve.install_systemd(cfg, user)
+        _print(f"生成 {len(r['units'])} 个 unit 到 {r['dir']} (User={user}):")
+        for u in r["units"]:
+            _print(f"  - {u}")
+        _print()
+        _print("装上 + 开机自起(enable),跑这一条(需 root):")
+        _print(f"  {r['sudo_cmd']}")
+        _print()
+        _print("装完验证: systemctl is-active " + " ".join(s[:-8] for s in r["units"]))
+        return 0
+    _eprint(f"unknown action: {args.action}")
+    return 1
+
+
+def cmd_mcp_source(args: argparse.Namespace) -> int:
+    """切换业务仓 .mcp.json 各 MCP 的源 (local 本机本地实例 / platform 平台基线服务器)。
+
+    可统一切 (默认全部 3 套) 或只切指定 tool。host/port 来自 config.mcp_sources.<target>
+    (缺省 local=18xxx / platform=19xxx)。project_id 取自 <repo>/.claude/project.json。
+    """
+    from codev_platform.core.config import load_config
+    from codev_platform import mcp_serve
+    repo = Path(args.repo).expanduser().resolve() if args.repo else Path.cwd()
+    mcp_json = repo / ".mcp.json"
+    if not mcp_json.is_file():
+        _eprint(f"FATAL: 未找到 {mcp_json} (在业务仓根跑, 或 --repo 指定)")
+        return 1
+    pj = repo / CONFIG_RELPATH
+    if not pj.is_file():
+        _eprint(f"FATAL: 未找到 {pj} (先 codev-platform init)")
+        return 1
+    try:
+        pid = validate(json.loads(pj.read_text(encoding="utf-8")).get("project_id"))
+    except (json.JSONDecodeError, ProjectIdError) as exc:
+        _eprint(f"FATAL: 解析 project_id 失败: {exc!s}")
+        return 1
+
+    alias = {
+        "docs": "platform-docs", "chromadb": "platform-docs", "chroma": "platform-docs",
+        "platform-docs": "platform-docs", "cross-link": "cross-link", "crosslink": "cross-link",
+        "codegraph": "codegraph",
+    }
+    cfg = load_config()
+    try:
+        data = json.loads(mcp_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        _eprint(f"FATAL: {mcp_json} 解析失败: {exc!s}")
+        return 1
+    servers = data.get("mcpServers", {})
+    sel = [alias.get(t, t) for t in args.tools] if args.tools else list(mcp_serve.MCP_SOURCE_TOOLS)
+
+    changed: list[tuple[str, str]] = []
+    for tool in sel:
+        if tool not in servers:
+            _print(f"  跳过 {tool} (.mcp.json 无此项)")
+            continue
+        try:
+            url = mcp_serve.mcp_source_url(cfg, args.target, tool, pid)
+        except ValueError as exc:
+            _eprint(f"FATAL: {exc!s}")
+            return 1
+        servers[tool]["type"] = "sse"
+        servers[tool]["url"] = url
+        changed.append((tool, url))
+    if not changed:
+        _print("无改动 (选中的 tool 都不在 .mcp.json)")
+        return 0
+    mcp_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _print(f"OK: {mcp_json}  ->  源 = {args.target}  (project_id={pid})")
+    for tool, url in changed:
+        _print(f"  {tool.ljust(14)} {url}")
+    _print()
+    _print("提示: 重启 Claude Code 让新 .mcp.json 生效。")
+    return 0

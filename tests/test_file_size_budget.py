@@ -13,11 +13,8 @@ _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # 当前已超、暂缓拆 (各有后续拆分计划)。新增超限文件**严禁**加这里——先拆。
 _WHITELIST = {
-    "codev_platform/cli.py",                          # CLI 多子命令聚合, 待按子命令分文件
-    "codev_platform/plugins/builtin/sql.py",          # SQL 多方言 + Python/Java DML 解析, 待拆
-    "codev_platform/plugins/builtin/_stack_scan.py",  # 多栈扫描基座 (react/fastapi/spring...), 待拆
+    # cli.py / sql.py / _stack_scan.py / ops/reindex.py 已拆成同名包 (各 ≤600), 移出白名单。
     "codev_platform/cross_link/server.py",            # cross-link MCP server, 退役中 (Track A6 迁 store)
-    "codev_platform/ops/reindex.py",                  # reindex 多 stage 编排, 待按 stage 拆
 }
 
 
