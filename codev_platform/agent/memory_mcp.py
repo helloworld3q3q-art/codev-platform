@@ -383,7 +383,7 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
             "rbac_enabled": deps.get_rbac_store() is not None,
         })
 
-    _cfg = load_config()
+    _cfg = _cfg0  # 复用启动闸已读的 config(避免 run_http 内重复 load_config)
     _mw = [Middleware(AuthMiddleware, authenticator=build_authenticator(_cfg),
                       public_paths={"/healthz", "/health"})]
     _rl = maybe_rate_limit_middleware(_cfg)
