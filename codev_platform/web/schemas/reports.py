@@ -40,3 +40,41 @@ class GraphQueryResponse(BaseModel):
 
     found: bool = False
     data: dict | None = None
+
+
+# ---- MCP 调用分析 (platform-admin 仪表盘) ----
+
+class McpChromaUsage(BaseModel):
+    agentCalls: int = 0   # web 端 agent(chat)调用数
+    devCalls: int = 0     # 开发端 Claude Code / Codex 直调数
+    hits: int = 0         # 命中(返回 >0 结果)的次数
+
+
+class McpCallUsage(BaseModel):
+    calls: int = 0        # cross-link / codegraph: 纯开发端调用(agent 不走这俩 MCP)
+
+
+class McpModelUsage(BaseModel):
+    embedCalls: int = 0   # 自部署 Qwen embedding 推理次数(每次搜索 1 次)
+    rerankCalls: int = 0  # 自部署 Qwen reranker 推理次数(rerank_used 为真)
+
+
+class McpUsageMetrics(BaseModel):
+    chroma: McpChromaUsage = Field(default_factory=McpChromaUsage)
+    crossLink: McpCallUsage = Field(default_factory=McpCallUsage)
+    codegraph: McpCallUsage = Field(default_factory=McpCallUsage)
+    model: McpModelUsage = Field(default_factory=McpModelUsage)
+
+
+class McpProjectUsage(McpUsageMetrics):
+    projectId: str = ""
+
+
+class McpUsageWindow(BaseModel):
+    projects: list[McpProjectUsage] = Field(default_factory=list)
+    total: McpUsageMetrics = Field(default_factory=McpUsageMetrics)
+
+
+class McpUsageReportResponse(BaseModel):
+    last7d: McpUsageWindow = Field(default_factory=McpUsageWindow)    # 近 7 天
+    allTime: McpUsageWindow = Field(default_factory=McpUsageWindow)   # 全时段累计

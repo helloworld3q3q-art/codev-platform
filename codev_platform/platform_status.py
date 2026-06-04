@@ -109,6 +109,80 @@ def _usage_7d(repo_root: Path) -> dict[str, dict[str, int]]:
     return usage
 
 
+def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
+    """MCP 调用分析:每项目 + 合计,7 天窗 + 全时段累计,按来源(agent/dev)分桶。
+
+    - chroma(platform-docs):agent / dev 调用 + 命中(search_recall.jsonl 含 client 字段;
+      老日志无 client → 计 dev)
+    - cross-link / codegraph:调用数(纯 dev —— web 端 agent 的 codegraph/impact 工具直读
+      sqlite/store,不走这俩 MCP server)
+    - 自部署模型:embed 调用(每次搜索 1 次)+ rerank 调用(rerank_used 为真),即本机 Qwen
+      embedding/reranker 的实际推理次数。
+    """
+    from codev_platform.core.paths import logs_dir
+    cutoff = datetime.now() - timedelta(days=7)
+
+    def _blank() -> dict[str, dict[str, int]]:
+        return {
+            "chroma": {"agentCalls": 0, "devCalls": 0, "hits": 0},
+            "crossLink": {"calls": 0},
+            "codegraph": {"calls": 0},
+            "model": {"embedCalls": 0, "rerankCalls": 0},
+        }
+
+    acc: dict[str, dict[str, dict]] = {"last7d": {}, "allTime": {}}
+
+    def _get(window: str, pid: str | None) -> dict:
+        return acc[window].setdefault(pid or "(legacy)", _blank())
+
+    def _windows(o: dict) -> list[str]:
+        ts = _parse_dt(str(o.get("ts", "")))
+        return ["allTime", "last7d"] if (ts is None or ts >= cutoff) else ["allTime"]
+
+    def _iter(path: Path):
+        if not path.is_file():
+            return
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+    recall = logs_dir() / "search_recall.jsonl"
+    cl = repo_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl"
+    cg = repo_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
+
+    for o in _iter(recall):
+        client = o.get("client") or "dev"
+        hit = 1 if (o.get("hit") or 0) > 0 else 0
+        rerank = 1 if o.get("rerank_used") else 0
+        for w in _windows(o):
+            m = _get(w, o.get("project_id"))
+            m["chroma"]["agentCalls" if client == "agent" else "devCalls"] += 1
+            m["chroma"]["hits"] += hit
+            m["model"]["embedCalls"] += 1
+            m["model"]["rerankCalls"] += rerank
+    for path, key in ((cl, "crossLink"), (cg, "codegraph")):
+        for o in _iter(path):
+            for w in _windows(o):
+                _get(w, o.get("project_id"))[key]["calls"] += 1
+
+    def _shape(window: str) -> dict[str, Any]:
+        total = _blank()
+        projects = []
+        for pid, m in sorted(acc[window].items()):
+            projects.append({"projectId": pid, **m})
+            for grp, kv in m.items():
+                for k, v in kv.items():
+                    total[grp][k] += v
+        return {"projects": projects, "total": total}
+
+    return {"last7d": _shape("last7d"), "allTime": _shape("allTime")}
+
+
 def build_platform_status(cfg: dict) -> dict[str, Any]:
     """聚合所有项目 x 三库 + 记忆 + 7d 使用率。服务端调用(读本机资源),返回 JSON-able dict。"""
     repo_root = _repo_root()

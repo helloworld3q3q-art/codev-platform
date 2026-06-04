@@ -21,6 +21,7 @@ from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.graph import impact as I
 from codev_platform.graph.store import graph_store_path
 from codev_platform.web.schemas import reports as S
+from codev_platform.web.security.deps import require_platform_admin
 
 router = APIRouter()
 
@@ -124,3 +125,17 @@ def report_api_callers(request: Request, body: S.ApiCallersRequest,
                        ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
     return _query(request, project_id, I.find_api_callers, body.endpointRef)
+
+
+@router.get(
+    "/api/v1/reports/mcp-usage",
+    tags=[_TAG],
+    summary="MCP 调用分析-每项目+合计(7天/全时段, agent/dev 分桶 + 自部署模型)",
+    operation_id="reportMcpUsage",
+    response_model=CommonResult[S.McpUsageReportResponse],
+)
+def report_mcp_usage(request: Request, _sess=Depends(require_platform_admin)) -> CommonResult:
+    # 平台级跨项目统计 (非 project-scoped) → require_platform_admin (仅平台开发者/管理员)。
+    from codev_platform import platform_status
+    data = platform_status.mcp_usage_report(platform_status._repo_root())
+    return ok(S.McpUsageReportResponse(**data), request_id=_rid(request))
