@@ -2,10 +2,9 @@
 
   codev-platform metrics [--since 30m|2h|1d] [--json]
 
-Reads 4 jsonl sources (already written by the running services -- we only read):
+Reads 3 jsonl sources (already written by the running services -- we only read):
   - audit       : core.audit.audit_log_path()        ts/service/user_id/org_id/via/project_id/allowed/reason
   - chroma      : chroma/search_recall.jsonl          ts/project_id/query/hit/... (one row per search_docs)
-  - cross-link  : cross_link/cross_link_usage.jsonl   ts/project_id/tool/ok/...
   - codegraph   : codegraph/codegraph_usage.jsonl     ts/project_id/tool/ok/...
 
 Pure aggregation (parse/within_since/aggregate/check_alerts) is split from the
@@ -127,18 +126,16 @@ def aggregate(sources: dict[str, list[dict]]) -> MetricsSummary:
     """纯聚合: 每源指标 + 顶层 totals。源缺失 -> 视为空列表。"""
     audit = _agg_audit(sources.get("audit", []))
     chroma = _agg_recall(sources.get("chroma", []))
-    cross = _agg_usage(sources.get("cross-link", []))
     codegraph = _agg_usage(sources.get("codegraph", []))
     per_source = {
         "audit": audit,
         "chroma": chroma,
-        "cross-link": cross,
         "codegraph": codegraph,
     }
     totals = {
         "audit_total": audit["total"],
-        "mcp_calls": chroma["total"] + cross["total"] + codegraph["total"],
-        "mcp_errors": cross["errors"] + codegraph["errors"],
+        "mcp_calls": chroma["total"] + codegraph["total"],
+        "mcp_errors": codegraph["errors"],
     }
     return MetricsSummary(per_source=per_source, totals=totals)
 
@@ -176,7 +173,7 @@ def to_prometheus(summary: MetricsSummary) -> str:
     call_samples: list[tuple[str, float]] = []
     err_samples: list[tuple[str, float]] = []
     rate_samples: list[tuple[str, float]] = []
-    for src in ("chroma", "cross-link", "codegraph"):
+    for src in ("chroma", "codegraph"):
         s = summary.per_source.get(src, {})
         label = f'service="{_prom_escape(src)}"'
         call_samples.append((label, s.get("total", 0)))
@@ -205,7 +202,7 @@ def check_alerts(summary: MetricsSummary, thresholds: dict | None) -> list[str]:
             alerts.append(f"audit deny_rate {rate:.2%} > {deny_max:.2%}")
     err_max = th.get("error_rate_max")
     if err_max is not None:
-        for src in ("cross-link", "codegraph"):
+        for src in ("codegraph",):
             rate = summary.per_source.get(src, {}).get("error_rate", 0.0)
             if rate > err_max:
                 alerts.append(f"{src} error_rate {rate:.2%} > {err_max:.2%}")
@@ -244,20 +241,17 @@ def deliver_alerts(alerts: list[str], cfg) -> None:
 # IO layer (thin) -- reads only, never writes the sources.
 # --------------------------------------------------------------------------
 def _source_paths() -> dict[str, Path]:
-    """按包定位 4 个 jsonl + audit。延迟 import 避免聚合层依赖运行态。"""
-    import codev_platform.cross_link as _cl
+    """按包定位 jsonl + audit。延迟 import 避免聚合层依赖运行态。"""
     import codev_platform.codegraph as _cg
     from codev_platform.core.audit import audit_log_path
 
     from codev_platform.core.paths import logs_dir
-    cl_dir = Path(_cl.__file__).parent
     cg_dir = Path(_cg.__file__).parent
     return {
         "audit": audit_log_path(),
         # search_recall.jsonl 已迁出包目录到 data_root/logs (与 _obslog 写入路径一致);
-        # cross_link/codegraph 的 usage.jsonl 未迁移, 仍在各自包目录。
+        # codegraph 的 usage.jsonl 未迁移, 仍在包目录。
         "chroma": logs_dir() / "search_recall.jsonl",
-        "cross-link": cl_dir / "cross_link_usage.jsonl",
         "codegraph": cg_dir / "codegraph_usage.jsonl",
     }
 
@@ -286,7 +280,7 @@ def _print_human(summary: MetricsSummary, alerts: list[str], since: str | None) 
           f"denied={a['denied']}  deny_rate={a['deny_rate']:.1%}")
     for reason, cnt in a["deny_by_reason"].items():
         print(f"              deny: {reason} x{cnt}")
-    for src in ("chroma", "cross-link", "codegraph"):
+    for src in ("chroma", "codegraph"):
         s = summary.per_source[src]
         if "by_tool" in s:
             print(f"{src:<11} calls={s['total']}  errors={s['errors']}  "

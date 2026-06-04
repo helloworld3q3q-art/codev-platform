@@ -64,20 +64,19 @@ def test_aggregate_audit_counts_and_deny_reasons():
 
 
 def test_aggregate_usage_total_by_tool_and_errors():
-    cross = [
-        {"tool": "find_table_refs", "ok": True},
-        {"tool": "find_table_refs", "ok": False},
-        {"tool": "search_nodes", "ok": True},
+    codegraph = [
+        {"tool": "codegraph_search", "ok": True},
+        {"tool": "codegraph_search", "ok": False},
+        {"tool": "codegraph_callers", "ok": True},
     ]
     chroma = [{"hit": 3}, {"hit": 0}]
-    codegraph = [{"tool": "codegraph_search", "ok": True}]
-    s = m.aggregate({"cross-link": cross, "chroma": chroma, "codegraph": codegraph})
-    c = s.per_source["cross-link"]
+    s = m.aggregate({"chroma": chroma, "codegraph": codegraph})
+    c = s.per_source["codegraph"]
     assert c["total"] == 3
     assert c["errors"] == 1
-    assert c["by_tool"]["find_table_refs"] == 2
+    assert c["by_tool"]["codegraph_search"] == 2
     assert s.per_source["chroma"]["total"] == 2  # 召回只计次数
-    assert s.totals["mcp_calls"] == 3 + 2 + 1
+    assert s.totals["mcp_calls"] == 3 + 2
     assert s.totals["mcp_errors"] == 1
 
 
