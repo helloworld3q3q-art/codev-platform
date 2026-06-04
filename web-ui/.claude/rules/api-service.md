@@ -121,35 +121,35 @@ try {
 
 ---
 
-## 五、后端 schema 红线（影响 `pnpm run api` 生成,踩过两次)
+## 五、后端 schema 红线（跨栈 codegen 契约,踩过两次)
 
-写后端 FastAPI 接口 / Pydantic schema 时,以下两条直接决定前端能不能用,**违反会生成坏代码或静默失效**:
+> codev-platform 是**多栈平台** —— 业务仓后端可能是 Python(FastAPI)/ Java(Spring)/ Node 等,
+> **它们都经 OpenAPI 喂给本前端的 `pnpm run api`**。下面两条是与栈无关的契约,**任何后端栈都要守**,
+> 违反会生成坏代码或静默失效。每条给出各栈的落地方式。
 
-### 5.1 🚨 schema 的 docstring / 字段 description 必须**单行**
+### 5.1 🚨 OpenAPI schema 的 `description` 必须**单行**
 
-多行 docstring/description 会进 OpenAPI `description`,前端 swagger 生成器把它原样塞进
-`typings.d.ts` 的 `//` 注释 —— **换行处破坏 `.d.ts` 语法**(`tsc` 报 `TS1127 Invalid character`,整个 typings 解析失败)。
+多行 description 会被前端 swagger 生成器原样塞进 `typings.d.ts` 的 `//` 注释 —— **换行处破坏 `.d.ts`
+语法**(`tsc` 报 `TS1127 Invalid character`,整个 typings 解析失败)。description 来源因栈而异,都要单行:
 
-```python
-# ❌ 多行 docstring → 生成的 typings.d.ts 报错
-class FooRequest(BaseModel):
-    """第一行说明。
-    第二行说明。"""        # ← 换行进 description → 破坏 .d.ts
+| 栈 | description 来源 | 单行做法 |
+|---|---|---|
+| Python / FastAPI | 类 docstring + `Field(description=...)` | docstring 单行;多行说明改 `#` 注释(不进 OpenAPI) |
+| Java / Spring | `@Schema(description="...")` / `@Operation` | `description` 串内不换行 |
+| Node(nestjs 等) | `@ApiProperty({ description })` | 同上 |
 
-# ✅ 单行 docstring;要写多行用 # 注释(# 注释不进 OpenAPI)
-class FooRequest(BaseModel):
-    """一句话单行说明。"""
-    # 详细多行说明用普通 # 注释, 不会进 description。
-```
+参考既有处理:`codev_platform/web/schemas/audit.py:AuditListRequest`、`core/httpkit/pagination.py:PageBody`。
 
-参考既有处理:`codev_platform/web/schemas/audit.py` 的 `AuditListRequest`、`core/httpkit/pagination.py` 的 `PageBody`。
+### 5.2 POST 列表接口的分页 / 过滤参数走 **body**,不要走 query
 
-### 5.2 POST 列表接口的分页 / 过滤参数走 **body**,不要用 `Query`
+前端 `post()`(`utils/fetch`)**一律把参数发 body**,不发 query(沿 Java `@RequestBody` 约定)。
+后端 list 接口若从 query 取参,前端传的值到不了:必填 query(如 `code`)→ **400**;可选分页 →
+**静默永远第 1 页**(数据少时不易发现)。✅ 各栈正解 = **收 body 模型/DTO**:
 
-前端 `post()`(`utils/fetch`)**一律把参数发 body**(沿 Java `@RequestBody` 约定),不发 query。
-后端 list 接口若用 `code: str = Query(...)` / `Depends(page_params)`(query 版)取参:
+| 栈 | ❌ 错(query) | ✅ 对(body) |
+|---|---|---|
+| Python / FastAPI | `code: str = Query(...)` / `Depends(page_params)` | body 模型;分页继承 `core.httpkit.pagination.PageBody` |
+| Java / Spring | `@RequestParam` | `@RequestBody XxxListRequest`(含 pageNumber/pageSize)|
+| Node | `req.query` | `req.body` |
 
-- 必填 query 参数(如 `code`)→ 前端 body 传不到 → **400**;
-- 可选分页 → 前端 `pageNumber/pageSize` 传不到 → **静默永远第 1 页**(数据少时不易发现)。
-
-✅ 正确:POST 列表接口收 **body 模型**;分页继承 `core.httpkit.pagination.PageBody`(`pageNumber/pageSize/offset`),过滤字段加在子类。`GET` 接口才用 `Query`。
+`GET` 接口才用 query 参数。
