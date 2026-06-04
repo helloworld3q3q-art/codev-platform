@@ -9,7 +9,8 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [next-plan-2026-06-05.md](next-plan-2026-06-05.md) | 主 plan **v2(四专家会诊修订)**:ROI 重排 `C1→B1→A-MVP`(收尾先于新特性)+ A 砍只读 MVP(≥70% 验收)+ 软/硬节点隔离 + grounding-first + A2/A3/A4 推下轮 | 📋 v2 规划 |
+| [next-plan-2026-06-05.md](next-plan-2026-06-05.md) | 主 plan **v3**:ROI 重排 `C1→M→B1→A1`(收尾先于新特性)+ **新增 Track M 开发端 memory** + A 砍只读 MVP(≥70% 验收)+ 软/硬节点隔离 + grounding-first | 📋 v3 规划 |
+| [dev-agent-memory-mcp-design-2026-06-05.md](dev-agent-memory-mcp-design-2026-06-05.md) | **子设计(四专家会诊)**:开发端 Claude Code/Codex 经 MCP 接平台 memory —— 独立 SSE server + per-dev token 身份(org_id 不可由 client 传)+ personal 默认隐私 + P0 三缺口前置 + 读侧 MVP 先行 | 📐 设计 |
 | [agent-loop-guard-redesign-2026-06-05.md](agent-loop-guard-redesign-2026-06-05.md) | loop guard 重构(5 专家两轮会诊):工具三分类护栏(只读近乎不限 / 检索类输出侧零增量 / 无效调用单独防线)+ 收尾禁脑补 + 读取充分性门。修 `per_tool_cap=3` 误杀 read_file 的主瓶颈 | 📋 待启动 |
 
 ---
