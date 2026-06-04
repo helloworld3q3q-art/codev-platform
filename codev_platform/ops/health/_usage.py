@@ -46,8 +46,14 @@ def _usage_search_recall(r: Report, recall_file: Path, project_id: str | None = 
     else:
         status = "OK"
     sample = " / baseline=small(<30)" if total < 30 else ""
+    # 按调用方分桶: agent(web 端 chat) vs dev(开发端 Claude Code 直调)。老日志无 client → 计 dev。
+    by_client: dict[str, int] = {}
+    for o in recent:
+        c = o.get("client") or "dev"
+        by_client[c] = by_client.get(c, 0) + 1
+    split = ", ".join(f"{c} {n}" for c, n in sorted(by_client.items()))
     r.line("search_recall", status,
-           f"{total} queries / hit_rate={hit_rate}% / median_top1_dist={med}{sample}")
+           f"{total} queries ({split}) / hit_rate={hit_rate}% / median_top1_dist={med}{sample}")
 
 
 def _usage_reindex(r: Report, repo: Path) -> None:
@@ -112,7 +118,7 @@ def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict,
         strict_commits += int(has_s)
 
     cutoff = datetime.now() - timedelta(days=7)
-    query_count = 0
+    dev_q = agent_q = 0  # 分桶: dev=开发端 Claude Code 直调 / agent=web 端 chat 调用
     if recall_file.is_file():
         for o in _iter_jsonl(recall_file):
             if project_id and o.get("project_id") != project_id:
@@ -120,21 +126,26 @@ def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict,
             if o.get("ts"):
                 ts = _parse_dt(str(o["ts"]))
                 if ts and ts >= cutoff:
-                    query_count += 1
+                    if (o.get("client") or "dev") == "agent":
+                        agent_q += 1
+                    else:
+                        dev_q += 1
+    query_count = dev_q + agent_q
 
     if query_count == 0 and cand_commits > 0:
         r.line("platform-docs usage", "WARN",
                f"0 search_docs / {cand_commits} L2L3 candidate commits; adoption missing")
     else:
-        detail = f"{query_count} search_docs (last 7d)"
+        detail = f"{query_count} search_docs (dev {dev_q} / agent {agent_q}, last 7d)"
         if commit_count > 0:
             detail += f" / {commit_count} commits = {round(1.0 * query_count / commit_count, 2)}"
         r.line("platform-docs usage", "INFO", detail)
+    # 采纳率只看 dev 侧: agent 是 web 端产品流量, 不算"开发者用 MCP 替代 grep"。
     if cand_commits > 0:
-        ratio = round(1.0 * query_count / cand_commits, 2)
+        ratio = round(1.0 * dev_q / cand_commits, 2)
         r.line("platform-docs adopt", "INFO",
                f"L2L3_candidate_commits={cand_commits} strict_MCP_candidate_commits={strict_commits} "
-               f"search_docs_per_candidate={ratio} (platform-docs only)")
+               f"dev_search_docs_per_candidate={ratio} (dev-side only; agent {agent_q} excluded)")
     elif commit_count > 0:
         r.line("platform-docs adopt", "INFO", "no L2/L3 candidate commits detected in last 7d")
 

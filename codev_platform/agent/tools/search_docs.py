@@ -36,7 +36,9 @@ async def _call_search(query: str, category: str | None, module: str | None, pro
     from mcp import ClientSession
     from mcp.client.sse import sse_client
 
-    url = f"{_daemon_url()}?project_id={project_id}"
+    # client=agent: 让 daemon 把本次召回记为 web 端 agent 调用(开发端 .mcp.json 不传 → 默认 dev),
+    # 采纳率监控据此分桶(agent 产品流量 vs 开发者 MCP 采纳)。
+    url = f"{_daemon_url()}?project_id={project_id}&client=agent"
     args: dict[str, Any] = {"query": query}
     if category:
         args["category"] = category

@@ -25,6 +25,7 @@ import codev_platform.chroma._reranker as rr  # reranker rebind 标量经 rr.<na
 from codev_platform.chroma.server import (
     server,
     _current_project_id,
+    _current_client,
     PROJECT_ID,
     _projects,
     _ensure_project,
@@ -228,6 +229,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             _log_recall({
                 "ts": _dt.datetime.now().isoformat(timespec="seconds"),
                 "project_id": pid,
+                "client": _current_client.get(),  # agent(web 端) / dev(开发端直调), 采纳率分桶
                 "query": redact_text(query, _LOG_MODE),
                 "k": k,
                 "category": category,

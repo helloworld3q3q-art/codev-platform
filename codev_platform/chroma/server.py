@@ -156,6 +156,11 @@ def _project_last_indexed_iso(project_id: str) -> str | None:
 _current_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_current_project_id", default=None
 )
+# 调用方来源: 区分 web 端 agent 调用 vs 开发端 Claude Code 直调 (采纳率分桶用)。
+# SSE ?client= 指定; agent 的 search_docs 工具传 client=agent, 开发端 .mcp.json 不传 → 默认 dev。
+_current_client: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_current_client", default="dev"
+)
 
 
 # _ensure_model / _get_client 已抽到 _models.py (上方 import re-export, _ensure_project /
@@ -364,10 +369,12 @@ async def _run_http(port: int) -> None:
             _flog(f"[sse] reject: cannot load project {pid}: {err}")
             return
 
+        client = request.query_params.get("client") or "dev"
         global _sse_sessions
         token = _current_project_id.set(pid)
+        ctok = _current_client.set(client)
         _sse_sessions += 1
-        _flog(f"[sse] session start project_id={pid} (active={_sse_sessions})")
+        _flog(f"[sse] session start project_id={pid} client={client} (active={_sse_sessions})")
         try:
             async with sse_transport.connect_sse(
                 request.scope, request.receive, request._send
@@ -375,6 +382,7 @@ async def _run_http(port: int) -> None:
                 await server.run(read_stream, write_stream, server.create_initialization_options())
         finally:
             _current_project_id.reset(token)
+            _current_client.reset(ctok)
             _sse_sessions = max(0, _sse_sessions - 1)
             _flog(f"[sse] session end project_id={pid} (active={_sse_sessions})")
 
