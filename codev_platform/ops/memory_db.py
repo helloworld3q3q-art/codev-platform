@@ -151,7 +151,20 @@ def load_config():
     return _lc()
 
 
+def _cmd_import_md(args: argparse.Namespace) -> int:
+    """把 *.md 人肉记忆导入 PG memory(默认 dry-run, --apply 真写)。逻辑在 agent.memory_import。"""
+    from pathlib import Path
+
+    from codev_platform.agent.memory_import import run_import
+    return run_import(
+        Path(args.path).resolve(), scope=args.scope, scope_ref=args.scope_ref,
+        owner=args.owner, apply=args.apply, echo=_out,
+    )
+
+
 def cmd_memory(args: argparse.Namespace) -> int:
+    if args.action == "import-md":
+        return _cmd_import_md(args)
     cfg = load_config()
     if args.action == "init-db":
         return _cmd_init_db(cfg)
@@ -164,7 +177,16 @@ def cmd_memory(args: argparse.Namespace) -> int:
 def register(subparsers) -> None:
     p = subparsers.add_parser(
         "memory",
-        help="memory PG 库管理 (init-db 幂等建表 / doctor 体检; 不建 database, 不自动装依赖)",
+        help="memory PG 库管理 (init-db 建表 / doctor 体检 / import-md 导入 .md 记忆)",
     )
-    p.add_argument("action", choices=["init-db", "doctor"])
+    sub = p.add_subparsers(dest="action", required=True)
+    sub.add_parser("init-db", help="幂等建 memory PG schema 表 (不建 database)")
+    sub.add_parser("doctor", help="memory PG 连通 + schema 体检")
+    imp = sub.add_parser("import-md", help="导入 feedback_*.md / reference_*.md 到 PG memory")
+    imp.add_argument("path", help="记忆 .md 源目录")
+    imp.add_argument("--scope", default="org", help="org | team | project | personal(默认 org)")
+    imp.add_argument("--scope-ref", dest="scope_ref", default="org",
+                     help="作用域 ref:project=project_id / personal=user_id(默认 org)")
+    imp.add_argument("--owner", default="local", help="owner_user_id(默认 local)")
+    imp.add_argument("--apply", action="store_true", help="真写入 PG(默认 dry-run)")
     p.set_defaults(func=cmd_memory)
