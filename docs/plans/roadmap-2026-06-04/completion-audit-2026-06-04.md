@@ -42,12 +42,12 @@ Bash 直读磁盘的对账,把"plan 说没做"逐项核到代码是否真没做�
 | + | D-test_file_size_budget 静态断言"未做" | 早已存在 + 防僵化测试; 2026-06-04 本轮又扩展(拆 4 大文件后收紧白名单) |
 | + | C-Phase6/M6 Connector 的 **Git 接入** | `webhook/`(server + providers)接 gitea/gitlab **push→reindex 写队列**完整链路 + 多 provider 抽象 —— **Git connector 已做**(盘点把整个 Connector 列空, 漏看 Git) |
 
-### 3.2 True Negative —— 核实确认未做(7 项)
+### 3.2 True Negative —— 原列 7 项, 2026-06-04 二次复核后**实际仅 3 项真未做(M5/M6/M7)**
 
 | # | 项 | 证据 | 归属 |
 |---|---|---|---|
-| 1 | **B-M1 任务记忆(task_id/task_memory/task_state)** | 全仓 grep `task_id` **零命中** | Memory 最大空白, 大特性开专轮 |
-| 2 | B-M2 Context Engineering(budget/context_plan/分组) | 无 `context_plan`/`context_budget` | Memory |
+| 1 | **B-M1 任务记忆** | ~~grep task_id 零命中~~ **2026-06-04 复核: 已做** —— `task_id`/`task_state` 满仓(memory_store/recall_service/runctx/chat/schemas)+ `set_task_state` + `remember` 写侧工具; M1 plan 6 步实现(9fe5ab2→c30ebe0)。grep 零命中是 M1 实现**前**的旧证据 | ✅ 已做 |
+| 2 | B-M2 Context Engineering | ~~无 context_plan~~ **2026-06-04 复核: 已做** —— `context_plan.py`(GROUP_ORDER 分组 + budget_max 裁剪 + ContextPlan + build_context_plan)+ 测试(test_agent_context_plan/prompt_context); commit e16d724 | ✅ 已做 |
 | 3 | B-M5 memory benchmark(10 万条/P95) | 无 benchmark 测试 | Memory |
 | 4 | B-M6 / C-Phase6 Connector — **Jira/飞书/Wiki**(+CI) | 除 schema 节点类型定义(`wiki_page`/`jira_issue`)外**零实现**。**注**:同列的 **Git 接入已做**(webhook push→reindex), 不在此; CI 未做 | 文档/任务接入空 |
 | 5 | B-M7 多模态/行为记忆 | 无 | Memory |
@@ -55,6 +55,11 @@ Bash 直读磁盘的对账,把"plan 说没做"逐项核到代码是否真没做�
 | 7 | B-M4 四层权限闭环 | ~~需细核~~ **2026-06-04 细核: 实际已闭环** —— personal/project(acl.py)+ org/team(RbacStore `org_members`/`team_members` 表 + `core/rbac.py:memory_scope_decision` 按 org_role/team role 判权 + `agent/routes/memory.py:_scope_decision` 双轨调度)全在; 测试齐(rbac_core/rbac_wire/route_acl/org_cli/web_orgs)。acl.py "待 M5" 系陈旧注释(纯函数兜底, 真实校验经 RbacStore) | ✅ 已闭环 |
 
 ---
+
+> **2026-06-04 二次复核小结**: 本表原列 7 项"确认未做",复核后 **4 项实为已做**(M1/M2/M4/18082,
+> 见各行纠正),**真未做仅 M5 benchmark / M6 Connector(Jira/飞书/Wiki) / M7 多模态** —— 全是 ROI 低
+> 或大特性。这印证本报告 §六 元教训:**连"确认未做"表自己都高估了 4/7** —— 盘点必须 Bash 直读代码,
+> 文档/grep 旧证据不可信。**Memory M0–M4 全闭环。**
 
 ## 四、修正后的三大真实缺口
 
