@@ -8,8 +8,15 @@ plugins 各栈 scan 产出节点(endpoint / function / ...)后, resolver 解析�
 resolver 是 ingest 的 post-pass(同 _link_pass 的位置), 不是 per-plugin per-repo 扫描。
 
 加语言 = 加一个 CallResolver 实现 + register_resolver 一行, 核心零改(同 agent provider /
-plugins 的协议族 + registry 铁律, 零 if-else)。各 resolver 对齐现有插件的语言栈
-(spring / fastapi / node / dotnet / ...)。
+plugins 的协议族 + registry 铁律, 零 if-else)。
+
+⚠️ 加 resolver 的前提 —— **只补 codegraph 的结构盲区**(2026-06-04 实测教训):
+codegraph 已能精确解析强类型语言的跨函数调用(Java / C# 等)。对这些栈再写"方法名 BFS"resolver
+只产串台噪声 —— 实测 Spring/Java 在 platform 仓: 与 codegraph **零重叠**, 且 assignMenus→backtest
+mapper 之类跨语义误连一片, 增量为负, 已撤。**唯有 codegraph 结构性追不到的盲区才值得做 resolver**:
+典型是 Python DI(self._store.x() 要先解析注入类型, codegraph 动态分发追不动 → fastapi resolver
+用方法名 BFS 绕过)。判据一句话:"codegraph 即便索引完整、也追不到这条边吗?" 答否 → 交 codegraph
+(它更准), 别用 resolver 重复 + 添噪。故当前只有 codegraph(兜底) + fastapi(Python DI 盲区)两个。
 """
 from __future__ import annotations
 
