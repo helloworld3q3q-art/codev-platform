@@ -89,7 +89,7 @@ const AgentPage: React.FC = () => {
       try {
         const res = await postAgentChat({
           question,
-          sessionId: activeSessionId || undefined,
+          sessionId: sentFor || undefined, // 用 ref 记录的当前会话, 不读可能过期的 state 闭包
           maxSteps: MAX_STEPS,
         });
         if (activeSessionRef.current !== sentFor) {
@@ -129,7 +129,7 @@ const AgentPage: React.FC = () => {
         }
       }
     },
-    [nextId, activeSessionId, loadSessions],
+    [nextId, loadSessions],
   );
 
   // 切项目: 清空会话重开 + 重拉会话列表 (会话与 project 上下文绑定)。
