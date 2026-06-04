@@ -80,9 +80,14 @@ dispatch 薄包装 `@server.call_tool()` + usage jsonl 埋点。**复用 `deps.g
 | 服务侧映射 | `TokenAuthenticator` 遍历 `gateway.tokens`(只存 hash)→ 取**服务侧预登记**的 org_id/user_id/projects | org 由平台管理员写 config 决定, 不读 client 输入 |
 | Identity | `Identity(org_id=..., via="token")` 写 `request.state`; `_resolve_identity` 优先取它、忽略裸 header | 杜绝持合法 token 者伪造他人 org/user |
 
-**关键护栏要扩展**: `deploy_policy_error` 当前只对 prod/非 loopback 强制 token; **多开发者共用绑 127.0.0.1
-的 WSL 服务时 host 是 loopback、mode 可能仍 dev → passthrough 放行 → `X-User-Id` 可伪造 → personal 串号**。
-须加"多 dev"判据(config `multi_user=true` 或检测 >1 登记 token)强制 `auth_mode=token`。
+**身份按环境分档(两端都安全)**: 这不是平台脆弱点, 是正确的按环境分档 ——
+- **开发态(单人/各自机器的 WSL, loopback)**: passthrough(裸 header)图方便。**串号的前提是"多个开发者
+  共用同一台 WSL 实例"; 单人自己机器的 WSL 没有"别人"可串 → 零风险**。
+- **部署态(prod / 非 loopback)**: `deploy_policy_error` **已强制 token 模式** → org_id 走服务侧映射, 红线不破。
+
+**唯一过渡空窗**: 从单人 WSL 变成"多人共用一台 WSL/内网服务器"、却**还没切 token** 的那段。这是"忘了切配置",
+非"机制做不到"。**P3 已用代码堵这段**: 加"多 dev"判据(config `multi_user=true` 或检测 >1 登记 token)
+强制 `auth_mode=token`, 不靠人记得切。
 
 ### 4.2 开发端读写矩阵(token 模式)
 
@@ -174,7 +179,9 @@ vs A1 ≥70% 才成立)、用户信号(M 是直接需求)、失败代价(M 读�
 
 1. **identity 映射做歪 = 一致体验+隐私双崩**(产品+安全): dev 无登录态, user_id 映射错→召回到别人记忆/personal 串 project。MVP 核心交付物, 非附属。
 2. **隐私默认值错 → 一次外泄全队弃用**(产品): 写侧默认必须 personal + 显式提升 + RBAC 断言级保证。
-3. **多 dev 共用 WSL 仍跑 passthrough**(安全): `deploy_policy_error` 护栏须扩展覆盖"多开发者"判据, 否则裸 header 可伪造身份。
+3. **身份过渡空窗(非平台脆弱点, 仅过渡误配)**: 开发态(单人 WSL, passthrough)与部署态(`deploy_policy_error`
+   强制 token)**两端都安全**; 风险仅限"从单人 WSL 变多人共用一台 WSL/内网服务器、却未切 token"的过渡空窗。
+   **P3 `multi_user` 护栏用代码堵这段**(检测多 dev 强制 token), 不靠人自律。属"忘切配置", 非"机制做不到"。
 
 ---
 
