@@ -552,6 +552,17 @@ async def main() -> None:
             _ensure_reranker()
         except Exception as exc:  # noqa: BLE001
             _flog(f"[init] reranker prewarm skipped: {exc!s}")
+        # 模型已加载 ≠ CUDA kernel 已暖: 首次真实 inference 还要编译 kernel(数秒)。
+        # 跑一次哑查询(embed + rerank)把 kernel 也预热, 让任意消费者(agent / Claude Code /
+        # 人)首查就快, 不因首查超时被推回 grep(提高 MCP 命中可靠性, 不止靠 agent 端重试)。
+        try:
+            from codev_platform.chroma._models import _encode_query
+            from codev_platform.chroma._reranker import _rerank_scores
+            _encode_query("warmup")
+            _rerank_scores("warmup", ["warmup document"])
+            _flog("[init] CUDA kernel warmed (dummy embed + rerank)")
+        except Exception as exc:  # noqa: BLE001
+            _flog(f"[init] kernel warmup skipped: {exc!s}")
 
     if is_http:
         port = int(os.getenv("PLATFORM_DOCS_DAEMON_PORT", "18083"))

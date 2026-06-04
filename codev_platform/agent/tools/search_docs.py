@@ -7,12 +7,18 @@ daemon 没起 → 优雅报错(让模型知道检索不可用,不编)。
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from codev_platform.agent.brain import ToolResult
 from codev_platform.agent.tools.base import Tool
 
 _TIMEOUT_SEC = 60
+# 冷启动重试: daemon 重启 / 首查时 embedding+reranker 冷加载(~30-60s)+ CUDA kernel 预热,
+# 首次调用易超时/失败。重试一次(此时模型已被首次调用触发加载、趋暖)→ 大幅降低"误判 daemon 挂"
+# 把开发者推回 grep 的概率(提高 MCP 命中的可靠性地基, agent-provider §4 代码护栏思路)。
+_RETRIES = 2
+_RETRY_BACKOFF_SEC = 3
 
 
 def _daemon_url() -> str:
@@ -68,22 +74,29 @@ class SearchDocsTool(Tool):
         q = (args or {}).get("query", "").strip()
         if not q:
             return ToolResult(call_id="", content="缺少 query 参数", is_error=True)
-        try:
-            pid = _resolve_project_id(self.project_id)
-            text = asyncio.run(
-                asyncio.wait_for(
-                    _call_search(q, (args or {}).get("category"), (args or {}).get("module"), pid),
-                    timeout=_TIMEOUT_SEC,
+        last_err: Exception | None = None
+        for attempt in range(_RETRIES):
+            try:
+                pid = _resolve_project_id(self.project_id)
+                text = asyncio.run(
+                    asyncio.wait_for(
+                        _call_search(q, (args or {}).get("category"),
+                                     (args or {}).get("module"), pid),
+                        timeout=_TIMEOUT_SEC,
+                    )
                 )
-            )
-        except Exception as e:  # noqa: BLE001 — daemon 没起 / 超时 / 协议错都转结果
-            return ToolResult(
-                call_id="",
-                content=f"search_docs 不可用({type(e).__name__}: {e})。"
-                        f"可能 chroma daemon 未运行;改用其它工具或如实告知检索不可用。",
-                is_error=True,
-            )
-        return ToolResult(call_id="", content=text)
+                return ToolResult(call_id="", content=text)
+            except Exception as e:  # noqa: BLE001 — daemon 没起 / 超时 / 协议错都转结果
+                last_err = e
+                if attempt + 1 < _RETRIES:
+                    time.sleep(_RETRY_BACKOFF_SEC)  # 冷启动: 等模型加载完再重试
+        return ToolResult(
+            call_id="",
+            content=f"search_docs 不可用({type(last_err).__name__}: {last_err})。"
+                    f"已重试 {_RETRIES} 次仍失败;可能 chroma daemon 未运行,"
+                    f"改用其它工具或如实告知检索不可用。",
+            is_error=True,
+        )
 
 
 def register_into(registry, project_id: str | None = None) -> None:
