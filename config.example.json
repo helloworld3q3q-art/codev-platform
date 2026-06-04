@@ -75,6 +75,8 @@
   "gateway": {
     "_comment": "HTTP 入口统一认证拦截 (codev_platform.gateway, 纯 ASGI 中间件, SSE 安全 + 高并发)。auth_mode: passthrough(默认, 单人/开发期, 信任 X-User-Id/X-Org-Id 明文头, 不验签) | token(多人/对外, 验 Authorization: Bearer)。认证加密: tokens 的 key 是 token 的 sha256 hash(明文不落盘), 生成 python -c \"import hashlib;print(hashlib.sha256(b'你的token').hexdigest())\"; 真表走 PG, 绝不进仓。传输加密(HTTPS/TLS)是部署层: 远程平台 url 用 https, TLS 在反代/uvicorn 终结。",
     "auth_mode": "passthrough",
+    "_comment_multi_user": "multi_user=true 显式声明多人共用本平台(如多 dev 共用同一台 WSL/内网服务器)。置 true 或登记了 >1 个 token 而 auth_mode 仍 passthrough → agent serve / memory MCP 拒绝启动(fail-fast, multi_user_policy_error): passthrough 不验签会让多人 personal 记忆串号。单人自己机器(loopback, 无他人)留 false 即可。",
+    "multi_user": false,
     "_comment_tokens": "tokens.<hash>.projects 是该 token 的 project 白名单(ACL 闸2, 见 core/acl.py): [\"openclaw-stock\"] 显式白名单 | \"*\" 全部项目 | 缺省=无权(安全默认, 不给空 token 越权)。org_id 是身份所属 org(闸1: 须 == 目标 project 的 org_id 才放行)。",
     "tokens": { "<token-sha256-hex>": { "user_id": "alice", "org_id": "default", "projects": ["openclaw-stock"] } },
     "_comment_rate_limit": "应用层滑动窗口限流 (codev_platform.gateway.RateLimitMiddleware, 纯 ASGI)。dev 默认关 (enabled=false 不挂中间件, 不破现状)。生产/对外开: 按身份限 (有 Auth 的 4 套 MCP/agent 优先 user_id), webhook 无身份按 client IP。每身份每分钟 per_minute 次, 超 → 429 {\"error\":\"rate limited\"}。健康探针 /healthz /health 豁免。反代 caddy 可叠加 IP 层粗限, 二者互补。",
