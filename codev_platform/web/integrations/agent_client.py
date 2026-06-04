@@ -50,6 +50,12 @@ class AgentClient:
     def memory_list(self, ident, params: dict) -> dict:
         return self._request("GET", "/memory", ident, params=params)
 
+    def list_sessions(self, ident, params: dict) -> dict:
+        return self._request("GET", "/sessions", ident, params=params)
+
+    def session_messages(self, ident, params: dict) -> dict:
+        return self._request("GET", "/sessions/messages", ident, params=params)
+
     # ------------------------------------------------------------------
 
     def _request(self, method: str, path: str, ident, *,

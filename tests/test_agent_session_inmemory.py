@@ -28,3 +28,30 @@ def test_default_org_when_omitted():
     s = InMemorySessionStore()
     sid = s.new("alice")  # 默认 org='default'
     assert s.has(sid, "alice", org_id="default")
+
+
+def test_list_sessions_title_count_and_isolation():
+    s = InMemorySessionStore()
+    sid = s.new("alice")
+    s.append(sid, "alice",
+             Message(role="user", content="标题问题"),
+             Message(role="assistant", content="答"))
+    s.new("bob")  # 别人会话不混入
+    rows = s.list_sessions("alice")
+    assert len(rows) == 1
+    assert rows[0].session_id == sid
+    assert rows[0].title == "标题问题"
+    assert rows[0].message_count == 2
+    assert rows[0].created_at is not None and rows[0].updated_at is not None
+    # 跨 user / 跨 org 列不到
+    assert s.list_sessions("carol") == []
+    assert s.list_sessions("alice", org_id="orgX") == []
+
+
+def test_list_sessions_recent_first():
+    s = InMemorySessionStore()
+    a = s.new("u")
+    b = s.new("u")
+    s.append(a, "u", Message(role="user", content="a"))  # a 后活跃 → 排前
+    rows = s.list_sessions("u")
+    assert [r.session_id for r in rows][0] == a

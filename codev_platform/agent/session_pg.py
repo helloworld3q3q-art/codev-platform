@@ -16,7 +16,7 @@ import uuid
 from dataclasses import asdict
 
 from codev_platform.agent.brain import Message, ToolCall
-from codev_platform.agent.session import SessionStore
+from codev_platform.agent.session import SessionMeta, SessionStore, derive_title
 
 _DEFAULT_ORG = "default"
 
@@ -129,6 +129,40 @@ class SqlSessionStore(SessionStore):
                 (org_id, user_id, session_id),
             ).fetchall()
         return [_row_to_msg(r[0], r[1], r[2]) for r in rows]
+
+    def list_sessions(self, user_id: str, org_id: str = _DEFAULT_ORG,
+                      *, limit: int = 50, offset: int = 0) -> list[SessionMeta]:
+        """列会话:WHERE 强制 org_id + user_id(隔离红线,绝不跨用户)。
+        title 由相关子查询取首条 user 消息(MIN(id))派生 —— **不加 schema 列**,
+        以后要持久标题再加列、本方法形状不变(plan §四①)。message_count 同子查询计。
+        走读池(副本若配)。联合索引 ix_agent_msg_session 覆盖子查询。
+        """
+        self._ensure()
+        with self._read_pool.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.session_id, s.created_at, s.updated_at,
+                       (SELECT m.content FROM agent_messages m
+                         WHERE m.org_id = s.org_id AND m.user_id = s.user_id
+                           AND m.session_id = s.session_id AND m.role = 'user'
+                         ORDER BY m.id LIMIT 1) AS first_user,
+                       (SELECT count(*) FROM agent_messages c
+                         WHERE c.org_id = s.org_id AND c.user_id = s.user_id
+                           AND c.session_id = s.session_id) AS msg_count
+                  FROM agent_sessions s
+                 WHERE s.org_id = %s AND s.user_id = %s
+                 ORDER BY s.updated_at DESC
+                 LIMIT %s OFFSET %s
+                """,
+                (org_id, user_id, limit, offset),
+            ).fetchall()
+        return [
+            SessionMeta(
+                session_id=r[0], created_at=r[1], updated_at=r[2],
+                title=derive_title(r[3]), message_count=int(r[4] or 0),
+            )
+            for r in rows
+        ]
 
     def append(self, session_id: str, user_id: str, *messages: Message,
                org_id: str = _DEFAULT_ORG) -> None:

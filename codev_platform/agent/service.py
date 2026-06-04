@@ -10,10 +10,11 @@ from fastapi import FastAPI
 
 def create_app() -> FastAPI:
     app = FastAPI(title="codev-platform agent", version="0.1.0")
-    from codev_platform.agent.routes import chat, meta, memory
+    from codev_platform.agent.routes import chat, meta, memory, sessions
     app.include_router(meta.router)
     app.include_router(chat.router)
     app.include_router(memory.router)
+    app.include_router(sessions.router)
 
     # 统一请求拦截(认证 → request.state.identity)。passthrough(单人)放行解析,
     # token 模式(M6)对非公开端点 401。/health 公开(存活探针)。模块在 gateway/,此处只挂载。

@@ -9,12 +9,12 @@ from pydantic import BaseModel, Field
 
 
 class AuditListRequest(BaseModel):
-    """POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选)。
+    """POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选)。"""
 
-    注: org 维度不在此声明 —— org_admin 强制只查本 org (路由注入 session org),
-    platform_admin 可传 orgId 跨 org 查。
-    """
-
+    # 注: org 维度不在此声明 —— org_admin 强制只查本 org (路由注入 session org),
+    # platform_admin 可传 orgId 跨 org 查。
+    # (此说明用 # 注释而非 docstring:多行 docstring 会进 OpenAPI description,
+    #  被前端 swagger 生成器原样塞进 typings.d.ts `//` 注释,换行处破坏 .d.ts 解析。)
     service: str | None = Field(None, description="服务名: codev-web / codev-agent")
     userId: str | None = Field(None, description="用户 ID")
     orgId: str | None = Field(None, description="组织 ID (仅 platform_admin 可指定; org_admin 忽略)")

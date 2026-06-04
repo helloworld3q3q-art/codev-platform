@@ -8,13 +8,18 @@ require_project_access (core.acl 单一真值源) 先校验 X-Project-Id, 通过
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from codev_platform.core.config import load_config
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.integrations.agent_client import AgentClient
-from codev_platform.web.schemas.agent import ChatData, ChatRequest
+from codev_platform.web.schemas.agent import (
+    ChatData,
+    ChatRequest,
+    SessionItem,
+    SessionMessageItem,
+)
 
 router = APIRouter()
 
@@ -47,3 +52,47 @@ def agent_chat(
     }
     raw = agent_client.chat(identity, payload)
     return ok(ChatData.of(raw), request_id=_rid(request))
+
+
+def _as_list(raw) -> list:
+    """agent GET 端点直接返 JSON 数组(FastAPI 序列化 list[Model]);兼容偶发 {data:[...]} 包裹。"""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        return raw.get("data", []) or []
+    return []
+
+
+@router.get(
+    "/api/v1/agent/sessions",
+    tags=["AgentAPI-对话"],
+    summary="会话-列表(按当前用户)",
+    operation_id="agentSessions",
+    response_model=CommonResult[list[SessionItem]],
+)
+def agent_sessions(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    ctx=Depends(require_project_access),
+) -> CommonResult[list[SessionItem]]:
+    identity, _project_id = ctx
+    raw = agent_client.list_sessions(identity, {"limit": limit, "offset": offset})
+    return ok([SessionItem.of(s) for s in _as_list(raw)], request_id=_rid(request))
+
+
+@router.get(
+    "/api/v1/agent/sessions/messages",
+    tags=["AgentAPI-对话"],
+    summary="会话-历史消息",
+    operation_id="agentSessionMessages",
+    response_model=CommonResult[list[SessionMessageItem]],
+)
+def agent_session_messages(
+    request: Request,
+    sessionId: str = Query(..., min_length=1, description="会话 id"),
+    ctx=Depends(require_project_access),
+) -> CommonResult[list[SessionMessageItem]]:
+    identity, _project_id = ctx
+    raw = agent_client.session_messages(identity, {"session_id": sessionId})
+    return ok([SessionMessageItem.of(m) for m in _as_list(raw)], request_id=_rid(request))

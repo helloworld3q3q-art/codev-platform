@@ -56,3 +56,36 @@ class ChatData(BaseModel):
             usage=raw.get("usage") or {},
             stopReason=raw.get("stop_reason", ""),
         )
+
+
+# ---- 会话(sessions 域)----
+
+class SessionItem(BaseModel):
+    """会话摘要 (agent SessionOut 的 web 投影, camelCase)。"""
+
+    sessionId: str = Field(..., description="会话 id")
+    title: str = Field("", description="标题 (首条 user 消息派生)")
+    messageCount: int = Field(0, description="消息条数")
+    createdAt: str | None = Field(None, description="创建时间 (ISO8601)")
+    updatedAt: str | None = Field(None, description="最近活跃时间 (ISO8601)")
+
+    @classmethod
+    def of(cls, raw: dict) -> SessionItem:
+        return cls(
+            sessionId=raw.get("session_id", ""),
+            title=raw.get("title", ""),
+            messageCount=raw.get("message_count", 0),
+            createdAt=raw.get("created_at"),
+            updatedAt=raw.get("updated_at"),
+        )
+
+
+class SessionMessageItem(BaseModel):
+    """历史消息 (agent MessageOut 的 web 投影)。"""
+
+    role: str = Field(..., description="user | assistant")
+    content: str = Field("", description="消息正文")
+
+    @classmethod
+    def of(cls, raw: dict) -> SessionMessageItem:
+        return cls(role=raw.get("role", ""), content=raw.get("content", ""))

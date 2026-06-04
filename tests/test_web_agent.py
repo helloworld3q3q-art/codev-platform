@@ -46,6 +46,18 @@ class _FakeAgentClient:
             raise self._exc
         return self._raw
 
+    def list_sessions(self, ident, params: dict) -> list:
+        self.calls.append((ident, params))
+        if self._exc is not None:
+            raise self._exc
+        return self._raw
+
+    def session_messages(self, ident, params: dict) -> list:
+        self.calls.append((ident, params))
+        if self._exc is not None:
+            raise self._exc
+        return self._raw
+
 
 def _client(cfg: dict) -> TestClient:
     return TestClient(build_app(title="t", routers=[agent.router], cfg=cfg))
@@ -109,3 +121,47 @@ def test_chat_downstream_unavailable_is_503():
     assert body["result"] == 1
     assert body["errors"][0]["errorCode"] == "upstream_unavailable"
     assert body["requestId"]
+
+
+def test_sessions_list_proxies_and_envelope():
+    fake = _FakeAgentClient(raw=[
+        {"session_id": "s1", "title": "问题一", "message_count": 4,
+         "created_at": "2026-06-04T00:00:00Z", "updated_at": "2026-06-04T01:00:00Z"},
+    ])
+    agent.agent_client = fake
+    c = _client(_PASSTHROUGH_CFG)
+    r = c.get("/api/v1/agent/sessions", headers=_HEADERS)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["result"] == 0
+    data = body["data"]
+    assert data[0]["sessionId"] == "s1"
+    assert data[0]["title"] == "问题一"
+    assert data[0]["messageCount"] == 4
+    assert data[0]["updatedAt"] == "2026-06-04T01:00:00Z"
+
+
+def test_session_messages_proxies_and_envelope():
+    fake = _FakeAgentClient(raw=[
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ])
+    agent.agent_client = fake
+    c = _client(_PASSTHROUGH_CFG)
+    r = c.get("/api/v1/agent/sessions/messages", params={"sessionId": "s1"}, headers=_HEADERS)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["result"] == 0
+    assert [m["role"] for m in body["data"]] == ["user", "assistant"]
+    # sessionId 透传给下游 (snake_case)
+    _ident, params = fake.calls[0]
+    assert params["session_id"] == "s1"
+
+
+def test_sessions_downstream_unavailable_is_503():
+    fake = _FakeAgentClient(exc=PlatformError(ErrorCode.UPSTREAM_UNAVAILABLE, "agent 后端不可达"))
+    agent.agent_client = fake
+    c = _client(_PASSTHROUGH_CFG)
+    r = c.get("/api/v1/agent/sessions", headers=_HEADERS)
+    assert r.status_code == 503
+    assert r.json()["errors"][0]["errorCode"] == "upstream_unavailable"

@@ -1,6 +1,7 @@
 """HTTP 请求/响应模型(pydantic)."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -28,6 +29,26 @@ class ChatResponse(BaseModel):
     steps: list[StepOut]
     usage: dict[str, Any]
     stop_reason: str
+
+
+# ---- 会话(sessions 域,plan §四)----
+# 与 chat schema 同文件但独立分节(内聚到"会话域");路由实现在 routes/sessions.py,不塞 chat.py。
+
+class SessionOut(BaseModel):
+    """会话摘要(GET /sessions 单项)。session_pg.SessionMeta 的 HTTP 投影。"""
+
+    session_id: str
+    title: str
+    message_count: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class MessageOut(BaseModel):
+    """历史消息(GET /sessions/messages 单项)。仅暴露 UI 渲染所需字段。"""
+
+    role: str
+    content: str
 
 
 class ProviderOut(BaseModel):
