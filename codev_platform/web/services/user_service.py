@@ -197,8 +197,11 @@ class UserService:
 
     @staticmethod
     def _to_item(user: User) -> UserItem:
+        # role 取该用户在自身 org 的成员角色 (account 表无 role, 真值在 OrgMember)。
+        member = get_member_store().get(user.org_id, user.username)
         return UserItem(
             username=user.username, orgId=user.org_id,
             displayName=user.display_name or None, email=user.email or None,
             status=user.status,
+            role=member.role if member else None,
         )

@@ -58,6 +58,7 @@ class UserItem(BaseModel):
     displayName: str | None = None
     email: str | None = None
     status: str = "ACTIVE"
+    role: str | None = None    # 该用户在 orgId 的成员角色 (viewer|member|admin); 无成员记录=None
 
 
 class UserActionResult(BaseModel):

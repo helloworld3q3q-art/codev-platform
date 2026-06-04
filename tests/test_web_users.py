@@ -122,6 +122,24 @@ def test_list_users_pagination(client):
     assert len(body["data"]) == 2
 
 
+def test_list_and_detail_include_role(client):
+    auth = _admin_session(username="boss")  # boss 在 orgA 是 admin
+    client.post("/api/v1/users/create", headers=auth,
+                json={"username": "alice", "password": "pw123456", "orgId": "orgA", "role": "member"})
+    # list 每行带 role
+    r = client.post("/api/v1/users/list", headers=auth)
+    by_name = {u["username"]: u for u in r.json()["data"]}
+    assert by_name["boss"]["role"] == "admin"
+    assert by_name["alice"]["role"] == "member"
+    # detail 带 role
+    d = client.get("/api/v1/users/detail", headers=auth, params={"username": "alice"})
+    assert d.json()["data"]["role"] == "member"
+    # 无 member 记录 → role=None (不报错)
+    user_store.upsert(User(username="nomem", password_hash=hash_password("pw123456"), org_id="orgA"))
+    d2 = client.get("/api/v1/users/detail", headers=auth, params={"username": "nomem"})
+    assert d2.json()["data"]["role"] is None
+
+
 # ---- status 禁用 → revoke_user ----
 
 def test_disable_user_revokes_sessions(client):
