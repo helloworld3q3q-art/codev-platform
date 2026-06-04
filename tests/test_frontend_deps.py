@@ -29,14 +29,14 @@ def test_no_node_skips(monkeypatch, tmp_path):
 def test_depcruise_failure_skips(monkeypatch, tmp_path):
     monkeypatch.setattr(fd, "_node_available", lambda: True)
     monkeypatch.setattr(fd, "_frontend_roots", lambda repo: [tmp_path / "web"])
-    monkeypatch.setattr(fd, "_run_depcruise", lambda front: None)  # 工具挂
+    monkeypatch.setattr(fd, "_run_depcruise", lambda front, pid: None)  # 工具挂
     assert fd.scan_frontend_deps(tmp_path, "proj") == ([], [])
 
 
 def test_parse_nodes_and_edges(monkeypatch, tmp_path):
     monkeypatch.setattr(fd, "_node_available", lambda: True)
     monkeypatch.setattr(fd, "_frontend_roots", lambda repo: [tmp_path / "web"])
-    monkeypatch.setattr(fd, "_run_depcruise", lambda front: _FAKE)
+    monkeypatch.setattr(fd, "_run_depcruise", lambda front, pid: _FAKE)
     nodes, edges = fd.scan_frontend_deps(tmp_path, "proj")
 
     assert len(nodes) == 3
@@ -67,7 +67,7 @@ def test_vue_views_treated_as_page(monkeypatch, tmp_path):
     # vue 工程: .vue 组件 + views/ 当页面(react 用 pages/, vue 多用 views/)。
     monkeypatch.setattr(fd, "_node_available", lambda: True)
     monkeypatch.setattr(fd, "_frontend_roots", lambda repo: [tmp_path / "app"])
-    monkeypatch.setattr(fd, "_run_depcruise", lambda front: _FAKE_VUE)
+    monkeypatch.setattr(fd, "_run_depcruise", lambda front, pid: _FAKE_VUE)
     nodes, edges = fd.scan_frontend_deps(tmp_path, "proj")
     home = next(n for n in nodes if "Home.vue" in n.id)
     menu = next(n for n in nodes if "Menu.vue" in n.id)
@@ -80,7 +80,7 @@ def test_reverse_component_to_page(monkeypatch, tmp_path):
     # 验证反向可达: Base 组件 -> 被 Btn 用 -> 被 foo 页面用 => 影响 foo 页面。
     monkeypatch.setattr(fd, "_node_available", lambda: True)
     monkeypatch.setattr(fd, "_frontend_roots", lambda repo: [tmp_path / "web"])
-    monkeypatch.setattr(fd, "_run_depcruise", lambda front: _FAKE)
+    monkeypatch.setattr(fd, "_run_depcruise", lambda front, pid: _FAKE)
     nodes, edges = fd.scan_frontend_deps(tmp_path, "proj")
     nm = {n.id: n for n in nodes}
     rev: dict[str, list[str]] = {}
