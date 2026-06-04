@@ -116,7 +116,8 @@ dispatch 薄包装 `@server.call_tool()` + usage jsonl 埋点。**复用 `deps.g
 
 ### 6.1 最高 ROI 场景
 
-① **跨机一致**(personal+project recall)—— 当前真实在痛(MEMORY 里多条"换机器/重启后…"事故)。
+① **跨机一致 = 记忆跟人走**(personal+project recall)—— 换机/重 clone 后同一 user token 自动 recall 回全部
+本人记忆, 不锁在单机 MEMORY.md。当前真实在痛(MEMORY 里多条"换机器/重启后…"事故), **是 P1 MVP 的核心验收用例**。
 ② **团队 redline/约定共享**(project 只读)—— `.claude/rules` 2200 行不 autoload, 新人 agent 看不到; project memory = "会自己冒出来的 redline"。
 ③ 跨开发者踩坑共享(②的外溢)。④ onboarding(②③攒够量后的兑现, 不单独做)。
 
@@ -151,7 +152,7 @@ ownership 提升才升 project(与 A1 纠错回路同源, 可共用)。
 | 阶段 | 内容 | 验证 |
 |---|---|---|
 | **P0 前置修复** | §七 三缺口(topic_key / 审计旁路 / redline 写闸) | 单测: agent 写记忆带 topic_key 参与去重; remember 经 audit; 非 admin 写 redline 被拒 |
-| **P1 MCP 读侧 MVP** | `memory_mcp.py` 暴露 `recall`+`list_scope`(只读)+ token 身份 + .mcp.json 接入 | e2e: Claude Code recall 到本人 personal + 本项目 project; 跨机一致 |
+| **P1 MCP 读侧 MVP** | `memory_mcp.py` 暴露 `recall`+`list_scope`(只读)+ token 身份 + .mcp.json 接入 | e2e: ① **换机同步用例**: A 机 `remember` → B 机**同 user token** `recall` 命中且**断言条目一致**(记忆跟人走);② recall 到本人 personal + 本项目 project |
 | **P2 写侧 + 迁移** | 开放 `remember`(默认 personal)/`forget`/`supersede` + `memory import-md` CLI | personal 默认 + 显式提升; MEMORY.md 导入幂等 |
 | **P3 多 dev 护栏** | `multi_user` 强制 token; 隐私可见性 CLI(`memory list --scope`) | 多 dev 共用 WSL 0 串号; personal 对 org 不可见断言 |
 
