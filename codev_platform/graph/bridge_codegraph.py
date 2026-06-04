@@ -26,8 +26,6 @@ from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode
 
 logger = logging.getLogger(__name__)
 
-BRIDGE_PLUGIN = "builtin.codegraph_bridge"
-
 _MAX_DEPTH = 6     # 调用链深度上限 (端点 handler → service → repo → SQL 通常 ≤4)
 _MAX_VISIT = 400   # 单端点 BFS 访问节点上限 (防爆炸)
 # 把 endpoint handler 关联到的 codegraph 节点 kind (函数/方法)。

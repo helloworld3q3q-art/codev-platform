@@ -11,15 +11,19 @@ run_applicable 的成功列表),不影响其余插件入库。store 写入按 pl
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from codev_platform.graph.schema import AnalyzerResult, NodeKind
+from codev_platform.graph.schema import AnalyzerResult, GraphEdge, NodeKind
 from codev_platform.graph.store import load_graph, open_store, upsert_result
 from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.registry import run_applicable
 
+logger = logging.getLogger(__name__)
+
 LINKER_PLUGIN = "builtin.linker"
+CALLS_PLUGIN = "builtin.call_resolvers"  # 调用边(CALLS)统一归属: 多 resolver 去重后合并入此 plugin
 
 
 @dataclass
@@ -70,28 +74,48 @@ def ingest_project(
         # 链不到 Java/Spring 端点的缺口。挂 builtin.linker, upsert 幂等可重跑。
         _link_pass(conn, project_id, report)
 
-        # A1 桥接: 用 codegraph 调用图把 backend_endpoint --calls--> backend_function(碰表) 物化,
-        # store 自成连通 (端点出边从 0 → >0), 解锁影响分析。fail-soft: codegraph 缺失则空跑。
-        _bridge_pass(conn, project_id, report)
+        # 调用边 post-pass: 跑所有适用 CallResolver(codegraph 兜底 + 未来各语言栈 resolver)把
+        # endpoint→function / 函数→函数 calls 边物化, store 自成连通解锁影响分析。按语言栈
+        # 可扩展(graph/call_resolvers/), 全局去重, fail-soft。
+        _calls_pass(conn, project_id, report, Path(repo_path))
     finally:
         conn.close()
     return report
 
 
-def _bridge_pass(conn, project_id: str, report: IngestReport) -> None:
-    """A1 codegraph 桥接: 读 store endpoint/function 节点 -> endpoint→function calls 边 -> upsert。"""
-    from codev_platform.graph.bridge_codegraph import (
-        BRIDGE_PLUGIN,
-        bridge_endpoints_to_functions,
-    )
+def _calls_pass(conn, project_id: str, report: IngestReport, repo_path: Path) -> None:
+    """调用边 post-pass: 跑所有适用 CallResolver(按语言栈)→ 全局去重 → upsert 统一 plugin。
+
+    取代原 _bridge_pass: codegraph resolver(原桥接逻辑)+ 未来各语言 resolver(spring/fastapi/
+    ...)都在此跑。calls 边全局去重((source,target,kind)), 多 resolver 产同边时先跑者赢
+    (codegraph 先, 各语言 resolver 补缺)。单 resolver 失败 fail-soft 不拖垮其余。
+    """
+    from codev_platform.graph.call_resolvers import applicable_resolvers
 
     merged = load_graph(conn, project_id)
-    endpoints = [n for n in merged.nodes if n.kind == NodeKind.BACKEND_ENDPOINT.value]
-    functions = [n for n in merged.nodes if n.kind == NodeKind.BACKEND_FUNCTION.value]
-    edges = bridge_endpoints_to_functions(project_id, endpoints, functions)
-    upsert_result(conn, project_id, AnalyzerResult(edges=edges, plugin=BRIDGE_PLUGIN))
-    report.ingested.append(BRIDGE_PLUGIN)
-    report.summaries[BRIDGE_PLUGIN] = {"endpoint_function_edges": len(edges)}
+    nodes = merged.nodes
+    seen: set[tuple[str, str, str]] = set()
+    all_edges: list[GraphEdge] = []
+    by_resolver: dict[str, int] = {}
+    for r in applicable_resolvers(repo_path, nodes):
+        try:
+            edges = r.resolve(repo_path, project_id, nodes)
+        except Exception as exc:  # noqa: BLE001 — 单 resolver 失败不拖垮其余 + 整个 pass
+            logger.warning("[calls] resolver %s failed: %r", r.name, exc)
+            by_resolver[r.name] = 0
+            continue
+        fresh = []
+        for e in edges:
+            key = (e.source, e.target, e.kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            fresh.append(e)
+        all_edges.extend(fresh)
+        by_resolver[r.name] = len(fresh)
+    upsert_result(conn, project_id, AnalyzerResult(edges=all_edges, plugin=CALLS_PLUGIN))
+    report.ingested.append(CALLS_PLUGIN)
+    report.summaries[CALLS_PLUGIN] = {"calls_edges": len(all_edges), "by_resolver": by_resolver}
 
 
 def _link_pass(conn, project_id: str, report: IngestReport) -> None:
