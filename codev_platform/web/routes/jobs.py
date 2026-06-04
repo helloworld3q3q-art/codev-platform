@@ -12,7 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 
 from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, page
-from codev_platform.core.httpkit.pagination import PageParams, page_params
+from codev_platform.core.httpkit.pagination import PageBody
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.schemas.jobs import JobCancelRequest, JobDTO
 from codev_platform.web.services.index_service import make_reindex_dispatch_trigger
@@ -71,14 +71,15 @@ def cancel_job(
 )
 def list_jobs(
     request: Request,
+    body: PageBody | None = None,   # 分页从 body 取(前端 post 发 body); 缺/空 → 默认第 1 页
     ctx=Depends(require_project_access),
-    pg: PageParams = Depends(page_params),
 ) -> PageResult[JobDTO]:
     # project_id 来自 X-Project-Id (require_project_access 解析 + 鉴权); 只列当前项目的 job。
+    pg = body or PageBody()
     _identity, project_id = ctx
-    rows, total = job_service.list_jobs(project_id=project_id, offset=pg.offset, limit=pg.page_size)
+    rows, total = job_service.list_jobs(project_id=project_id, offset=pg.offset, limit=pg.pageSize)
     return page(
         [JobDTO.of(j) for j in rows],
-        page_number=pg.page_number, page_size=pg.page_size, total=total,
+        page_number=pg.pageNumber, page_size=pg.pageSize, total=total,
         request_id=_rid(request),
     )

@@ -79,7 +79,7 @@ def test_list_orgs_pagination(client):
     for i in range(3):
         org_store.create(Org(code=f"org{i}", name=f"Org{i}"))
     h = _auth("super", "")
-    r = client.post("/api/v1/orgs/list", params={"pageSize": 2, "pageNumber": 1}, headers=h)
+    r = client.post("/api/v1/orgs/list", json={"pageSize": 2, "pageNumber": 1}, headers=h)
     assert r.status_code == 200
     body = r.json()
     assert body["result"] == 0

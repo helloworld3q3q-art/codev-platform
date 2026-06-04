@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, Request
 
 from codev_platform.core.config import load_config
 from codev_platform.core.httpkit.envelope import PageResult, page
-from codev_platform.core.httpkit.pagination import PageParams, page_params
 from codev_platform.core.platform_admin import is_platform_admin
 from codev_platform.web.repositories.audit_read_repo import AuditFilter, query
 from codev_platform.web.schemas.audit import AuditItem, AuditListRequest
@@ -47,7 +46,6 @@ def _scoped_org_id(sess: Session, requested: str | None) -> str | None:
 def list_audit_access(
     request: Request,
     body: AuditListRequest,
-    pg: PageParams = Depends(page_params),
     sess: Session = Depends(_require_admin),
 ) -> PageResult[AuditItem]:
     f = AuditFilter(
@@ -59,9 +57,10 @@ def list_audit_access(
         ts_from=body.tsFrom,
         ts_to=body.tsTo,
     )
-    rows, total = query(f, offset=pg.offset, limit=pg.page_size)
+    # 分页从 body 取(AuditListRequest 继承 PageBody); 前端 post 发 body, 不读 query。
+    rows, total = query(f, offset=body.offset, limit=body.pageSize)
     return page(
         [AuditItem.of(r) for r in rows],
-        page_number=pg.page_number, page_size=pg.page_size, total=total,
+        page_number=body.pageNumber, page_size=body.pageSize, total=total,
         request_id=_rid(request),
     )

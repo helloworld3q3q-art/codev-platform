@@ -113,7 +113,7 @@ def test_list_users_pagination(client):
     for i in range(3):
         client.post("/api/v1/users/create", headers=auth,
                     json={"username": f"u{i}", "password": "pw123456", "orgId": "orgA"})
-    r = client.post("/api/v1/users/list?pageNumber=1&pageSize=2", headers=auth)
+    r = client.post("/api/v1/users/list", json={"pageNumber": 1, "pageSize": 2}, headers=auth)
     assert r.status_code == 200
     body = r.json()
     assert body["currentPage"] == 1 and body["pageSize"] == 2

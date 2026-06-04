@@ -120,8 +120,7 @@ def test_pagination_newest_first(_isolate, client):
                  for i in range(5)])
     member_store.upsert(OrgMember(org_id="acme", username="bob", role="admin"))
     h = _auth("bob", "acme")
-    r = client.post("/api/v1/audit/list", params={"pageSize": 2, "pageNumber": 1},
-                    json={}, headers=h)
+    r = client.post("/api/v1/audit/list", json={"pageSize": 2, "pageNumber": 1}, headers=h)
     body = r.json()
     assert body["total"] == 5 and body["pageSize"] == 2 and body["totalPage"] == 3
     assert len(body["data"]) == 2

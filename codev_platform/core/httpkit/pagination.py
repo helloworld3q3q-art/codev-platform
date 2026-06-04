@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fastapi import Query
+from pydantic import BaseModel, Field
 
 _MAX_PAGE_SIZE = 200
 
@@ -26,5 +27,17 @@ def page_params(
     pageNumber: int = Query(1, ge=1, description="页码, 从 1 起"),
     pageSize: int = Query(20, ge=1, le=_MAX_PAGE_SIZE, description="每页数量"),
 ) -> PageParams:
-    """分页参数依赖。pageSize 上限 200 (防一次拉全表)。"""
+    """分页参数依赖 (query 版)。pageSize 上限 200 (防一次拉全表)。"""
     return PageParams(page_number=pageNumber, page_size=pageSize)
+
+
+class PageBody(BaseModel):
+    """POST 列表请求体的分页基类。前端 post() 一律发 body, 故分页从 body 收(不是 query),
+    否则前端翻页/页大小传不到后端。list 过滤请求体继承本类追加过滤字段。"""
+
+    pageNumber: int = Field(1, ge=1, description="页码, 从 1 起")
+    pageSize: int = Field(20, ge=1, le=_MAX_PAGE_SIZE, description="每页数量 (上限 200)")
+
+    @property
+    def offset(self) -> int:
+        return (self.pageNumber - 1) * self.pageSize

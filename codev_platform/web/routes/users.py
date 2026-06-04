@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from codev_platform.core.config import load_config
 from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, page
-from codev_platform.core.httpkit.pagination import PageParams, page_params
+from codev_platform.core.httpkit.pagination import PageBody
 from codev_platform.core.platform_admin import is_platform_admin
 from codev_platform.web.schemas.users import (
     UserActionResult,
@@ -72,13 +72,14 @@ def get_user_profile(
 )
 def list_users(
     request: Request,
-    pg: PageParams = Depends(page_params),
+    body: PageBody | None = None,   # 分页从 body 取(前端 post 发 body); 缺/空 → 默认第 1 页
     sess: Session = Depends(_admin),
     svc: UserService = Depends(_service),
 ) -> PageResult[UserItem]:
+    pg = body or PageBody()
     org_id = None if _is_platform_admin(sess.username) else sess.org_id
-    items, total = svc.list_users(org_id=org_id, offset=pg.offset, limit=pg.page_size)
-    return page(items, page_number=pg.page_number, page_size=pg.page_size,
+    items, total = svc.list_users(org_id=org_id, offset=pg.offset, limit=pg.pageSize)
+    return page(items, page_number=pg.pageNumber, page_size=pg.pageSize,
                 total=total, request_id=_rid(request))
 
 

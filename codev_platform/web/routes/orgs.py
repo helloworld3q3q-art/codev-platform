@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 
 from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, page
-from codev_platform.core.httpkit.pagination import PageParams, page_params
+from codev_platform.core.httpkit.pagination import PageBody
 from codev_platform.web.schemas.orgs import (
     MemberActionResult,
     MemberAddRequest,
@@ -60,12 +60,13 @@ def _rid(request: Request):
 )
 def list_orgs(
     request: Request,
-    pg: PageParams = Depends(page_params),
+    body: PageBody | None = None,   # 分页从 body 取(前端 post 发 body); 缺/空 → 默认第 1 页
     _sess=Depends(current_session),
     svc: OrgService = Depends(_service),
 ) -> PageResult[OrgItem]:
-    items, total = svc.list_orgs(offset=pg.offset, limit=pg.page_size)
-    return page(items, page_number=pg.page_number, page_size=pg.page_size,
+    pg = body or PageBody()
+    items, total = svc.list_orgs(offset=pg.offset, limit=pg.pageSize)
+    return page(items, page_number=pg.pageNumber, page_size=pg.pageSize,
                 total=total, request_id=_rid(request))
 
 

@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from codev_platform.core.httpkit.pagination import PageBody
 
-class AuditListRequest(BaseModel):
-    """POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选)。"""
+
+class AuditListRequest(PageBody):
+    """POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选) + 分页 (继承 PageBody)。"""
 
     # 注: org 维度不在此声明 —— org_admin 强制只查本 org (路由注入 session org),
     # platform_admin 可传 orgId 跨 org 查。
