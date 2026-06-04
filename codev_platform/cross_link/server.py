@@ -282,6 +282,24 @@ async def list_tools() -> list[Tool]:
             description="统一图谱 store 概览：nodes_by_kind + edges_by_kind + build_meta（各 plugin ingest 元数据）。",
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="find_component_pages",
+            description=(
+                "改前端组件 → 哪些页面受影响（反向依赖, 含传递: 组件→barrel→页面）。传组件名"
+                "（如 'PermissionButton'）或 frontend_module 节点 id, 返回受影响页面清单(is_page 模块)"
+                "+ 数量。改公共组件前必查影响面。数据由 dependency-cruiser 解析前端依赖图(codegraph 盲区)。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "component": {
+                        "type": "string",
+                        "description": "前端组件名（如 'PermissionButton'）或 frontend_module 节点 id",
+                    },
+                },
+                "required": ["component"],
+            },
+        ),
     ]
 
 
@@ -547,6 +565,25 @@ def _cross_link_stats_via_store(pid: str) -> dict | None:
         store_conn.close()
 
 
+def _find_component_pages_via_store(pid: str, component: str) -> dict | None:
+    """graph store 反向查前端组件 → 受影响页面 (复用 impact.find_impacted_pages)。
+
+    返回 find_impacted_pages 结果(found True/False, 后者含 ambiguous 歧义候选);
+    store 缺失 / 异常 → None (调用方回 INDEX_MISSING)。
+    """
+    store_conn = _open_graph_store_for(pid)
+    if store_conn is None:
+        return None
+    try:
+        from codev_platform.graph.impact import find_impacted_pages
+        return find_impacted_pages(store_conn, pid, component)
+    except Exception as exc:  # noqa: BLE001
+        _flog(f"[find_component_pages] failed pid={pid} comp={component!r}: {exc!s}")
+        return None
+    finally:
+        store_conn.close()
+
+
 @server.call_tool()
 async def call_tool(name: str, args: dict) -> list[TextContent]:
     """计时 + usage 埋点的薄包装,再分发到 _dispatch(查询逻辑不变)。"""
@@ -625,6 +662,19 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             _ms = (_t.perf_counter() - _t0) * 1000
             _flog(f"[search_nodes] hits={len(store_payload['hits'])} took={_ms:.1f}ms (graph_store)")
             return _ok(store_payload)
+
+        if name == "find_component_pages":
+            comp = (args.get("component") or "").strip()
+            if not comp:
+                return _err("component 不能为空", ErrorCode.INVALID_PARAMS)
+            _flog(f"[find_component_pages] component={comp!r}")
+            payload = _find_component_pages_via_store(pid, comp)
+            if payload is None:
+                return _err(_NO_STORE_MSG, ErrorCode.INDEX_MISSING)
+            _ms = (_t.perf_counter() - _t0) * 1000
+            _flog(f"[find_component_pages] found={payload.get('found')} "
+                  f"count={payload.get('count')} took={_ms:.1f}ms")
+            return _ok(payload)
 
         if name == "cross_link_stats":
             store_payload = _cross_link_stats_via_store(pid)

@@ -66,6 +66,43 @@ def test_find_table_usage_by_name(conn):
     assert ids == {_EP, _FN, _FE}
 
 
+def test_find_impacted_pages_transitive(tmp_path):
+    # 前端依赖图: page --imports--> barrel --imports--> PermissionButton。
+    # 改 PermissionButton, 反向(谁 import 它, 含传递)只取 is_page 模块 = 受影响页面。
+    from codev_platform.graph.impact import find_impacted_pages
+    pid = "fe"
+    c = open_store(pid, path=tmp_path / "fe.sqlite")
+    page = f"{pid}:frontend_module:src/pages/foo/index.tsx"
+    barrel = f"{pid}:frontend_module:src/components/Button/index.tsx"
+    comp = f"{pid}:frontend_module:src/components/Button/PermissionButton.tsx"
+    nodes = [
+        GraphNode(id=page, kind=NodeKind.FRONTEND_MODULE.value, name="index.tsx",
+                  project_id=pid, file="src/pages/foo/index.tsx", meta={"is_page": True}),
+        GraphNode(id=barrel, kind=NodeKind.FRONTEND_MODULE.value, name="index.tsx",
+                  project_id=pid, file="src/components/Button/index.tsx", meta={"is_page": False}),
+        GraphNode(id=comp, kind=NodeKind.FRONTEND_MODULE.value, name="PermissionButton.tsx",
+                  project_id=pid, file="src/components/Button/PermissionButton.tsx",
+                  meta={"is_page": False}),
+    ]
+    edges = [
+        GraphEdge(source=page, target=barrel, kind=EdgeKind.IMPORTS.value),
+        GraphEdge(source=barrel, target=comp, kind=EdgeKind.IMPORTS.value),
+    ]
+    upsert_result(c, pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="builtin.frontend_deps"))
+    r = find_impacted_pages(c, pid, "PermissionButton.tsx")
+    assert r["found"]
+    assert r["count"] == 1                       # 只 1 个页面(barrel 非 is_page 不计)
+    assert all(p["is_page"] for p in r["pages"])  # 返回的全是页面
+    assert "pages/foo" in r["pages"][0]["file"]
+    c.close()
+
+
+def test_find_impacted_pages_not_found(conn):
+    from codev_platform.graph.impact import find_impacted_pages
+    r = find_impacted_pages(conn, _PID, "NoSuchComponent")
+    assert r["found"] is False
+
+
 def test_find_page_dependencies_forward(conn):
     r = find_page_dependencies(conn, _PID, _FE)
     assert r["found"]

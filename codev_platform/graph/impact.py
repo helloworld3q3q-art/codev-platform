@@ -23,6 +23,7 @@ _MAX_DEPTH = 10
 _LAYER: dict[str, str] = {
     NodeKind.FRONTEND_ROUTE.value: "frontend",
     NodeKind.FRONTEND_COMPONENT.value: "frontend",
+    NodeKind.FRONTEND_MODULE.value: "frontend",
     NodeKind.FRONTEND_API_CALL.value: "frontend",
     NodeKind.BACKEND_ENDPOINT.value: "backend",
     NodeKind.BACKEND_FUNCTION.value: "backend",
@@ -88,6 +89,8 @@ def _node_brief(n: GraphNode, depth: int | None = None, via: str | None = None) 
         "id": n.id, "kind": n.kind, "name": n.name, "layer": layer_of(n.kind),
         "file": n.file, "line": n.line,
     }
+    if n.meta and "is_page" in n.meta:  # 前端模块: 标注是否页面(供"影响哪些页面"区分)
+        d["is_page"] = bool(n.meta["is_page"])
     if depth is not None:
         d["depth"] = depth
     if via is not None:
@@ -159,6 +162,26 @@ def find_page_dependencies(conn, project_id: str, page_ref: str) -> dict:
         return _not_found("page", page_ref, ambig)
     reached = _traverse(g, node.id, reverse=False)
     return {"found": True, "page": _node_brief(node), "dependsOn": _grouped(reached)}
+
+
+def find_impacted_pages(conn, project_id: str, component_ref: str) -> dict:
+    """改前端组件 component_ref(id 或 name) → 哪些**页面**受影响。
+
+    反向 BFS(谁 import 它, 含传递: 组件→barrel→页面), 只取 is_page 的 frontend_module 节点。
+    解锁"改这个公共组件影响哪些页面"(codegraph 盲区, 数据由 dependency-cruiser 经 frontend_deps 产)。
+    """
+    g = build_impact_graph(conn, project_id)
+    node, ambig = _resolve(g, component_ref, None)
+    if node is None:
+        return _not_found("component", component_ref, ambig)
+    reached = _traverse(g, node.id, reverse=True)
+    pages = [
+        _node_brief(n, d, v) for (n, d, v) in reached
+        if (n.meta or {}).get("is_page")
+    ]
+    pages.sort(key=lambda p: (p.get("depth", 0), p["file"] or ""))
+    return {"found": True, "component": _node_brief(node),
+            "pages": pages, "count": len(pages)}
 
 
 def find_api_callers(conn, project_id: str, endpoint_ref: str) -> dict:

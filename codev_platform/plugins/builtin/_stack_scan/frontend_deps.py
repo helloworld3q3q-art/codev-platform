@@ -144,7 +144,15 @@ def _comp_id(project_id: str, front_rel: str, source: str) -> str:
 
 def _comp_node(project_id: str, front_rel: str, source: str, nid: str) -> GraphNode:
     path = f"{front_rel}/{source}" if front_rel not in ("", ".") else source
-    name = source.rsplit("/", 1)[-1]
+    # 组件名 = 文件名去扩展; index.* 用父目录名(barrel 约定, 同 scan_react_pages 命名 +
+    # agent 直觉: 查 "PermissionButton" 而非 "PermissionButton.tsx", 一堆 index 也可辨识)。
+    stem = source.rsplit("/", 1)[-1]
+    base = stem.rsplit(".", 1)[0] if "." in stem else stem
+    if base == "index":
+        segs = source.rstrip("/").split("/")
+        name = segs[-2] if len(segs) >= 2 else base
+    else:
+        name = base
     return GraphNode(
         id=nid,
         kind=NodeKind.FRONTEND_MODULE.value,
