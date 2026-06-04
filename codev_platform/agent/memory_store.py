@@ -56,16 +56,16 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def supersede(self, old_id: str, new_entry: MemoryEntry, *,
-                  owner_user_id: str | None = None) -> str:
-        """新条取代旧条。owner_user_id 给定则限本人(防改他人记忆,IDE 写侧用);
-        None=不限(维护/迁移路径)。"""
+                  owner_user_id: str | None = None, protect_redline: bool = False) -> str:
+        """新条取代旧条。owner_user_id 给定则限本人(防改他人记忆,IDE 写侧用);None=不限
+        (维护/迁移路径)。protect_redline=True 则拒绝取代 redline 条(IDE 不得改 org 硬约束)。"""
         ...
 
     @abstractmethod
     def forget(self, entry_id: str, *, owner_user_id: str | None = None,
-               org_id: str | None = None) -> bool:
-        """显式遗忘。owner_user_id / org_id 给定则限本人 + 本 org(IDE 写侧防删他人);
-        None=不限(维护路径)。"""
+               org_id: str | None = None, protect_redline: bool = False) -> bool:
+        """显式遗忘。owner_user_id / org_id 给定则限本人 + 本 org(IDE 写侧防删他人);None=不限
+        (维护路径)。protect_redline=True 则拒绝遗忘 redline 条(IDE 不得删 org 硬约束)。"""
         ...
 
     @abstractmethod

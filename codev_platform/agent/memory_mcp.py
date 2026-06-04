@@ -281,8 +281,8 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             old_id = (args.get("old_id") or "").strip()
             if not old_id:
                 return _err("old_id 不能为空", ErrorCode.INVALID_PARAMS)
-            try:  # owner 限定:只能取代自己写的旧条;不匹配 → ValueError
-                eid = store.supersede(old_id, entry, owner_user_id=user_id)
+            try:  # owner 限定 + redline 保护:只能取代自己写的非 redline 旧条;不匹配 → ValueError
+                eid = store.supersede(old_id, entry, owner_user_id=user_id, protect_redline=True)
             except ValueError as e:
                 return _err(f"supersede 失败:{e}", ErrorCode.INVALID_PARAMS)
             return _ok({"ok": True, "id": eid, "supersedes": old_id})
@@ -294,10 +294,10 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             entry_id = (args.get("entry_id") or "").strip()
             if not entry_id:
                 return _err("entry_id 不能为空", ErrorCode.INVALID_PARAMS)
-            # owner 限定即鉴权:只能删本人 + 本 org 的条目(store 内 WHERE owner_user_id + org_id)。
-            done = store.forget(entry_id, owner_user_id=user_id, org_id=org_id)
+            # owner 限定即鉴权:只能删本人 + 本 org 的非 redline 条目(IDE 不得删 org 硬约束)。
+            done = store.forget(entry_id, owner_user_id=user_id, org_id=org_id, protect_redline=True)
             return _ok({"ok": done, "id": entry_id,
-                        "note": "" if done else "未找到或非本人记忆(无改动)"})
+                        "note": "" if done else "未找到 / 非本人 / redline 受保护(无改动)"})
 
         return _err(f"未知 tool: {name}", ErrorCode.INVALID_PARAMS)
     except Exception as exc:  # noqa: BLE001

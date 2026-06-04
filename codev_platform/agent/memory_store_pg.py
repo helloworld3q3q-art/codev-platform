@@ -101,11 +101,12 @@ class SqlMemoryStore(MemoryStore):
         return eid
 
     def supersede(self, old_id: str, new_entry: MemoryEntry, *,
-                  owner_user_id: str | None = None) -> str:
+                  owner_user_id: str | None = None, protect_redline: bool = False) -> str:
         """新条目取代旧条目:旧 status→superseded,新条目 supersedes=old_id(留痕,不物删)。
 
         旧条目须存在且与新条目同 org(防跨 org 串接 supersede 链);owner_user_id 给定则还须
-        本人持有(IDE 写侧防改他人记忆)。不匹配 → 抛 ValueError 回滚事务,不写孤儿新条目。
+        本人持有(IDE 写侧防改他人记忆);protect_redline=True 则旧条不得为 redline(IDE 不得改
+        org 硬约束)。不匹配 → 抛 ValueError 回滚事务,不写孤儿新条目。
         """
         self._ensure()
         new_entry.supersedes = old_id
@@ -117,6 +118,8 @@ class SqlMemoryStore(MemoryStore):
                 if owner_user_id is not None:
                     sql += " AND owner_user_id=%s"
                     params.append(owner_user_id)
+                if protect_redline:
+                    sql += " AND is_redline = false"
                 cur = conn.execute(sql, params)
                 if cur.rowcount == 0:
                     raise ValueError(
@@ -136,10 +139,11 @@ class SqlMemoryStore(MemoryStore):
         return eid
 
     def forget(self, entry_id: str, *, owner_user_id: str | None = None,
-               org_id: str | None = None) -> bool:
+               org_id: str | None = None, protect_redline: bool = False) -> bool:
         """显式遗忘:status→forgotten(不物删,recall 只查 active)。
 
-        owner_user_id / org_id 给定则限本人 + 本 org(IDE 写侧防删他人记忆);None=不限(维护路径)。
+        owner_user_id / org_id 给定则限本人 + 本 org(IDE 写侧防删他人记忆);protect_redline=True
+        则拒绝遗忘 redline 条(IDE 不得删 org 硬约束);None/False=不限(维护路径)。
         """
         self._ensure()
         sql = ("UPDATE memory_entries SET status='forgotten', updated_at=now() "
@@ -151,6 +155,8 @@ class SqlMemoryStore(MemoryStore):
         if owner_user_id is not None:
             sql += " AND owner_user_id=%s"
             params.append(owner_user_id)
+        if protect_redline:
+            sql += " AND is_redline = false"
         with self._write_pool.connection() as conn:
             cur = conn.execute(sql, params)
             return cur.rowcount > 0

@@ -51,14 +51,14 @@ class _FakeStore:
         self.written.append(entry)
         return "new-id-1"
 
-    def forget(self, entry_id, *, owner_user_id=None, org_id=None):
-        self.forgot.append((entry_id, owner_user_id, org_id))
+    def forget(self, entry_id, *, owner_user_id=None, org_id=None, protect_redline=False):
+        self.forgot.append((entry_id, owner_user_id, org_id, protect_redline))
         return self._forget_ok
 
-    def supersede(self, old_id, new_entry, *, owner_user_id=None):
+    def supersede(self, old_id, new_entry, *, owner_user_id=None, protect_redline=False):
         if self._supersede_raises:
             raise ValueError("目标不存在/非本人")
-        self.superseded.append((old_id, new_entry, owner_user_id))
+        self.superseded.append((old_id, new_entry, owner_user_id, protect_redline))
         return "new-id-2"
 
 
@@ -201,8 +201,8 @@ def test_forget_owner_scoped(monkeypatch):
     _bind(monkeypatch, store=store)
     out = _run("forget", {"entry_id": "e9"})
     assert out["ok"] is True
-    # 传 owner + org 给 store(防删他人)
-    assert store.forgot[0] == ("e9", "alice", "acme")
+    # 传 owner + org + redline 保护给 store(防删他人 / 删 org 硬约束)
+    assert store.forgot[0] == ("e9", "alice", "acme", True)
 
 
 def test_forget_not_found(monkeypatch):
@@ -219,8 +219,8 @@ def test_supersede_owner_scoped(monkeypatch):
     _bind(monkeypatch, store=store)
     out = _run("supersede", {"old_id": "e1", "content": "改用浅色", "topic_key": "Dark Mode"})
     assert out["ok"] and out["supersedes"] == "e1"
-    old_id, new_entry, owner = store.superseded[0]
-    assert old_id == "e1" and owner == "alice"
+    old_id, new_entry, owner, protect = store.superseded[0]
+    assert old_id == "e1" and owner == "alice" and protect is True  # redline 受保护
     assert new_entry.owner_user_id == "alice" and new_entry.topic_key == "dark-mode"
 
 
