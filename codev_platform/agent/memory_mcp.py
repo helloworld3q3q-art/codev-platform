@@ -130,6 +130,55 @@ async def list_tools() -> list[Tool]:
                 "required": ["scope"],
             },
         ),
+        Tool(
+            name="remember",
+            description=(
+                "把值得跨会话/跨机记住的偏好/约定/决策写进平台记忆。默认 personal(仅本人,跨机跟人走);"
+                "团队共享显式传 scope=project + scope_ref=项目 id。偏好/约定务必带 topic_key(同 key 覆盖去重)。"
+                "org/team 写受 RBAC 限;redline(org 硬约束)**不可经此写**(仅 web 管理面)。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "要记住的内容(简洁一条)"},
+                    "scope": {"type": "string", "enum": list(SCOPES), "default": "personal"},
+                    "scope_ref": {"type": "string",
+                                  "description": "project_id / team_id;personal 自动用本人,可省"},
+                    "kind": {"type": "string", "description": "preference / fact / task ..."},
+                    "topic_key": {"type": "string",
+                                  "description": "同主题稳定短标识(偏好/约定务必给,同 key 覆盖去重)"},
+                },
+                "required": ["content"],
+            },
+        ),
+        Tool(
+            name="forget",
+            description="遗忘一条本人记忆(软删,status→forgotten,不再被 recall)。只能删自己写的。",
+            inputSchema={
+                "type": "object",
+                "properties": {"entry_id": {"type": "string", "description": "要遗忘的记忆 id"}},
+                "required": ["entry_id"],
+            },
+        ),
+        Tool(
+            name="supersede",
+            description=(
+                "用新内容取代本人旧记忆(偏好演进留痕:旧条 superseded,新条 supersedes=旧 id)。"
+                "scope/scope_ref 给新条目的归属(默认 personal);只能取代自己写的旧条。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "old_id": {"type": "string", "description": "被取代的旧记忆 id"},
+                    "content": {"type": "string", "description": "新内容"},
+                    "scope": {"type": "string", "enum": list(SCOPES), "default": "personal"},
+                    "scope_ref": {"type": "string", "description": "新条归属;personal 自动用本人"},
+                    "kind": {"type": "string", "description": "preference / fact ..."},
+                    "topic_key": {"type": "string", "description": "同主题稳定短标识"},
+                },
+                "required": ["old_id", "content"],
+            },
+        ),
     ]
 
 
@@ -196,6 +245,59 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
             entries = store.list_scope(scope, scope_ref, org_id=org_id, limit=limit)
             return _ok({"scope": scope, "scope_ref": scope_ref, "count": len(entries),
                         "entries": [_entry_dict(e) for e in entries]})
+
+        if name in ("remember", "supersede"):
+            store = deps.get_memory_store()
+            if store is None:
+                return _err("memory 未启用(未配 memory.pg_dsn)", ErrorCode.DEPENDENCY_MISSING)
+            content = (args.get("content") or "").strip()
+            if not content:
+                return _err("content 不能为空", ErrorCode.INVALID_PARAMS)
+            scope = (args.get("scope") or "personal").strip()
+            if scope not in SCOPES:
+                return _err(f"scope must be one of {list(SCOPES)}", ErrorCode.INVALID_PARAMS)
+            # personal 强制本人(隐私:不能以他人名义写);其它用 client 给的 ref。
+            scope_ref = user_id if scope == "personal" else (args.get("scope_ref") or "").strip()
+            if scope != "personal" and not scope_ref:
+                return _err("scope_ref required for non-personal scope", ErrorCode.INVALID_PARAMS)
+            # ACL:与 route/remember 工具同一道闸。redline 不可经 IDE 写 → is_redline 恒 False。
+            from codev_platform.agent.memory_authz import make_topic_key, scope_decision
+            from codev_platform.agent.memory_store import MemoryEntry
+            from codev_platform.core.audit import audit_access
+            from codev_platform.core.config import load_config
+            ident = _ctx_identity.get()
+            dec = scope_decision(load_config(), org_id, user_id, scope, scope_ref, ident)
+            audit_access("agent-memory-mcp", ident, scope_ref, dec)
+            if not dec.allowed:
+                return _err("forbidden: memory scope access denied", ErrorCode.ACCESS_DENIED)
+            entry = MemoryEntry(
+                id="", scope=scope, scope_ref=scope_ref, owner_user_id=user_id,
+                org_id=org_id, content=content, kind=args.get("kind"),
+                topic_key=make_topic_key(args.get("topic_key")), is_redline=False,
+            )
+            if name == "remember":
+                eid = store.write(entry)
+                return _ok({"ok": True, "id": eid, "scope": scope, "scope_ref": scope_ref})
+            old_id = (args.get("old_id") or "").strip()
+            if not old_id:
+                return _err("old_id 不能为空", ErrorCode.INVALID_PARAMS)
+            try:  # owner 限定:只能取代自己写的旧条;不匹配 → ValueError
+                eid = store.supersede(old_id, entry, owner_user_id=user_id)
+            except ValueError as e:
+                return _err(f"supersede 失败:{e}", ErrorCode.INVALID_PARAMS)
+            return _ok({"ok": True, "id": eid, "supersedes": old_id})
+
+        if name == "forget":
+            store = deps.get_memory_store()
+            if store is None:
+                return _err("memory 未启用(未配 memory.pg_dsn)", ErrorCode.DEPENDENCY_MISSING)
+            entry_id = (args.get("entry_id") or "").strip()
+            if not entry_id:
+                return _err("entry_id 不能为空", ErrorCode.INVALID_PARAMS)
+            # owner 限定即鉴权:只能删本人 + 本 org 的条目(store 内 WHERE owner_user_id + org_id)。
+            done = store.forget(entry_id, owner_user_id=user_id, org_id=org_id)
+            return _ok({"ok": done, "id": entry_id,
+                        "note": "" if done else "未找到或非本人记忆(无改动)"})
 
         return _err(f"未知 tool: {name}", ErrorCode.INVALID_PARAMS)
     except Exception as exc:  # noqa: BLE001

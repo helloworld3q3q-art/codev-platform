@@ -35,12 +35,31 @@ class _FakeRecall:
 
 
 class _FakeStore:
-    def __init__(self):
+    def __init__(self, *, forget_ok=True, supersede_raises=False):
         self.calls = []
+        self.written = []
+        self.forgot = []
+        self.superseded = []
+        self._forget_ok = forget_ok
+        self._supersede_raises = supersede_raises
 
     def list_scope(self, scope, scope_ref, org_id="default", limit=100):
         self.calls.append((scope, scope_ref, org_id, limit))
         return [_entry(scope=scope, scope_ref=scope_ref)]
+
+    def write(self, entry):
+        self.written.append(entry)
+        return "new-id-1"
+
+    def forget(self, entry_id, *, owner_user_id=None, org_id=None):
+        self.forgot.append((entry_id, owner_user_id, org_id))
+        return self._forget_ok
+
+    def supersede(self, old_id, new_entry, *, owner_user_id=None):
+        if self._supersede_raises:
+            raise ValueError("目标不存在/非本人")
+        self.superseded.append((old_id, new_entry, owner_user_id))
+        return "new-id-2"
 
 
 def _bind(monkeypatch, *, org="acme", user="alice", project="proj1", ident=None,
@@ -126,6 +145,89 @@ def test_list_scope_bad_scope(monkeypatch):
     store = _FakeStore()
     _bind(monkeypatch, store=store)
     out = _run("list_scope", {"scope": "galaxy"})
+    assert "error" in out
+
+
+# ---- remember (write) ----
+
+def test_remember_defaults_personal_self(monkeypatch):
+    store = _FakeStore()
+    _bind(monkeypatch, store=store)
+    out = _run("remember", {"content": "我偏好深色", "topic_key": "Dark Mode"})
+    assert out["ok"] and out["scope"] == "personal" and out["scope_ref"] == "alice"
+    e = store.written[0]
+    assert e.scope == "personal" and e.scope_ref == "alice" and e.owner_user_id == "alice"
+    assert e.org_id == "acme" and e.is_redline is False
+    assert e.topic_key == "dark-mode"          # 归一
+    assert e.content == "我偏好深色"
+
+
+def test_remember_project_in_allowlist(monkeypatch):
+    store = _FakeStore()
+    ident = SimpleNamespace(via="token", org_id="acme", user_id="alice",
+                            projects=frozenset({"proj1"}), all_projects=False)
+    _bind(monkeypatch, store=store, ident=ident, auth_mode="token")
+    out = _run("remember", {"content": "团队约定", "scope": "project", "scope_ref": "proj1"})
+    assert out["ok"] and store.written[0].scope == "project"
+
+
+def test_remember_project_denied_when_not_allowlisted(monkeypatch):
+    store = _FakeStore()
+    ident = SimpleNamespace(via="token", org_id="acme", user_id="alice",
+                            projects=frozenset({"other"}), all_projects=False)
+    _bind(monkeypatch, store=store, ident=ident, auth_mode="token")
+    out = _run("remember", {"content": "x", "scope": "project", "scope_ref": "proj1"})
+    assert "error" in out and not store.written
+
+
+def test_remember_non_personal_requires_scope_ref(monkeypatch):
+    store = _FakeStore()
+    _bind(monkeypatch, store=store)
+    out = _run("remember", {"content": "x", "scope": "project"})
+    assert "error" in out and not store.written
+
+
+def test_remember_empty_content(monkeypatch):
+    store = _FakeStore()
+    _bind(monkeypatch, store=store)
+    out = _run("remember", {"content": "   "})
+    assert "error" in out
+
+
+# ---- forget (write) ----
+
+def test_forget_owner_scoped(monkeypatch):
+    store = _FakeStore(forget_ok=True)
+    _bind(monkeypatch, store=store)
+    out = _run("forget", {"entry_id": "e9"})
+    assert out["ok"] is True
+    # 传 owner + org 给 store(防删他人)
+    assert store.forgot[0] == ("e9", "alice", "acme")
+
+
+def test_forget_not_found(monkeypatch):
+    store = _FakeStore(forget_ok=False)
+    _bind(monkeypatch, store=store)
+    out = _run("forget", {"entry_id": "nope"})
+    assert out["ok"] is False and "未找到" in out["note"]
+
+
+# ---- supersede (write) ----
+
+def test_supersede_owner_scoped(monkeypatch):
+    store = _FakeStore()
+    _bind(monkeypatch, store=store)
+    out = _run("supersede", {"old_id": "e1", "content": "改用浅色", "topic_key": "Dark Mode"})
+    assert out["ok"] and out["supersedes"] == "e1"
+    old_id, new_entry, owner = store.superseded[0]
+    assert old_id == "e1" and owner == "alice"
+    assert new_entry.owner_user_id == "alice" and new_entry.topic_key == "dark-mode"
+
+
+def test_supersede_target_not_owned(monkeypatch):
+    store = _FakeStore(supersede_raises=True)
+    _bind(monkeypatch, store=store)
+    out = _run("supersede", {"old_id": "someone-else", "content": "x"})
     assert "error" in out
 
 

@@ -100,23 +100,27 @@ class SqlMemoryStore(MemoryStore):
             )
         return eid
 
-    def supersede(self, old_id: str, new_entry: MemoryEntry) -> str:
+    def supersede(self, old_id: str, new_entry: MemoryEntry, *,
+                  owner_user_id: str | None = None) -> str:
         """新条目取代旧条目:旧 status→superseded,新条目 supersedes=old_id(留痕,不物删)。
 
-        旧条目须存在且与新条目同 org(防跨 org 串接 supersede 链);找不到 → 抛 ValueError
-        回滚事务,不写孤儿新条目。
+        旧条目须存在且与新条目同 org(防跨 org 串接 supersede 链);owner_user_id 给定则还须
+        本人持有(IDE 写侧防改他人记忆)。不匹配 → 抛 ValueError 回滚事务,不写孤儿新条目。
         """
         self._ensure()
         new_entry.supersedes = old_id
         with self._write_pool.connection() as conn:
             with conn.transaction():
-                cur = conn.execute(
-                    "UPDATE memory_entries SET status='superseded', updated_at=now() "
-                    "WHERE id=%s AND org_id=%s",
-                    (old_id, new_entry.org_id),
-                )
+                sql = ("UPDATE memory_entries SET status='superseded', updated_at=now() "
+                       "WHERE id=%s AND org_id=%s")
+                params: list = [old_id, new_entry.org_id]
+                if owner_user_id is not None:
+                    sql += " AND owner_user_id=%s"
+                    params.append(owner_user_id)
+                cur = conn.execute(sql, params)
                 if cur.rowcount == 0:
-                    raise ValueError(f"supersede 目标不存在或跨 org: id={old_id} org={new_entry.org_id}")
+                    raise ValueError(
+                        f"supersede 目标不存在/跨 org/非本人: id={old_id} org={new_entry.org_id}")
                 eid = new_entry.id or str(uuid.uuid4())
                 conn.execute(
                     "INSERT INTO memory_entries "
@@ -131,15 +135,24 @@ class SqlMemoryStore(MemoryStore):
                 )
         return eid
 
-    def forget(self, entry_id: str) -> bool:
-        """显式遗忘:status→forgotten(不物删,recall 只查 active)。"""
+    def forget(self, entry_id: str, *, owner_user_id: str | None = None,
+               org_id: str | None = None) -> bool:
+        """显式遗忘:status→forgotten(不物删,recall 只查 active)。
+
+        owner_user_id / org_id 给定则限本人 + 本 org(IDE 写侧防删他人记忆);None=不限(维护路径)。
+        """
         self._ensure()
+        sql = ("UPDATE memory_entries SET status='forgotten', updated_at=now() "
+               "WHERE id=%s AND status<>'forgotten'")
+        params: list = [entry_id]
+        if org_id is not None:
+            sql += " AND org_id=%s"
+            params.append(org_id)
+        if owner_user_id is not None:
+            sql += " AND owner_user_id=%s"
+            params.append(owner_user_id)
         with self._write_pool.connection() as conn:
-            cur = conn.execute(
-                "UPDATE memory_entries SET status='forgotten', updated_at=now() "
-                "WHERE id=%s AND status<>'forgotten'",
-                (entry_id,),
-            )
+            cur = conn.execute(sql, params)
             return cur.rowcount > 0
 
     def archive(self, entry_id: str) -> bool:

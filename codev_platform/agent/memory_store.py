@@ -55,10 +55,18 @@ class MemoryStore(ABC):
                    limit: int = 100) -> list[MemoryEntry]: ...
 
     @abstractmethod
-    def supersede(self, old_id: str, new_entry: MemoryEntry) -> str: ...
+    def supersede(self, old_id: str, new_entry: MemoryEntry, *,
+                  owner_user_id: str | None = None) -> str:
+        """新条取代旧条。owner_user_id 给定则限本人(防改他人记忆,IDE 写侧用);
+        None=不限(维护/迁移路径)。"""
+        ...
 
     @abstractmethod
-    def forget(self, entry_id: str) -> bool: ...
+    def forget(self, entry_id: str, *, owner_user_id: str | None = None,
+               org_id: str | None = None) -> bool:
+        """显式遗忘。owner_user_id / org_id 给定则限本人 + 本 org(IDE 写侧防删他人);
+        None=不限(维护路径)。"""
+        ...
 
     @abstractmethod
     def archive(self, entry_id: str) -> bool:
