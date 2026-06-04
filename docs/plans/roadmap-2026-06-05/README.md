@@ -10,6 +10,7 @@
 | 文件 | 内容 | 状态 |
 |---|---|---|
 | [next-plan-2026-06-05.md](next-plan-2026-06-05.md) | 主 plan **v2(四专家会诊修订)**:ROI 重排 `C1→B1→A-MVP`(收尾先于新特性)+ A 砍只读 MVP(≥70% 验收)+ 软/硬节点隔离 + grounding-first + A2/A3/A4 推下轮 | 📋 v2 规划 |
+| [agent-loop-guard-redesign-2026-06-05.md](agent-loop-guard-redesign-2026-06-05.md) | loop guard 重构(5 专家两轮会诊):工具三分类护栏(只读近乎不限 / 检索类输出侧零增量 / 无效调用单独防线)+ 收尾禁脑补 + 读取充分性门。修 `per_tool_cap=3` 误杀 read_file 的主瓶颈 | 📋 待启动 |
 
 ---
 
