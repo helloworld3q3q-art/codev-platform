@@ -22,7 +22,7 @@
 - **distinct path = 确定进展**;**query 换词不可信**(弱模型加空格/同义词/调 limit → 无限「新指纹」)→ 工具必须**分类**施策,单一全局 cap 数值无论调大调小都错(大=放行 thrash,小=误杀只读)。
 - **不引入语义相似 / embedding 评分**(过度设计 + 阈值难调 + 误判)——只用确定性指纹 + 归一化哈希等值判断。
 - **强制收尾能治空转,治不了「没读够就被掐 → 答案空」**(`aa.txt` 里 agent 被迫在信息不全时收尾)→ 需「读取充分性门 + 禁脑补 prompt」兜底,否则护栏越紧幻觉越多。
-- 一切阈值进 `LoopPolicy`、按 provider 解析(§4 配置驱动,弱模型严 / 强模型可关),核心循环零 if-else。
+- **护栏逻辑必须模型无关、配置随模型**:`loop.py` 不出现任何模型名 if-else;模型差异 100% 落在 `LoopPolicy` 数值/开关上(数据非代码,agent-provider §1 铁律)。所有新阈值进 `LoopPolicy`,经 `registry.loop_policy()` 的 `_pick`(`config agent.providers.<name>.loop.<f>` > `agent.loop.<f>` > `spec.default_loop_policy` > 全局默认)逐字段解析。**这套 per-provider 解析机制已存在**(现仅 deepseek 设了 `per_tool_cap=3`),本 plan 只是把新字段接上 + 给各模型档位默认,绝不为单一模型写死。
 
 ## 三、Phase 划分
 
@@ -42,10 +42,11 @@
 - **结果哈希仅 `RETRIEVAL` 类**(read_file 读不同文件天然 novel,套上去等于不设防 + 空文件/同名 `__init__` 撞哈希误拦)。
 - **Gate**:同义换词但结果相同 → 连续 3 次后强制收尾;正常换查法(结果不同)放行;归一化能挡「加空格/标点」绕过。
 
-### P3 — 配置接线 + 收尾合规(est 0.5d)
-- `LoopPolicy` 加字段(`readonly_distinct_cap` / `readonly_total_cap` / `retrieval_distinct_cap` / `no_progress_limit` / `novelty_check`),`per_tool_cap` 保 **deprecated 别名**映射 `retrieval_distinct_cap`(不破 deepseek=3 现有 config + 测试)。
+### P3 — 配置接线(per-model)+ 收尾合规(est 0.5d)
+- `LoopPolicy` 加字段(`readonly_distinct_cap` / `readonly_total_cap` / `retrieval_distinct_cap` / `no_progress_limit` / `novelty_check` / `invalid_call_limit`),**每个新字段都接进 `registry.loop_policy()` 的 `_pick`** → 自动支持 `agent.providers.<name>.loop.<f>` 逐模型覆盖。`per_tool_cap` 保 **deprecated 别名**映射 `retrieval_distinct_cap`(不破 deepseek=3 现有 config + 测试)。
+- **按能力档给各 provider 设 `default_loop_policy`**(见 §六 矩阵):claude/gpt = 强档(基本不管)、qwen-max = 中档、deepseek/qwen-turbo = 弱档。加 GPT/Qwen 接入 = 选档 + spec 一行(或纯 config),loop 核心零改。
 - 收尾 prompt 补:① **禁脑补未读内容**;② **读取充分性门** —— distinct-path < 阈值(默认 2)时收尾文案改为「几乎没读到文件,疑似卡在无效调用,检查参数后重试一次再收尾」,区分「空转」与「读够了」。
-- **Gate**:`test_agent_registry` 覆盖新字段 config 覆盖 + 别名向后兼容;deepseek 旧 `per_tool_cap=3` 仍生效。
+- **Gate**:`test_agent_registry` 断言——(a)每个新字段都能经 `agent.providers.<name>.loop.<f>` 覆盖;(b)强档 provider(如 claude)解析出 `novelty_check=False` 等宽松值、弱档(deepseek)解析出严格值;(c)`per_tool_cap` 别名向后兼容,deepseek 旧 config 仍生效;(d)config 未配的新模型走档位默认而非全局裸默认。
 
 ## 四、风险
 
@@ -62,7 +63,26 @@
 - **C. 语义新颖度评分 / embedding 去重** —— 务实派否:过度设计 + 引入误判 + 依赖。
 - **选定 = 工具三分类 + 确定性输出哈希 + 无效调用防线**,三方折中:输入侧粗筛(指纹归一化)+ 输出侧承重墙(结果哈希/零增量,仅检索类)+ 无关兜底(`max_steps`)+ 只读专属(distinct-path/总量软顶)。
 
-## 六、启动条件
+## 六、按模型配置(核心:不写死 deepseek)
+
+护栏**逻辑**对所有模型一视同仁;**参数**按模型能力分档。强模型指令遵从好、自控强 → 基本不管(避免误伤);弱模型指令遵从差 → 严管防空转。机制全部复用已有的 `registry.loop_policy()` per-provider 解析,**不为任何单一模型在 loop.py 写 if-else**。
+
+**能力档默认矩阵**(写进各 `ProviderSpec.default_loop_policy`,数值待 design doc + 实测微调):
+
+| 能力档 | 代表 provider | `novelty_check` | `retrieval_distinct_cap` | `no_progress_limit` | `readonly_total_cap` | 思路 |
+|---|---|---|---|---|---|---|
+| **强** | `claude` / `gpt`(4/4o) | `False`(关,自控) | 12 | 5 | 30 | 少管,最大探索自由 |
+| **中** | `qwen`(qwen-max)/ gpt-4o-mini | `True` | 8 | 3 | 25 | 适度护栏 |
+| **弱** | `deepseek` / qwen-turbo / 小模型 | `True` | 6 | 3 | 20 | 严管,防换词空转 |
+
+**三种调法(对应 agent-provider §2「加模型走三档」)**:
+1. **OpenAI 兼容新厂商**(零代码):`config.agent.providers.<name> = {base_url, model, api_key}` + 可选 `loop.<f>` 覆盖逐字段调档。
+2. **想要内置默认的常用厂商**(一行):`registry.py` 给该 `ProviderSpec` 加 `default_loop_policy=LoopPolicy(...)`。
+3. **全新协议**:另写适配器(与本护栏无关)。
+
+**接入 GPT / Qwen 的实操**:GPT 走强档(`novelty_check=False`、宽 cap)、Qwen 按子模型分档(qwen-max 中档 / qwen-turbo 弱档)——都只是上面表里选一行值,要么进 spec 默认、要么进 config,`loop.py` / 护栏逻辑一行不动。**不确定新模型属哪档 → 默认走中档**(config 永远能事后逐字段覆盖纠偏)。
+
+## 七、启动条件
 
 - agent venv 可跑 `tests/test_agent_loop_guard.py`(纯单元,**无需 daemon / GPU**)。
 - P0 需先在 design doc 定位 `search_docs` 的 `module` enum 真值源(疑在 chroma schema)并定两候选取舍。
