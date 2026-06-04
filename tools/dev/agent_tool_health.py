@@ -32,6 +32,8 @@ PROBES = [
     ("page_dependencies", {"pageRef": "ChatPanel"}),
     ("api_callers", {"endpointRef": "agentChat"}),
     ("search_docs", {"query": "会话持久化 工具调用流"}),
+    ("read_file", {"path": "codev_platform/agent/tools/__init__.py"}),
+    ("list_dir", {"path": "."}),
     ("remember", {"content": "[agent_tool_health] probe, 可忽略"}),
 ]
 
