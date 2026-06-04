@@ -1,6 +1,6 @@
 """统一图谱 MCP server dispatch 测试 —— 纯函数 dispatch(绕过 MCP 装饰器)。
 
-验证 7 个工具的 name→impact 查询映射 + A1 业务域查询经 MCP 入口可达。SSE/auth 部署样板
+验证 8 个工具的 name→impact 查询映射 + A1 业务域查询经 MCP 入口可达。SSE/auth 部署样板
 照搬 cross-link(已在那侧验证), 这里只钉 dispatch 契约。
 """
 from __future__ import annotations

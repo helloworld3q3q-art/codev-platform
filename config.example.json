@@ -93,16 +93,15 @@
   },
 
   "mcp": {
-    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。多租户单端点 + ?project_id= 路由。cross_link_sse_port: cross-link 端口(默认 18086)。codegraph_sse_port: codegraph 多租户代理端口(默认 18091, 方案 B 平台自写代理, 按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` 后端并转发)。graph_sse_port: 统一图谱 MCP(impact 跨层影响 + A1 业务域查询, 默认 18092)。",
-    "cross_link_sse_port": 18086,
+    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。多租户单端点 + ?project_id= 路由。codegraph_sse_port: codegraph 多租户代理端口(默认 18091, 方案 B 平台自写代理, 按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` 后端并转发)。graph_sse_port: 统一图谱 MCP(impact 跨层影响 + A1 业务域查询 + search_nodes, 替代退役的 cross-link, 默认 18092)。",
     "codegraph_sse_port": 18091,
     "graph_sse_port": 18092
   },
 
   "mcp_sources": {
     "_comment": "客户端可切换的两个实例源 (双实例: 本地活跃 + 平台基线), 给 `codev-platform mcp-source local|platform [tools...]` 改写业务仓 .mcp.json 用。local=本机本地实例(索引 working tree 含未提交); platform=平台基线服务器(索引 HEAD, 跨项目/团队共享)。单机开发期两者同主机不同端口(local 18xxx / platform 19xxx); 真团队部署把 platform.host 改成远程平台 IP 即可, 零改代码。缺省即下方端口, 整块可省。",
-    "local":    { "host": "127.0.0.1", "platform-docs": 18083, "cross-link": 18086, "codegraph": 18091 },
-    "platform": { "host": "127.0.0.1", "platform-docs": 19083, "cross-link": 19086, "codegraph": 19091 }
+    "local":    { "host": "127.0.0.1", "platform-docs": 18083, "codegraph": 18091, "agent-memory": 18087, "graph": 18092 },
+    "platform": { "host": "127.0.0.1", "platform-docs": 19083, "codegraph": 19091, "agent-memory": 19087, "graph": 19092 }
   },
 
   "logging": {

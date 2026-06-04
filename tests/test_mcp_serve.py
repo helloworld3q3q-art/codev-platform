@@ -15,9 +15,9 @@ def test_build_codegraph_cmd():
     assert cmd == ["py", "-m", "codev_platform.codegraph.server", "--http", "--port", "18091"]
 
 
-def test_build_cross_link_cmd():
-    cmd = ms.build_cross_link_cmd("py", 18086)
-    assert cmd == ["py", "-m", "codev_platform.cross_link.server", "--http", "--port", "18086"]
+def test_build_graph_cmd():
+    cmd = ms.build_graph_cmd("py", 18092)
+    assert cmd == ["py", "-m", "codev_platform.graph.mcp_server", "--http", "--port", "18092"]
 
 
 def test_build_agent_memory_cmd():
@@ -67,25 +67,25 @@ def test_memory_maintenance_systemd_units():
 
 def test_endpoint_health_url_for_all_kinds():
     chroma = MCPEndpoint(name="platform-docs", kind="chroma", port=18083)
-    cl = MCPEndpoint(name="cross-link", kind="cross_link", port=18086)
+    gr = MCPEndpoint(name="graph", kind="graph", port=18092)
     cg = MCPEndpoint(name="codegraph", kind="codegraph", port=18091)
     # 审计 #4: 探活改打 PUBLIC /healthz (最小, 不泄敏); 详情面 /platform/status 改鉴权
     assert chroma.health_url.endswith(":18083/healthz")
-    assert cl.health_url.endswith(":18086/healthz")
+    assert gr.health_url.endswith(":18092/healthz")
     # codegraph 改平台自写多租户代理后也自带 /healthz (不再 mcp-proxy 无 health → TCP)
     assert cg.health_url.endswith(":18091/healthz")
     assert cg.sse_url == "http://127.0.0.1:18091/sse"
 
 
-def test_iter_endpoints_always_has_chroma_and_cross_link(tmp_path):
-    cfg = {"daemon": {"port": 18083}, "mcp": {"cross_link_sse_port": 18086}, "projects": {}}
+def test_iter_endpoints_always_has_chroma_and_graph(tmp_path):
+    cfg = {"daemon": {"port": 18083}, "mcp": {"graph_sse_port": 18092}, "projects": {}}
     eps = ms.iter_endpoints(cfg)
     kinds = {e.kind: e for e in eps}
     # chroma 现在也可由 serve-mcp start 拉起作常驻 (cutover 后失去 launcher auto-spawn);
     # self_spawned 仅表示它也能被业务仓 Claude 会话经 launcher 拉起
     assert kinds["chroma"].self_spawned is True and kinds["chroma"].cmd is not None
     assert "codev_platform.chroma.server" in kinds["chroma"].cmd
-    assert kinds["cross_link"].port == 18086 and kinds["cross_link"].cmd is not None
+    assert kinds["graph"].port == 18092 and kinds["graph"].cmd is not None
 
 
 def test_iter_endpoints_codegraph_single_multitenant(tmp_path):
@@ -120,7 +120,7 @@ def test_iter_endpoints_codegraph_default_port(tmp_path):
 def test_probe_http_kind_uses_health(monkeypatch):
     monkeypatch.setattr(ms, "_http_health", lambda url, timeout=2.0: True)
     monkeypatch.setattr(ms, "_tcp_open", lambda h, p, timeout=2.0: False)  # 不应被调用
-    ep = MCPEndpoint(name="cross-link", kind="cross_link", port=18086)
+    ep = MCPEndpoint(name="graph", kind="graph", port=18092)
     assert ms.probe(ep) == "ok"
 
 
@@ -137,4 +137,4 @@ def test_probe_all_shape(monkeypatch):
     monkeypatch.setattr(ms, "_tcp_open", lambda h, p, timeout=2.0: False)
     rows = ms.probe_all({"daemon": {"port": 18083}, "projects": {}})
     assert all({"name", "kind", "port", "status", "sse_url", "self_spawned"} <= set(r) for r in rows)
-    assert any(r["kind"] == "cross_link" for r in rows)
+    assert any(r["kind"] == "graph" for r in rows)

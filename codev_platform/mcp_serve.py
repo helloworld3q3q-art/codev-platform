@@ -6,8 +6,8 @@
 | 端点 | 起法 | 多租户 |
 |---|---|---|
 | platform-docs (chroma) | 现有 daemon 自带 SSE (首个会话经 launcher 自 spawn) | ?project_id= contextvar |
-| cross-link | `python -m codev_platform.cross_link.server --http` (本仓) | ?project_id= contextvar |
 | codegraph (per project) | `mcp-proxy --port P -- codegraph serve --mcp` (cwd=repo) | 每项目一端口 (port 即选择器) |
+| graph (统一图谱) | `python -m codev_platform.graph.mcp_server --http` (替代退役的 cross-link) | ?project_id= contextvar |
 
 codegraph 是外部 stdio-only 工具 (`codegraph serve --mcp` 无 HTTP 选项),用 **mcp-proxy
 server 模式** 包成 SSE,保全工具集 (callers/impact/context...),不退化成 codegraph-api REST。
@@ -30,9 +30,8 @@ from typing import Any
 from codev_platform.core.config import get as _cfg_get, load_config
 
 
-# 默认端口 (config 可覆盖)。chroma 沿用 daemon.port;cross-link / codegraph 走 mcp.*。
+# 默认端口 (config 可覆盖)。chroma 沿用 daemon.port;codegraph 走 mcp.*。
 DEFAULT_CHROMA_PORT = 18083
-DEFAULT_CROSS_LINK_PORT = 18086
 DEFAULT_CODEGRAPH_PORT = 18091  # codegraph 多租户代理端点 (单端点, mcp.codegraph_sse_port 覆盖)
 DEFAULT_AGENT_MEMORY_PORT = 18087  # agent memory MCP 前门 (mcp.agent_memory_sse_port 覆盖)
 DEFAULT_GRAPH_PORT = 18092  # 统一图谱 MCP (impact + A1 业务域; mcp.graph_sse_port 覆盖)
@@ -41,8 +40,8 @@ DEFAULT_GRAPH_PORT = 18092  # 统一图谱 MCP (impact + A1 业务域; mcp.graph
 @dataclass
 class MCPEndpoint:
     """一个 MCP 服务端点 (平台侧拉起 + 业务侧连接)。"""
-    name: str                       # 展示名: platform-docs / cross-link / codegraph
-    kind: str                       # chroma | cross_link | codegraph
+    name: str                       # 展示名: platform-docs / codegraph / agent-memory / graph
+    kind: str                       # chroma | codegraph | agent_memory | graph
     port: int
     project_id: str | None = None   # 三套均多租户单端点, 统一为 None (业务仓走 ?project_id=)
     cmd: list[str] | None = None    # spawn 命令 (None = 自 spawn / 外部托管, 如 chroma daemon)
@@ -94,14 +93,9 @@ def build_codegraph_cmd(python: str | Path, port: int) -> list[str]:
     """构造 codegraph 多租户代理 HTTP 端点启动命令 (方案 B, 平台自写, 不再用 mcp-proxy)。
 
     代理内部按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` stdio 后端并转发,
-    与 cross-link / chroma 同构 (单端点多租户)。repo_path 由代理从 config.projects 解析。
+    与 chroma 同构 (单端点多租户)。repo_path 由代理从 config.projects 解析。
     """
     return [str(python), "-m", "codev_platform.codegraph.server", "--http", "--port", str(port)]
-
-
-def build_cross_link_cmd(python: str | Path, port: int) -> list[str]:
-    """构造 cross-link HTTP 端点启动命令。"""
-    return [str(python), "-m", "codev_platform.cross_link.server", "--http", "--port", str(port)]
 
 
 def build_agent_memory_cmd(python: str | Path, port: int) -> list[str]:
@@ -121,15 +115,15 @@ def build_graph_cmd(python: str | Path, port: int) -> list[str]:
 # config.mcp_sources.<target> 覆盖 host + 各 tool 端口 —— 换远程平台只改 host, 不改代码。
 # 详见 docs/plans/roadmap-2026-05-29/dual-instance-codeindex-2026-05-30.md §四。
 # ----------------------------------------------------------------------
-MCP_SOURCE_TOOLS = ("platform-docs", "cross-link", "codegraph", "agent-memory", "graph")
+MCP_SOURCE_TOOLS = ("platform-docs", "codegraph", "agent-memory", "graph")
 DEFAULT_MCP_SOURCES: dict[str, dict[str, Any]] = {
     "local": {
         "host": "127.0.0.1", "platform-docs": DEFAULT_CHROMA_PORT,
-        "cross-link": DEFAULT_CROSS_LINK_PORT, "codegraph": DEFAULT_CODEGRAPH_PORT,
+        "codegraph": DEFAULT_CODEGRAPH_PORT,
         "agent-memory": DEFAULT_AGENT_MEMORY_PORT, "graph": DEFAULT_GRAPH_PORT,
     },
     "platform": {
-        "host": "127.0.0.1", "platform-docs": 19083, "cross-link": 19086, "codegraph": 19091,
+        "host": "127.0.0.1", "platform-docs": 19083, "codegraph": 19091,
         "agent-memory": 19087, "graph": 19092,
     },
 }
@@ -157,8 +151,8 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     """从 config 枚举应常驻的 MCP 端点 (纯函数, 不 spawn)。
 
     - chroma: daemon.port (self-spawned, 不由本编排器拉起)
-    - cross-link: mcp.cross_link_sse_port
     - codegraph: mcp.codegraph_sse_port (单端点多租户代理, 内部按 project_id 路由 per-repo 后端)
+    - graph: mcp.graph_sse_port (统一图谱 impact + A1 业务域, 替代 cross-link)
     """
     venv_py = _venv_python(cfg)
     out: list[MCPEndpoint] = []
@@ -172,11 +166,6 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
         cmd=[str(venv_py), "-m", "codev_platform.chroma.server", "--http"],
         self_spawned=True,
     ))
-
-    # cross-link (本仓, 本编排器拉起)
-    cl_port = int(_cfg_get(cfg, "mcp.cross_link_sse_port") or DEFAULT_CROSS_LINK_PORT)
-    out.append(MCPEndpoint(name="cross-link", kind="cross_link", port=cl_port,
-                           cmd=build_cross_link_cmd(venv_py, cl_port)))
 
     # codegraph 多租户单端点 (方案 B): 平台自写代理, 按 ?project_id= 懒启动 per-repo 后端 +
     # 转发。端口固定 mcp.codegraph_sse_port (不再 per-project 浮动); repo_path 由代理自行
@@ -264,7 +253,6 @@ def probe_all(cfg: dict | None = None, *, diagnose: bool = False) -> list[dict[s
 _DEP_HINT = {
     "chroma": "chromadb + 模型 (Qwen embedding/reranker)",
     "codegraph": "codegraph 命令 + mcp-proxy",
-    "cross_link": "sqlglot",
     "agent_memory": "psycopg (PG 驱动) + extra [agent]",
     "graph": "无重依赖 (纯 sqlite3)",
 }
@@ -272,7 +260,6 @@ _DEP_HINT = {
 _DB_HINT = {
     "chroma": "chroma collection",
     "codegraph": "codegraph 索引",
-    "cross_link": "cross_layer.sqlite (项目未注册?)",
     "agent_memory": "memory.pg_dsn 未配 (PG 库未就绪?)",
     "graph": "graph_store/<pid>.sqlite (未 ingest?)",
 }
@@ -322,11 +309,6 @@ def _systemctl_is_active(unit_name: str) -> bool | None:
 
 def _dep_ok(ep: MCPEndpoint, cfg: dict) -> bool:
     """该 kind 的关键依赖是否可用 (best-effort, 失败即视为缺)。"""
-    if ep.kind == "cross_link":
-        # cross-link server 本身只用 sqlite3 (server.py 注释); sqlglot 仅建索引时用。
-        # 这里探 sqlglot 作"完整链路"指示 (重建依赖)。
-        import importlib.util
-        return importlib.util.find_spec("sqlglot") is not None
     if ep.kind == "chroma":
         import importlib.util
         return importlib.util.find_spec("chromadb") is not None
@@ -346,14 +328,12 @@ def _db_present(ep: MCPEndpoint, cfg: dict) -> bool:
     """
     try:
         from codev_platform.core.paths import (
-            cross_link_db_path, codegraph_db_path, chroma_dir,
+            codegraph_db_path, chroma_dir,
         )
     except Exception:
         return True  # 解析失败不误报数据缺
     projects = _cfg_get(cfg, "projects") or {}
     pids = list(projects.keys()) if isinstance(projects, dict) else []
-    if ep.kind == "cross_link":
-        return any(cross_link_db_path(p).exists() for p in pids)
     if ep.kind == "codegraph":
         return any(codegraph_db_path(p).exists() for p in pids)
     if ep.kind == "chroma":

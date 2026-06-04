@@ -1,9 +1,10 @@
 """统一图谱 MCP server — 暴露 impact + A1 业务域查询给开发端 agent(Claude Code/Codex)。
 
-7 个 tools(薄包装 graph/impact 查询函数, 纯读 sqlite, **不调 LLM**):
+8 个 tools(薄包装 graph/impact 查询函数, 纯读 sqlite, **不调 LLM**):
   跨层影响 — find_impact / find_table_usage / find_page_dependencies /
              find_impacted_pages / find_api_callers
   A1 业务域 — find_node_domain(节点→域) / list_domain_members(域→成员)
+  搜索 — search_nodes(模糊搜节点, 承接退役的 cross-link)
 
 多租户单端点 + ?project_id= 路由(镜像 cross-link)。读 data/graph_store/<pid>.sqlite。
 这是 A1 业务域 + 整个统一图谱对开发端 agent 的消费前门(第 5 套平台 MCP)。
