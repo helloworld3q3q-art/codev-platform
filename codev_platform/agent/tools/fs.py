@@ -27,16 +27,31 @@ _SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".keystore")
 _SECRET_NAMES = ("id_rsa", "id_dsa", "id_ecdsa", ".env", "credentials", ".npmrc", ".pypirc")
 
 
+def _repo_root(pid: str) -> Path | None:
+    """项目仓根:**机器级 config 覆盖优先**(projects.<pid>.repo_path —— WSL/Win 各自正确),
+    再 fallback meta.json repo_path(committed, 跨平台可能不符,如 WSL 上是 Windows 路径)。
+    都拿不到 / 路径在本机不存在 → None。
+    """
+    from codev_platform.core.config import get as cfg_get, load_config
+    rp = cfg_get(load_config(), f"projects.{pid}.repo_path", None)
+    if rp and Path(rp).is_dir():
+        return Path(rp).resolve()
+    mp = repo_path_of(pid)
+    if mp and mp.is_dir():
+        return mp.resolve()
+    return None
+
+
 def _resolve_root(project_id: str | None) -> tuple[Path | None, str]:
     """(仓根, 错误信息)。仓根拿不到时返回 (None, 原因)。"""
     try:
         pid = resolve_project_id(project_id)
     except Exception as e:  # noqa: BLE001 — 工具边界, project 非法/缺失转结果
         return None, f"project 解析失败: {e}"
-    root = repo_path_of(pid)
-    if root is None or not root.is_dir():
-        return None, f"project '{pid}' 仓根未知(platform_meta meta.json 缺 repo_path)"
-    return root.resolve(), ""
+    root = _repo_root(pid)
+    if root is None:
+        return None, f"project '{pid}' 仓根未知(config projects.{pid}.repo_path / meta.json 均无有效本机路径)"
+    return root, ""
 
 
 def _safe_target(root: Path, rel: str) -> tuple[Path | None, str]:

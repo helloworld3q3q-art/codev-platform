@@ -17,8 +17,8 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("STOCK_DB_PASSWORD=supersecret\n", encoding="utf-8")
     (tmp_path / "deploy.pem").write_text("-----BEGIN KEY-----\n", encoding="utf-8")
     (tmp_path / "node_modules").mkdir()
-    # 仓根解析 + project_id 解析都打桩到 tmp_path(不连真 platform_meta / config)
-    monkeypatch.setattr(fs, "repo_path_of", lambda pid: tmp_path)
+    # 仓根解析 + project_id 解析都打桩到 tmp_path(不连真 config / platform_meta)
+    monkeypatch.setattr(fs, "_repo_root", lambda pid: tmp_path.resolve())
     monkeypatch.setattr(fs, "resolve_project_id", lambda explicit: "codev-platform")
     return tmp_path
 
@@ -64,7 +64,7 @@ def test_list_dir_traversal_blocked(repo):
 
 
 def test_repo_root_unknown_is_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(fs, "repo_path_of", lambda pid: None)
+    monkeypatch.setattr(fs, "_repo_root", lambda pid: None)
     monkeypatch.setattr(fs, "resolve_project_id", lambda explicit: "x")
     r = fs.ReadFileTool("x").run({"path": "a.py"})
     assert r.is_error and "仓根未知" in r.content
