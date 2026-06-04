@@ -72,11 +72,14 @@ def _usage_reindex(r: Report, repo: Path) -> None:
 def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict,
                          project_id: str | None = None) -> None:
     # candidate / strict MCP-path patterns (defaults + project meta extensions)
+    # 候选 = "改它前本应查 MCP(规则/链路)的提交"。纯写文档 (docs/*.md) 不是候选 ——
+    # 否则每条日报/plan 都灌进分母, 把采纳率压虚低 (codev 自身 docs 提交极多)。改规则
+    # (.claude/rules) 仍算候选(改前应查关联规则)。codev-platform 自身 Python 代码经
+    # meta.json 的 mcp_candidate_patterns 追加 (见 health.get 合并), 不写死业务仓布局。
     default_cand = [
         r"^apps/[^/]+/src/.*\.(java|ts|tsx|less)$",
         r"^\.claude/(rules|skills)/.*\.md$",
         r"^apps/[^/]+/\.claude/rules/.*\.md$",
-        r"^docs/.*\.md$",
         r"^tools/(dev|chroma|cross_link)/",
         r"^scripts/.*\.(ps1|cmd|bat)$",
     ]
