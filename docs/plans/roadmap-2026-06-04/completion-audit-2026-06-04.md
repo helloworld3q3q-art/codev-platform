@@ -64,10 +64,18 @@ Bash 直读磁盘的对账,把"plan 说没做"逐项核到代码是否真没做�
    (M0 doctor / M3 生命周期已做, M1 任务记忆闭环是大头)。配合本轮另一发现:**agent 对话
    `agent_sessions=0`, 平台 AI 对话从未被真正使用** —— Memory 写侧闭环(agent 不自动 remember)
    也需补。两者叠加 = Memory 当前是"读侧建完、写侧空转"。
-2. **影响分析的数据桥接(endpoint→表)** —— **代码链路完整(缺口#1 已做), 但数据断**:
-   `service→store` 的 Python DI 实例方法调用(`self._store.create()`)codegraph 追不动,
-   导致 endpoint→表可达 = 0。根因已定位(Python DI 调用链, 非 SQLAlchemy), 修法脆弱、
-   ROI 低(专家共识), cross_layer 也做不到, 不卡退役。作单独 backlog(P3+)。
+2. **影响分析的数据桥接(endpoint→表)** —— **代码链路完整(缺口#1 已做), 但 codev dogfood 数据断**:
+   `service→store` 的 Python DI(`self._store.xxx()`)在 codegraph 的 calls 图里缺边, BFS 从
+   route 经 service 到不了 PG store 碰表函数 → endpoint→表可达 = 0(2026-06-04 实测:
+   `_find_handler` 59/59 成功, 但 **BFS join 0/59**;断点纯在 service→store 这一跳, 非匹配问题)。
+   **2026-06-04 核实(端到端冒烟, 真实 store)**:
+   - codev-platform store 309 节点/310 边, 四跳三通一断: calls_api 51 ✅ / **calls 0 ❌** /
+     reads+writes_table 114 ✅。
+   - 业务仓 openclaw-stock 同链路 **calls=155 边**, table_usage 多表反向可达前端
+     (edges 表→6 前端 / covered→4 / files / latest...)。
+   - **判定**:卖点对**真实客户(业务仓)端到端可用**, 断点是 codev **纯 Python 严格 DI 架构**特有。
+     商业优先级低 → **确认放 backlog(P3+)**。修法(扫 service `__init__` 的 `self._store` DI 字段
+     类型 → 物化 service→store calls 边)脆弱, 待 dogfood 价值真需要时再做。
 
 **⏸ 优先级靠后(2026-06-04 定)**:**文档/任务类 Connector —— Jira / 飞书 / Wiki**(M6/Phase6)
 **暂不排期**(同 Connector 列的 **Git 接入已做**=webhook push→reindex, CI 未做归其他 backlog);
