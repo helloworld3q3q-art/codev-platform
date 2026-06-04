@@ -1,0 +1,274 @@
+"""统一图谱 MCP server — 暴露 impact + A1 业务域查询给开发端 agent(Claude Code/Codex)。
+
+7 个 tools(薄包装 graph/impact 查询函数, 纯读 sqlite, **不调 LLM**):
+  跨层影响 — find_impact / find_table_usage / find_page_dependencies /
+             find_impacted_pages / find_api_callers
+  A1 业务域 — find_node_domain(节点→域) / list_domain_members(域→成员)
+
+多租户单端点 + ?project_id= 路由(镜像 cross-link)。读 data/graph_store/<pid>.sqlite。
+这是 A1 业务域 + 整个统一图谱对开发端 agent 的消费前门(第 5 套平台 MCP)。
+
+启动: python -m codev_platform.graph.mcp_server --http [--port N] (SSE) / 无参 (stdio)。
+"""
+from __future__ import annotations
+
+import asyncio
+import contextvars
+import datetime
+import json
+import os
+import sqlite3
+import sys
+import traceback
+from pathlib import Path
+
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
+
+from codev_platform.core.errors import ErrorCode
+from codev_platform.core.project_id import ProjectIdError, resolve_local
+from codev_platform.graph import impact as _impact
+from codev_platform.graph.store import graph_store_path, open_store
+
+
+def _resolve_default_project() -> str | None:
+    try:
+        return resolve_local()
+    except ProjectIdError:
+        return None
+
+
+PROJECT_ID = _resolve_default_project()
+
+
+def _flog(msg: str) -> None:
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] [graph-mcp] {msg}", file=sys.stderr, flush=True)
+
+
+# ---- per-project 连接(lazy, 多租户 contextvar 路由) ----
+_conns: dict[str, sqlite3.Connection] = {}
+_missing: dict[str, str] = {}
+_current_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_graph_project_id", default=None
+)
+
+
+def _active_pid() -> str | None:
+    return _current_project_id.get() or PROJECT_ID
+
+
+def _conn_for(pid: str | None) -> sqlite3.Connection | None:
+    if pid is None:
+        return None
+    c = _conns.get(pid)
+    if c is not None:
+        return c
+    p = graph_store_path(pid)
+    if not p.exists():
+        _missing[pid] = f"graph store 不存在: {p}; 先跑 ingest(graph.ingest.ingest_project)"
+        return None
+    _missing.pop(pid, None)
+    try:
+        c = open_store(pid)  # 含前向迁移 + schema
+        _conns[pid] = c
+        return c
+    except Exception as exc:  # noqa: BLE001
+        _flog(f"[init] pid={pid} open_store 失败: {exc!s}")
+        return None
+
+
+# ---- MCP server ----
+server: Server = Server("graph")
+
+_REF_SCHEMA = {
+    "type": "object",
+    "properties": {"ref": {"type": "string", "description": "节点 id 或 name"}},
+    "required": ["ref"],
+}
+
+
+def _str_schema(field: str, desc: str) -> dict:
+    return {"type": "object", "properties": {field: {"type": "string", "description": desc}},
+            "required": [field]}
+
+
+def _ok(obj: object) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps(obj, ensure_ascii=False))]
+
+
+def _err(msg: str) -> list[TextContent]:
+    return _ok({"error": msg})
+
+
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    return [
+        Tool(name="find_impact",
+             description="改某节点(endpoint/表/函数/组件)→ 跨层被波及集合(反向 BFS, 谁依赖它)",
+             inputSchema=_REF_SCHEMA),
+        Tool(name="find_table_usage",
+             description="给表名 → 哪些函数/端点/前端用它(反向 BFS)",
+             inputSchema=_str_schema("table", "数据库表名")),
+        Tool(name="find_page_dependencies",
+             description="给前端页/组件 → 它依赖的端点/函数/表(正向 BFS)",
+             inputSchema=_str_schema("page", "前端页面/组件 id 或 name")),
+        Tool(name="find_impacted_pages",
+             description="改前端公共组件 → 哪些页面受影响(传递依赖)",
+             inputSchema=_str_schema("component", "前端组件 id 或 name")),
+        Tool(name="find_api_callers",
+             description="给后端端点 → 哪些前端调它",
+             inputSchema=_str_schema("endpoint", "后端端点 id 或 name")),
+        Tool(name="find_node_domain",
+             description="查 endpoint/表属于哪个业务域(A1 LLM 语义标注, 不调 LLM 读已标)",
+             inputSchema=_REF_SCHEMA),
+        Tool(name="list_domain_members",
+             description="查某业务域下有哪些 endpoint/表(A1 软节点)",
+             inputSchema=_str_schema("domain", "业务域名, 如 订单/行情")),
+    ]
+
+
+# name → (arg 键, impact 查询函数)。改工具集只动这一处(list_tools 对齐 7 项)。
+_DISPATCH = {
+    "find_impact": ("ref", _impact.find_impact),
+    "find_table_usage": ("table", _impact.find_table_usage),
+    "find_page_dependencies": ("page", _impact.find_page_dependencies),
+    "find_impacted_pages": ("component", _impact.find_impacted_pages),
+    "find_api_callers": ("endpoint", _impact.find_api_callers),
+    "find_node_domain": ("ref", _impact.find_node_domain),
+    "list_domain_members": ("domain", _impact.list_domain_members),
+}
+
+
+def dispatch(name: str, args: dict, conn, pid: str) -> dict:
+    """name → impact 查询(纯函数, 可测, 绕过 MCP 装饰器)。未知 tool / 缺参 raise。"""
+    if name not in _DISPATCH:
+        raise ValueError(f"未知 tool: {name}")
+    arg_key, fn = _DISPATCH[name]
+    return fn(conn, pid, args[arg_key])
+
+
+@server.call_tool()
+async def call_tool(name: str, args: dict) -> list[TextContent]:
+    pid = _active_pid()
+    conn = _conn_for(pid)
+    if conn is None:
+        return _err(_missing.get(pid, f"无 graph store(project_id={pid}); 先 ingest"))
+    try:
+        return _ok(dispatch(name, args, conn, pid))
+    except KeyError as exc:
+        return _err(f"tool '{name}' 缺必填参数: {exc!s}")
+    except ValueError as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return _err(f"tool '{name}' 执行失败: {exc!s}")
+
+
+async def main() -> None:
+    if PROJECT_ID is None:
+        _flog("FATAL(stdio): 无法解析 project_id (env CODEV_PROJECT_ID / .claude/project.json)")
+        sys.exit(1)
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+
+# ---- HTTP (SSE) 多租户单端点(镜像 cross-link) ----
+_GRAPH_SSE_PORT = int(os.getenv("GRAPH_SSE_PORT", "18092"))
+
+
+async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+    import uvicorn
+
+    from codev_platform.core.acl import can_access
+    from codev_platform.core.audit import audit_access
+    from codev_platform.core.config import load_config
+    from codev_platform.core.project_id import validate as _pid_validate
+    from codev_platform.gateway import (
+        AuthMiddleware,
+        build_authenticator,
+        maybe_rate_limit_middleware,
+    )
+
+    sse_transport = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        pid_raw = request.query_params.get("project_id")
+        if pid_raw:
+            try:
+                pid = _pid_validate(pid_raw)
+            except Exception as exc:  # noqa: BLE001
+                _flog(f"[sse] reject invalid project_id {pid_raw!r}: {exc!s}")
+                return JSONResponse(
+                    {"error": "invalid project_id", "code": ErrorCode.INVALID_PARAMS.value},
+                    status_code=400)
+        else:
+            pid = None
+        _ident = getattr(request.state, "identity", None)
+        _dec = can_access(load_config(), _ident, pid)
+        audit_access("graph", _ident, pid, _dec)
+        if not _dec.allowed:
+            return JSONResponse({"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value},
+                                status_code=403)
+        if pid is None:
+            pid = PROJECT_ID
+        token = _current_project_id.set(pid)
+        _flog(f"[sse] session start project_id={pid}")
+        try:
+            async with sse_transport.connect_sse(
+                request.scope, request.receive, request._send
+            ) as (read_stream, write_stream):
+                await server.run(read_stream, write_stream,
+                                 server.create_initialization_options())
+        finally:
+            _current_project_id.reset(token)
+
+    async def healthz(_request):
+        return JSONResponse({"status": "ok", "service": "graph"})
+
+    async def platform_status(_request):
+        seen = set(list(_conns) + list(_missing))
+        return JSONResponse({
+            "status": "ok", "service": "graph", "default_project_id": PROJECT_ID,
+            "loaded_projects": {pid: (pid in _conns) for pid in seen},
+            "missing_store": _missing,
+        })
+
+    _cfg = load_config()
+    _mw = [Middleware(AuthMiddleware, authenticator=build_authenticator(_cfg),
+                      public_paths={"/healthz", "/health"})]
+    _rl = maybe_rate_limit_middleware(_cfg)
+    if _rl is not None:
+        _mw.append(_rl)
+
+    app = Starlette(
+        debug=False,
+        routes=[
+            Route("/healthz", healthz, methods=["GET"]),
+            Route("/health", healthz, methods=["GET"]),
+            Route("/platform/status", platform_status, methods=["GET"]),
+            Route("/sse", handle_sse, methods=["GET"]),
+            Mount("/messages/", app=sse_transport.handle_post_message),
+        ],
+        middleware=_mw,
+    )
+    _flog(f"[http] graph SSE server starting on 127.0.0.1:{port}")
+    config = uvicorn.Config(app, host="127.0.0.1", port=port,
+                            log_level="warning", access_log=False)
+    await uvicorn.Server(config).serve()
+
+
+if __name__ == "__main__":
+    if "--http" in sys.argv:
+        _port = _GRAPH_SSE_PORT
+        if "--port" in sys.argv:
+            _port = int(sys.argv[sys.argv.index("--port") + 1])
+        asyncio.run(run_http(_port))
+    else:
+        asyncio.run(main())
