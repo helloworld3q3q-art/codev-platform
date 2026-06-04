@@ -35,6 +35,7 @@ DEFAULT_CHROMA_PORT = 18083
 DEFAULT_CROSS_LINK_PORT = 18086
 DEFAULT_CODEGRAPH_PORT = 18091  # codegraph 多租户代理端点 (单端点, mcp.codegraph_sse_port 覆盖)
 DEFAULT_AGENT_MEMORY_PORT = 18087  # agent memory MCP 前门 (mcp.agent_memory_sse_port 覆盖)
+DEFAULT_GRAPH_PORT = 18092  # 统一图谱 MCP (impact + A1 业务域; mcp.graph_sse_port 覆盖)
 
 
 @dataclass
@@ -108,6 +109,11 @@ def build_agent_memory_cmd(python: str | Path, port: int) -> list[str]:
     return [str(python), "-m", "codev_platform.agent.memory_mcp", "--http", "--port", str(port)]
 
 
+def build_graph_cmd(python: str | Path, port: int) -> list[str]:
+    """构造统一图谱 MCP HTTP 端点启动命令 (impact + A1 业务域查询)。"""
+    return [str(python), "-m", "codev_platform.graph.mcp_server", "--http", "--port", str(port)]
+
+
 # ----------------------------------------------------------------------
 # 客户端可切换源 (双实例): 业务仓 .mcp.json 的 URL 指向哪个实例。
 #   local    = 本机本地实例 (索引 working tree, 含未提交; 默认 18xxx)
@@ -115,16 +121,16 @@ def build_agent_memory_cmd(python: str | Path, port: int) -> list[str]:
 # config.mcp_sources.<target> 覆盖 host + 各 tool 端口 —— 换远程平台只改 host, 不改代码。
 # 详见 docs/plans/roadmap-2026-05-29/dual-instance-codeindex-2026-05-30.md §四。
 # ----------------------------------------------------------------------
-MCP_SOURCE_TOOLS = ("platform-docs", "cross-link", "codegraph", "agent-memory")
+MCP_SOURCE_TOOLS = ("platform-docs", "cross-link", "codegraph", "agent-memory", "graph")
 DEFAULT_MCP_SOURCES: dict[str, dict[str, Any]] = {
     "local": {
         "host": "127.0.0.1", "platform-docs": DEFAULT_CHROMA_PORT,
         "cross-link": DEFAULT_CROSS_LINK_PORT, "codegraph": DEFAULT_CODEGRAPH_PORT,
-        "agent-memory": DEFAULT_AGENT_MEMORY_PORT,
+        "agent-memory": DEFAULT_AGENT_MEMORY_PORT, "graph": DEFAULT_GRAPH_PORT,
     },
     "platform": {
         "host": "127.0.0.1", "platform-docs": 19083, "cross-link": 19086, "codegraph": 19091,
-        "agent-memory": 19087,
+        "agent-memory": 19087, "graph": 19092,
     },
 }
 
@@ -184,6 +190,12 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     mem_port = int(_cfg_get(cfg, "mcp.agent_memory_sse_port") or DEFAULT_AGENT_MEMORY_PORT)
     out.append(MCPEndpoint(name="agent-memory", kind="agent_memory", port=mem_port,
                            cmd=build_agent_memory_cmd(venv_py, mem_port)))
+
+    # graph (本仓, 本编排器拉起)。统一图谱 MCP: impact + A1 业务域查询, 多租户单端点
+    # (?project_id= 路由 data/graph_store/<pid>.sqlite)。让开发端 agent 查整个统一图谱 + 业务域。
+    graph_port = int(_cfg_get(cfg, "mcp.graph_sse_port") or DEFAULT_GRAPH_PORT)
+    out.append(MCPEndpoint(name="graph", kind="graph", port=graph_port,
+                           cmd=build_graph_cmd(venv_py, graph_port)))
     return out
 
 
@@ -254,6 +266,7 @@ _DEP_HINT = {
     "codegraph": "codegraph 命令 + mcp-proxy",
     "cross_link": "sqlglot",
     "agent_memory": "psycopg (PG 驱动) + extra [agent]",
+    "graph": "无重依赖 (纯 sqlite3)",
 }
 # 每 kind 缺数据时的人类可读提示 (diagnose_down db_present=False 用)。
 _DB_HINT = {
@@ -261,6 +274,7 @@ _DB_HINT = {
     "codegraph": "codegraph 索引",
     "cross_link": "cross_layer.sqlite (项目未注册?)",
     "agent_memory": "memory.pg_dsn 未配 (PG 库未就绪?)",
+    "graph": "graph_store/<pid>.sqlite (未 ingest?)",
 }
 
 
@@ -350,6 +364,9 @@ def _db_present(ep: MCPEndpoint, cfg: dict) -> bool:
     if ep.kind == "agent_memory":
         # 同一 PG, 不按 project 分库; memory.pg_dsn 配了即视为数据面就绪 (连通性由 healthz 兜)。
         return bool(_cfg_get(cfg, "memory.pg_dsn") or os.environ.get("CODEV_PLATFORM_MEMORY_DSN"))
+    if ep.kind == "graph":
+        from codev_platform.graph.store import graph_store_path
+        return any(graph_store_path(p).exists() for p in pids)
     return True
 
 
