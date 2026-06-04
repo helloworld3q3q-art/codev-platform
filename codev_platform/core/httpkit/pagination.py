@@ -32,9 +32,10 @@ def page_params(
 
 
 class PageBody(BaseModel):
-    """POST 列表请求体的分页基类。前端 post() 一律发 body, 故分页从 body 收(不是 query),
-    否则前端翻页/页大小传不到后端。list 过滤请求体继承本类追加过滤字段。"""
-
+    # POST 列表请求体的分页基类。前端 post() 一律发 body, 故分页从 body 收(不是 query);
+    # list 过滤请求体继承本类追加过滤字段。
+    # (用 # 注释非 docstring: 多行 docstring 会进 OpenAPI description → 前端 swagger 生成器
+    #  原样塞进 typings.d.ts `//` 注释, 换行破坏 .d.ts 解析。同 AuditListRequest 的处理。)
     pageNumber: int = Field(1, ge=1, description="页码, 从 1 起")
     pageSize: int = Field(20, ge=1, le=_MAX_PAGE_SIZE, description="每页数量 (上限 200)")
 
