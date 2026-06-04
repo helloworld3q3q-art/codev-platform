@@ -52,7 +52,8 @@ class ChatService:
 
     def ask(self, question: str, session_id: str | None = None,
             max_steps: int | None = None, user_id: str = "local",
-            project_id: str | None = None, org_id: str = "default") -> ChatOutcome:
+            project_id: str | None = None, org_id: str = "default",
+            task_id: str | None = None) -> ChatOutcome:
         provider = self._provider_factory()  # 缺 key 抛 RuntimeError,由调用层(route)映射
 
         if session_id and self._sessions.has(session_id, user_id, org_id=org_id):
@@ -75,7 +76,16 @@ class ChatService:
             policy = replace(policy, max_steps=max_steps)
         loop = AgentLoop(provider, registry, policy=policy)
         trace = Trace(sid, provider.name, provider.model)
-        result = loop.run(question, history=history, trace=trace, system=system)
+        # M1: 设运行上下文(身份/项目/任务), 供 remember 等工具在 run() 内拿来写 memory;
+        # 退出即 reset, 不跨请求泄漏。
+        from codev_platform.agent.runctx import RunContext, reset_run_context, set_run_context
+        _ctx_token = set_run_context(
+            RunContext(user_id=user_id, org_id=org_id, project_id=project_id, task_id=task_id)
+        )
+        try:
+            result = loop.run(question, history=history, trace=trace, system=system)
+        finally:
+            reset_run_context(_ctx_token)
 
         self._sessions.append(
             sid, user_id,

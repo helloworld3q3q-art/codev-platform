@@ -13,8 +13,9 @@ def build_default_registry(project_id: str | None = None) -> ToolRegistry:
     reg = ToolRegistry()
     # cross_link 工具已退役: 其跨层查询由 impact (统一图谱 store 原生) 完全覆盖且更全
     # (table_usage 替 cross_link_table_refs / api_callers 替 cross_link_endpoint_callers)。
-    from codev_platform.agent.tools import codegraph, impact, search_docs
+    from codev_platform.agent.tools import codegraph, impact, remember, search_docs
     codegraph.register_into(reg, project_id)
     impact.register_into(reg, project_id)  # 统一图谱影响分析 (store, 取代旧 cross_link 工具)
     search_docs.register_into(reg, project_id)
+    remember.register_into(reg, project_id)  # M1 写侧: agent 把任务记忆写进 memory(读上下文走 runctx)
     return reg

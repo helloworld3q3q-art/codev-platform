@@ -74,5 +74,9 @@ def test_build_registry_accepts_project_id():
     reg = build_default_registry("some-project")
     names = {t.name for t in reg.all()}
     assert "table_usage" in names and "codegraph_search" in names and "search_docs" in names
+    # project_id 路由的工具(codegraph/impact/search_docs)在 __init__ 绑 project_id;
+    # remember 例外 —— 它从 runctx 拿 per-request 上下文(含 project_id), 不在 __init__ 绑。
     for tool in reg.all():
+        if tool.name == "remember":
+            continue
         assert getattr(tool, "project_id", "MISSING") == "some-project"
