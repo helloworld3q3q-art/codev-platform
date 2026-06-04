@@ -75,7 +75,7 @@ const SessionToggle: React.FC<SessionToggleProps> = ({ onToggle }) => {
 
   return (
     <div
-      className="absolute left-0 z-20 flex items-center justify-center w-18 bg-primary text-#ffffff rounded-r-8 shadow-md cursor-grab select-none touch-none active:cursor-grabbing"
+      className="absolute left-0 z-20 flex items-center justify-center w-18 bg-primaryHover text-#ffffff rounded-r-8 shadow-md cursor-grab select-none touch-none active:cursor-grabbing"
       style={{ top: y, height: TAB_H }}
       title="会话(点击开/关, 可上下拖动)"
       onPointerDown={handlePointerDown}
