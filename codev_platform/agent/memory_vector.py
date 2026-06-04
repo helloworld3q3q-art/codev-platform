@@ -37,8 +37,9 @@ class MemoryVectorIndex(ABC):
         ...
 
     @abstractmethod
-    def delete(self, entry_id: str) -> None:
-        """删一条记忆的向量(forget/supersede 时同步,防召回到已失效条)。"""
+    def delete(self, entry_id: str, *, org_id: str) -> None:
+        """删一条记忆的向量(forget/supersede 时同步,防召回到已失效条)。
+        org_id 定位 per-org collection(`<org_id>__agent_memory`)。"""
         ...
 
     @abstractmethod

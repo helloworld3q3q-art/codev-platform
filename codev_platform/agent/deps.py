@@ -95,7 +95,31 @@ def get_memory_store():
                 import sys
                 print(f"[agent.deps] memory store 不可用({type(e).__name__}: {e})", file=sys.stderr)
                 _memory_store = None
+        # B1: recall_backend=vector 时, 包一层写时 embed 装饰器(全写路径自动入向量索引)。
+        # 索引不可用(缺 chromadb/模型)→ 不包, 写库照常, 召回退回关键词。
+        if _memory_store is not None:
+            idx = get_memory_vector_index()
+            if idx is not None:
+                from codev_platform.agent.memory_store_vector import VectorSyncMemoryStore
+                _memory_store = VectorSyncMemoryStore(_memory_store, idx)
     return _memory_store
+
+
+_vec_index_built = False
+_vec_index = None  # type: ignore[var-annotated]
+
+
+def get_memory_vector_index():
+    """agent memory 向量索引(B1)。仅 config memory.recall_backend=='vector' 时构建;缺依赖 → None。
+    单例懒建。store-wrap 与 recall service 共用同一实例。"""
+    global _vec_index_built, _vec_index
+    if not _vec_index_built:
+        _vec_index_built = True
+        cfg = acfg.agent_cfg()
+        if acfg.get(cfg, "memory.recall_backend", "local") == "vector":
+            from codev_platform.agent.memory_vector_chroma import build_memory_vector_index
+            _vec_index = build_memory_vector_index(cfg)
+    return _vec_index
 
 
 _rbac_store_built = False
@@ -141,16 +165,30 @@ def get_recall_service():
             cfg = acfg.agent_cfg()
             backend = acfg.get(cfg, "memory.recall_backend", "local")
             policy = acfg.get(cfg, "memory.conflict_policy", "personal_first")
-            if backend == "local":
-                from codev_platform.agent.recall_service import LocalRecallService
-                _recall_service = LocalRecallService(
-                    store, default_policy=policy, rbac_store=get_rbac_store()
+            if backend == "vector":
+                # B1: 向量语义召回。索引可用 → VectorRecallService(排序层 RRF 关键词∪向量);
+                # 缺 chromadb/模型 → 退回 LocalRecallService(召回不挂, 只是退化为关键词)。
+                idx = get_memory_vector_index()
+                from codev_platform.agent.recall_service import (
+                    LocalRecallService, VectorRecallService,
                 )
+                if idx is not None:
+                    _recall_service = VectorRecallService(
+                        store, idx, default_policy=policy, rbac_store=get_rbac_store())
+                else:
+                    import sys
+                    print("[agent.deps] recall_backend=vector 但向量索引不可用(缺 chromadb/模型),"
+                          "退回 local 关键词召回", file=sys.stderr)
+                    _recall_service = LocalRecallService(
+                        store, default_policy=policy, rbac_store=get_rbac_store())
             else:
-                import sys
-                print(f"[agent.deps] memory.recall_backend={backend!r} 暂未接(仅 'local' 可用), "
-                      f"召回退化为不启用", file=sys.stderr)
-                _recall_service = None
+                from codev_platform.agent.recall_service import LocalRecallService
+                if backend != "local":
+                    import sys
+                    print(f"[agent.deps] memory.recall_backend={backend!r} 未知(仅 local/vector),"
+                          f"按 local 处理", file=sys.stderr)
+                _recall_service = LocalRecallService(
+                    store, default_policy=policy, rbac_store=get_rbac_store())
     return _recall_service
 
 
