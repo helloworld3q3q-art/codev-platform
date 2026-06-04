@@ -1,8 +1,8 @@
-# Daily Summary — 2026-06-05(W3 loop-guard 重构落地 + 端到端验证)
+# Daily Summary — 2026-06-05(W2 Track M memory 全栈 + B1 向量召回 / W3 loop-guard 重构)
 
-> 范围:三窗口并行(W1 图谱 / W2 memory / W3 loop-guard)中的 **W3** 全程。
-> 关联:`agent-loop-guard-redesign-2026-06-05.md`(plan)、`agent-provider-architecture.md §1/§4`(铁律)。
-> commit:`e3c6594`(W3 核心)+ `9246664`(审计 follow-up),均已 push 到 `fuwuqi/dev`。
+> 范围:三窗口并行(W1 图谱 / W2 memory / W3 loop-guard)。本文 **W3 段**(§一~§五)+ **W2 段**(§六~§十一)。
+> 关联:`agent-loop-guard-redesign-2026-06-05.md`、`dev-agent-memory-mcp-design-2026-06-05.md`、`next-plan-2026-06-05.md`。
+> commit:W3 = `e3c6594`+`9246664`;W2 见 §十一 清单。均已 push 到 `fuwuqi/dev`。
 
 ---
 
@@ -38,3 +38,48 @@ aa.txt 实测 codev-platform 的 `module="web-ui"` 被 MCP `inputSchema` enum �
 1. **多窗口并行禁 `git add -A`**:首个 commit 被 `-A` 卷入 W2 未提交的 10 个文件。未 push 时 `git reset --soft HEAD~1` + `git restore --staged .` 拆出来,W2 改动原样留回工作树(零丢失,后由 W2 窗口自己提交成 `f656c6a`)。沉淀为 memory `multi-window-git-add-scope`。落点:`workflow.md §6.1`。
 2. **改 MCP schema 必重启 daemon**:`inputSchema` enum 服务端强校验,daemon 不随 pull/commit 热重载(MEMORY `wsl-mcp-daemons-stale-after-pull`)。`serve-mcp` 无 `restart`,reload = `pkill -f chroma.server` + `serve-mcp start --wait`。
 3. **WSL bridge 引号坑**:`wsl.exe bash -c '<payload>'` 会把 payload 再包一层双引号,内含 `"`/`|`/`()` 会被外层 shell 重解析 → 复杂命令写成 `.sh` 文件用 `wsl.exe bash <file>` 跑,免引号穿层。
+
+---
+
+# W2 段 —— Track M(开发端 memory 接平台)全栈交付 + B1 向量召回
+
+> 范围:`dev-agent-memory-mcp-design-2026-06-05.md` 的 Track M(P0→P3)+ 后续 B1。四轮(每阶段一轮)独立审计全 PASS。
+
+## 六、Track M P0 —— 写侧鉴权三缺口前置修复
+
+memory 写侧此前三个真缺口(安全+质量专家独立抓到):① `remember` 工具不写 `topic_key`/`is_redline` → 永不去重;② `RememberTool.run` 绕过 `audit_access`+`_scope_decision` → 无授权无留痕;③ `is_redline` 由 client 直传无写闸 → 可冒造 org 硬约束。修复:
+- 抽 `agent/memory_authz.py` 单一真值源:`make_topic_key`(三写入端统一 slug,Unicode `isalnum` 保留中/日/韩/音标)、`scope_decision`(route+工具同一道闸)、`redline_write_allowed`(仅 org admin)。
+- 真 identity 经 `RunContext` 透到工具(token 模式 project 写不被误拒);IDE 写路径恒不写 redline。
+- commit `f656c6a`(主)+ `b6dd256`(审计 NIT:slug 改 Unicode isalnum,避免韩文等丢 key)。
+
+## 七、Track M P1 —— memory MCP 前门读侧 MVP
+
+新建 `agent/memory_mcp.py` SSE 前门(对称 cross-link),只读暴露 `recall`+`list_scope`;**org/user 从认证身份绑 contextvar,绝不由 client 传**(身份红线);`mcp_serve` 注册第 4 端点(18087/19087)+ systemd unit + `.mcp.json`。commit `19942c3`。审计 PASS(contextvar 生命周期对照 MCP SDK 核实不串租户)。
+
+## 八、Track M P2 —— 写侧 + 迁移
+
+- `memory_mcp` 加 `remember`(默认 personal)/`forget`/`supersede`:scope_decision+audit 同闸、redline 恒不写、owner+org SQL 隔离;store `forget`/`supersede` 加 owner-scoped + `protect_redline` 闸(IDE 不得删改 redline)。
+- `codev-platform memory import-md <path>` CLI:逻辑进包 `agent/memory_import.py`(wheel 通用),`scripts/migrate_memory_md.py` 退薄 shim;默认 dry-run、topic_key 归一幂等。
+- commit `2bc7362`(写工具)+`9c8e8ae`(import-md)+`346d3b7`(审计 NIT:`protect_redline`)。
+
+## 九、Track M P3 —— 多 dev 护栏 + 可见性 CLI
+
+- `gateway.multi_user_policy_error`:`multi_user=true` 或 >1 登记 token 而仍 passthrough → memory MCP / agent serve **拒绝启动**(fail-fast,堵"单人 WSL 变多人共用却没切 token"的过渡空窗,不靠人记得)。
+- `codev-platform memory list --scope`:可见性 CLI,personal 只看本机自己的(store 物理隔离保证 personal 对 org 不可见)。
+- commit `2e0d6b9`+`facb208`(config.example)+`78e7dce`(审计 NIT:去重 load_config)。
+
+## 十、部署 + e2e + B1 向量召回
+
+- **WSL 部署上线**:agent-memory 端点 systemd `enabled`+`active`(reboot 自起)on 19087,`memory_enabled`+`rbac_enabled`;只装 agent-memory 单 unit,不动正在跑的另 3 个。WSL config 补 `mcp.agent_memory_sse_port: 19087`。
+- **换机同步 e2e 实测 PASS**(`scripts/e2e_agent_memory_sync.py`,驱动真实 19087):A机 remember → B机同 user recall **命中**(记忆跟人走)、C机他 user recall **未命中**(隐私隔离)、forget owner 限定生效。commit `5b5c74e`。
+- **B1 向量语义召回**:step1 `VectorRecallService`(RRF 关键词∪向量,redline 永置顶,前置 scope/冲突消解全保留)+ `MemoryVectorIndex` 接缝(`5cef5b0`);step2 真链路 per-org chroma `<org>__agent_memory` + Qwen-CPU 嵌入 + 写时 embed 装饰器 `VectorSyncMemoryStore` + deps `recall_backend=vector` 接线(`a124179`)。**WSL 实测 PASS**:语义>关键词("深色模式配色"命中"暗色主题")、向量查询带 ACL where 过滤、redline 仍置顶。审计亮点:`vec_ids ∩ active 池`是真 ACL+新鲜度硬闸,陈旧向量索引无法泄漏。`84aa488`(docs)+`23b86db`(审计 NIT)。
+
+## 十一、踩坑 / 教训 + commit 清单(W2)
+
+踩坑:
+1. **多窗口 `git add -A` 反向被坑**:W2 的 10 个文件曾被 W3 窗口 `-A` 卷走;此后 W2 全程**显式 `git add <文件清单>`**,与并行 W1(A1 图谱)/W3 提交干净分离。
+2. **PowerShell→wsl→bash 三层引号**:内联 python `-c` 多次被外层重解析炸 → 复杂 python/JSON 改写**临时 .py 文件**(Windows temp)再 `wsl python /mnt/c/.../x.py` 跑,免引号穿层。
+3. **WSL 仓经 Gitea 自动拉**:`~/work/codev-platform` origin=Gitea(localhost:3000),push `fuwuqi dev` 后 WSL 自动 pull;editable venv 改 .py 即生效,但 systemd daemon 不热重载(改码需 restart)。
+4. **`pkill -f <模式>` 自杀**:`pkill -f codev_platform.agent.memory_mcp` 把承载该命令的 bash 自身一起杀了(命令行含同模式)→ 杀进程用更窄模式或 pid。
+
+commit(均 push 到 `fuwuqi/dev`):`f656c6a` `b6dd256`(P0)/ `19942c3` `6d70f06`(P1)/ `2bc7362` `9c8e8ae` `346d3b7` `97af3ae`(P2)/ `2e0d6b9` `facb208` `78e7dce`(P3)/ `5b5c74e`(e2e)/ `5cef5b0` `a124179` `84aa488` `23b86db`(B1)。Track M plan 序 `M→B1` 已走完。
