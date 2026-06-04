@@ -105,7 +105,7 @@ const OrgProjectFab: React.FC = () => {
     <>
       {createPortal(
         <div
-          className="fixed z-1000 flex items-center justify-center rounded-full bg-#1677ff text-#ffffff shadow-lg cursor-grab select-none touch-none active:cursor-grabbing"
+          className="fixed z-1000 flex items-center justify-center rounded-full bg-primary text-#ffffff shadow-lg cursor-grab select-none touch-none active:cursor-grabbing"
           style={{ left: pos.x, top: pos.y, width: FAB_SIZE, height: FAB_SIZE }}
           title="组织 / 项目"
           onPointerDown={handlePointerDown}
