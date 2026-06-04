@@ -8,7 +8,7 @@ D15: 把"换机后要手动跑的几条命令"压成一个有序、幂等、fail
 
 顺序 (按 config 条件产出):
   ① check  venv      —— .venv 存在且能 import codev_platform (缺 → guide, 绝不自动 pip)。
-  ② cmd    serve-mcp —— 拉起 4 端点 (chroma / cross-link / codegraph)。
+  ② cmd    serve-mcp —— 拉起 4 端点 (chroma / codegraph / agent-memory / graph)。
   ③ cmd    codegraph link --all —— 仅当 config.projects 非空。
   ④ cmd    memory init-db        —— 仅当 config.memory.pg_dsn 非空; 为空则 guide (可选)。
 

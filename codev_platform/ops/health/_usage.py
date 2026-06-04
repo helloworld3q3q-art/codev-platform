@@ -150,35 +150,6 @@ def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict,
         r.line("platform-docs adopt", "INFO", "no L2/L3 candidate commits detected in last 7d")
 
 
-def _usage_cross_link(r: Report, cl_usage: Path, project_id: str | None = None) -> None:
-    if not cl_usage.is_file():
-        r.line("cross-link usage", "INFO", "cross_link_usage.jsonl not found (no calls yet)")
-        return
-    cutoff = datetime.now() - timedelta(days=7)
-    rows = []
-    for o in _iter_jsonl(cl_usage):
-        if project_id and o.get("project_id") != project_id:
-            continue
-        if o.get("ts"):
-            ts = _parse_dt(str(o["ts"]))
-            if ts and ts < cutoff:
-                continue
-        rows.append(o)
-    if not rows:
-        r.line("cross-link usage", "INFO", "no cross-link calls (last 7d)")
-        return
-    by_tool: dict[str, int] = {}
-    for o in rows:
-        by_tool[o.get("tool", "?")] = by_tool.get(o.get("tool", "?"), 0) + 1
-    ok = sum(1 for o in rows if o.get("ok"))
-    ok_rate = round(100.0 * ok / len(rows))
-    lat = sorted(float(o["elapsed_ms"]) for o in rows if o.get("elapsed_ms") is not None)
-    med = f"{round(lat[len(lat) // 2])}ms" if lat else "n/a"
-    tools = ",".join(f"{k}={v}" for k, v in by_tool.items())
-    r.line("cross-link usage", "INFO",
-           f"{len(rows)} calls / ok={ok_rate}% / median={med} / {tools} last 7d")
-
-
 def _usage_codegraph(r: Report, cg_usage: Path, project_id: str | None = None) -> None:
     # 镜像 _usage_cross_link: 读 codegraph 自写代理 (server.py) 的 codegraph_usage.jsonl。
     if not cg_usage.is_file():

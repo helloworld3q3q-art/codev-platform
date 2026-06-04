@@ -30,7 +30,7 @@ def log_sources() -> dict[str, Path]:
 
     注: logs_dir() 会按需创建 data_root/logs 目录 (幂等, gitignored), 故本函数有建目录副作用。
 
-    chroma/cross-link/codegraph 各取 data_root/logs/<prefix>_mcp_server.log (前缀防多
+    chroma/codegraph 各取 data_root/logs/<prefix>_mcp_server.log (前缀防多
     daemon 同名碰撞; 与各 daemon 的 _log_file() 同源); audit 取审计 jsonl。
     serve-mcp spawn 日志是一个**目录** (mcp_serve_logs/), 不在此返回单文件 ——
     由 run_logs 单独展开列其 *.log (每端点一文件)。
@@ -41,7 +41,6 @@ def log_sources() -> dict[str, Path]:
     ld = logs_dir()
     return {
         "chroma": ld / "chroma_mcp_server.log",
-        "cross-link": ld / "cross_link_mcp_server.log",
         "codegraph": ld / "codegraph_mcp_server.log",
         "audit": audit_log_path(),
     }
@@ -112,7 +111,7 @@ def register(subparsers) -> None:
         "logs", help="集中查看平台侧日志末 N 行 (MCP server / serve-mcp / audit)")
     lp.add_argument(
         "--service", default="all",
-        choices=["chroma", "cross-link", "codegraph", "serve-mcp", "webhook", "reindex", "audit", "all"],
+        choices=["chroma", "codegraph", "serve-mcp", "webhook", "reindex", "audit", "all"],
         help="看哪个源 (默认 all)")
     lp.add_argument("--tail", type=int, default=50, help="末 N 行 (默认 50)")
     lp.set_defaults(func=cmd_logs)

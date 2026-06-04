@@ -29,14 +29,13 @@ def test_plan_has_pg_when_dsn_set():
 
 
 def test_plan_data_subdir_existence(tmp_path):
-    # only create chroma + cross_layer.sqlite; codegraph_ext/audit absent
+    # only create chroma + codegraph_ext; audit absent
     (tmp_path / "chroma").mkdir()
-    (tmp_path / "cross_layer.sqlite").write_text("x")
+    (tmp_path / "codegraph_ext").mkdir()
     plan = B.plan_backup(_cfg(data_dir=str(tmp_path)), "20260601-000000")
     labels = {i.label for i in plan if i.kind == "tree"}
     assert "data-chroma" in labels
-    assert "data-cross_layer.sqlite" in labels
-    assert "data-codegraph_ext" not in labels
+    assert "data-codegraph_ext" in labels
     assert "data-audit" not in labels
 
 

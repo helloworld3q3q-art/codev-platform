@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 
 from codev_platform.ops._common import cfg_get, matches_any, reindex_patterns
-from codev_platform.core.paths import cross_link_db_path
 
 from ._util import (
     Report,
@@ -323,85 +322,6 @@ def _check_rules_vs_incident(r: Report, repo: Path) -> None:
         r.line("rules vs incident", "WARN", f"incident {gap}d ahead of rules ({incs[0].name}) - sync rules")
 
 
-def _has_cross_link(repo: Path) -> bool:
-    mcp = repo / ".mcp.json"
-    if not mcp.is_file():
-        return False
-    try:
-        d = json.loads(mcp.read_text(encoding="utf-8"))
-        return bool(d.get("mcpServers", {}).get("cross-link"))
-    except Exception:
-        return False
-
-
-def _check_cross_layer(
-    r: Report, repo: Path, cdv_root: Path, chroma_py: Path | None,
-    project_id: str, health: dict,
-) -> None:
-    has_cl = _has_cross_link(repo)
-    # 走 paths.cross_link_db_path: 尊重 data.platform_data_dir / PLATFORM_DATA_DIR override,
-    # 否则硬编码 cdv_root/data 在 override 后会误报缺失。
-    db = cross_link_db_path(project_id)
-    if has_cl and db.is_file():
-        if not (chroma_py and chroma_py.exists()):
-            return
-        try:
-            conn = sqlite3.connect(str(db))
-            cur = conn.cursor()
-            n = cur.execute("select count(*) from nodes").fetchone()[0]
-            e = cur.execute("select count(*) from edges").fetchone()[0]
-            row = cur.execute("select value from build_meta where key='last_build_at'").fetchone()
-            last = row[0] if row else "?"
-            conn.close()
-        except Exception as exc:  # noqa: BLE001
-            r.line("cross_layer", "FAIL", f"query failed: {exc!r}")
-            return
-        base = f"nodes={n} edges={e} last={last}"
-        src_dirs = [repo / rel.replace("/", os.sep) for rel in (health.get("cross_layer_source_dirs") or [])]
-        latest_src: tuple[Path, float] | None = None
-        for d in src_dirs:
-            cand = _latest_mtime(d)
-            if cand and (latest_src is None or cand[1] > latest_src[1]):
-                latest_src = cand
-        build_at = _parse_dt(last) if last != "?" else None
-        if build_at and latest_src:
-            lag = round((latest_src[1] - build_at.timestamp()) / 86400.0)
-            if lag <= 0:
-                r.line("cross_layer", "OK", base)
-            elif lag <= 1:
-                r.line("cross_layer", "OK", base + " (lag <=1d)")
-            else:
-                # A3: cross_layer 已退役自动重建 (统一图谱 store 为真值源, parity 达标),
-                # 落后于源是预期的 (仅手动 reindex --cross-link 才刷新) → INFO, 不再 WARN 误报。
-                r.line("cross_layer", "INFO",
-                       base + f" (lag {lag}d; A3 退役自动重建, store 为真值源, 手动 --cross-link 可刷)")
-        else:
-            r.line("cross_layer", "OK", base)
-    elif not has_cl:
-        r.line("cross_layer", "INFO", "not configured")
-    else:
-        r.line("cross_layer", "INFO", "configured, index not built")
-
-
-def _check_cross_link_mcp(r: Report, procs: list[dict[str, str]]) -> None:
-    if not procs:
-        r.line("cross-link mcp", "INFO", "process probe skipped (no psutil/ps/wmic)")
-        return
-    cl = [p for p in procs if p["cmdline"] and re.search(r"cross_link[\\/]mcp_server\.py", p["cmdline"])]
-    if not cl:
-        r.line("cross-link mcp", "OK", "no running cross-link MCP server")
-        return
-    pidset = {p["pid"] for p in cl}
-    roots = [p for p in cl if p["ppid"] not in pidset]
-    chain = len(roots) or len(cl)
-    pids = ",".join(p["pid"] for p in cl)
-    if chain == 1:
-        r.line("cross-link mcp", "INFO", f"stdio chain count=1 process-chain pids={pids}")
-    else:
-        r.line("cross-link mcp", "INFO",
-               f"stdio chain count={chain} process-chain pids={pids} (expected with multiple sessions)")
-
-
 def _check_codegraph_db(r: Report, repo: Path, chroma_py: Path | None) -> None:
     lock = repo / ".codegraph" / ".rebuild.lock"
     db = repo / ".codegraph" / "codegraph.db"
@@ -469,7 +389,7 @@ def _check_hook_missed(r: Report, repo: Path, health: dict) -> None:
     files = [f for f in files_txt.splitlines() if f.strip()]
     # default indexable scope = doc + codegraph patterns (parity with .ps1 defaults)
     pats = reindex_patterns(health)
-    indexable = pats["doc"] + pats["codegraph"] + pats["cross_link"]
+    indexable = pats["doc"] + pats["codegraph"]
     should = any(matches_any(f, indexable) for f in files)
     reindex_log = repo / "tools" / "chroma" / "reindex.log"
     short = head[:7]

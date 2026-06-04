@@ -248,7 +248,7 @@ def cmd_gateway(args: argparse.Namespace) -> int:
                 continue
             old_url = conf.get("url", "")
             # 按 server 名做路径前缀 (最稳, 不依赖原 url path 解析):
-            #   platform-docs -> {base}/platform-docs/sse, cross-link -> {base}/cross-link/sse ...
+            #   platform-docs -> {base}/platform-docs/sse, codegraph -> {base}/codegraph/sse ...
             # 保留原 query (?project_id=...)。
             query = urlsplit(old_url).query if old_url else ""
             new_url = urlunsplit(("", "", f"{base}/{name}/sse", query, ""))
@@ -263,7 +263,6 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         _cfg = load_config()
         _ports = {
             "platform-docs": get(_cfg, "daemon.port", 18083),
-            "cross-link": get(_cfg, "mcp.cross_link_sse_port", 18086),
             "codegraph": get(_cfg, "mcp.codegraph_sse_port", 18091),
             "webhook": get(_cfg, "webhook.port", 18099),
         }

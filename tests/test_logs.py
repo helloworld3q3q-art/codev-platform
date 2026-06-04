@@ -6,13 +6,12 @@ from codev_platform.ops import logs as L
 
 def test_log_sources_keys_and_data_root_located():
     src = L.log_sources()
-    assert {"chroma", "cross-link", "codegraph", "audit"} <= set(src)
+    assert {"chroma", "codegraph", "audit"} <= set(src)
     # 落 data_root/logs, 文件名带 <prefix>_ 前缀防多 daemon 同名碰撞
     assert src["chroma"].name == "chroma_mcp_server.log"
-    assert src["cross-link"].name == "cross_link_mcp_server.log"
     assert src["codegraph"].name == "codegraph_mcp_server.log"
-    # 三者同一 logs 目录, 靠文件名前缀区分 (不再靠包目录)
-    assert src["chroma"].parent == src["cross-link"].parent == src["codegraph"].parent
+    # 两者同一 logs 目录, 靠文件名前缀区分 (不再靠包目录)
+    assert src["chroma"].parent == src["codegraph"].parent
     assert src["chroma"].parent.name == "logs"
 
 

@@ -25,13 +25,11 @@ Checks (parity with the .ps1):
   - platform-docs server process count
   - mcp-proxy presence
   - rules vs incident freshness
-  - cross_layer KG freshness (project-namespaced)
-  - cross-link mcp process diagnostics
   - codegraph db (integrity + journal_mode + counts) + locks
   - post-commit hook missed-fire detection
   - git tools/ status
   - usage stats: search_recall / reindex 7d / platform-docs usage+adopt /
-    cross-link usage / codegraph usage
+    codegraph usage
 
 ExitCode: 0 all green / 2 only WARN / 1 any FAIL (same as .ps1).
 """
@@ -73,8 +71,6 @@ from ._checks import (  # noqa: F401
     _check_chroma_venv,
     _check_codegraph_db,
     _check_codegraph_mcp,
-    _check_cross_layer,
-    _check_cross_link_mcp,
     _check_daemon,
     _check_embed_load,
     _check_embed_model,
@@ -86,12 +82,10 @@ from ._checks import (  # noqa: F401
     _check_rules_vs_incident,
     _check_torch,
     _daemon_port,
-    _has_cross_link,
     _resolve_model_dir,
 )
 from ._usage import (  # noqa: F401
     _usage_codegraph,
-    _usage_cross_link,
     _usage_platform_docs,
     _usage_reindex,
     _usage_search_recall,
@@ -146,8 +140,6 @@ def cmd_health(args: argparse.Namespace) -> int:
     _check_pd_servers(r, port, procs)
     _check_mcp_proxy(r, cfg)
     _check_rules_vs_incident(r, repo)
-    _check_cross_layer(r, repo, cdv_root, chroma_py, project_id, health)
-    _check_cross_link_mcp(r, procs)
     _check_codegraph_db(r, repo, chroma_py)
     _check_codegraph_mcp(r, repo, procs)
     _check_hook_missed(r, repo, health)
@@ -161,12 +153,10 @@ def cmd_health(args: argparse.Namespace) -> int:
     r.section(f"--- usage stats (last 7 days{scope}) ---")
     from codev_platform.core.paths import logs_dir
     recall_file = logs_dir() / "search_recall.jsonl"  # 迁出包目录后与 _obslog 写入路径一致
-    cl_usage = cdv_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl"
     cg_usage = cdv_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
     _usage_search_recall(r, recall_file, usage_pid)
     _usage_reindex(r, repo)
     _usage_platform_docs(r, repo, recall_file, health, usage_pid)
-    _usage_cross_link(r, cl_usage, usage_pid)
     _usage_codegraph(r, cg_usage, usage_pid)
 
     # top banner (parity with .ps1 P6)
@@ -289,21 +279,13 @@ def cmd_health_all(args: argparse.Namespace) -> int:
             cg_s = "无 .codegraph db"
         else:
             cg_s = str(cg)
-        xl = p.get("cross_link")
-        if isinstance(xl, dict):
-            xl_s = f"nodes={xl.get('nodes', 0)} (本地)"
-        elif xl == "not_built":
-            xl_s = "未建(不适用/未建)"
-        else:
-            xl_s = "未建/不可用"
         u = p.get("usage_7d", {})
         reg_tag = "" if p.get("registered") else "  (未注册 platform_meta)"
         out(f"[{pid}]{reg_tag}")
         out(f"    chroma 文档 = {ch} chunks")
         out(f"    codegraph 代码 = {cg_s}")
-        out(f"    cross-link 链路 = {xl_s}")
         out(f"    memory 项目专属 = {p.get('memory_project', 0)} 条  (+ org 共享 {mem_org})")
-        out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / cross-link {u.get('cross_link', 0)} / codegraph {u.get('codegraph', 0)}")
+        out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / codegraph {u.get('codegraph', 0)}")
         out("")
 
     # MCP 端点 reachability (P5): 业务仓走服务地址连的端点是否常驻可达。
@@ -323,7 +305,7 @@ def cmd_health_all(args: argparse.Namespace) -> int:
     leg = data.get("usage_legacy")
     if leg:
         out(f"[INFO] 旧日志未带 project_id(daemon 重启后新查询才分项目): "
-            f"search_docs {leg.get('search_docs', 0)} / cross-link {leg.get('cross_link', 0)} / codegraph {leg.get('codegraph', 0)}")
+            f"search_docs {leg.get('search_docs', 0)} / codegraph {leg.get('codegraph', 0)}")
     for e in data.get("errors", []):
         out(f"[WARN] 服务端: {e}")
     return 0

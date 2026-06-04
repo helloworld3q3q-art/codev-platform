@@ -24,7 +24,7 @@ from pathlib import Path
 
 
 BACKUP_DIR_RE = re.compile(r"^codev-backup-\d{8}-\d{6}$")
-_DATA_SUBITEMS = ("chroma", "cross_layer.sqlite", "codegraph_ext", "audit")
+_DATA_SUBITEMS = ("chroma", "codegraph_ext", "audit")
 
 
 def _out(msg: str = "") -> None:
