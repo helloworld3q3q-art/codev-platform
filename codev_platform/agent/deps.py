@@ -202,7 +202,8 @@ def get_memory_maintenance():
     cfg = acfg.agent_cfg()
     min_n = acfg.get(cfg, "memory.compress_min_entries", 3)
     from codev_platform.agent.memory_maintenance import MemoryMaintenance
-    return MemoryMaintenance(store, min_entries=min_n)
+    # B2: 传向量索引(recall_backend=vector 时非 None)→ 压缩归档原条时同步 GC 其向量。
+    return MemoryMaintenance(store, min_entries=min_n, vector_index=get_memory_vector_index())
 
 
 _chat_service: ChatService | None = None

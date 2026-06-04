@@ -198,6 +198,46 @@ def render_clock_resync_units(user: str) -> dict[str, str]:
     }
 
 
+def render_memory_maintenance_units(cfg: dict, user: str) -> dict[str, str]:
+    """B2 (M4 cron): memory 维护 service + timer —— 每日 TTL 归档(轻、无 LLM、安全)。
+
+    定时只跑 `run_memory_maintenance.py`(无 args)= TTL 归档 + (recall_backend=vector 时)压缩归档
+    原条的向量 GC。**压缩(LLM 融合)需 scope 参数 + provider 仍手动跑**, 定时不碰 LLM。单实例锁在
+    脚本内(advisory_lock)与手动跑互斥。oneshot + timer, 不常驻。
+    """
+    import shlex
+    from codev_platform.mcp_serve import _resolve_venv_scripts, _venv_python
+    venv_py = _venv_python(cfg)
+    venv_bin = str(_resolve_venv_scripts(cfg))
+    repo_root = Path(__file__).resolve().parent.parent  # codev_platform 包的上一级 = 仓根
+    script = repo_root / "scripts" / "run_memory_maintenance.py"
+    execstart = f"{shlex.quote(str(venv_py))} {shlex.quote(str(script))}"
+    service = (
+        "[Unit]\n"
+        "Description=codev memory maintenance (TTL 归档 + 向量 GC; oneshot)\n"
+        "After=network.target\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"User={user}\n"
+        f"WorkingDirectory={repo_root}\n"
+        f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        f"ExecStart={execstart}\n"
+    )
+    timer = (
+        "[Unit]\n"
+        "Description=codev memory maintenance timer (daily 04:00 + 开机补跑)\n\n"
+        "[Timer]\n"
+        "OnCalendar=*-*-* 04:00:00\n"
+        "Persistent=true\n\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+    return {
+        "codev-memory-maintenance.service": service,
+        "codev-memory-maintenance.timer": timer,
+    }
+
+
 def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
     """以普通用户生成 unit 到 ~/codev-systemd/(config 读对), 返回唯一一条 sudo 安装命令。
 
@@ -216,6 +256,8 @@ def install_systemd(cfg: dict, user: str) -> dict[str, Any]:
         units[_rname] = _rcontent
     # B8: 时钟重同步 service + timer (WSL2 睡眠漂移纠偏)。
     units.update(render_clock_resync_units(user))
+    # B2: memory 维护 service + timer (每日 TTL 归档 + 向量 GC)。
+    units.update(render_memory_maintenance_units(cfg, user))
     out_dir = Path.home() / "codev-systemd"
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []

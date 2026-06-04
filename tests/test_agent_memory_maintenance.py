@@ -154,3 +154,48 @@ def test_list_scope_excludes_expired_even_before_archive():
     s = FakeStore()
     s.write(_e("过期", ttl_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
     assert s.list_scope("personal", "alice") == []
+
+
+# ---- B2: 压缩归档原条时同步 GC 向量(闭合 B1 审计 NIT)----
+
+class _FakeVecIdx:
+    def __init__(self, boom=False):
+        self.deleted = []
+        self._boom = boom
+
+    def upsert(self, entry):
+        pass
+
+    def delete(self, entry_id, *, org_id):
+        if self._boom:
+            raise RuntimeError("vec down")
+        self.deleted.append((entry_id, org_id))
+
+    def query_ids(self, *a, **k):
+        return []
+
+
+def test_compress_gc_vectors_of_archived_originals():
+    s = FakeStore()
+    ids = [s.write(_e(c, topic_key="t")) for c in ("a", "b", "c")]
+    idx = _FakeVecIdx()
+    nid = MemoryMaintenance(s, min_entries=3, vector_index=idx).compress_topic(
+        "personal", "alice", "t", _CONCAT)
+    assert nid is not None
+    assert {d[0] for d in idx.deleted} == set(ids)        # 原 3 条向量被删
+    assert all(d[1] == "default" for d in idx.deleted)    # 带 org_id 定位 per-org 库
+
+
+def test_compress_no_vector_index_noop():
+    s = FakeStore()
+    [s.write(_e(c, topic_key="t")) for c in ("a", "b", "c")]
+    nid = MemoryMaintenance(s, min_entries=3).compress_topic("personal", "alice", "t", _CONCAT)
+    assert nid is not None   # vector_index=None 时 GC no-op, 不崩
+
+
+def test_compress_vec_gc_failure_does_not_break():
+    s = FakeStore()
+    [s.write(_e(c, topic_key="t")) for c in ("a", "b", "c")]
+    nid = MemoryMaintenance(s, min_entries=3, vector_index=_FakeVecIdx(boom=True)).compress_topic(
+        "personal", "alice", "t", _CONCAT)
+    assert nid is not None   # 向量 GC 失败被吞,压缩主流程仍成功

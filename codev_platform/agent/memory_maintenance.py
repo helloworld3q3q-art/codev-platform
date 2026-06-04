@@ -11,19 +11,33 @@ LLM 融合走**注入式 `fuse_fn`**(`list[str] -> str`):编排逻辑(取组/写
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from codev_platform.agent.memory_store import MemoryEntry, MemoryStore
 
 FuseFn = Callable[[list[str]], str]
 
+_log = logging.getLogger(__name__)
+
 
 class MemoryMaintenance:
     """记忆维护编排。依赖 MemoryStore 抽象,不含 LLM / DB 细节。"""
 
-    def __init__(self, store: MemoryStore, *, min_entries: int = 3) -> None:
+    def __init__(self, store: MemoryStore, *, min_entries: int = 3, vector_index=None) -> None:
         self._store = store
         self._min = min_entries  # 一个 topic 攒到这么多条才触发压缩(少了不值得融合)
+        # B2: 压缩归档原条时, 同步删其向量(闭合 B1 审计 NIT —— archive 不经 store decorator
+        # 同步向量, 这里有 id+org_id 可精确删)。None=未启向量召回, GC 无操作。
+        self._vec = vector_index
+
+    def _gc_vector(self, entry_id: str, org_id: str) -> None:
+        if self._vec is None:
+            return
+        try:
+            self._vec.delete(entry_id, org_id=org_id)
+        except Exception as e:  # noqa: BLE001 — 向量是副本, GC 失败不拖垮维护主流程
+            _log.warning("[memory_maint] 向量 GC 失败 id=%s: %s: %s", entry_id, type(e).__name__, e)
 
     def archive_expired(self, org_id: str | None = None) -> int:
         """TTL 到期批量归档,返回归档条数。"""
@@ -52,6 +66,7 @@ class MemoryMaintenance:
         new_id = self._store.write(summary)
         for e in entries:
             self._store.archive(e.id)
+            self._gc_vector(e.id, e.org_id)   # 归档原条 → 删其向量(防陈旧向量在索引堆积)
         return new_id
 
     def compress_scope(self, scope: str, scope_ref: str, fuse_fn: FuseFn,

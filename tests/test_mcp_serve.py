@@ -55,6 +55,16 @@ def test_agent_memory_systemd_unit_generated():
     assert "codev_platform.agent.memory_mcp" in units["codev-mcp-agent-memory.service"]
 
 
+def test_memory_maintenance_systemd_units():
+    # B2: M4 cron — 每日 TTL 归档 + 向量 GC 的 oneshot service + timer
+    from codev_platform import mcp_systemd
+    u = mcp_systemd.render_memory_maintenance_units({"projects": {}}, "deployer")
+    assert "codev-memory-maintenance.service" in u and "codev-memory-maintenance.timer" in u
+    svc = u["codev-memory-maintenance.service"]
+    assert "run_memory_maintenance.py" in svc and "Type=oneshot" in svc
+    assert "OnCalendar" in u["codev-memory-maintenance.timer"]
+
+
 def test_endpoint_health_url_for_all_kinds():
     chroma = MCPEndpoint(name="platform-docs", kind="chroma", port=18083)
     cl = MCPEndpoint(name="cross-link", kind="cross_link", port=18086)
