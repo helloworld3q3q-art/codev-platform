@@ -14,8 +14,10 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 
+from codev_platform.agent import deps
 from codev_platform.agent.runctx import RunContext, set_run_context
 from codev_platform.agent.tools import build_default_registry
 
@@ -31,6 +33,23 @@ PROBES = [
     ("search_docs", {"query": "会话持久化 工具调用流"}),
     ("remember", {"content": "[agent_tool_health] probe, 可忽略"}),
 ]
+
+
+def _cleanup_remember(content: str) -> str:
+    """remember 探针会真写一条记忆;体检完即归档,避免每次跑都留垃圾(写完即删语义)。
+    从 '已记住(scope=project, id=XXXX)' 解析 id → memory store archive。"""
+    m = re.search(r"id=([0-9a-fA-F-]+)", content or "")
+    if not m:
+        return content
+    store = deps.get_memory_store()
+    if store is None:
+        return content
+    try:
+        if store.archive(m.group(1)):
+            return content + "  [已自动归档,不留垃圾]"
+    except Exception:  # noqa: BLE001 — 清理失败不影响体检结论
+        pass
+    return content
 
 
 def _is_failure(content: str, is_error: bool) -> bool:
@@ -57,6 +76,8 @@ def main() -> int:
             res = tool.run(args)
             content = res.content or ""
             failed = _is_failure(content, bool(getattr(res, "is_error", False)))
+            if name == "remember" and not failed:  # 探针写的记忆立即归档,不留垃圾
+                content = _cleanup_remember(content)
         except Exception as e:  # noqa: BLE001 — 体检要捕获任何异常并归为 FAIL
             content = f"{type(e).__name__}: {e}"
             failed = True
