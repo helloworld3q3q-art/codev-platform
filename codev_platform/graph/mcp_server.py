@@ -126,27 +126,36 @@ async def list_tools() -> list[Tool]:
         Tool(name="list_domain_members",
              description="查某业务域下有哪些 endpoint/表(A1 软节点)",
              inputSchema=_str_schema("domain", "业务域名, 如 订单/行情")),
+        Tool(name="search_nodes",
+             description="模糊搜节点(name 含 query, 可选 kind 过滤)—— 找端点/表/函数/业务域(承接 cross-link)",
+             inputSchema={"type": "object", "properties": {
+                 "query": {"type": "string", "description": "搜索词(匹配 name)"},
+                 "kind": {"type": "string",
+                          "description": "可选 kind 过滤(backend_endpoint/db_table/... 默认 all)"},
+                 "limit": {"type": "integer", "description": "返回上限(默认 50)"}},
+                 "required": ["query"]}),
     ]
 
 
-# name → (arg 键, impact 查询函数)。改工具集只动这一处(list_tools 对齐 7 项)。
+# name → 调用适配器(conn, pid, args) → impact 查询结果。改工具集只动这一处(list_tools 对齐)。
 _DISPATCH = {
-    "find_impact": ("ref", _impact.find_impact),
-    "find_table_usage": ("table", _impact.find_table_usage),
-    "find_page_dependencies": ("page", _impact.find_page_dependencies),
-    "find_impacted_pages": ("component", _impact.find_impacted_pages),
-    "find_api_callers": ("endpoint", _impact.find_api_callers),
-    "find_node_domain": ("ref", _impact.find_node_domain),
-    "list_domain_members": ("domain", _impact.list_domain_members),
+    "find_impact": lambda c, p, a: _impact.find_impact(c, p, a["ref"]),
+    "find_table_usage": lambda c, p, a: _impact.find_table_usage(c, p, a["table"]),
+    "find_page_dependencies": lambda c, p, a: _impact.find_page_dependencies(c, p, a["page"]),
+    "find_impacted_pages": lambda c, p, a: _impact.find_impacted_pages(c, p, a["component"]),
+    "find_api_callers": lambda c, p, a: _impact.find_api_callers(c, p, a["endpoint"]),
+    "find_node_domain": lambda c, p, a: _impact.find_node_domain(c, p, a["ref"]),
+    "list_domain_members": lambda c, p, a: _impact.list_domain_members(c, p, a["domain"]),
+    "search_nodes": lambda c, p, a: _impact.search_nodes(
+        c, p, a["query"], a.get("kind", "all"), int(a.get("limit", 50))),
 }
 
 
 def dispatch(name: str, args: dict, conn, pid: str) -> dict:
-    """name → impact 查询(纯函数, 可测, 绕过 MCP 装饰器)。未知 tool / 缺参 raise。"""
+    """name → impact 查询(纯函数, 可测, 绕 MCP 装饰器)。未知 tool raise ValueError / 缺参 KeyError。"""
     if name not in _DISPATCH:
         raise ValueError(f"未知 tool: {name}")
-    arg_key, fn = _DISPATCH[name]
-    return fn(conn, pid, args[arg_key])
+    return _DISPATCH[name](conn, pid, args)
 
 
 @server.call_tool()

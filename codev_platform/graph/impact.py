@@ -279,6 +279,26 @@ def find_node_domain(conn, project_id: str, node_ref: str) -> dict:
     return {"found": True, "node": _node_brief(node), "domains": sorted(set(domains))}
 
 
+def search_nodes(conn, project_id: str, query: str, kind: str = "all",
+                 limit: int = 50) -> dict:
+    """模糊搜节点(name 含 query, 可选 kind 过滤)。读已落库, 不调 LLM。
+
+    含软节点(include_soft=True), 业务域名也能搜到。对齐 cross-link `search_nodes` 语义
+    (退役 cross-link 后由本工具承接)。
+    """
+    g = build_impact_graph(conn, project_id, include_soft=True)
+    low = (query or "").strip().lower()
+    if not low:
+        return {"query": query, "kind": kind, "hits": [], "count": 0}
+    hits = [
+        _node_brief(n) for n in g.nodes.values()
+        if low in (n.name or "").lower() and (kind in ("all", "") or n.kind == kind)
+    ]
+    hits.sort(key=lambda h: (h["kind"], h["name"]))
+    capped = hits[: max(0, int(limit))]
+    return {"query": query, "kind": kind, "hits": capped, "count": len(capped)}
+
+
 def list_domain_members(conn, project_id: str, domain_name: str) -> dict:
     """查某业务域下有哪些 endpoint/表(反向软边)。读已标好的软节点, **不调 LLM**。"""
     g = build_impact_graph(conn, project_id, include_soft=True)

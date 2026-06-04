@@ -18,9 +18,10 @@ from codev_platform.graph.schema import (
 from codev_platform.graph.store import open_store, upsert_result
 
 
-def test_dispatch_table_has_seven_tools():
-    assert len(gm._DISPATCH) == 7
+def test_dispatch_table_has_eight_tools():
+    assert len(gm._DISPATCH) == 8
     assert "find_node_domain" in gm._DISPATCH
+    assert "search_nodes" in gm._DISPATCH
     assert "list_domain_members" in gm._DISPATCH
 
 
@@ -49,5 +50,22 @@ def test_dispatch_business_domain_queries(tmp_path):
         assert r["found"] and r["domains"] == ["订单"]
         m = gm.dispatch("list_domain_members", {"domain": "订单"}, conn, "p")
         assert m["found"] and m["count"] == 1
+    finally:
+        conn.close()
+
+
+def test_dispatch_search_nodes(tmp_path):
+    # search_nodes 承接 cross-link: 模糊搜 + kind 过滤(退役 cross-link 后由 graph MCP 提供)。
+    conn = open_store("p", path=tmp_path / "g.sqlite")
+    try:
+        e = GraphNode(id="p:backend_endpoint:GET /orders", kind=NodeKind.BACKEND_ENDPOINT,
+                      name="GET /orders", project_id="p")
+        t = GraphNode(id="p:db_table:orders", kind=NodeKind.DB_TABLE, name="orders",
+                      project_id="p")
+        upsert_result(conn, "p", AnalyzerResult(nodes=[e, t], plugin="x"))
+        r = gm.dispatch("search_nodes", {"query": "order"}, conn, "p")
+        assert {h["name"] for h in r["hits"]} == {"GET /orders", "orders"}
+        r2 = gm.dispatch("search_nodes", {"query": "order", "kind": "db_table"}, conn, "p")
+        assert [h["name"] for h in r2["hits"]] == ["orders"]
     finally:
         conn.close()
