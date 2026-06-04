@@ -1,6 +1,6 @@
 # Daily Summary — 2026-06-05(W2 Track M memory 全栈 + B1 向量召回 / W3 loop-guard 重构)
 
-> 范围:三窗口并行(W1 图谱 / W2 memory / W3 loop-guard)。本文 **W3 段**(§一~§五)+ **W2 段**(§六~§十一)。
+> 范围:三窗口并行(W1 图谱 / W2 memory / W3 loop-guard)。本文 **W3 段**(§一~§五 + 附:chroma 事故)+ **W2 段**(§六~§十一)。
 > 关联:`agent-loop-guard-redesign-2026-06-05.md`、`dev-agent-memory-mcp-design-2026-06-05.md`、`next-plan-2026-06-05.md`。
 > commit:W3 = `e3c6594`+`9246664`;W2 见 §十一 清单。均已 push 到 `fuwuqi/dev`。
 
@@ -38,6 +38,18 @@ aa.txt 实测 codev-platform 的 `module="web-ui"` 被 MCP `inputSchema` enum �
 1. **多窗口并行禁 `git add -A`**:首个 commit 被 `-A` 卷入 W2 未提交的 10 个文件。未 push 时 `git reset --soft HEAD~1` + `git restore --staged .` 拆出来,W2 改动原样留回工作树(零丢失,后由 W2 窗口自己提交成 `f656c6a`)。沉淀为 memory `multi-window-git-add-scope`。落点:`workflow.md §6.1`。
 2. **改 MCP schema 必重启 daemon**:`inputSchema` enum 服务端强校验,daemon 不随 pull/commit 热重载(MEMORY `wsl-mcp-daemons-stale-after-pull`)。`serve-mcp` 无 `restart`,reload = `pkill -f chroma.server` + `serve-mcp start --wait`。
 3. **WSL bridge 引号坑**:`wsl.exe bash -c '<payload>'` 会把 payload 再包一层双引号,内含 `"`/`|`/`()` 会被外层 shell 重解析 → 复杂命令写成 `.sh` 文件用 `wsl.exe bash <file>` 跑,免引号穿层。
+
+## 附(W3)、chromadb 1.5.9 多 flush compaction 事故 + 修复(dogfood 衍生)
+
+> 完整复盘:`docs/incidents/2026-06-05-chromadb-multiflush-compaction.md`。修复 commit `87de379`。
+
+**起因(误诊连锁)**:dogfood 跑里 openclaw-stock 的 `search_docs` 返回 codev 文档,被我误判成 bug。逐层误诊(路由失效→污染→磁盘→并发→settle),每层都被下一步证伪;期间 `--force` 猛刷共享 chroma 库,把 `chroma.sqlite3` 彻底搞坏(`database disk image is malformed`),search_docs 一度全项目下线。**真相**:那"污染"是**设计内**——`platform/.claude/index.json` 的 `external_doc_paths` 故意引 codev 文档作跨仓真值源(只要先读一眼 index.json 就免了整起事故)。
+
+**真根因**:chromadb 1.5.9 的 compaction —— 对一个 collection 做**多次** flush(`col.upsert`)、而库里已有别的 collection 时,会写坏 sqlite(`Error purging logs` / `Failed to pull logs` / `disk I/O 522`)。**单次 upsert 不犯**;构建顺序/并发/路径/settle 都不是变量(全证伪)。平台之前没事是因为原 3 collection 是**增量**小 upsert 建起来的,只有全量 `--force` bulk 重建才触发。
+
+**修复**:`indexer.py` 的 flush 阈值 `BATCH` 默认 100 → `int(os.getenv("PLATFORM_INDEX_FLUSH_BATCH","50000"))`(现实库=单 upsert,彻底绕开;env 兜底超大库)。恢复流程:停 daemon + `reindex-queue worker` 独占 → `rm -rf data/chroma` → 逐项目单 upsert 重建 → **干净重起 daemon**(陈旧 daemon 报错会误导)→ 实测 search 恢复(codev 1632 / openclaw 5154,各返自己文档)。沉淀 memory `chromadb-multiflush-compaction`。
+
+**教训**:① 动共享数据(尤其破坏性 `--force`)前先确认"真是 bug 吗",能只读验证就别动手;② 全量重建 chroma 必单 upsert + 独占(chromadb 持久库非多进程写安全);③ 重建/改 schema 后必"干净重起 daemon"再判断。**chromadb 降稳定版**留作下次依赖升级评估(单 upsert 默认已让当下不依赖它)。
 
 ---
 
