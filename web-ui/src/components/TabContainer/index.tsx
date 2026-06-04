@@ -1,4 +1,5 @@
 import { findMenuNameByPath, MENU_ITEMS } from '@/menus';
+import OrgProjectFab from '@/components/OrgProjectFab';
 import UserMenu from '@/components/UserMenu';
 import { TabContainer as JlogiTabContainer } from '@jlogi/ui';
 import { history, useKeepOutlets, useLocation } from '@umijs/max';
@@ -62,18 +63,22 @@ const TabContainer: React.FC = () => {
   }, []);
 
   return (
-    <JlogiTabContainer
-      pathname={`${location.pathname}${location.search || ''}`}
-      navigate={navigate}
-      defaultPath={defaultPath}
-      excludePaths={excludePaths}
-      getTitle={getMenuTitle}
-      storageKey="stock-admin-web-tab-container"
-      enableContextMenu={true}
-      tabBarExtraContent={tabBarExtraContent}
-    >
-      {element}
-    </JlogiTabContainer>
+    <>
+      <JlogiTabContainer
+        pathname={`${location.pathname}${location.search || ''}`}
+        navigate={navigate}
+        defaultPath={defaultPath}
+        excludePaths={excludePaths}
+        getTitle={getMenuTitle}
+        storageKey="stock-admin-web-tab-container"
+        enableContextMenu={true}
+        tabBarExtraContent={tabBarExtraContent}
+      >
+        {element}
+      </JlogiTabContainer>
+      {/* 全局右下角悬浮:组织/项目切换(可拖动) */}
+      <OrgProjectFab />
+    </>
   );
 };
 
