@@ -267,3 +267,20 @@ def test_business_domain_via_ingest_analyzers_pass(tmp_path):
     finally:
         abase._ANALYZERS.clear()
         abase._ANALYZERS.extend(saved)
+
+
+def test_business_domain_registered_only_when_config_enabled():
+    # config gate: 默认/无配置不注册(no-op); 显式 enabled=true 才注册(生产开启路径)。
+    from codev_platform.graph.analyzers import _register_configured, base
+
+    saved = list(base._ANALYZERS)
+    base._ANALYZERS.clear()
+    try:
+        assert _register_configured({}) is False
+        assert base._ANALYZERS == []
+        assert _register_configured(
+            {"analyzers": {"business_domain": {"enabled": True}}}) is True
+        assert "business_domain" in [a.name for a in base._ANALYZERS]
+    finally:
+        base._ANALYZERS.clear()
+        base._ANALYZERS.extend(saved)

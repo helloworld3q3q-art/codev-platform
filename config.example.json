@@ -61,6 +61,11 @@
     }
   },
 
+  "analyzers": {
+    "_comment": "统一图谱综合分析器 (graph/analyzers, ingest 的 second post-pass)。business_domain: A1 业务域映射 — LLM 给 endpoint 链路归业务域 (软节点, confidence<1.0, impact 默认过滤不污染查依赖)。enabled 默认 false (关): 开启后 ingest 会调 LLM (走 agent.provider, 需 key) 按聚类标域, 有 per-cluster fingerprint 缓存。codev-platform 真 deepseek-chat 实测准确率 ~95% (A1-3 验收)。provider 缺 key 时自动 no-op。开启条件: enabled=true + agent.providers.<provider>.api_key (或 env) 在位。",
+    "business_domain": { "enabled": false }
+  },
+
   "memory": {
     "_comment": "memory 持久化用的平台独立 PG 库 (codev_platform_memory)。pg_dsn=主库(写); pg_dsn_read=只读副本(读,预留,留空=读写同库)。安全红线: 含密码, 真值只写本机 config 或 env (CODEV_PLATFORM_MEMORY_DSN / _READ), 绝不进仓; 严禁复用业务库 DSN (见 memory plan §3.2b)。null = 不启用 memory PG, 会话仅内存。建库 (CREATE DATABASE) 见 P4 runbook; 表由 `codev-platform memory init-db` 幂等建。",
     "pg_dsn": null,
