@@ -260,3 +260,26 @@ agent 报 `codegraph 未建索引` + `search_docs daemon 未运行`,实查发现
 ### 残留（待用户决断）
 - 开放式大"影响分析"问题在 deepseek-chat 上多轮 churn,超 web→agent 客户端 **30s 超时**（`agent.timeout_sec`）→ `result:1`。杠杆三选一:调高 `agent.timeout_sec` / 降 deepseek `max_steps` / 换更强模型。
 - `config.py:model_name` 顶层优先 footgun（续6 记录）仍待评估。
+
+---
+
+## MCP 采纳率优化:减 grep / 提命中（本会话续 8,跨日 06-04）
+
+承"为什么 MCP 使用率这么低、是工作流不对吗"的追问,系统性优化 MCP 采纳。核心判断:**纯规则劝不动(本平台 §4 原则:要机制非 prompt),且原指标在骗人**。
+
+### ① 可靠性硬化（`2dd956e`）— 命中率地基
+MCP 失败会把开发者**永久**推回 grep。两处:agent `search_docs` 冷启动重试一次(daemon 重启/首查模型冷加载易超时);chroma daemon prewarm 加哑查询(embed+rerank)warm CUDA kernel(模型已加载 ≠ kernel 已暖)。验证:重启后首次 search_docs 1 次即成功;hit_rate 86→88→**92.7%**、中位距离 0.52→**0.46**。
+
+### ③ 采纳率指标修正（`6ef8480` 崩溃修复 + `97fe246` + `e5186bd` 分桶）
+- 先修挡路 bug:`_usage.py` 在 `top5[0].distance=None`(bm25/rrf 路径)时 `sorted()` 崩,整个 7 天用量段渲染不出(reindex worker 也撞它)。
+- **候选剔除纯 docs**:`search_docs_per_candidate` 原含 `docs/*.md` → 每条日报都算"应查 MCP",把比值压虚低(`0.2`)。剔除后候选从 111→个位数,比值翻正。
+- **按来源分桶（`e5186bd`,本轮重点）**:采纳率把 **web 端 agent 产品流量**和**开发端 Claude Code 直调**混在一起 = 失真。chroma 是唯一混合面(agent 的 codegraph/impact 工具直读 sqlite,不走那两个 MCP,故 cross-link/codegraph usage 本就纯 dev)。实现:SSE `?client=` → `_current_client` contextvar → 落 `search_recall.jsonl`;agent `search_docs` 传 `client=agent`,开发端不传→默认 dev(老日志无字段也归 dev)。health 按 dev/agent 拆分,**采纳率 `dev_search_docs_per_candidate` 只算 dev 侧**(agent 排除)。
+- 单测 `tests/test_health_search_recall_client.py` 3 个:分桶 / usage 拆分 / **采纳率排除 agent**(造真 git 候选 commit 验)。线上实测 `search_recall 41 (agent 1, dev 40)`。
+
+### ② 减 grep 机制:hook → 撤回 → rule 门禁
+- 先做了 PreToolUse hook(`948210d`)注入"优先 MCP"提醒,每会话一次、非阻断,实测触发。
+- 但 hook **必带 transcript 注入噪音**(用户指出),`d95e111` 撤回,改走**零噪音 rule 门禁**:`ai-tools-mcp.md` 顶部加极短 **MCP-first 决策卡**(`ec8e58f`,真值源 + sync)——找符号/调用链/文档/跨层各用哪个 MCP + grep 仅 4 兜底场景 + 自检挂 §3.3。诚实结论:能"自动"减 grep 的只有 hook(必噪音),rule/skill 是纪律辅助;真正拉命中的是 ① 可靠性。
+
+### 教训
+- 运维副作用:本会话多次重启 daemon + `wsl --shutdown` → **当前 Claude Code 会话的 MCP 直连陈旧**(`/mcp` 显示 connected 只是 SSE 握手,POST session 失配),需**重启 Claude Code**(非 /clear)恢复。daemon 本身健康(WSL 新客户端 + agent 端到端已证)。
+- "使用率低"先别下"工作流错"结论 → 多半是**度量口径**问题(分母灌水 / 不分来源)。
