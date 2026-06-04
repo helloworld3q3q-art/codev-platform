@@ -34,7 +34,7 @@ class _FakeRecall:
     def __init__(self, entries):
         self._entries = entries
 
-    def recall(self, *, org_id, user_id, project_id, query="", limit=8, policy=None):
+    def recall(self, *, org_id, user_id, project_id, query="", limit=8, policy=None, task_id=None):
         return self._entries
 
 

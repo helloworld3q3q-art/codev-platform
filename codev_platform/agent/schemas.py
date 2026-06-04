@@ -11,6 +11,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(None, description="多轮会话 id;省略=新会话")
     max_steps: int | None = Field(None, description="本次循环 step 上限;省略走 config")
     project_id: str | None = Field(None, description="按此 project 路由工具(P2);省略走 X-Project-Id 头 / cwd")
+    task_id: str | None = Field(None, description="M1:绑定的任务 id;同 task_id 记忆优先召回, 跨会话恢复任务上下文")
 
 
 class StepOut(BaseModel):

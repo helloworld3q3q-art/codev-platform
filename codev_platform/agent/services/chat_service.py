@@ -63,7 +63,7 @@ class ChatService:
         history = self._sessions.get(sid, user_id, org_id=org_id)
 
         registry = self._registry_factory(project_id)  # 工具按 project_id 路由
-        memories = self._recall_memories(org_id, user_id, project_id, question)
+        memories = self._recall_memories(org_id, user_id, project_id, question, task_id)
         # 把上下文 + 召回记忆注入 system prompt,让模型"知道"自己在哪个项目 / 为谁 + 遵循已知偏好
         system = build_code_understanding_system(
             project_id=project_id, user_id=user_id, org_id=org_id, memories=memories)
@@ -95,13 +95,14 @@ class ChatService:
         )
         return ChatOutcome(session_id=sid, result=result)
 
-    def _recall_memories(self, org_id: str, user_id: str, project_id: str | None, question: str):
+    def _recall_memories(self, org_id: str, user_id: str, project_id: str | None,
+                         question: str, task_id: str | None = None):
         """召回分层记忆;失败(DB 抖动等)只退化为"不注入记忆",绝不阻断问答。"""
         if self._recall is None:
             return []
         try:
             return self._recall.recall(
                 org_id=org_id, user_id=user_id, project_id=project_id,
-                query=question, limit=self._recall_limit)
+                query=question, limit=self._recall_limit, task_id=task_id)
         except Exception:  # noqa: BLE001 — 召回非关键路径,失败静默退化
             return []

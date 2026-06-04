@@ -108,6 +108,38 @@ def test_recall_limit_caps():
     assert len(out) == 5
 
 
+def test_recall_task_id_priority():
+    # M1: 传 task_id 时, 当前任务的记忆置顶(任务上下文优先), 其余仍召回不丢。
+    store = FakeStore([
+        MemoryEntry(id="m1", scope="personal", scope_ref="alice", owner_user_id="u",
+                    content="别的任务记忆", org_id="default", task_id="other-task"),
+        MemoryEntry(id="m2", scope="personal", scope_ref="alice", owner_user_id="u",
+                    content="当前任务目标", org_id="default", task_id="task-A"),
+        MemoryEntry(id="m3", scope="personal", scope_ref="alice", owner_user_id="u",
+                    content="无任务记忆", org_id="default", task_id=None),
+    ])
+    svc = LocalRecallService(store)
+    out = svc.recall(org_id="default", user_id="alice", project_id=None, task_id="task-A")
+    assert out[0].content == "当前任务目标"   # task-A 置顶
+    assert len(out) == 3                       # 其余不被丢弃
+    # 不传 task_id 时不加权(保原相对序: m1 在前)
+    out_no = svc.recall(org_id="default", user_id="alice", project_id=None)
+    assert out_no[0].content == "别的任务记忆"
+
+
+def test_recall_redline_beats_task_match():
+    # M1 不变量: redline(组织硬约束)仍压过 task 匹配的普通记忆, 任务加权不得破坏红线优先。
+    store = FakeStore([
+        MemoryEntry(id="t", scope="personal", scope_ref="alice", owner_user_id="u",
+                    content="task 匹配普通记忆", org_id="default", task_id="task-A"),
+        MemoryEntry(id="r", scope="org", scope_ref="org", owner_user_id="u",
+                    content="组织红线", org_id="default", is_redline=True, task_id=None),
+    ])
+    out = LocalRecallService(store).recall(
+        org_id="default", user_id="alice", project_id=None, task_id="task-A")
+    assert out[0].content == "组织红线" and out[0].is_redline  # redline 压过 task 匹配
+
+
 def test_rank_redline_first_then_query_match():
     es = [
         _e("personal", "u", "无关内容"),

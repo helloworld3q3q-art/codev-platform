@@ -52,10 +52,19 @@ def _score(entry: MemoryEntry, terms: list[str]) -> int:
     return sum(1 for t in terms if t in c)
 
 
-def _rank_for_query(entries: list[MemoryEntry], query: str) -> list[MemoryEntry]:
-    """redline 永远最前(组织硬约束必须让模型看到),其次按 query 命中数,稳定排序保 recency。"""
+def _rank_for_query(entries: list[MemoryEntry], query: str,
+                    task_id: str | None = None) -> list[MemoryEntry]:
+    """排序优先级:redline(组织硬约束必须让模型看到)→ 当前 task → query 命中 → recency(稳定排序)。
+
+    M1:task 匹配并入 key 元组(而非另起一次 sorted), 确保 redline 仍压过 task ——
+    红线优先是硬不变量, 不能被任务加权破坏。
+    """
     terms = [t for t in query.lower().split() if t]
-    return sorted(entries, key=lambda e: (0 if e.is_redline else 1, -_score(e, terms)))
+    return sorted(entries, key=lambda e: (
+        0 if e.is_redline else 1,
+        0 if (task_id and getattr(e, "task_id", None) == task_id) else 1,
+        -_score(e, terms),
+    ))
 
 
 class RecallService(ABC):
@@ -63,7 +72,8 @@ class RecallService(ABC):
 
     @abstractmethod
     def recall(self, *, org_id: str, user_id: str | None, project_id: str | None,
-               query: str = "", limit: int = 8, policy: str | None = None) -> list[MemoryEntry]:
+               query: str = "", limit: int = 8, policy: str | None = None,
+               task_id: str | None = None) -> list[MemoryEntry]:
         ...
 
 
@@ -91,10 +101,12 @@ class LocalRecallService(RecallService):
         return visible_scopes(org_id, user_id, project_id)
 
     def recall(self, *, org_id: str, user_id: str | None, project_id: str | None,
-               query: str = "", limit: int = 8, policy: str | None = None) -> list[MemoryEntry]:
+               query: str = "", limit: int = 8, policy: str | None = None,
+               task_id: str | None = None) -> list[MemoryEntry]:
         policy = policy or self._policy
         pooled: list[MemoryEntry] = []
         for scope, ref in self._visible_scopes(org_id, user_id, project_id):
             pooled.extend(self._store.list_scope(scope, ref, org_id=org_id, limit=self._per_scope_limit))
         resolved = resolve_conflicts(pooled, policy=policy)
-        return _rank_for_query(resolved, query)[:limit]
+        # M1: task_id 并入排序 key(redline > task > query 命中), redline 不变量不被破坏。
+        return _rank_for_query(resolved, query, task_id=task_id)[:limit]
