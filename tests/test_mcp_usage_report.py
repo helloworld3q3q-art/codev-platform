@@ -1,7 +1,7 @@
 """platform_status.mcp_usage_report —— MCP 调用分析聚合(仪表盘数据源)。
 
 锁住: 每项目 + 合计; 7天窗 vs 全时段累计; chroma 按 agent/dev 分桶 + 命中;
-cross-link/codegraph 纯调用数; 自部署模型 embed/rerank 计数。
+codegraph 纯调用数; 自部署模型 embed/rerank 计数。
 """
 from __future__ import annotations
 
@@ -29,9 +29,6 @@ def _setup(tmp_path, monkeypatch):
         {"ts": old, "project_id": "p1", "client": "dev", "hit": 1},     # 仅入 allTime
     ])
     repo = tmp_path / "repo"
-    _write(repo / "codev_platform" / "cross_link" / "cross_link_usage.jsonl", [
-        {"ts": now, "project_id": "p1"}, {"ts": now, "project_id": "p2"},
-    ])
     _write(repo / "codev_platform" / "codegraph" / "codegraph_usage.jsonl", [
         {"ts": now, "project_id": "p1"},
     ])
@@ -60,10 +57,9 @@ def test_last7d_model_counts_split(tmp_path, monkeypatch):
     assert p1["model"]["devRerank"] == 0
 
 
-def test_cross_link_and_codegraph_calls(tmp_path, monkeypatch):
+def test_codegraph_calls(tmp_path, monkeypatch):
     rep = _setup(tmp_path, monkeypatch)
     p1 = _proj(rep["last7d"], "p1")
-    assert p1["crossLink"]["calls"] == 1
     assert p1["codegraph"]["calls"] == 1
 
 
@@ -80,7 +76,6 @@ def test_alltime_includes_old_entry(tmp_path, monkeypatch):
 def test_total_sums_all_projects(tmp_path, monkeypatch):
     rep = _setup(tmp_path, monkeypatch)
     total = rep["last7d"]["total"]
-    assert total["crossLink"]["calls"] == 2       # p1 1 + p2 1
     assert total["chroma"]["agentCalls"] == 1
     assert total["model"]["agentEmbed"] == 1
     assert total["model"]["devEmbed"] == 2        # p1 的 2 条 recent dev

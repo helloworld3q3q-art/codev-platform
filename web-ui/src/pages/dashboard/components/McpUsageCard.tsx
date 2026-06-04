@@ -1,6 +1,6 @@
 // MCP 调用分析卡 v2 —— 每项目一行 (分组列) + 合计行固定底部, 近7天 / 全时段切换。
 // chroma 按 agent/dev 分桶 + agent/dev 命中; 模型 (自部署) embed/rerank 各按 agent/dev 分桶;
-// cross-link / codegraph 为纯开发端调用数 (列头带 "(开发端)")。
+// codegraph 为纯开发端调用数 (列头带 "(开发端)")。
 import { useCallback, useMemo, useState } from 'react';
 
 import { ProCard } from '@ant-design/pro-components';
@@ -18,7 +18,6 @@ interface McpUsageRow {
   chromaDevCalls: number;
   chromaAgentHits: number;
   chromaDevHits: number;
-  crossLink: number;
   codegraph: number;
   embedAgent: number;
   embedDev: number;
@@ -31,7 +30,6 @@ interface McpUsageTotals {
   chromaDevCalls: number;
   chromaAgentHits: number;
   chromaDevHits: number;
-  crossLink: number;
   codegraph: number;
   embedAgent: number;
   embedDev: number;
@@ -73,7 +71,6 @@ const COLUMNS: ProColumns<McpUsageRow>[] = [
       { title: 'rerank·dev', dataIndex: 'rerankDev', align: 'right', width: 110 },
     ],
   },
-  { title: 'cross-link(开发端)', dataIndex: 'crossLink', align: 'right', width: 130 },
   { title: 'codegraph(开发端)', dataIndex: 'codegraph', align: 'right', width: 130 },
 ];
 
@@ -87,7 +84,6 @@ const SUMMARY_FIELDS: (keyof McpUsageTotals)[] = [
   'embedDev',
   'rerankAgent',
   'rerankDev',
-  'crossLink',
   'codegraph',
 ];
 
@@ -102,7 +98,6 @@ function buildRows(window?: API.McpUsageWindow): McpUsageRow[] {
     chromaDevCalls: p.chroma?.devCalls ?? 0,
     chromaAgentHits: p.chroma?.agentHits ?? 0,
     chromaDevHits: p.chroma?.devHits ?? 0,
-    crossLink: p.crossLink?.calls ?? 0,
     codegraph: p.codegraph?.calls ?? 0,
     embedAgent: p.model?.agentEmbed ?? 0,
     embedDev: p.model?.devEmbed ?? 0,
@@ -118,7 +113,6 @@ function buildTotals(window?: API.McpUsageWindow): McpUsageTotals {
     chromaDevCalls: t?.chroma?.devCalls ?? 0,
     chromaAgentHits: t?.chroma?.agentHits ?? 0,
     chromaDevHits: t?.chroma?.devHits ?? 0,
-    crossLink: t?.crossLink?.calls ?? 0,
     codegraph: t?.codegraph?.calls ?? 0,
     embedAgent: t?.model?.agentEmbed ?? 0,
     embedDev: t?.model?.devEmbed ?? 0,

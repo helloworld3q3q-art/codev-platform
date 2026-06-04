@@ -57,15 +57,6 @@ def _parse_dt(text: str) -> datetime | None:
     return None
 
 
-def _local_crosslink(data_dir: Path, pid: str) -> Any:
-    """平台本地 cross_layer.sqlite(中心化, 平台自有)读 nodes 数。未建返回 'not_built'。"""
-    xdb = data_dir / "codegraph_ext" / pid / "cross_layer.sqlite"
-    if not xdb.is_file():
-        return "not_built"
-    c = _sqlite_counts(xdb, "nodes") or {}
-    return {"nodes": c.get("nodes", 0), "source": "local"}
-
-
 def _self_project_id(repo_root: Path) -> str | None:
     pj = repo_root / ".claude" / "project.json"
     if pj.is_file():
@@ -83,13 +74,12 @@ def _usage_7d(repo_root: Path) -> dict[str, dict[str, int]]:
 
     def bump(pid: str | None, key: str) -> None:
         k = pid or "(legacy)"
-        usage.setdefault(k, {"search_docs": 0, "cross_link": 0, "codegraph": 0})[key] += 1
+        usage.setdefault(k, {"search_docs": 0, "codegraph": 0})[key] += 1
 
     from codev_platform.core.paths import logs_dir
     for path, key in (
         # search_recall.jsonl 已迁 data_root/logs (与 _obslog 写入一致); 其余 usage.jsonl 未迁。
         (logs_dir() / "search_recall.jsonl", "search_docs"),
-        (repo_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl", "cross_link"),
         (repo_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl", "codegraph"),
     ):
         if not path.is_file():
@@ -114,8 +104,8 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
 
     - chroma(platform-docs):agent / dev 调用 + 命中(search_recall.jsonl 含 client 字段;
       老日志无 client → 计 dev)
-    - cross-link / codegraph:调用数(纯 dev —— web 端 agent 的 codegraph/impact 工具直读
-      sqlite/store,不走这俩 MCP server)
+    - codegraph:调用数(纯 dev —— web 端 agent 的 codegraph/impact 工具直读
+      sqlite/store,不走这个 MCP server)
     - 自部署模型:embed 调用(每次搜索 1 次)+ rerank 调用(rerank_used 为真),即本机 Qwen
       embedding/reranker 的实际推理次数。
     """
@@ -125,8 +115,7 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
     def _blank() -> dict[str, dict[str, int]]:
         return {
             "chroma": {"agentCalls": 0, "devCalls": 0, "agentHits": 0, "devHits": 0},
-            "crossLink": {"calls": 0},   # 纯开发端(agent 不走此 MCP)
-            "codegraph": {"calls": 0},   # 纯开发端(同上)
+            "codegraph": {"calls": 0},   # 纯开发端(agent 不走此 MCP)
             "model": {"agentEmbed": 0, "devEmbed": 0, "agentRerank": 0, "devRerank": 0},
         }
 
@@ -152,7 +141,6 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
                 continue
 
     recall = logs_dir() / "search_recall.jsonl"
-    cl = repo_root / "codev_platform" / "cross_link" / "cross_link_usage.jsonl"
     cg = repo_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
 
     for o in _iter(recall):
@@ -168,7 +156,7 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
             mo["agentEmbed" if a else "devEmbed"] += 1   # 每次搜索 1 次 embed
             if rerank:
                 mo["agentRerank" if a else "devRerank"] += 1
-    for path, key in ((cl, "crossLink"), (cg, "codegraph")):
+    for path, key in ((cg, "codegraph"),):
         for o in _iter(path):
             for w in _windows(o):
                 _get(w, o.get("project_id"))[key]["calls"] += 1
@@ -228,7 +216,7 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         errors.append("memory:" + repr(e))
 
-    # MCP 端点 reachability (P5): cross-link / codegraph SSE 端点是否常驻可达。
+    # MCP 端点 reachability (P5): codegraph / graph SSE 端点是否常驻可达。
     # chroma 自身就是本 daemon, 不重复探。失败不阻塞整体 status。
     mcp_endpoints: list[dict] = []
     try:
@@ -263,15 +251,11 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
             else:
                 codegraph = "no_db"
 
-        # cross-link: 平台本地 cross_layer.sqlite(中心化, 平台自有)。
-        cross_link: Any = _local_crosslink(data, pid)
-
         projects[pid] = {
             "chroma_chunks": chroma_pid.get(pid, 0),
             "codegraph": codegraph,
-            "cross_link": cross_link,
             "memory_project": mem_proj.get(pid, 0),
-            "usage_7d": usage.get(pid, {"search_docs": 0, "cross_link": 0}),
+            "usage_7d": usage.get(pid, {"search_docs": 0}),
             "registered": pid in registered,
         }
 

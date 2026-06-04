@@ -52,7 +52,7 @@ class McpChromaUsage(BaseModel):
 
 
 class McpCallUsage(BaseModel):
-    calls: int = 0        # cross-link / codegraph: 纯开发端调用(agent 不走这俩 MCP)
+    calls: int = 0        # codegraph: 纯开发端调用(agent 不走此 MCP)
 
 
 class McpModelUsage(BaseModel):
@@ -65,7 +65,6 @@ class McpModelUsage(BaseModel):
 
 class McpUsageMetrics(BaseModel):
     chroma: McpChromaUsage = Field(default_factory=McpChromaUsage)
-    crossLink: McpCallUsage = Field(default_factory=McpCallUsage)
     codegraph: McpCallUsage = Field(default_factory=McpCallUsage)
     model: McpModelUsage = Field(default_factory=McpModelUsage)
 
