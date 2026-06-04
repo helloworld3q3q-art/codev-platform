@@ -86,33 +86,38 @@ def ingest_project(
 def _calls_pass(conn, project_id: str, report: IngestReport, repo_path: Path) -> None:
     """调用边 post-pass: 跑所有适用 CallResolver(按语言栈)→ 全局去重 → upsert 统一 plugin。
 
-    取代原 _bridge_pass: codegraph resolver(原桥接逻辑)+ 未来各语言 resolver(spring/fastapi/
-    ...)都在此跑。calls 边全局去重((source,target,kind)), 多 resolver 产同边时先跑者赢
-    (codegraph 先, 各语言 resolver 补缺)。单 resolver 失败 fail-soft 不拖垮其余。
+    取代原 _bridge_pass: codegraph resolver(原桥接逻辑)+ 各语言 resolver(spring/fastapi/...)
+    都在此跑。calls 边全局去重((source,target,kind)), 多 resolver 产同边时 **confidence 最高者
+    赢**(专门 resolver 精确解析 conf=1.0 正确盖过 codegraph 兜底边 conf<1.0;并列时先注册者赢)。
+    单 resolver 失败 fail-soft 不拖垮其余。
     """
     from codev_platform.graph.call_resolvers import applicable_resolvers
 
     merged = load_graph(conn, project_id)
     nodes = merged.nodes
-    seen: set[tuple[str, str, str]] = set()
-    all_edges: list[GraphEdge] = []
+    # 先收集所有 resolver 产的边(带来源名), 再按 key 选 winner —— 避免"先到先得"误丢高置信边。
+    collected: list[tuple[str, GraphEdge]] = []
     by_resolver: dict[str, int] = {}
     for r in applicable_resolvers(repo_path, nodes):
+        by_resolver.setdefault(r.name, 0)  # 跑过即登记(哪怕 0 边 / 抛错), 审计可见
         try:
             edges = r.resolve(repo_path, project_id, nodes)
         except Exception as exc:  # noqa: BLE001 — 单 resolver 失败不拖垮其余 + 整个 pass
             logger.warning("[calls] resolver %s failed: %r", r.name, exc)
-            by_resolver[r.name] = 0
             continue
-        fresh = []
         for e in edges:
-            key = (e.source, e.target, e.kind)
-            if key in seen:
-                continue
-            seen.add(key)
-            fresh.append(e)
-        all_edges.extend(fresh)
-        by_resolver[r.name] = len(fresh)
+            collected.append((r.name, e))
+    # winner 选取: 同 (source,target,kind) 保留 confidence 最高者;并列不取代(严格 >),
+    # 故 collected 的注册先后成为并列 tiebreak(codegraph 兜底先注册, 并列时兜底赢)。
+    best: dict[tuple[str, str, str], tuple[str, GraphEdge]] = {}
+    for name, e in collected:
+        key = (e.source, e.target, e.kind)
+        cur = best.get(key)
+        if cur is None or e.confidence > cur[1].confidence:
+            best[key] = (name, e)
+    all_edges: list[GraphEdge] = [e for _, e in best.values()]
+    for name, _ in best.values():
+        by_resolver[name] += 1  # 计数 = 该 resolver 最终赢下的边数(被盖过的不计)
     upsert_result(conn, project_id, AnalyzerResult(edges=all_edges, plugin=CALLS_PLUGIN))
     report.ingested.append(CALLS_PLUGIN)
     report.summaries[CALLS_PLUGIN] = {"calls_edges": len(all_edges), "by_resolver": by_resolver}

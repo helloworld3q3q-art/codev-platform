@@ -41,10 +41,10 @@ _RESOLVERS: list[CallResolver] = []
 def register_resolver(r: CallResolver) -> None:
     """注册一个 resolver —— 加语言栈的唯一接入点(在 call_resolvers/__init__ 调)。
 
-    注册顺序即去重优先级: _calls_pass 全局去重「先跑者赢」, 同一 (source,target,kind) 边
-    归先注册的 resolver。故**跨语言兜底者(codegraph)先注册**, 各语言专门 resolver 后注册只补
-    codegraph 追不到的边(如 Python DI)。⚠️ Phase 2 若引入会与 codegraph 产**同边、且置信更高**
-    的专门 resolver, 需把 _calls_pass 去重改为按 confidence 取胜(而非位置)——届时拍板, 勿默认延续位置优先。
+    去重优先级 = confidence(见 _calls_pass): 同一 (source,target,kind) 边保留**置信最高者**。
+    注册顺序仅作 **confidence 并列时的 tiebreak**(先注册者赢)。故跨语言兜底者(codegraph,
+    边 conf<1.0)先注册, 各语言专门 resolver(精确解析 conf=1.0)后注册, 能正确盖过兜底的同边;
+    而 codegraph 追到、专门 resolver 追不到的边(无人竞争)原样保留。
     """
     _RESOLVERS.append(r)
 

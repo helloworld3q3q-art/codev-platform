@@ -28,11 +28,12 @@ from codev_platform.graph.store import load_graph, open_store
 _CALLS = EdgeKind.CALLS.value
 
 
-def _edge(pid: str, fn: str) -> GraphEdge:
+def _edge(pid: str, fn: str, conf: float = 1.0) -> GraphEdge:
     return GraphEdge(
         source=f"{pid}:backend_endpoint:e1",
         target=f"{pid}:backend_function:{fn}",
         kind=_CALLS,
+        confidence=conf,
     )
 
 
@@ -129,12 +130,34 @@ def test_calls_pass_dedup_first_wins(isolated_registry, tmp_path):
         summary = report.summaries[CALLS_PLUGIN]
         # 全局去重: f1 + f2 = 2 条(second 的 f1 被吞)。
         assert summary["calls_edges"] == 2
-        # 先跑者赢: first 占 f1+f2=2, second 的唯一边重复 → 0。
+        # confidence 并列(都 1.0) → 先注册者赢: first 占 f1+f2=2, second 的 f1 不更高 → 0。
         assert summary["by_resolver"] == {"first": 2, "second": 0}
         # 真落库可读回。
         merged = load_graph(conn, pid)
         calls = [e for e in merged.edges if e.kind == _CALLS]
         assert len(calls) == 2
+    finally:
+        conn.close()
+
+
+def test_calls_pass_confidence_overrides(isolated_registry, tmp_path):
+    pid = "proj-conf"
+    # codegraph 类兜底**先**注册产低置信边; 专门 resolver **后**注册产同边但高置信。
+    register_resolver(_FakeResolver("codegraph-like", [_edge(pid, "f1", conf=0.7)]))
+    register_resolver(_FakeResolver("spring-like", [_edge(pid, "f1", conf=1.0)]))
+
+    conn = open_store(pid, path=tmp_path / "store.sqlite")
+    try:
+        report = IngestReport(project_id=pid)
+        _calls_pass(conn, pid, report, tmp_path)
+        summary = report.summaries[CALLS_PLUGIN]
+        assert summary["calls_edges"] == 1  # 去重后仅 1 条
+        # 高置信专门 resolver 盖过兜底 → 兜底归 0(尽管先注册)。
+        assert summary["by_resolver"] == {"codegraph-like": 0, "spring-like": 1}
+        merged = load_graph(conn, pid)
+        calls = [e for e in merged.edges if e.kind == _CALLS]
+        assert len(calls) == 1
+        assert calls[0].confidence == 1.0  # 落库的是高置信边
     finally:
         conn.close()
 
