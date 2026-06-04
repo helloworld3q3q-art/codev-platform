@@ -132,3 +132,20 @@ def test_no_recall_service_works():
     svc = _service()
     out = svc.ask("q")
     assert out.result.answer == "answer"
+
+
+def test_task_id_passed_to_recall():
+    # M1 验收: task_id 从 ask 全链路透传到召回(支撑"同 task_id 跨会话恢复 / 不同 task 不串")
+    seen = {"task_id": "UNSET"}
+
+    class _Cap:
+        def recall(self, *, task_id=None, **kw):
+            seen["task_id"] = task_id
+            return []
+
+    svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), _FakeProvider,
+                      lambda: 5, recall=_Cap())
+    svc.ask("q", task_id="task-7")
+    assert seen["task_id"] == "task-7"   # 显式 task_id 透传到召回
+    svc.ask("q2")
+    assert seen["task_id"] is None       # 不传 → None(向后兼容)

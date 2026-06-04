@@ -10,8 +10,10 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from codev_platform.agent import deps
-from codev_platform.agent.memory_store import MemoryEntry, SCOPES
-from codev_platform.agent.schemas import MemoryEntryOut, MemoryWriteRequest
+from codev_platform.agent.memory_store import MemoryEntry, SCOPES, TASK_STATES
+from codev_platform.agent.schemas import (
+    MemoryEntryOut, MemoryWriteRequest, TaskStateRequest, TaskStateResponse,
+)
 from codev_platform.core import identity
 from codev_platform.core.acl import AccessDecision, can_access, memory_scope_access
 from codev_platform.core.audit import audit_access
@@ -151,3 +153,29 @@ def list_memory(
         raise HTTPException(status_code=503, detail=to_http_detail(
             "memory store unavailable", ErrorCode.UPSTREAM_UNAVAILABLE)) from e
     return [_to_out(e) for e in entries]
+
+
+@router.post("/memory/task/state", response_model=TaskStateResponse)
+def set_task_state(req: TaskStateRequest, request: Request) -> TaskStateResponse:
+    """更新任务状态(M1 状态机)。owner 限定: 只能改自己写的任务记忆状态(防改他人), org 隔离。"""
+    store = deps.get_memory_store()
+    if store is None:  # PG 未配 → DEPENDENCY_MISSING(503)
+        raise HTTPException(status_code=503, detail=to_http_detail(
+            "memory store not configured", ErrorCode.DEPENDENCY_MISSING))
+    if req.task_state not in TASK_STATES:  # 入参非法 → INVALID_PARAMS(400)
+        raise HTTPException(status_code=400, detail=to_http_detail(
+            f"task_state must be one of {list(TASK_STATES)}", ErrorCode.INVALID_PARAMS))
+    try:  # 非法 X-Org-Id / X-User-Id → 400
+        org_id, user_id = _resolve_identity(request)
+    except ValueError as e:  # 入参非法 → INVALID_PARAMS;str(e) 仅日志
+        _log.warning("memory.task-state identity rejected: %s", e)
+        raise HTTPException(status_code=400, detail=to_http_detail(
+            "invalid X-Org-Id / X-User-Id", ErrorCode.INVALID_PARAMS)) from e
+    try:
+        # owner 限定即鉴权: 持 token 者只能改自己 org + 自己写的任务(store 内 WHERE owner_user_id)
+        n = store.set_task_state(req.task_id, req.task_state, org_id=org_id, owner_user_id=user_id)
+    except Exception as e:  # noqa: BLE001 — DB 错转 503;完整异常只进日志, 不回客户端
+        _log.warning("memory.task-state store error: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=503, detail=to_http_detail(
+            "memory store unavailable", ErrorCode.UPSTREAM_UNAVAILABLE)) from e
+    return TaskStateResponse(task_id=req.task_id, task_state=req.task_state, updated=n)

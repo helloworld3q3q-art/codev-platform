@@ -20,6 +20,8 @@ _DEFAULT_ORG = "default"
 
 # 作用域取值(plan §二):org / team / project / personal
 SCOPES = ("org", "team", "project", "personal")
+# M1 任务状态机(plan §M1):active(进行)/ blocked(阻塞)/ done(完成)/ archived(归档)
+TASK_STATES = ("active", "blocked", "done", "archived")
 
 
 @dataclass
@@ -66,4 +68,11 @@ class MemoryStore(ABC):
     @abstractmethod
     def archive_expired(self, org_id: str | None = None) -> int:
         """TTL 到期批量归档(ttl_at < now 且 active → archived)。返回归档条数。"""
+        ...
+
+    @abstractmethod
+    def set_task_state(self, task_id: str, task_state: str, org_id: str = _DEFAULT_ORG,
+                       owner_user_id: str | None = None) -> int:
+        """更新某 task_id 的 active 记忆 task_state(M1 任务状态流转)。owner_user_id 给定则
+        限本人(防改他人任务)。返回更新条数。"""
         ...

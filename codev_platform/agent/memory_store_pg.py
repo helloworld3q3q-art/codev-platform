@@ -182,6 +182,21 @@ class SqlMemoryStore(MemoryStore):
             cur = conn.execute(sql, params)
             return cur.rowcount
 
+    def set_task_state(self, task_id: str, task_state: str, org_id: str = _DEFAULT_ORG,
+                       owner_user_id: str | None = None) -> int:
+        """更新某 task_id 的 active 记忆 task_state(M1)。owner_user_id 给定则限本人
+        (防改他人任务);org_id 隔离。返回更新条数(0=无匹配/无权改)。"""
+        self._ensure()
+        sql = ("UPDATE memory_entries SET task_state=%s, updated_at=now() "
+               "WHERE org_id=%s AND task_id=%s AND status='active'")
+        params: list = [task_state, org_id, task_id]
+        if owner_user_id is not None:
+            sql += " AND owner_user_id=%s"
+            params.append(owner_user_id)
+        with self._write_pool.connection() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount
+
     # ---- 读路径(副本,若配置)----
 
     def list_scope(self, scope: str, scope_ref: str, org_id: str = _DEFAULT_ORG,

@@ -40,6 +40,15 @@ class FakeStore(MemoryStore):
     def archive_expired(self, org_id=None):
         return 0
 
+    def set_task_state(self, task_id, task_state, org_id=_DEFAULT_ORG, owner_user_id=None):
+        n = 0
+        for e in self._entries:
+            if (e.org_id == org_id and e.task_id == task_id and e.status == "active"
+                    and (owner_user_id is None or e.owner_user_id == owner_user_id)):
+                e.task_state = task_state
+                n += 1
+        return n
+
 
 def _e(scope, ref, content, *, topic_key=None, is_redline=False, org="default"):
     return MemoryEntry(id=content, scope=scope, scope_ref=ref, owner_user_id="u",
@@ -138,6 +147,20 @@ def test_recall_redline_beats_task_match():
     out = LocalRecallService(store).recall(
         org_id="default", user_id="alice", project_id=None, task_id="task-A")
     assert out[0].content == "组织红线" and out[0].is_redline  # redline 压过 task 匹配
+
+
+def test_set_task_state_owner_scoped():
+    # M1: set_task_state 只改本人(owner 限定)+ 本 org 的该 task active 记忆, 防改他人任务。
+    store = FakeStore([
+        MemoryEntry(id="a", scope="personal", scope_ref="alice", owner_user_id="alice",
+                    content="alice 任务", org_id="default", task_id="t1", task_state="active"),
+        MemoryEntry(id="b", scope="personal", scope_ref="bob", owner_user_id="bob",
+                    content="bob 任务", org_id="default", task_id="t1", task_state="active"),
+    ])
+    n = store.set_task_state("t1", "done", org_id="default", owner_user_id="alice")
+    assert n == 1
+    assert store._entries[0].task_state == "done"    # alice 的改了
+    assert store._entries[1].task_state == "active"  # bob 的没动(防改他人)
 
 
 def test_rank_redline_first_then_query_match():

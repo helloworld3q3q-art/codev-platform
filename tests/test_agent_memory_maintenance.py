@@ -57,6 +57,16 @@ class FakeStore(MemoryStore):
                 n += 1
         return n
 
+    def set_task_state(self, task_id, task_state, org_id="default", owner_user_id=None):
+        n = 0
+        for e in self._db.values():
+            if (e.org_id == org_id and getattr(e, "task_id", None) == task_id
+                    and e.status == "active"
+                    and (owner_user_id is None or e.owner_user_id == owner_user_id)):
+                e.task_state = task_state
+                n += 1
+        return n
+
 
 def _e(content, *, scope="personal", ref="alice", topic_key=None, is_redline=False,
        org="default", ttl_at=None, status="active"):

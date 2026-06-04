@@ -64,3 +64,16 @@ class MemoryEntryOut(BaseModel):
     topic_key: str | None = None
     is_redline: bool = False
     status: str = "active"
+
+
+# ---- 任务状态机(M1)----
+
+class TaskStateRequest(BaseModel):
+    task_id: str = Field(..., min_length=1, description="任务 id")
+    task_state: str = Field(..., description="active | blocked | done | archived")
+
+
+class TaskStateResponse(BaseModel):
+    task_id: str
+    task_state: str
+    updated: int = Field(..., description="更新的记忆条数(0=无匹配/无权改)")
