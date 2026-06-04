@@ -107,9 +107,9 @@ def test_store_missing_graceful(tmp_path, monkeypatch):
 
 # ---- GET /reports/mcp-usage: platform_admin 鉴权门 + 响应形状 ----
 
-_FAKE_METRICS = {"chroma": {"agentCalls": 1, "devCalls": 2, "hits": 2},
+_FAKE_METRICS = {"chroma": {"agentCalls": 1, "devCalls": 2, "agentHits": 1, "devHits": 2},
                  "crossLink": {"calls": 1}, "codegraph": {"calls": 1},
-                 "model": {"embedCalls": 3, "rerankCalls": 1}}
+                 "model": {"agentEmbed": 1, "devEmbed": 2, "agentRerank": 1, "devRerank": 0}}
 
 
 def _mcp_client(monkeypatch):
@@ -133,7 +133,7 @@ def test_mcp_usage_platform_admin_ok(monkeypatch):
     assert r.status_code == 200
     d = r.json()["data"]
     assert d["last7d"]["projects"][0]["chroma"]["agentCalls"] == 1
-    assert d["last7d"]["total"]["model"]["embedCalls"] == 3
+    assert d["last7d"]["total"]["model"]["devEmbed"] == 2
     assert "allTime" in d
 
 

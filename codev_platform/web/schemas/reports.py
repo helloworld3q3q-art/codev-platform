@@ -47,7 +47,8 @@ class GraphQueryResponse(BaseModel):
 class McpChromaUsage(BaseModel):
     agentCalls: int = 0   # web 端 agent(chat)调用数
     devCalls: int = 0     # 开发端 Claude Code / Codex 直调数
-    hits: int = 0         # 命中(返回 >0 结果)的次数
+    agentHits: int = 0    # agent 命中(返回 >0 结果)次数
+    devHits: int = 0      # dev 命中次数
 
 
 class McpCallUsage(BaseModel):
@@ -55,8 +56,11 @@ class McpCallUsage(BaseModel):
 
 
 class McpModelUsage(BaseModel):
-    embedCalls: int = 0   # 自部署 Qwen embedding 推理次数(每次搜索 1 次)
-    rerankCalls: int = 0  # 自部署 Qwen reranker 推理次数(rerank_used 为真)
+    # 自部署 Qwen embedding/reranker 推理次数, 按来源拆 (容量归因: agent 产品 vs 开发者)
+    agentEmbed: int = 0
+    devEmbed: int = 0
+    agentRerank: int = 0
+    devRerank: int = 0
 
 
 class McpUsageMetrics(BaseModel):

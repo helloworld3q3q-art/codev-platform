@@ -124,10 +124,10 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
 
     def _blank() -> dict[str, dict[str, int]]:
         return {
-            "chroma": {"agentCalls": 0, "devCalls": 0, "hits": 0},
-            "crossLink": {"calls": 0},
-            "codegraph": {"calls": 0},
-            "model": {"embedCalls": 0, "rerankCalls": 0},
+            "chroma": {"agentCalls": 0, "devCalls": 0, "agentHits": 0, "devHits": 0},
+            "crossLink": {"calls": 0},   # 纯开发端(agent 不走此 MCP)
+            "codegraph": {"calls": 0},   # 纯开发端(同上)
+            "model": {"agentEmbed": 0, "devEmbed": 0, "agentRerank": 0, "devRerank": 0},
         }
 
     acc: dict[str, dict[str, dict]] = {"last7d": {}, "allTime": {}}
@@ -156,15 +156,18 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
     cg = repo_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
 
     for o in _iter(recall):
-        client = o.get("client") or "dev"
-        hit = 1 if (o.get("hit") or 0) > 0 else 0
-        rerank = 1 if o.get("rerank_used") else 0
+        a = (o.get("client") or "dev") == "agent"   # agent(web) vs dev(开发端)
+        hit = (o.get("hit") or 0) > 0
+        rerank = bool(o.get("rerank_used"))
         for w in _windows(o):
-            m = _get(w, o.get("project_id"))
-            m["chroma"]["agentCalls" if client == "agent" else "devCalls"] += 1
-            m["chroma"]["hits"] += hit
-            m["model"]["embedCalls"] += 1
-            m["model"]["rerankCalls"] += rerank
+            ch = _get(w, o.get("project_id"))["chroma"]
+            mo = _get(w, o.get("project_id"))["model"]
+            ch["agentCalls" if a else "devCalls"] += 1
+            if hit:
+                ch["agentHits" if a else "devHits"] += 1
+            mo["agentEmbed" if a else "devEmbed"] += 1   # 每次搜索 1 次 embed
+            if rerank:
+                mo["agentRerank" if a else "devRerank"] += 1
     for path, key in ((cl, "crossLink"), (cg, "codegraph")):
         for o in _iter(path):
             for w in _windows(o):

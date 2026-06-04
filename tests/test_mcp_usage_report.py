@@ -47,14 +47,17 @@ def test_last7d_chroma_agent_dev_split_and_hits(tmp_path, monkeypatch):
     p1 = _proj(rep["last7d"], "p1")
     assert p1["chroma"]["agentCalls"] == 1
     assert p1["chroma"]["devCalls"] == 2          # 1 显式 dev + 1 无 client
-    assert p1["chroma"]["hits"] == 2              # 两条 recent hit=1
+    assert p1["chroma"]["agentHits"] == 1         # agent 那条 hit=1
+    assert p1["chroma"]["devHits"] == 1           # 显式 dev hit=1; 无 client 那条 hit=0 不算
 
 
-def test_last7d_model_counts(tmp_path, monkeypatch):
+def test_last7d_model_counts_split(tmp_path, monkeypatch):
     rep = _setup(tmp_path, monkeypatch)
     p1 = _proj(rep["last7d"], "p1")
-    assert p1["model"]["embedCalls"] == 3         # 3 条 recent 搜索
-    assert p1["model"]["rerankCalls"] == 1        # 仅 1 条 rerank_used
+    assert p1["model"]["agentEmbed"] == 1
+    assert p1["model"]["devEmbed"] == 2           # 2 条 recent dev 搜索
+    assert p1["model"]["agentRerank"] == 1        # 仅 agent 那条 rerank_used
+    assert p1["model"]["devRerank"] == 0
 
 
 def test_cross_link_and_codegraph_calls(tmp_path, monkeypatch):
@@ -70,7 +73,8 @@ def test_alltime_includes_old_entry(tmp_path, monkeypatch):
     p1_all = _proj(rep["allTime"], "p1")
     assert p1_7d["chroma"]["devCalls"] == 2       # 老条目不入 7d
     assert p1_all["chroma"]["devCalls"] == 3      # 老条目入 allTime
-    assert p1_all["model"]["embedCalls"] == 4
+    assert p1_all["model"]["devEmbed"] == 3       # 3 条 dev 搜索 (含老条目)
+    assert p1_all["model"]["agentEmbed"] == 1
 
 
 def test_total_sums_all_projects(tmp_path, monkeypatch):
@@ -78,4 +82,5 @@ def test_total_sums_all_projects(tmp_path, monkeypatch):
     total = rep["last7d"]["total"]
     assert total["crossLink"]["calls"] == 2       # p1 1 + p2 1
     assert total["chroma"]["agentCalls"] == 1
-    assert total["model"]["embedCalls"] == 3
+    assert total["model"]["agentEmbed"] == 1
+    assert total["model"]["devEmbed"] == 2        # p1 的 2 条 recent dev
