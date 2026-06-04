@@ -41,7 +41,12 @@ from codev_platform.graph.schema import (
 )
 
 
-SCHEMA_SQL: Final[str] = """
+# 每表 DDL 单独成常量:SCHEMA_SQL 拼全量, _REBUILD_DDL 供旧库迁移复用同一份定义
+# (避免迁移时再抄一遍表结构, 防漂移)。
+# project_id 列说明:nodes 自始带 project_id (共库纵深防御);edges/evidences/findings
+# 后补 (C1 列对齐) —— evidences/findings 主键纳入 project_id, 因 seq 跨 project 会撞;
+# edges 主键也纳入 project_id, 与 nodes 同源隔离。
+_NODES_DDL: Final[str] = """
 CREATE TABLE IF NOT EXISTS nodes (
     id          TEXT NOT NULL,
     plugin      TEXT NOT NULL,
@@ -54,18 +59,24 @@ CREATE TABLE IF NOT EXISTS nodes (
     meta_json   TEXT,
     PRIMARY KEY (id, plugin)
 );
+"""
 
+_EDGES_DDL: Final[str] = """
 CREATE TABLE IF NOT EXISTS edges (
+    project_id  TEXT NOT NULL,
     plugin      TEXT NOT NULL,
     source      TEXT NOT NULL,
     target      TEXT NOT NULL,
     kind        TEXT NOT NULL,
     confidence  REAL DEFAULT 1.0,
     meta_json   TEXT,
-    PRIMARY KEY (plugin, source, target, kind)
+    PRIMARY KEY (project_id, plugin, source, target, kind)
 );
+"""
 
+_EVIDENCES_DDL: Final[str] = """
 CREATE TABLE IF NOT EXISTS evidences (
+    project_id  TEXT NOT NULL,
     plugin      TEXT NOT NULL,
     seq         INTEGER NOT NULL,
     source      TEXT NOT NULL,
@@ -74,10 +85,13 @@ CREATE TABLE IF NOT EXISTS evidences (
     line        INTEGER,
     confidence  REAL DEFAULT 1.0,
     meta_json   TEXT,
-    PRIMARY KEY (plugin, seq)
+    PRIMARY KEY (project_id, plugin, seq)
 );
+"""
 
+_FINDINGS_DDL: Final[str] = """
 CREATE TABLE IF NOT EXISTS findings (
+    project_id     TEXT NOT NULL,
     plugin         TEXT NOT NULL,
     seq            INTEGER NOT NULL,
     kind           TEXT NOT NULL,
@@ -87,9 +101,11 @@ CREATE TABLE IF NOT EXISTS findings (
     node_ids_json  TEXT,
     evidence_ids_json TEXT,
     meta_json      TEXT,
-    PRIMARY KEY (plugin, seq)
+    PRIMARY KEY (project_id, plugin, seq)
 );
+"""
 
+_INGEST_META_DDL: Final[str] = """
 CREATE TABLE IF NOT EXISTS ingest_meta (
     plugin          TEXT PRIMARY KEY,
     plugin_version  TEXT,
@@ -99,7 +115,9 @@ CREATE TABLE IF NOT EXISTS ingest_meta (
     finding_count   INTEGER,
     ingested_at     TEXT
 );
+"""
 
+_INDEX_DDL: Final[str] = """
 CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
 CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
 CREATE INDEX IF NOT EXISTS idx_nodes_plugin ON nodes(plugin);
@@ -107,6 +125,17 @@ CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
 """
+
+SCHEMA_SQL: Final[str] = "\n".join(
+    (_NODES_DDL, _EDGES_DDL, _EVIDENCES_DDL, _FINDINGS_DDL, _INGEST_META_DDL, _INDEX_DDL)
+)
+
+# 旧库迁移复用:表名 -> 该表当前 DDL。仅 C1 后补 project_id 的三表需要 rebuild 迁移。
+_REBUILD_DDL: Final[dict[str, str]] = {
+    "edges": _EDGES_DDL,
+    "evidences": _EVIDENCES_DDL,
+    "findings": _FINDINGS_DDL,
+}
 
 
 def graph_store_path(project_id: str) -> Path:
@@ -118,6 +147,39 @@ def graph_store_path(project_id: str) -> Path:
     return data_root() / "graph_store" / f"{project_id}.sqlite"
 
 
+def _migrate_project_id_columns(conn: sqlite3.Connection, project_id: str) -> None:
+    """旧库 (edges/evidences/findings 无 project_id 列) 前向迁移到 C1 列对齐 schema。
+
+    每表:已存在且缺 project_id 列 → rename 旧表 + 建新表 (含 project_id + 新主键) +
+    回填 project_id = 本文件 pid + drop 旧表。数据不丢, 无需重 reindex。
+    - 新库 (表不存在):跳过, 留给 executescript(SCHEMA_SQL) 直接建新 schema。
+    - 已迁移 (project_id 列已在):跳过 (幂等)。
+
+    表名取自 _REBUILD_DDL 的固定键 (edges/evidences/findings), 非外部输入, 无注入风险。
+    """
+    for table, ddl in _REBUILD_DDL.items():
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        ).fetchone()
+        if not exists:
+            continue
+        cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+        if "project_id" in cols:
+            continue
+        # 旧 schema → 重建。旧列原样搬, project_id 用本文件 pid 回填 (per-project 库
+        # 内所有行同属一个 project)。
+        old_cols = ", ".join(cols)
+        conn.execute(f"ALTER TABLE {table} RENAME TO {table}__c1old")
+        conn.executescript(ddl)
+        conn.execute(
+            f"INSERT INTO {table} (project_id, {old_cols}) "
+            f"SELECT ?, {old_cols} FROM {table}__c1old",
+            (project_id,),
+        )
+        conn.execute(f"DROP TABLE {table}__c1old")
+    conn.commit()
+
+
 def open_store(project_id: str, *, path: Path | None = None) -> sqlite3.Connection:
     """打开 (或新建) 某 project 的统一图谱 sqlite, 返回已初始化 schema 的连接。
 
@@ -125,10 +187,12 @@ def open_store(project_id: str, *, path: Path | None = None) -> sqlite3.Connecti
         project_id: 项目隔离键 (决定默认文件名)。
         path:       显式覆盖 DB 路径 (测试用);None 走 graph_store_path。
     """
-    p = path if path is not None else graph_store_path(project_id)
+    pid = _validate_project_id(project_id)
+    p = path if path is not None else graph_store_path(pid)
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(p)
     conn.execute("PRAGMA journal_mode = WAL")
+    _migrate_project_id_columns(conn, pid)  # 旧库前向迁移 (须在 executescript 前)
     conn.executescript(SCHEMA_SQL)
     conn.commit()
     return conn
@@ -160,16 +224,18 @@ def upsert_result(
     plugin = result.plugin or "(unknown)"
     version = result.plugin_version or ""
 
-    # 先清该 plugin 旧数据 (幂等替换)。
-    # nodes 有 project_id 列 -> DELETE 必须按 (plugin, project_id) 双键, 否则共享库
-    # 下会误删别项目同插件节点。edges/evidences/findings/ingest_meta 无 project_id 列,
-    # 仍仅按 plugin 清: per-project 库是隔离边界。
-    # TODO: 全表 project_id 列化 (edges/evidences/findings 也带 project_id) 另立。
+    # 先清该 plugin 旧数据 (幂等替换)。nodes/edges/evidences/findings 都有 project_id 列
+    # (C1 列对齐) → DELETE 按 (plugin, project_id) 双键, 共享库下不误删别项目同插件行。
+    # ingest_meta 无 project_id 列 (per-plugin 计数, per-project 库即隔离边界), 仅按 plugin。
     conn.execute(
         "DELETE FROM nodes WHERE plugin = ? AND project_id = ?", (plugin, project_id)
     )
-    for table in ("edges", "evidences", "findings", "ingest_meta"):
-        conn.execute(f"DELETE FROM {table} WHERE plugin = ?", (plugin,))
+    for table in ("edges", "evidences", "findings"):
+        conn.execute(
+            f"DELETE FROM {table} WHERE plugin = ? AND project_id = ?",
+            (plugin, project_id),
+        )
+    conn.execute("DELETE FROM ingest_meta WHERE plugin = ?", (plugin,))
 
     conn.executemany(
         """INSERT INTO nodes
@@ -187,20 +253,21 @@ def upsert_result(
     )
     conn.executemany(
         """INSERT OR REPLACE INTO edges
-             (plugin, source, target, kind, confidence, meta_json)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+             (project_id, plugin, source, target, kind, confidence, meta_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         [
-            (plugin, e.source, e.target, e.kind, e.confidence, _dump_meta(e.meta))
+            (project_id, plugin, e.source, e.target, e.kind, e.confidence,
+             _dump_meta(e.meta))
             for e in result.edges
         ],
     )
     conn.executemany(
         """INSERT INTO evidences
-             (plugin, seq, source, detail, file, line, confidence, meta_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+             (project_id, plugin, seq, source, detail, file, line, confidence, meta_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
-                plugin, i, ev.source, ev.detail, ev.file, ev.line,
+                project_id, plugin, i, ev.source, ev.detail, ev.file, ev.line,
                 ev.confidence, _dump_meta(ev.meta),
             )
             for i, ev in enumerate(result.evidences)
@@ -208,12 +275,12 @@ def upsert_result(
     )
     conn.executemany(
         """INSERT INTO findings
-             (plugin, seq, kind, severity, title, detail,
+             (project_id, plugin, seq, kind, severity, title, detail,
               node_ids_json, evidence_ids_json, meta_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
-                plugin, i, f.kind, f.severity, f.title, f.detail,
+                project_id, plugin, i, f.kind, f.severity, f.title, f.detail,
                 json.dumps(f.node_ids, ensure_ascii=False),
                 json.dumps(f.evidence_ids, ensure_ascii=False),
                 _dump_meta(f.meta),
@@ -248,17 +315,16 @@ def load_graph(
     单产出模型);plugin=<name> 只读该插件的产出 (含 plugin/version 归属)。
     """
     project_id = _validate_project_id(project_id)
-    # edges/evidences/findings 仅按 plugin 过滤 (无 project_id 列): per-project 库是
-    # 隔离边界, 且这些行的端点 node 已经过 project_id 过滤。
-    where = "WHERE plugin = ?" if plugin else ""
-    params: tuple = (plugin,) if plugin else ()
-
-    # nodes 始终带 project_id 过滤 (共享库防串项目); plugin 也给则 AND plugin。
-    node_where = "WHERE project_id = ?"
-    node_params: tuple = (project_id,)
+    # 四表 (nodes/edges/evidences/findings) 都按 project_id 过滤 (C1 列对齐, 共享库防串);
+    # 给 plugin 则再 AND plugin。四表过滤条件一致, 共用 where/params。
+    where = "WHERE project_id = ?"
+    params: tuple = (project_id,)
     if plugin:
-        node_where += " AND plugin = ?"
-        node_params = (project_id, plugin)
+        where += " AND plugin = ?"
+        params = (project_id, plugin)
+
+    node_where = where
+    node_params = params
 
     nodes = [
         GraphNode(
