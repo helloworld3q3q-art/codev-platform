@@ -1,6 +1,6 @@
-# Daily Summary — 2026-06-05(W2 Track M memory 全栈 + B1 向量召回 / W3 loop-guard 重构)
+# Daily Summary — 2026-06-05(W1 统一图谱 MCP + cross-link 退役 / W2 Track M memory 全栈 + B1 / W3 loop-guard 重构)
 
-> 范围:三窗口并行(W1 图谱 / W2 memory / W3 loop-guard)。本文 **W3 段**(§一~§五 + 附:chroma 事故)+ **W2 段**(§六~§十一)。
+> 范围:三窗口并行(W1 图谱 / W2 memory / W3 loop-guard)。本文 **W3 段**(§一~§五 + 附:chroma 事故)+ **W2 段**(§六~§十三)+ **W1 段**(§十四~§十六)。
 > 关联:`agent-loop-guard-redesign-2026-06-05.md`、`dev-agent-memory-mcp-design-2026-06-05.md`、`next-plan-2026-06-05.md`。
 > commit:W3 = `e3c6594`+`9246664`;W2 见 §十一 清单。均已 push 到 `fuwuqi/dev`。
 
@@ -117,3 +117,30 @@ commit(均 push 到 `fuwuqi/dev`):`f656c6a` `b6dd256`(P0)/ `19942c3` `6d70f06`(P
 - **vector 被 Qwen CPU 嵌入完全主导**(写 ~3.5s、召回 ~1.3s,慢 local ~1000×);chroma ANN 不是瓶颈(嵌入是)。写低频可接受;召回 ~1.3s 交互可忍但偏高。
 - **取舍**:要 vector 的语义质量又想压延迟 → `memory.embed_device=cuda`(GPU 嵌入快 ~10-50×),代价是与 chroma daemon 抢 8GB GPU(OOM 风险,需 `gpu_concurrency`/显存盘点)。默认 `cpu` 是"安全但慢";延迟敏感场景仍建议 local。
 - **数据未固化**(--keep 可留作 B1 benchmark);本次摸底用完即清。commit:见 §十一 末追加。
+
+---
+
+# W1 段 —— 统一图谱 MCP(A1 消费前门)+ cross-link 退役
+
+> 范围:W1 图谱线。给 A1 综合理解层补上开发端消费前门(graph MCP),并完成 cross-link 彻底退役收口。commit 见 §十六,均已 push 到 `fuwuqi/dev`。
+
+## 十四、统一图谱 MCP —— A1 业务域 + impact 接到开发端 agent
+
+A1 标注准(95%)但"标签躺图谱里没人用"——缺开发端消费前门。新建 `graph/mcp_server.py`(第 5 套平台 MCP,多租户 SSE 镜像 cross-link),给开发端 Claude Code/Codex 暴露 8 工具:跨层影响 5(`find_impact`/`find_table_usage`/`find_page_dependencies`/`find_impacted_pages`/`find_api_callers`)+ A1 业务域 2(`find_node_domain`/`list_domain_members`)+ `search_nodes`(模糊搜,退役 cross-link 前补)。`dispatch` 抽纯函数可测(绕 MCP 装饰器)。接 `serve-mcp` 第 5 端点(local 18092 / platform 19092)+ config + systemd unit。commit `807b65a`/`eeea201`/`3820651`/`61dfa16`(search_nodes)。
+
+## 十五、cross-link 彻底退役(6 批,-3300 行)
+
+核实发现 **cross-link 的 MCP 工具早就只读统一图谱 store**(老 `cross_layer.sqlite` 数据角色 2026-06-03 退场),graph MCP 已承接其能力(`find_table_usage`≈`find_table_refs` / `find_api_callers`≈`find_endpoint_link` / `search_nodes`)。**4 专家会诊**核实"放弃不丢能力",否掉一个关键误判:统一图谱 `builtin.sql` 插件**其实已扫 Java 注解 SQL + MyBatis-Plus**(`_scan_java_dml`/`_scan_mybatis_plus`)→ Java 表血缘已覆盖;stock 用注解 SQL 非 XML Mapper(全仓 0 个 `*Mapper.xml`),无缺口。据此分 6 批退"外壳":
+
+- **批1 编排**:mcp_serve 停 cross-link 端点 + config + .mcp.json(`8ca21e5`)。
+- **批2a metrics**:删 cross-link 源(删包护栏 —— 不再 import 该包)(`1ac12f0`)。
+- **批A ops 观测**:health(`_check_cross_layer`/`_check_cross_link_mcp`/`_usage_cross_link`)+ logs/gateway/bootstrap/backup(`af9dfea`)。
+- **批C web/dashboard**:platform_status + `web/schemas/reports` + 前端 `McpUsageCard.tsx` 删 cross-link 列(`e709338`)。
+- **批D 删包+reindex**:删整包 + Java/TS 扫描器 + reindex scope/runner/A3 `_AUTO_REINDEX_RETIRED` 机制 + systemd(顺手补 graph unit,修接线漏),**-3063 行**(`c57b309`)。
+- **批B 文档**:ai-tools-mcp/workflow/README 的 cross-link → graph + `sync-rules`(`5be567e`)。
+
+**验证**:全套 **1050 passed**(5 fail 是本机缺 `jieba` 的 W2 vector 测试,与退役无关)。**运维待办**(代码已就绪):① WSL `serve-mcp` 重启停还在跑的 cross-link daemon(否则旧进程跑已删代码)+ 起 graph 端点;② 前端 `pnpm run api` 重生 typings(删 `crossLink`);③ 业务仓 `.mcp.json` 删 cross-link 块。沉淀 memory `cross-link-retired-graph-takeover`。
+
+## 十六、commit 清单(W1)
+
+均 push 到 `fuwuqi/dev`:`807b65a` `eeea201` `3820651`(统一图谱 MCP)/ `61dfa16`(search_nodes)/ `8ca21e5`(批1 编排)/ `1ac12f0`(批2a metrics)/ `af9dfea`(批A ops)/ `e709338`(批C web)/ `c57b309`(批D 删包)/ `5be567e`(批B 文档)。
