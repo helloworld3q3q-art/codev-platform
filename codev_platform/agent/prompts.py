@@ -65,6 +65,19 @@ def _format_context_plan(plan) -> str:
     return "\n".join(lines)
 
 
+def _project_display_name(project_id: str) -> str | None:
+    """取项目 display_name 作 prompt 自描述(让模型能判断"这功能像不像本项目的")。
+
+    best-effort:读 platform_meta meta.json,缺失 / 任何异常 → None(自描述是锦上添花,
+    绝不因此影响 prompt 构建)。lazy import 破环(prompts ← tools._project)。
+    """
+    try:
+        from codev_platform.agent.tools._project import display_name_of
+        return display_name_of(project_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def build_code_understanding_system(
     project_id: str | None = None,
     user_id: str | None = None,
@@ -88,10 +101,20 @@ def build_code_understanding_system(
         if user_id:
             ctx_lines.append(f"- 用户(user):{user_id}")
         if project_id:
+            _dn = _project_display_name(project_id)
+            _label = f"{project_id}({_dn})" if _dn else project_id
             ctx_lines.append(
-                f"- 项目(project):{project_id}"
+                f"- 项目(project):{_label}"
                 "(你的检索工具已绑定到此项目,所有 codegraph/impact/search_docs"
                 "查的都是这个项目的数据;问'现在哪个项目'就答它)"
+            )
+            # 防"绑错项目空转 + 凭空捏造": 索引只覆盖本项目, 越界即如实收尾, 不堆工具不编造。
+            ctx_lines.append(
+                "- ⚠️ 索引范围:你只能看到**本项目**的代码与文档,看不到其它项目。"
+                "若用户问的功能 / 页面 / 模块在本项目检索 2 次仍找不到、且不像属于本项目 → "
+                f"**立刻停止换词重搜**,如实说「在本项目 {project_id} 里没找到」,并提示「可能属于"
+                "别的项目(平台自身 / 其它业务仓),换 project_id 重连后再查」。"
+                "**绝不凭空捏造不存在的文件 / 页面 / 符号来硬凑答案** —— 没有就说没有。"
             )
         else:
             ctx_lines.append("- 项目:未指定(工具按进程默认仓)")

@@ -59,3 +59,17 @@ def repo_path_of(project_id: str) -> Path | None:
         return Path(rp) if isinstance(rp, str) and rp else None
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def display_name_of(project_id: str) -> str | None:
+    """按 project_id 读 meta.json 的 display_name(供 agent prompt 自描述用)。找不到返 None。"""
+    meta_dir = _platform_meta_dir()
+    if meta_dir is None:
+        return None
+    meta = meta_dir / project_id / "meta.json"
+    try:
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        dn = data.get("display_name")
+        return dn if isinstance(dn, str) and dn else None
+    except (OSError, json.JSONDecodeError):
+        return None
