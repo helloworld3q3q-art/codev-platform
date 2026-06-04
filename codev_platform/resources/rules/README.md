@@ -12,7 +12,7 @@
 | `file-discipline.md` | 单文件行数 + 跨语言判重 + docs/ 目录归类 |
 | `commit-pr-conventions.md` | 项目红线:禁 AI 痕迹 / Co-Authored-By |
 | `windows-powershell.md` | `.ps1` ASCII / 中文 UTF8 / Claude Code 安全检查友好写法 |
-| `ai-tools-mcp.md` | CodeGraph / platform-docs / cross-link MCP 触发指南 |
+| `ai-tools-mcp.md` | CodeGraph / platform-docs / graph MCP 触发指南 |
 | `verification-checklist.md` | 改动后验证清单 + pre-push 6 gates |
 | `weekly-iteration-cadence.md` | 每周迭代节奏 + 归档 SOP |
 | `security.md` | 敏感信息 + 免责声明 + token 处理 |

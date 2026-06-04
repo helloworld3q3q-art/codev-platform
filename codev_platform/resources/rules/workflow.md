@@ -31,7 +31,7 @@
 ### 2.3 全局基础设施(改前确认)
 - `apps/stock-admin-web/src/app.tsx`、`src/models/**`、`src/utils/fetch/**`、`config/routes.ts`
 - `apps/stock-admin-api/pom.xml`、`package.json`、`requirements.txt`
-- `tools/dev/*.ps1`、`tools/cross_link/**`、`tools/chroma/**`、`.mcp.json`
+- `tools/dev/*.ps1`、`tools/chroma/**`、`.mcp.json`
 
 ---
 
@@ -43,9 +43,9 @@
 
 | 等级 | 适用范围 | 必做动作 |
 |---|---|---|
-| L1 小改 | 文案 / 注释 / 局部样式 / 单文件小 bug,且不改 API / DB / DTO / enum / 路由 / 全局配置 / 生成物 | `git status -s` + 定向读文件 + 最小验证;不强制 platform-docs / codegraph / cross-link |
-| L2 单层 | 单模块或同一技术层多模块联动,可能影响调用方但不改 API / DB / DTO / enum / 跨语言字段契约 | 相关模块 rules + codegraph 定义 / 调用方 / 影响面 + 定向验证;出现数据链问题时加 cross-link 并评估是否升 L3 |
-| L3 跨层 | DTO / API / SQL / Python 写库 / Flyway / enum / 推荐 / 资金 / 百分比 / shadow / snapshot / 前端请求离散筛选值 | platform-docs + codegraph + cross-link + 验证闭环 |
+| L1 小改 | 文案 / 注释 / 局部样式 / 单文件小 bug,且不改 API / DB / DTO / enum / 路由 / 全局配置 / 生成物 | `git status -s` + 定向读文件 + 最小验证;不强制 platform-docs / codegraph / graph |
+| L2 单层 | 单模块或同一技术层多模块联动,可能影响调用方但不改 API / DB / DTO / enum / 跨语言字段契约 | 相关模块 rules + codegraph 定义 / 调用方 / 影响面 + 定向验证;出现数据链问题时加 graph 并评估是否升 L3 |
+| L3 跨层 | DTO / API / SQL / Python 写库 / Flyway / enum / 推荐 / 资金 / 百分比 / shadow / snapshot / 前端请求离散筛选值 | platform-docs + codegraph + graph + 验证闭环 |
 | L4 高风险 | 生成文件 / 已发布 migration / AI 索引 / 依赖 / 全局 runtime / `tools/dev` / `.mcp.json` | 先说明影响范围;禁改项拒绝或走生成 / forward migration 等正确流程 |
 
 §3.2 是 L2/L3/L4 的展开表。L1 若命中 §2 的默认禁改 / 改前确认路径,或出现跨文件契约影响,必须升级到 L3/L4。
@@ -59,9 +59,9 @@ MCP 的目标不是"每次都用",而是让 L2/L3 的检索命中率稳定上来
 | L1 明确小改 | 不跑完整 MCP 链路;本地定向读 + 最小验证即可 |
 | L1 但不知道入口 / 文件位置 | 可用一次 codegraph / 本地搜索定位,定位后停止扩大 |
 | L2 单层单模块 | 至少用 codegraph 查定义 / 调用方 / 影响面之一;改子模块代码前补读对应 rules |
-| L2 单层多模块 | 用 codegraph impact / callers / callees 看同层联动;不默认 cross-link |
-| L2 中追问数据来源 / 去向 | 加一次 cross-link 查 endpoint / table / Python writer / Mapper 链路;若改契约或写库字段,升级 L3 |
-| L3 跨层 / 契约 / DB / enum | platform-docs + codegraph + cross-link 都要有结果或说明兜底 |
+| L2 单层多模块 | 用 codegraph impact / callers / callees 看同层联动;不默认 graph |
+| L2 中追问数据来源 / 去向 | 加一次 graph 查 endpoint / table / Python writer / Mapper 链路;若改契约或写库字段,升级 L3 |
+| L3 跨层 / 契约 / DB / enum | platform-docs + codegraph + graph 都要有结果或说明兜底 |
 | dirty 命中索引范围 | MCP 只作导航;关键结论必须回读真实文件 |
 | 多会话同时改 | 读侧可并发;写侧重建索引 / 代码生成 / migration 串行 |
 
@@ -79,7 +79,7 @@ L2/L3/L4 任务在修改文件前,必须先把规则、代码结构、数据链�
 - 文件范围:
 - 规则/skill:
 - CodeGraph 结论:
-- cross-link 结论:
+- graph 结论:
 - dirty-index / 真实文件:
 - 禁改项 / 生成项:
 - 验证:
@@ -91,13 +91,13 @@ L2/L3/L4 任务在修改文件前,必须先把规则、代码结构、数据链�
 |---|---|
 | L1 | 不强制成文;若入口不清或命中受控边界,升级到 L2/L3 后补齐。 |
 | L2 单模块 | 至少包含规则/skill、CodeGraph 定位或调用方、dirty-index 状态、定向验证。 |
-| L2 多模块 | 在 L2 单模块基础上补同层影响面;若出现 endpoint / table / Python writer-reader / API request 枚举值,加 cross-link 并评估升 L3。 |
-| L3 跨层 | 必须同时包含 platform-docs、CodeGraph、cross-link 结论;MCP 不可用时说明一次并用本地规则、源码、SQL、生成类型兜底。 |
+| L2 多模块 | 在 L2 单模块基础上补同层影响面;若出现 endpoint / table / Python writer-reader / API request 枚举值,加 graph 并评估升 L3。 |
+| L3 跨层 | 必须同时包含 platform-docs、CodeGraph、graph 结论;MCP 不可用时说明一次并用本地规则、源码、SQL、生成类型兜底。 |
 | L4 高风险 | 先列受控边界、禁改项、串行写资源和回退方式;生成物、历史 migration、AI 索引产物不得手改。 |
 
 典型拦截:
 - 前端筛选 / 下拉 `value` 会进入 API request,且是有限离散集合 → 直接按 L3 枚举链路处理,不得在前端本地 options 自造。
-- SQL / Flyway / Python 写库字段 → 必须有 cross-link 的 table / writer / reader 结论。
+- SQL / Flyway / Python 写库字段 → 必须有 graph 的 table / writer / reader 结论。
 - 多会话下目标文件已有未知改动 → 合并影响面必须改读真实文件,不得只信索引。
 
 ### 3.1 判断本次触及层
@@ -120,18 +120,18 @@ Web 前端 / Java API / Python Pipeline / DB-Flyway / 跨层契约 / AI 工具�
 | 前端样式 / 颜色 | 子模块 styles + stock-color-convention(涨跌)| - |
 | 前端 API 调用 / model | 子模块 api-service + react-patterns | - |
 | 前端枚举使用 | 子模块 architecture §4(useModel) + cross-layer-enum-consistency | - |
-| 前端筛选 / 下拉 value 会进入 API request | cross-layer-enum-consistency + skill add-enum | `cross-link find_endpoint_link` |
+| 前端筛选 / 下拉 value 会进入 API request | cross-layer-enum-consistency + skill add-enum | `graph find_api_callers` |
 | Java Controller / Facade | java-layering + api-contracts | `codegraph_callers` |
-| Java Mapper 自定义 SQL | 子模块 sql-patterns + shadow-isolation(读 recommend_result 必带过滤) | `cross-link find_table_refs` |
-| Java DTO 字段改动 | skill backend-dto-change + frontend-backend-handoff | `cross-link find_endpoint_link` + `codegraph_impact` |
+| Java Mapper 自定义 SQL | 子模块 sql-patterns + shadow-isolation(读 recommend_result 必带过滤) | `graph find_table_usage` |
+| Java DTO 字段改动 | skill backend-dto-change + frontend-backend-handoff | `graph find_api_callers` + `codegraph_impact` |
 | Java 新建 / 改枚举 | 子模块 enum-patterns + skill add-enum + cross-layer-enum-consistency | `codegraph_callers` |
-| 新增 Flyway migration | skill add-flyway-migration + same-day-rerun + not-null-write-guard | `cross-link find_table_refs` |
+| 新增 Flyway migration | skill add-flyway-migration + same-day-rerun + not-null-write-guard | `graph find_table_usage` |
 | 改既有 Flyway | ❌ 禁止,新增 forward migration | - |
-| Python repository 读写 | 子模块 pipeline-patterns + not-null-write-guard | `cross-link find_table_refs` |
+| Python repository 读写 | 子模块 pipeline-patterns + not-null-write-guard | `graph find_table_usage` |
 | Python 新 Job / 跑批入口 | skill add-python-job(含幂等性 + fetcher 限速) + same-day-rerun | - |
 | Python fetcher 入口 | skill add-python-job §🚨 fetcher 强制 + windows-powershell | - |
-| Python model/core.py 字段 | model-field-consistency + 必跑 `check_entity_dataclass_parity.py` | `cross-link find_table_refs` + `codegraph_callers` |
-| 影响推荐 / 4W / track 链路 | shadow-isolation + snapshot-trio-write + pit-redline-and-tracks | `cross-link find_table_refs` |
+| Python model/core.py 字段 | model-field-consistency + 必跑 `check_entity_dataclass_parity.py` | `graph find_table_usage` + `codegraph_callers` |
+| 影响推荐 / 4W / track 链路 | shadow-isolation + snapshot-trio-write + pit-redline-and-tracks | `graph find_table_usage` |
 | 影响资金 / capital 字段 | capital-amount-semantics(4 套口径) | `codegraph_impact` |
 | 影响百分比字段(stop_loss_pct 等)| pct-sign-convention(负值止损正值止盈)| `codegraph_callers` |
 | 业务 sanity check / 告警 | business-sanity-alerts | - |
@@ -140,27 +140,27 @@ Web 前端 / Java API / Python Pipeline / DB-Flyway / 跨层契约 / AI 工具�
 | 股票上下文展示 | stock-name-display(必带 stockName) | - |
 | 回测 / shadow 实验 | shadow-isolation §2 白名单 | - |
 | 提交 commit | commit-pr-conventions + skill git-commit | - |
-| AI 工具链 / cross-link / chroma | ai-tools-mcp | - |
+| AI 工具链 / graph / chroma | ai-tools-mcp | - |
 | PowerShell 脚本 | windows-powershell(ASCII only / UTF8) | - |
 | 文档 / 规则修改 | weekly-iteration-cadence + 引用路径存在检查 | - |
 
-#### 跨层业务链场景(必先调 cross-link 看全链路依赖,不许只改单层)
+#### 跨层业务链场景(必先调 graph 看全链路依赖,不许只改单层)
 
-凡涉及以下"业务标识符跨多层传递"的改动,**改前必查 cross-link**,确认全链路依赖再下手:
+凡涉及以下"业务标识符跨多层传递"的改动,**改前必查 graph**,确认全链路依赖再下手:
 
 | 跨层场景 | 必查链路 | MCP 工具组合 |
 |---|---|---|
-| **sql ↔ py** | Flyway column ↔ Python `core.py` / writer / reader | `cross-link find_table_refs` |
-| **sql ↔ java** | Flyway column ↔ Java Entity / Mapper SQL | `cross-link find_table_refs` |
-| **sql ↔ java ↔ 前端** | Flyway → Java DTO → 前端 `typings.d.ts` | `cross-link find_table_refs` + `find_endpoint_link` |
-| **sql ↔ py ↔ java ↔ 前端** | Flyway → Python writer → Java reader → DTO → typings → .tsx | `cross-link find_table_refs` + `find_endpoint_link` + `check_entity_dataclass_parity.py` |
-| **py ↔ java** | Python `core.py` ↔ Java Entity(同表) | `cross-link find_table_refs` + `check_entity_dataclass_parity.py` |
-| **py ↔ java ↔ 前端** | Python writer → Java reader → 前端展示 | `cross-link find_table_refs` + `find_endpoint_link` |
-| **java ↔ 前端** | Java DTO/Controller ↔ `typings.d.ts`(用户跑 `pnpm run api` 重生) | `cross-link find_endpoint_link` + `codegraph_impact` |
+| **sql ↔ py** | Flyway column ↔ Python `core.py` / writer / reader | `graph find_table_usage` |
+| **sql ↔ java** | Flyway column ↔ Java Entity / Mapper SQL | `graph find_table_usage` |
+| **sql ↔ java ↔ 前端** | Flyway → Java DTO → 前端 `typings.d.ts` | `graph find_table_usage` + `find_api_callers` |
+| **sql ↔ py ↔ java ↔ 前端** | Flyway → Python writer → Java reader → DTO → typings → .tsx | `graph find_table_usage` + `find_api_callers` + `check_entity_dataclass_parity.py` |
+| **py ↔ java** | Python `core.py` ↔ Java Entity(同表) | `graph find_table_usage` + `check_entity_dataclass_parity.py` |
+| **py ↔ java ↔ 前端** | Python writer → Java reader → 前端展示 | `graph find_table_usage` + `find_api_callers` |
+| **java ↔ 前端** | Java DTO/Controller ↔ `typings.d.ts`(用户跑 `pnpm run api` 重生) | `graph find_api_callers` + `codegraph_impact` |
 | **跨语言枚举** | Python enum ↔ Java enum ↔ 前端 `useModel('enum')` | `cross-layer-enum-consistency` + `audit_fetcher_registry_parity.py` |
-| **前端请求筛选枚举** | `.tsx Columns/valueEnum/options` → request DTO 字段 → Java enum → `EnumMetadataService` → `pnpm run enums` | `cross-layer-enum-consistency` + `find_endpoint_link` |
+| **前端请求筛选枚举** | `.tsx Columns/valueEnum/options` → request DTO 字段 → Java enum → `EnumMetadataService` → `pnpm run enums` | `cross-layer-enum-consistency` + `find_api_callers` |
 
-**未调 cross-link 直接动跨层链路** = 视为门禁未过(workflow.md §3.4 处理)。
+**未调 graph 直接动跨层链路** = 视为门禁未过(workflow.md §3.4 处理)。
 
 不在表内 → 至少读 workflow + 涉及目录 1-2 条最相关规则。
 
@@ -168,7 +168,7 @@ Web 前端 / Java API / Python Pipeline / DB-Flyway / 跨层契约 / AI 工具�
 
 每次任务首次修改前必须说一句:**本次触及 \<层\>;适用规则 \<文件名\>;关键约束 \<一句话\>;验证方式 \<命令\>**。
 
-例:`本次触及 Java Mapper + cross-link;适用 sql-patterns + ai-tools-mcp;不回改历史 Flyway,影子隔离 9 处 SQL 不动;验证 mvn test + cross-link rebuild`。
+例:`本次触及 Java Mapper + graph;适用 sql-patterns + ai-tools-mcp;不回改历史 Flyway,影子隔离 9 处 SQL 不动;验证 mvn test + graph rebuild`。
 
 同一轮任务范围不变沿用首次声明;范围扩大补读 + 重新声明。
 
@@ -187,7 +187,7 @@ Web 前端 / Java API / Python Pipeline / DB-Flyway / 跨层契约 / AI 工具�
 跨层改动必查:
 - **规则**:`platform-docs` MCP / `search_docs`
 - **调用链**:`codegraph` MCP(`codegraph_callers` / `codegraph_impact`)
-- **endpoint / Mapper / Flyway / table / Python 链路**:`cross-link` MCP(`find_endpoint_link` / `find_table_refs`)
+- **endpoint / Mapper / Flyway / table / Python 链路**:`graph` MCP(`find_api_callers` / `find_table_usage`)
 
 MCP 不可用 → 说明一次,本地 grep + Read 兜底。
 
@@ -223,9 +223,9 @@ MCP 不可用 → 说明一次,本地 grep + Read 兜底。
 
 - **文件所有权**:每个会话修改前先说明负责的文件 / 模块范围;不得并发修改同一文件。发现目标文件已有非本会话改动,先读最新内容再继续。
 - **工作树检查**:修改前后都看 `git status -s`;遇到未知改动不回滚,只在本次范围内协作。
-- **索引可信度**:调 CodeGraph / cross-link / platform-docs 前先看 dirty 范围。dirty 命中索引范围时,MCP 结果只能作参考,关键决策必须读真实文件确认。
+- **索引可信度**:调 CodeGraph / graph / platform-docs 前先看 dirty 范围。dirty 命中索引范围时,MCP 结果只能作参考,关键决策必须读真实文件确认。
 - **读侧并发**:MCP 查询 / SQLite 读连接 / stdio proxy 可以多会话并发。
-- **写侧串行**:Chroma reindex / CodeGraph rebuild / cross-link rebuild / 代码生成 / migration / 写库任务必须单实例执行,依赖既有 lock / forward migration / 人工确认。
+- **写侧串行**:Chroma reindex / CodeGraph rebuild / graph rebuild / 代码生成 / migration / 写库任务必须单实例执行,依赖既有 lock / forward migration / 人工确认。
 - **重资源单例**:GPU 模型类 daemon 必须单实例;多会话只能通过轻量 proxy 共享。
 
 ---
@@ -290,11 +290,11 @@ MCP 不可用 → 说明一次,本地 grep + Read 兜底。
 | Web API 调用 | ESLint + 确认 typings 已含字段 |
 | Java Mapper / Service | `mvn -f apps/stock-admin-api/pom.xml compile` 或相关 test |
 | Java DTO / Controller | skill backend-dto-change + compile + test |
-| Flyway | 新增 migration + Java 重启验证 + cross-link 检查 |
+| Flyway | 新增 migration + Java 重启验证 + graph 检查 |
 | Python repository / job | `python -m pytest python/stock-pipeline/tests/<target>` |
 | Python 跑批写侧 | pytest + 幂等 / 同日重跑检查 |
 | 枚举 | skill add-enum + 前后端生成链路 + parity 工具 |
-| endpoint / SQL / Mapper 链路 | cross-link 查询或重建 |
+| endpoint / SQL / Mapper 链路 | graph 查询或重建 |
 | AI 工具脚本 | 对应 tests + `tools/dev/ai-health.ps1` |
 | 文档 / 规则 | 引用路径存在 + pre-push audit |
 
@@ -351,7 +351,7 @@ MCP 不可用 → 说明一次,本地 grep + Read 兜底。
 【MCP 选型核查】对照 workflow.md §3.2 任务映射表,核实实施兄弟选的 MCP 工具与任务类型匹配:
 - 找代码符号 / 调用链 → 应选 codegraph_*
 - 找规则 / 文档 / 事故 → 应选 search_docs
-- 找业务链路 → 应选 cross-link find_*
+- 找业务链路 → 应选 graph find_*
 - 选错或漏选 → 审计不通过
 
 【Grep 例外声明核查】扫实施兄弟响应中所有 Grep 调用,每次必带 [Grep 例外: <类型>] 声明。
@@ -372,7 +372,7 @@ MCP 不可用 → 说明一次,本地 grep + Read 兜底。
 2. mcp__platform-docs__search_docs("<本次相关 sanity / 闭环 / 流程>") — 验流程对齐
 3. mcp__codegraph__codegraph_search("<被调用的关键函数 / 入口>") — 核接口契约 / 入参签名
 4. mcp__codegraph__codegraph_node("<本次构造的 dataclass / DTO>") — 核字段名一致性
-5. mcp__cross-link__find_table_refs("<本次写入的表>") — 核走标准 writer 路径不旁路
+5. mcp__graph__find_table_usage("<本次写入的表>") — 核走标准 writer 路径不旁路
 6. mcp__platform-docs__search_docs("<本次场景关键词>", category="memory") — 拿用户偏好 / 踩坑经验 / 决策记录(子 agent 不 autoload MEMORY,这步是它**唯一**看到用户偏好的路径)
 ```
 
@@ -385,7 +385,7 @@ MCP 不可用 → 说明一次,本地 grep + Read 兜底。
 L2/L3 任务起手 5-6 个并发 MCP 调用,**省 ~10 次 Grep + Read**(本次实测):
 
 ```
-1. cross-link find_table_refs("<核心表>") — 拿全跨层 reader/writer/updater 路径
+1. graph find_table_usage("<核心表>") — 拿全跨层 reader/writer/updater 路径
 2. search_docs("<改动主题>") — 拿规则 + 历史事故复盘 + 设计文档(top 5-8)
 3. codegraph_search("<目标符号>") — 定位文件:行号
 4. codegraph_search("<下游消费函数>") — 看 caller 影响面

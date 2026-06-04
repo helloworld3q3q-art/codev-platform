@@ -14,7 +14,7 @@
 | 符号定义 / 签名 / 位置 | `codegraph_search`(onboarding/架构问题用 `codegraph_context`)| 函数名 |
 | 调用方 / 影响面 / 改动波及 | `codegraph_callers` / `codegraph_impact` | 引用 |
 | 规则 / 设计 / 事故文档 | `search_docs` | `docs/` |
-| 前端↔端点↔表 跨层链路 | `cross-link` `find_table_refs` / `find_endpoint_link` | 多文件 |
+| 前端↔端点↔表 跨层链路 / 业务域 | `graph` `find_table_usage` / `find_api_callers` | 多文件 |
 
 **grep+Read 仅 4 种兜底场景合法**(详见 §2.1):未提交改动命中查询范围 / 索引滞后 / MCP 不可用 / 核对最新源码行号。
 **自检(挂 §3.3 门禁)**:本轮用 grep 找了上面任一类?→ 先确认真命中兜底场景,否则改用 MCP 重来。
@@ -27,7 +27,7 @@
 |---|---|---|
 | 找代码定义 / 函数源码 / 调用关系 | **CodeGraph** | `codegraph_search` / `codegraph_context`（PRIMARY，组合 search+node+callers+callees）/ `codegraph_callers` / `codegraph_callees` / `codegraph_impact`（blast radius）/ `codegraph_node` / `codegraph_explore` / `codegraph_files` / `codegraph_status` |
 | 找规则 / 设计文档 / 事故复盘 / 操作手册 | **platform-docs / Chroma** | `search_docs(query, category?, module?)` / `get_by_file` / `list_collections` |
-| 找前端 API ↔ Java endpoint ↔ Table 业务链路 | **cross-link** | `find_endpoint_link` / `find_table_refs` / `search_nodes` / `cross_link_stats` |
+| 找前端 API ↔ endpoint ↔ Table 跨层链路 / 业务域 | **graph**(统一图谱) | `find_impact` / `find_table_usage` / `find_api_callers` / `find_page_dependencies` / `find_impacted_pages` / `find_node_domain` / `list_domain_members` / `search_nodes` |
 | 跨会话用户偏好 / 反馈 / 项目状态(本地自带) | **MEMORY** | 本地 MEMORY.md 自动加载,无需调工具 |
 | 跨机 / 跨开发者共享的团队记忆(平台 PG) | **agent-memory** | `recall`(query-aware 去冲突 top-N)/ `list_scope`(诊断单作用域)。换机/重 clone 后同 token 召回回本人记忆 |
 
@@ -42,7 +42,7 @@
 | 平台 MCP 服务 | 端点(默认端口) | 起法 |
 |---|---|---|
 | **platform-docs**(chroma) | `http://127.0.0.1:18083/sse?project_id=<id>` | daemon,`serve-mcp start` 拉起(预热 Qwen ~30-60s) |
-| **cross-link** | `http://127.0.0.1:18086/sse?project_id=<id>` | `serve-mcp start` 拉起 |
+| **graph**(统一图谱) | `http://127.0.0.1:18092/sse?project_id=<id>` | `serve-mcp start` 拉起 |
 | **codegraph** | `http://127.0.0.1:<per-project 端口>/sse` | mcp-proxy 包 `codegraph serve --mcp`,`serve-mcp start` 拉起(每项目一端口) |
 | **agent-memory**(2026-06-04 新增,读侧 MVP) | `http://127.0.0.1:18087/sse?project_id=<id>` | `serve-mcp start` 拉起;`?project_id=` 仅用于 project-scope 记忆,org/user 走 token 身份 |
 
@@ -63,7 +63,7 @@ codev-platform serve-mcp status    # 确认全 OK(或 health --all 的 MCP 端�
 copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json   # 覆盖即恢复, 重启 Claude Code
 ```
 
-端口配在 `~/.codev-platform/config.json`(`mcp.cross_link_sse_port` / `projects.<id>.codegraph_sse_port`;业务仓连固定 URL 须显式 pin,防自动分配漂移)。单机图省事也可直接用 `.stdio.bak` 退回文件路径模式(略快 + 自动拉起);本套收益在**跨机共享**。
+端口配在 `~/.codev-platform/config.json`(`mcp.graph_sse_port` / `projects.<id>.codegraph_sse_port`;业务仓连固定 URL 须显式 pin,防自动分配漂移)。单机图省事也可直接用 `.stdio.bak` 退回文件路径模式(略快 + 自动拉起);本套收益在**跨机共享**。
 
 **codegraph 索引数据也已集中到平台**(2026-05-30,与 cross-link 对称):
 - 数据物理在 `data/codegraph_ext/<pid>/codegraph/`(与 `cross_layer.sqlite` 并排),业务仓 `<repo>/.codegraph` 是 **junction/symlink** 指向平台 —— 第三方 codegraph 工具透明无感。
@@ -84,7 +84,7 @@ copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json   # 覆盖即恢复, 
 | MCP 工具不可用 | server 崩 / db locked / 网络问题 |
 | 需要确认最新源码 | MCP 返回片段后核对行号、与最近编辑后的真实状态 |
 
-**判 SOP**:调 CodeGraph / cross-link 前先 `git status -s` 看 dirty 文件,或直接跑 `tools\dev\dirty-index-check.ps1`(exit 0 = MCP 可信,exit 1 = 有 dirty 命中索引范围,建议兜底)。
+**判 SOP**:调 CodeGraph / graph 前先 `git status -s` 看 dirty 文件,或直接跑 `tools\dev\dirty-index-check.ps1`(exit 0 = MCP 可信,exit 1 = 有 dirty 命中索引范围,建议兜底)。
 
 ### 2.2 commit 后 60 秒新鲜度检查（HIGHEST PRIORITY）
 
@@ -121,9 +121,9 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 
 | 场景 | 链 |
 |---|---|
-| 修 bug | `codegraph_search` → `codegraph_callers` → `codegraph_impact` → `search_docs(相关规则)` → `find_table_refs(相关表)` → Edit |
-| 写新功能 | `search_docs(类似设计)` → `codegraph_context(类似实现)` → `find_endpoint_link(类似 endpoint)` → 实现 → 测试 |
-| 跨层改动 | `find_endpoint_link` → `find_table_refs` → 按 **Python → Java → 前端** 顺序 → `pnpm run api` → `cross_link_stats` 验证 |
+| 修 bug | `codegraph_search` → `codegraph_callers` → `codegraph_impact` → `search_docs(相关规则)` → `find_table_usage(相关表)` → Edit |
+| 写新功能 | `search_docs(类似设计)` → `codegraph_context(类似实现)` → `find_api_callers(类似 endpoint)` → 实现 → 测试 |
+| 跨层改动 | `find_api_callers` → `find_table_usage` → 按 **Python → Java → 前端** 顺序 → `pnpm run api` → `search_nodes` 验证 |
 
 ---
 
@@ -131,8 +131,8 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 
 | 现象 | 第一步处理 |
 |---|---|
-| **业务仓 `/mcp` 四套全红**(切 SSE 后,连不上 18083/18086/18087/codegraph 端口) | 平台端点没常驻 —— 跑 `codev-platform serve-mcp start` 拉起 4 端点,`serve-mcp status` 确认全 OK。**重启电脑后必跑一次**(§一 b 常驻依赖) |
-| **单独 codegraph SSE 红**(platform-docs/cross-link 正常) | mcp-proxy 没起 / `codegraph` 命令缺。看 `codev_platform/mcp_serve_logs/codegraph_<pid>.log`;`serve-mcp start` 重拉。确认 venv 有 `mcp-proxy.exe`(`ai-health` 的 `mcp-proxy` 行) |
+| **业务仓 `/mcp` 全红**(切 SSE 后,连不上 18083/18087/18092/codegraph 端口) | 平台端点没常驻 —— 跑 `codev-platform serve-mcp start` 拉起端点,`serve-mcp status` 确认全 OK。**重启电脑后必跑一次**(§一 b 常驻依赖) |
+| **单独 codegraph SSE 红**(platform-docs/graph 正常) | mcp-proxy 没起 / `codegraph` 命令缺。看 `codev_platform/mcp_serve_logs/codegraph_<pid>.log`;`serve-mcp start` 重拉。确认 venv 有 `mcp-proxy.exe`(`ai-health` 的 `mcp-proxy` 行) |
 | **想退回旧 stdio 文件路径模式** | `copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json` → 重启 Claude Code,恢复 per-session 自 spawn(单机略快,无需 serve-mcp start) |
 | `codegraph database is locked` | 看 `.codegraph/codegraph.db.lock` stale(0 字节 + 数小时未变)即删 |
 | platform-docs 召回质量差 | `update-local-ai.ps1 -SkipCodeGraph -SkipCrossLink`(只重建 Chroma) |
@@ -143,7 +143,7 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 | platform-docs **daemon 运行中崩了** (search_docs 突然全失败) | mcp-proxy 还连着死的 daemon,所有 search 报错。**重启 Claude Code** 让 launcher 重检测 + 自动 spawn 新 daemon。`ai-health` 的 `platform-docs daemon` 会报 `not running`,`platform-docs servers` 会报 `0 servers`,组合判断 = daemon 真死了。常见诱因:GPU 驱动更新 / Windows 系统重启 / 手动 kill |
 | platform-docs **chroma reindex 撞锁** (`update-local-ai.ps1` 报"另一个 reindex 已在跑") | 正常拒绝行为(并发写 chroma 会损坏 db)。等先前 reindex 完成,或确认 stale(`data/chroma/.reindex.lock` 文件 > 30 分钟未变)后手动 `Remove-Item data\chroma\.reindex.lock` 重试 |
 | launcher 多 session **同时 cold start** | launcher 用 `tools/chroma/.daemon.spawn.lock` 串行化 spawn,后到的等 120s 让先到的 spawn 完成再 hand off。stale lock(> 120s 未变)自动抢占。**无需人工介入**,日志看 `[platform-docs-launcher] another launcher is spawning daemon, waiting...` |
-| cross-link 数据陈旧 | 看 `cross_link_stats.build_meta.last_build_at`;重建脚本待补 |
+| graph 数据陈旧 | 重建图谱(`update-local-ai` graph 档);用 `search_nodes` 抽样核对节点是否更新 |
 | MCP 完全连不上 | `~/.claude.json` 检查;重启 Claude Code(**不是 /clear**) |
 | post-commit hook 静默失败 | 跑 `ai-health` 看 `hook missed?`;WARN 则手动 `powershell -File tools/dev/post-commit.ps1` |
 | 需等 reindex 完成再调 MCP | `powershell -File tools/dev/wait-for-reindex.ps1`(秒回 exitCode 0/1/2) |
@@ -202,7 +202,7 @@ agent 自己应该会主动查相关规则,你不需要替它把规则贴在 pro
 | Skill | 用途 |
 |---|---|
 | `/ai-health` | 12 项体检 + dirty-check(三档:health / dirty / both) |
-| `/update-local-ai` | 手工重建索引(四档:all / Chroma / CodeGraph / cross-link) |
+| `/update-local-ai` | 手工重建索引(四档:all / Chroma / CodeGraph / graph) |
 
 ---
 
