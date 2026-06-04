@@ -179,3 +179,25 @@ def test_legacy_schema_migrates_preserving_data(tmp_path: Path) -> None:
         assert load_graph(conn, "proj-b").edges == []
     finally:
         conn.close()
+
+
+def test_legacy_migration_is_idempotent(tmp_path: Path) -> None:
+    """旧库迁移幂等: 同一 db open 两次 —— 第二次 project_id 列已在则跳过, 不抛
+    (无 __c1old 已存在错)、不重复回填(行数不翻倍)。"""
+    db = tmp_path / "legacy.sqlite"
+    raw = sqlite3.connect(db)
+    try:
+        raw.executescript(_LEGACY_DDL)
+        raw.execute("INSERT INTO edges (plugin, source, target, kind) "
+                    "VALUES ('px', 'a', 'b', 'calls')")
+        raw.commit()
+    finally:
+        raw.close()
+
+    open_store("proj-a", path=db).close()   # 第一次 open 触发迁移
+    conn = open_store("proj-a", path=db)    # 第二次 open: 列已在 → 跳过, 不抛
+    try:
+        g = load_graph(conn, "proj-a")
+        assert [e.source for e in g.edges] == ["a"]  # 仍 1 条, 未翻倍
+    finally:
+        conn.close()

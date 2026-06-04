@@ -125,6 +125,22 @@ def test_validate_clamps_overconfident_soft_edge():
     assert out.edges[0].confidence < 1.0
 
 
+def test_validate_drops_soft_edge_with_dangling_target():
+    # 软边 target 指向不存在的软节点(结果里无 GHOST 域节点)→ target 端悬空丢弃。
+    real = "p:backend_endpoint:/o"
+    edge = GraphEdge(source=real, target="p:business_domain:GHOST",
+                     kind=EdgeKind.BELONGS_TO_DOMAIN, confidence=0.8)
+    out = validate_soft_result(AnalyzerResult(edges=[edge], plugin="x"), {real})
+    assert out.edges == []
+
+
+def test_validate_drops_soft_edge_both_ends_dangling():
+    edge = GraphEdge(source="p:backend_endpoint:NOPE", target="p:business_domain:NOPE",
+                     kind=EdgeKind.BELONGS_TO_DOMAIN, confidence=0.8)
+    out = validate_soft_result(AnalyzerResult(edges=[edge], plugin="x"), set())
+    assert out.edges == []
+
+
 # ---- ingest second post-pass 集成 ----
 
 def test_analyzers_pass_persists_soft_products(clean_registry, tmp_path):
@@ -173,6 +189,36 @@ def test_analyzers_pass_drops_hallucinated_edge(clean_registry, tmp_path):
         assert any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in g.nodes)  # 软节点留
         assert [e for e in g.edges
                 if e.kind == EdgeKind.BELONGS_TO_DOMAIN.value] == []  # 悬空软边被丢
+    finally:
+        conn.close()
+
+
+def test_analyze_error_is_fail_soft(clean_registry, tmp_path):
+    """单 analyzer 的 analyze 抛错 → fail-soft, 不拖垮其余 analyzer 的产出。"""
+    from codev_platform.graph.ingest import ANALYZERS_PLUGIN, IngestReport, _analyzers_pass
+    from codev_platform.graph.store import load_graph, open_store, upsert_result
+
+    class _Boom:
+        name = "boom"
+
+        def applies(self, nodes):
+            return True
+
+        def analyze(self, project_id, nodes, edges):
+            raise RuntimeError("analyze boom")
+
+    register_analyzer(_Boom())            # 先注册会崩的
+    register_analyzer(_DomainAnalyzer())  # 再注册正常的
+    conn = open_store("p", path=tmp_path / "g.sqlite")
+    try:
+        ep = GraphNode(id="p:backend_endpoint:/o", kind=NodeKind.BACKEND_ENDPOINT,
+                       name="o", project_id="p")
+        upsert_result(conn, "p",
+                      AnalyzerResult(nodes=[ep], plugin="builtin.backend_fastapi"))
+        _analyzers_pass(conn, "p", IngestReport(project_id="p"))  # 不抛
+        g = load_graph(conn, "p", plugin=ANALYZERS_PLUGIN)
+        # 崩的被跳过, 正常 analyzer 的软产物仍落库。
+        assert any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in g.nodes)
     finally:
         conn.close()
 
