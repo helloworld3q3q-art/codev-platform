@@ -21,9 +21,6 @@ interface AuditItem {
 }
 
 // POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选)。
-
-注: org 维度不在此声明 —— org_admin 强制只查本 org (路由注入 session org),
-platform_admin 可传 orgId 跨 org 查。
 interface AuditListRequest {
   service?: any; // 服务名: codev-web / codev-agent
   userId?: any; // 用户 ID
@@ -275,6 +272,15 @@ interface CommonResult_JobIdData_ {
   requestId?: any;
 }
 
+// CommonResult_McpUsageReportResponse_ 响应数据
+interface CommonResult_McpUsageReportResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_MemberActionResult_ 接口
 interface CommonResult_MemberActionResult_ {
   result?: number;
@@ -428,6 +434,24 @@ interface CommonResult_list_OrgSelectionItem__ {
   requestId?: any;
 }
 
+// CommonResult_list_SessionItem__ 接口
+interface CommonResult_list_SessionItem__ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_list_SessionMessageItem__ 接口
+interface CommonResult_list_SessionMessageItem__ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_list_UserSelectionItem__ 接口
 interface CommonResult_list_UserSelectionItem__ {
   result?: number;
@@ -531,6 +555,53 @@ interface LogoutRequest {
   refreshToken: string; // refresh token
 }
 
+// McpCallUsage 接口
+interface McpCallUsage {
+  calls?: number;
+}
+
+// McpChromaUsage 接口
+interface McpChromaUsage {
+  agentCalls?: number;
+  devCalls?: number;
+  hits?: number;
+}
+
+// McpModelUsage 接口
+interface McpModelUsage {
+  embedCalls?: number;
+  rerankCalls?: number;
+}
+
+// McpProjectUsage 接口
+interface McpProjectUsage {
+  chroma?: McpChromaUsage;
+  crossLink?: McpCallUsage;
+  codegraph?: McpCallUsage;
+  model?: McpModelUsage;
+  projectId?: string;
+}
+
+// McpUsageMetrics 接口
+interface McpUsageMetrics {
+  chroma?: McpChromaUsage;
+  crossLink?: McpCallUsage;
+  codegraph?: McpCallUsage;
+  model?: McpModelUsage;
+}
+
+// McpUsageReportResponse 响应数据
+interface McpUsageReportResponse {
+  last7d?: McpUsageWindow;
+  allTime?: McpUsageWindow;
+}
+
+// McpUsageWindow 接口
+interface McpUsageWindow {
+  projects?: McpProjectUsage[];
+  total?: McpUsageMetrics;
+}
+
 // add/remove/roles 写操作回执。
 interface MemberActionResult {
   orgId: string;
@@ -583,7 +654,7 @@ interface MemoryItem {
 // POST /api/v1/memory 写记忆 (代理 agent /memory)。
 interface MemoryWriteRequest {
   scope: string; // org | team | project | personal
-  scopeRef: string; // org='org' / team_id / project_id / user_id
+  scopeRef?: string; // org='org' / team_id / project_id / user_id; personal 留空
   content: string; // 记忆内容
   kind?: any; // preference | fact | task ...
   topicKey?: any; // 冲突检测键
@@ -771,6 +842,22 @@ interface SessionInfo {
   roles?: string[]; // 会话用户角色 (platform_admin/admin/member/viewer)
 }
 
+// 会话摘要 (agent SessionOut 的 web 投影, camelCase)。
+interface SessionItem {
+  sessionId: string; // 会话 id
+  title?: string; // 标题 (首条 user 消息派生)
+  messageCount?: number; // 消息条数
+  createdAt?: any; // 创建时间 (ISO8601)
+  updatedAt?: any; // 最近活跃时间 (ISO8601)
+}
+
+// 历史消息 (agent MessageOut 的 web 投影)。assistant 携带工具调用流 steps。
+interface SessionMessageItem {
+  role: string; // user | assistant
+  content?: string; // 消息正文
+  steps?: ChatStep[]; // 工具调用流(assistant)
+}
+
 // TableUsageRequest 请求参数
 interface TableUsageRequest {
   table: string;
@@ -927,10 +1014,21 @@ interface PostJobsListParams {
   pageSize?: number; // 每页数量
 }
 
+// AgentGetSessionsParams 查询参数
+interface AgentGetSessionsParams {
+  limit?: number;
+  offset?: number;
+}
+
+// SessionsGetMessagesParams 查询参数
+interface SessionsGetMessagesParams {
+  sessionId: string; // 会话 id
+}
+
 // V1GetMemoryParams 查询参数
 interface V1GetMemoryParams {
   scope: string; // org|team|project|personal
-  scopeRef: string; // 该 scope 的 ref
+  scopeRef?: string; // 该 scope 的 ref; personal 留空(自动用本人)
   limit?: number; // 返回上限
 };
     }

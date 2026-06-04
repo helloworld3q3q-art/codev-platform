@@ -6,31 +6,36 @@ import { ProCard, StatisticCard } from '@ant-design/pro-components';
 import { Descriptions, Spin, Tag } from 'antd';
 
 import PageContainer from '@/components/PageContainer';
+import { isAdminRole } from '@/utils/role';
 
+import McpUsageCard from './components/McpUsageCard';
 import { DASHBOARD_DEFAULT, loadDashboard, type DashboardData } from './components/utils';
 
 export default function DashboardPage() {
   // 订阅当前项目, 切项目后图谱统计原地重拉(KeepAlive 缓存页 mount 仍按旧 X-Project-Id)。
   const { currentProjectId } = useModel('project');
+  // MCP 调用分析仅管理员可见 (与菜单显隐同口径 isAdminRole; 后端 403 兜底)。
+  const { userInfo } = useModel('user');
+  const isAdmin = isAdminRole(userInfo.roles);
   const [data, setData] = useState<DashboardData>(DASHBOARD_DEFAULT);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
-      const next = await loadDashboard();
+      const next = await loadDashboard(isAdmin);
       setData(next);
     } finally {
       setLoading(false);
     }
-    // currentProjectId 变化触发重拉
-  }, [currentProjectId]);
+    // currentProjectId / 角色变化触发重拉
+  }, [currentProjectId, isAdmin]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const { health, codegraph, unified, projectCount, orgCount } = data;
+  const { health, codegraph, unified, mcpUsage, projectCount, orgCount } = data;
   const healthOk = health?.status === 'ok';
   const depItems = Object.entries(health?.dependencies ?? {});
 
@@ -58,7 +63,7 @@ export default function DashboardPage() {
           </Descriptions>
         </ProCard>
 
-        <ProCard title="当前项目图谱" variant="outlined">
+        <ProCard title="当前项目图谱" variant="outlined" classNames={{ root: 'i:mb-16' }}>
           <Descriptions column={3} size="small">
             <Descriptions.Item label="CodeGraph 文件">{codegraph?.totalFiles ?? 0}</Descriptions.Item>
             <Descriptions.Item label="CodeGraph 节点">{codegraph?.totalNodes ?? 0}</Descriptions.Item>
@@ -71,6 +76,8 @@ export default function DashboardPage() {
             </Descriptions.Item>
           </Descriptions>
         </ProCard>
+
+        {isAdmin && <McpUsageCard data={mcpUsage} />}
       </Spin>
     </PageContainer>
   );

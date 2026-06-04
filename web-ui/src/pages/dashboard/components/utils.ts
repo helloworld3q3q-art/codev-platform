@@ -3,12 +3,15 @@ import { postOrgsList } from '@/services/apis/orgapi';
 import { getCheck } from '@/services/apis/healthapi';
 import { postStats, postStats2 } from '@/services/apis/graphapi';
 import { postProjectsList } from '@/services/apis/projectapi';
+import { getMcpUsage } from '@/services/apis/reportsapi';
 
 export interface DashboardData {
   health?: API.HealthData;
   codegraph?: API.CodegraphStatsResponse;
   // cross-link 已并入统一图谱 (血缘重构), 这里展示统一图谱 store 的 stats。
   unified?: API.UnifiedGraphStatsResponse;
+  // MCP 调用分析 (仅管理员可见, 后端 403 兜底); 非管理员不拉取。
+  mcpUsage?: API.McpUsageReportResponse;
   projectCount: number;
   orgCount: number;
 }
@@ -17,6 +20,7 @@ export const DASHBOARD_DEFAULT: DashboardData = {
   health: undefined,
   codegraph: undefined,
   unified: undefined,
+  mcpUsage: undefined,
   projectCount: 0,
   orgCount: 0,
 };
@@ -30,8 +34,21 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-export async function loadDashboard(): Promise<DashboardData> {
-  const [health, codegraph, unified, projectCount, orgCount] = await Promise.all([
+// MCP 调用分析窗口口径: last7d / allTime。getMcpUsage 失败或未授权 (403) 时返回 undefined, 卡内置空 graceful。
+export type McpUsageWindowKey = 'last7d' | 'allTime';
+
+async function loadMcpUsage(enabled: boolean): Promise<API.McpUsageReportResponse | undefined> {
+  if (!enabled) {
+    return undefined;
+  }
+  return safe(async (): Promise<API.McpUsageReportResponse | undefined> => {
+    const res = await getMcpUsage();
+    return res.data as API.McpUsageReportResponse | undefined;
+  }, undefined);
+}
+
+export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
+  const [health, codegraph, unified, projectCount, orgCount, mcpUsage] = await Promise.all([
     safe(async (): Promise<API.HealthData | undefined> => {
       const res = await getCheck();
       return res.data;
@@ -52,6 +69,7 @@ export async function loadDashboard(): Promise<DashboardData> {
       const res = await postOrgsList({ pageNumber: 1, pageSize: 1 });
       return res.total ?? 0;
     }, 0),
+    loadMcpUsage(isAdmin),
   ]);
-  return { health, codegraph, unified, projectCount, orgCount };
+  return { health, codegraph, unified, projectCount, orgCount, mcpUsage };
 }

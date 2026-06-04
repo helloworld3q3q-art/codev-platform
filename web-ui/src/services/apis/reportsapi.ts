@@ -1,4 +1,5 @@
 import {
+  get,
   post,
 } from '@/utils/fetch';
 
@@ -33,6 +34,13 @@ export async function postApiCallers(data: Partial<API.ApiCallersRequest>): Prom
   return await post<API.CommonResult_GraphQueryResponse_>({
     url: `${commonUrl}/api/v1/reports/api-callers`,
     data,
+  });
+}
+
+// MCP 调用分析-每项目+合计(7天/全时段, agent/dev 分桶 + 自部署模型)
+export async function getMcpUsage(): Promise<API.CommonResult_McpUsageReportResponse_> {
+  return await get<API.CommonResult_McpUsageReportResponse_>({
+    url: `${commonUrl}/api/v1/reports/mcp-usage`,
   });
 }
 
