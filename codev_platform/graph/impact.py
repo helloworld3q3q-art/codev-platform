@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from codev_platform.graph.schema import (
+    EdgeKind,
     GraphNode,
     NodeKind,
     is_soft_edge_kind,
@@ -255,3 +256,41 @@ def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
         "risk": risk, "layersAffected": layers_hit, "total": total,
         "summary": "\n".join(lines),
     }
+
+
+# ---------------------------------------------------------------- 业务域查询(A1 软节点消费前门)
+
+def find_node_domain(conn, project_id: str, node_ref: str) -> dict:
+    """查 endpoint/表属于哪个业务域(A1 软节点)。读已标好的软边, **不调 LLM**。
+
+    放开软边(include_soft=True)—— 这是"查理解"类查询, 与"查依赖"(默认过滤软边)分开,
+    互不污染: 查依赖走确定性硬骨架, 查理解才放开 LLM 标的软节点。
+    """
+    g = build_impact_graph(conn, project_id, include_soft=True)
+    node, ambig = _resolve(g, node_ref, None)
+    if node is None:
+        return _not_found("ref", node_ref, ambig)
+    domains = []
+    for tgt, kind in g.fwd.get(node.id, []):
+        if kind == EdgeKind.BELONGS_TO_DOMAIN.value:
+            dom = g.nodes.get(tgt)
+            if dom is not None:
+                domains.append(dom.name)
+    return {"found": True, "node": _node_brief(node), "domains": sorted(set(domains))}
+
+
+def list_domain_members(conn, project_id: str, domain_name: str) -> dict:
+    """查某业务域下有哪些 endpoint/表(反向软边)。读已标好的软节点, **不调 LLM**。"""
+    g = build_impact_graph(conn, project_id, include_soft=True)
+    doms = g.find_nodes_by_name(domain_name, NodeKind.BUSINESS_DOMAIN.value)
+    if not doms:
+        return {"found": False, "domain": domain_name}
+    dom = doms[0]
+    members = []
+    for src, kind in g.rev.get(dom.id, []):
+        if kind == EdgeKind.BELONGS_TO_DOMAIN.value:
+            m = g.nodes.get(src)
+            if m is not None:
+                members.append(_node_brief(m))
+    members.sort(key=lambda x: x["name"])
+    return {"found": True, "domain": dom.name, "members": members, "count": len(members)}

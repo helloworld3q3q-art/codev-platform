@@ -348,3 +348,28 @@ def test_ownership_override_still_produces_edges(tmp_path):
     r = a.analyze("p", [e, t], [_reads(e, t)])
     edges = [x for x in r.edges if x.kind == EdgeKind.BELONGS_TO_DOMAIN.value]
     assert edges and edges[0].source == e.id  # endpoint→纠正域 软边照常产
+
+
+def test_find_node_domain_and_list_members(tmp_path):
+    # 消费前门: 正向(节点→业务域)+ 反向(业务域→成员), 读已标好的软节点不调 LLM。
+    from codev_platform.graph.impact import find_node_domain, list_domain_members
+    from codev_platform.graph.store import open_store, upsert_result
+
+    conn = open_store("p", path=tmp_path / "g.sqlite")
+    try:
+        e1, e2 = _ep("GET /orders"), _ep("POST /orders")
+        dom = GraphNode(id="p:business_domain:订单", kind=NodeKind.BUSINESS_DOMAIN,
+                        name="订单", project_id="p", meta={"confidence": 0.7})
+        se1 = GraphEdge(source=e1.id, target=dom.id, kind=EdgeKind.BELONGS_TO_DOMAIN,
+                        confidence=0.7)
+        se2 = GraphEdge(source=e2.id, target=dom.id, kind=EdgeKind.BELONGS_TO_DOMAIN,
+                        confidence=0.7)
+        upsert_result(conn, "p", AnalyzerResult(nodes=[e1, e2, dom],
+                                                edges=[se1, se2], plugin="x"))
+        r = find_node_domain(conn, "p", "GET /orders")
+        assert r["found"] and r["domains"] == ["订单"]
+        m = list_domain_members(conn, "p", "订单")
+        assert m["found"] and m["count"] == 2
+        assert sorted(x["name"] for x in m["members"]) == ["GET /orders", "POST /orders"]
+    finally:
+        conn.close()
