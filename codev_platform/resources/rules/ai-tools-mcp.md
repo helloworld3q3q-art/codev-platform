@@ -28,7 +28,8 @@
 | 找代码定义 / 函数源码 / 调用关系 | **CodeGraph** | `codegraph_search` / `codegraph_context`（PRIMARY，组合 search+node+callers+callees）/ `codegraph_callers` / `codegraph_callees` / `codegraph_impact`（blast radius）/ `codegraph_node` / `codegraph_explore` / `codegraph_files` / `codegraph_status` |
 | 找规则 / 设计文档 / 事故复盘 / 操作手册 | **platform-docs / Chroma** | `search_docs(query, category?, module?)` / `get_by_file` / `list_collections` |
 | 找前端 API ↔ Java endpoint ↔ Table 业务链路 | **cross-link** | `find_endpoint_link` / `find_table_refs` / `search_nodes` / `cross_link_stats` |
-| 跨会话用户偏好 / 反馈 / 项目状态 | **MEMORY** | 自动加载,无需调工具 |
+| 跨会话用户偏好 / 反馈 / 项目状态(本地自带) | **MEMORY** | 本地 MEMORY.md 自动加载,无需调工具 |
+| 跨机 / 跨开发者共享的团队记忆(平台 PG) | **agent-memory** | `recall`(query-aware 去冲突 top-N)/ `list_scope`(诊断单作用域)。换机/重 clone 后同 token 召回回本人记忆 |
 
 **反例**:不要用 `Grep` + `Read` 循环找代码或文档 —— MCP 已预索引,grep 50 文件 + Read 消耗上下文 10× 且不如索引精确。
 
@@ -36,13 +37,16 @@
 
 ## 一 b、MCP 接入方式 —— 平台 SSE 服务地址(2026-05-30 服务化)
 
-三套 MCP 现在**都是平台 SSE 服务**,业务仓 `.mcp.json` 走 `type:sse` 连**服务地址**(不再 stdio 文件路径 launcher),支撑多用户 / 多机共享同一平台。
+四套 MCP 现在**都是平台 SSE 服务**,业务仓 `.mcp.json` 走 `type:sse` 连**服务地址**(不再 stdio 文件路径 launcher),支撑多用户 / 多机共享同一平台。
 
 | 平台 MCP 服务 | 端点(默认端口) | 起法 |
 |---|---|---|
 | **platform-docs**(chroma) | `http://127.0.0.1:18083/sse?project_id=<id>` | daemon,`serve-mcp start` 拉起(预热 Qwen ~30-60s) |
 | **cross-link** | `http://127.0.0.1:18086/sse?project_id=<id>` | `serve-mcp start` 拉起 |
 | **codegraph** | `http://127.0.0.1:<per-project 端口>/sse` | mcp-proxy 包 `codegraph serve --mcp`,`serve-mcp start` 拉起(每项目一端口) |
+| **agent-memory**(2026-06-04 新增,读侧 MVP) | `http://127.0.0.1:18087/sse?project_id=<id>` | `serve-mcp start` 拉起;`?project_id=` 仅用于 project-scope 记忆,org/user 走 token 身份 |
+
+> **agent-memory 是开发端共享记忆前门**:把平台分层记忆(personal/project + RBAC + redline)接给 IDE 编程 agent。当前**只读**(`recall`/`list_scope`),写侧(remember/forget/supersede)与迁移在后续阶段。**身份红线**:`org_id`/`user_id` 取认证 token 身份,**绝不由 client 传**;多 dev 共用同一 WSL 须用 token 模式(passthrough 会 personal 串号)。本地 MEMORY.md 与平台记忆**分层共存**(本地=草稿/离线 fallback,平台=团队真值层),非替代。
 
 > **codegraph 也是平台服务**:它本是外部 stdio-only 工具,用 mcp-proxy 包成 SSE,**保全 9 个工具**(callers/impact/context...,不退化成 codegraph-api REST)。codegraph-api(:18082)只承担平台 status/统计的 HTTP 面,**不**承担 AI 的 MCP 查询。
 
@@ -53,7 +57,7 @@ codev-platform serve-mcp start     # 一键拉起 4 端点(chroma 预热 ~30-60s
 codev-platform serve-mcp status    # 确认全 OK(或 health --all 的 MCP 端点段)
 ```
 
-不跑 → 业务仓 `/mcp` 三套全红(连不上端点)。**急救回退到旧 stdio 自 spawn 模式**:
+不跑 → 业务仓 `/mcp` 四套全红(连不上端点)。**急救回退到旧 stdio 自 spawn 模式**:
 
 ```powershell
 copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json   # 覆盖即恢复, 重启 Claude Code
@@ -127,7 +131,7 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 
 | 现象 | 第一步处理 |
 |---|---|
-| **业务仓 `/mcp` 三套全红**(切 SSE 后,连不上 18083/18086/codegraph 端口) | 平台端点没常驻 —— 跑 `codev-platform serve-mcp start` 拉起 4 端点,`serve-mcp status` 确认全 OK。**重启电脑后必跑一次**(§一 b 常驻依赖) |
+| **业务仓 `/mcp` 四套全红**(切 SSE 后,连不上 18083/18086/18087/codegraph 端口) | 平台端点没常驻 —— 跑 `codev-platform serve-mcp start` 拉起 4 端点,`serve-mcp status` 确认全 OK。**重启电脑后必跑一次**(§一 b 常驻依赖) |
 | **单独 codegraph SSE 红**(platform-docs/cross-link 正常) | mcp-proxy 没起 / `codegraph` 命令缺。看 `codev_platform/mcp_serve_logs/codegraph_<pid>.log`;`serve-mcp start` 重拉。确认 venv 有 `mcp-proxy.exe`(`ai-health` 的 `mcp-proxy` 行) |
 | **想退回旧 stdio 文件路径模式** | `copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json` → 重启 Claude Code,恢复 per-session 自 spawn(单机略快,无需 serve-mcp start) |
 | `codegraph database is locked` | 看 `.codegraph/codegraph.db.lock` stale(0 字节 + 数小时未变)即删 |
