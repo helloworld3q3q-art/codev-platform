@@ -102,3 +102,18 @@ commit(均 push 到 `fuwuqi/dev`):`f656c6a` `b6dd256`(P0)/ `19942c3` `6d70f06`(P
 - **M4 cron**:`mcp_systemd.render_memory_maintenance_units` —— `codev-memory-maintenance` oneshot service + 每日 04:00 timer(跑 `run_memory_maintenance.py` 无 args = TTL 归档 + 向量 GC;**LLM 压缩仍手动**)+ 并入 `install_systemd`;单实例锁与手动跑互斥。
 - **WSL 实操**:授权切 `recall_backend=vector` + 重启 agent-memory,**vector 模式 e2e 复跑 PASS**;maintenance live 跑通(空库 TTL 0、compress 跳过、无崩)。config 备份 `config.json.bak.vecbackend`。
 - 测试:`test_agent_memory_maintenance.py`(GC 删原条/无索引 no-op/GC 失败不崩)+ `test_mcp_serve.py`(timer unit 渲染)。commit `4f53705`。
+
+## 十三、C2 —— memory 压测摸底(收尾)
+
+`scripts/bench_memory.py`:隔离 `bench-mem-org` seed N 条 + 测 write/recall P50/P95(local 与 vector 各一遍),跑完自动 cleanup(DELETE bench org 行 + 删 bench chroma collection),不污真数据。纯 `percentiles` 单测(`tests/test_bench_memory.py` 4 passed)。WSL 实测(真 PG + Qwen-CPU):
+
+| backend | write P50/P95/P99 | recall P50/P95 | 吞吐 |
+|---|---|---|---|
+| **local**(n=500) | 3.75 / 5.15 / 7.25 ms | 1.13 / 2.53 ms | ~265 写/s |
+| **vector**(n=30, CPU embed) | 3588 / 7570 / 12093 ms | 1284 / 1810 ms | ~0.2 写/s |
+
+**结论**:
+- **local 亚 10ms**,且 recall 受 `per_scope_limit=50` 上限保护 → 与总量 N 解耦,N 万条也不退化。当前/中期规模 local 完全够。
+- **vector 被 Qwen CPU 嵌入完全主导**(写 ~3.5s、召回 ~1.3s,慢 local ~1000×);chroma ANN 不是瓶颈(嵌入是)。写低频可接受;召回 ~1.3s 交互可忍但偏高。
+- **取舍**:要 vector 的语义质量又想压延迟 → `memory.embed_device=cuda`(GPU 嵌入快 ~10-50×),代价是与 chroma daemon 抢 8GB GPU(OOM 风险,需 `gpu_concurrency`/显存盘点)。默认 `cpu` 是"安全但慢";延迟敏感场景仍建议 local。
+- **数据未固化**(--keep 可留作 B1 benchmark);本次摸底用完即清。commit:见 §十一 末追加。
