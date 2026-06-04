@@ -76,8 +76,9 @@ def agent_sessions(
     offset: int = Query(0, ge=0),
     ctx=Depends(require_project_access),
 ) -> CommonResult[list[SessionItem]]:
-    identity, _project_id = ctx
-    raw = agent_client.list_sessions(identity, {"limit": limit, "offset": offset})
+    identity, project_id = ctx
+    # 按项目隔离:把鉴权后的 project_id 透给 agent, 只列本项目会话(None 时 AgentClient 自动不带该参)。
+    raw = agent_client.list_sessions(identity, {"limit": limit, "offset": offset, "project_id": project_id})
     return ok([SessionItem.of(s) for s in _as_list(raw)], request_id=_rid(request))
 
 

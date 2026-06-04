@@ -48,6 +48,17 @@ def test_list_sessions_title_count_and_isolation():
     assert s.list_sessions("alice", org_id="orgX") == []
 
 
+def test_list_sessions_project_isolation():
+    s = InMemorySessionStore()
+    a = s.new("u", project_id="projA")
+    s.append(a, "u", Message(role="user", content="a"))
+    b = s.new("u", project_id="projB")
+    s.append(b, "u", Message(role="user", content="b"))
+    assert [r.session_id for r in s.list_sessions("u", project_id="projA")] == [a]
+    assert [r.session_id for r in s.list_sessions("u", project_id="projB")] == [b]
+    assert len(s.list_sessions("u")) == 2  # 不传 project_id = 不过滤
+
+
 def test_list_sessions_recent_first():
     s = InMemorySessionStore()
     a = s.new("u")

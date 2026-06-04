@@ -50,7 +50,9 @@ class SessionStore(ABC):
     """
 
     @abstractmethod
-    def new(self, user_id: str, org_id: str = _DEFAULT_ORG) -> str: ...
+    def new(self, user_id: str, org_id: str = _DEFAULT_ORG, *, project_id: str | None = None) -> str:
+        """新建会话,可绑 project_id(创建时定,不可改)。会话按项目隔离的真值就存在这。"""
+        ...
 
     @abstractmethod
     def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> list[Message]: ...
@@ -64,9 +66,11 @@ class SessionStore(ABC):
 
     @abstractmethod
     def list_sessions(self, user_id: str, org_id: str = _DEFAULT_ORG,
-                      *, limit: int = 50, offset: int = 0) -> list[SessionMeta]:
+                      *, project_id: str | None = None,
+                      limit: int = 50, offset: int = 0) -> list[SessionMeta]:
         """列出 (org_id, user_id) 名下会话,按最近活跃倒序。**绝不跨 user / 跨 org**
-        (隔离红线:实现层 WHERE 强制带 org_id + user_id,plan §七)。
+        (隔离红线:实现层 WHERE 强制带 org_id + user_id)。project_id 给定 → 只返回该项目的
+        会话(按项目隔离历史);None → 不按项目过滤(单项目 / 兼容)。
         """
         ...
 
@@ -79,14 +83,14 @@ class InMemorySessionStore(SessionStore):
 
     def __init__(self) -> None:
         self._store: dict[tuple[str, str, str], list[Message]] = {}
-        # 并行存 created/updated,让 list_sessions 与 PG 实现返回同形 SessionMeta(timestamps 非 None)。
-        self._meta: dict[tuple[str, str, str], tuple[datetime, datetime]] = {}
+        # 并行存 created/updated/project_id,让 list_sessions 与 PG 实现一致(timestamps 非 None + 项目过滤)。
+        self._meta: dict[tuple[str, str, str], dict] = {}
 
-    def new(self, user_id: str, org_id: str = _DEFAULT_ORG) -> str:
+    def new(self, user_id: str, org_id: str = _DEFAULT_ORG, *, project_id: str | None = None) -> str:
         sid = uuid.uuid4().hex
         self._store[(org_id, user_id, sid)] = []
         now = datetime.now(timezone.utc)
-        self._meta[(org_id, user_id, sid)] = (now, now)
+        self._meta[(org_id, user_id, sid)] = {"created": now, "updated": now, "project_id": project_id}
         return sid
 
     def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> list[Message]:
@@ -99,20 +103,27 @@ class InMemorySessionStore(SessionStore):
                org_id: str = _DEFAULT_ORG) -> None:
         key = (org_id, user_id, session_id)
         self._store.setdefault(key, []).extend(messages)
-        created = self._meta.get(key, (datetime.now(timezone.utc),) * 2)[0]
-        self._meta[key] = (created, datetime.now(timezone.utc))
+        now = datetime.now(timezone.utc)
+        meta = self._meta.get(key)
+        if meta is None:
+            self._meta[key] = {"created": now, "updated": now, "project_id": None}
+        else:
+            meta["updated"] = now
 
     def list_sessions(self, user_id: str, org_id: str = _DEFAULT_ORG,
-                      *, limit: int = 50, offset: int = 0) -> list[SessionMeta]:
+                      *, project_id: str | None = None,
+                      limit: int = 50, offset: int = 0) -> list[SessionMeta]:
         rows: list[SessionMeta] = []
         for (o, u, sid), msgs in self._store.items():
             if o != org_id or u != user_id:  # 隔离红线:只取本 org + 本 user
                 continue
+            meta = self._meta.get((o, u, sid), {})
+            if project_id is not None and meta.get("project_id") != project_id:
+                continue  # 按项目隔离:只返回本项目会话
             first_user = next((m.content for m in msgs if m.role == "user"), None)
-            created, updated = self._meta.get((o, u, sid), (None, None))
             rows.append(SessionMeta(
                 session_id=sid, title=derive_title(first_user), message_count=len(msgs),
-                created_at=created, updated_at=updated,
+                created_at=meta.get("created"), updated_at=meta.get("updated"),
             ))
         # 最近活跃倒序(updated 缺失排末尾),再分页
         rows.sort(key=lambda r: (r.updated_at or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)

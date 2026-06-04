@@ -59,8 +59,8 @@ class ChatService:
 
         if session_id and self._sessions.has(session_id, user_id, org_id=org_id):
             sid = session_id
-        else:
-            sid = self._sessions.new(user_id, org_id=org_id)
+        else:  # 新会话创建时绑当前 project_id(按项目隔离历史的真值源)
+            sid = self._sessions.new(user_id, org_id=org_id, project_id=project_id)
         history = self._sessions.get(sid, user_id, org_id=org_id)
 
         registry = self._registry_factory(project_id)  # 工具按 project_id 路由

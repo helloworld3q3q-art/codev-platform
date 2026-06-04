@@ -43,9 +43,11 @@ def list_sessions(
     request: Request,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    project_id: str | None = Query(None, description="按项目过滤(web 经 X-Project-Id 传入)"),
 ) -> list[SessionOut]:
     user_id, org_id = _identity_or_400(request)
-    metas = deps.get_sessions().list_sessions(user_id, org_id, limit=limit, offset=offset)
+    metas = deps.get_sessions().list_sessions(
+        user_id, org_id, project_id=project_id, limit=limit, offset=offset)
     return [
         SessionOut(
             session_id=m.session_id, title=m.title, message_count=m.message_count,

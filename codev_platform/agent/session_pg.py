@@ -25,10 +25,13 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   org_id     TEXT NOT NULL DEFAULT 'default',
   user_id    TEXT NOT NULL,
   session_id TEXT NOT NULL,
+  project_id TEXT,                          -- 会话归属项目(创建时绑, 按项目隔离历史)
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (org_id, user_id, session_id)
 );
+-- 存量表(早于 project_id 列)幂等补列:CREATE IF NOT EXISTS 不会给已存在的表加列。
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS project_id TEXT;
 CREATE TABLE IF NOT EXISTS agent_messages (
   id         BIGSERIAL PRIMARY KEY,          -- 自增 = 插入顺序,免应用层 seq race
   org_id     TEXT NOT NULL DEFAULT 'default',
@@ -99,13 +102,14 @@ class SqlSessionStore(SessionStore):
 
     # ---- 写路径(主库)----
 
-    def new(self, user_id: str, org_id: str = _DEFAULT_ORG) -> str:
+    def new(self, user_id: str, org_id: str = _DEFAULT_ORG, *, project_id: str | None = None) -> str:
         self._ensure()
         sid = uuid.uuid4().hex
         with self._write_pool.connection() as conn:
             conn.execute(
-                "INSERT INTO agent_sessions (org_id, user_id, session_id) VALUES (%s, %s, %s)",
-                (org_id, user_id, sid),
+                "INSERT INTO agent_sessions (org_id, user_id, session_id, project_id) "
+                "VALUES (%s, %s, %s, %s)",
+                (org_id, user_id, sid, project_id),
             )
         return sid
 
@@ -131,16 +135,22 @@ class SqlSessionStore(SessionStore):
         return [_row_to_msg(r[0], r[1], r[2]) for r in rows]
 
     def list_sessions(self, user_id: str, org_id: str = _DEFAULT_ORG,
-                      *, limit: int = 50, offset: int = 0) -> list[SessionMeta]:
-        """列会话:WHERE 强制 org_id + user_id(隔离红线,绝不跨用户)。
-        title 由相关子查询取首条 user 消息(MIN(id))派生 —— **不加 schema 列**,
-        以后要持久标题再加列、本方法形状不变(plan §四①)。message_count 同子查询计。
+                      *, project_id: str | None = None,
+                      limit: int = 50, offset: int = 0) -> list[SessionMeta]:
+        """列会话:WHERE 强制 org_id + user_id(隔离红线,绝不跨用户);project_id 给定再叠加
+        项目过滤(按项目隔离历史)。title 由相关子查询取首条 user 消息派生(不加 schema 列)。
         走读池(副本若配)。联合索引 ix_agent_msg_session 覆盖子查询。
         """
         self._ensure()
+        where = "s.org_id = %s AND s.user_id = %s"
+        params: list = [org_id, user_id]
+        if project_id is not None:  # 项目过滤(NULL project 的存量会话不会命中,符合隔离预期)
+            where += " AND s.project_id = %s"
+            params.append(project_id)
+        params += [limit, offset]
         with self._read_pool.connection() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT s.session_id, s.created_at, s.updated_at,
                        (SELECT m.content FROM agent_messages m
                          WHERE m.org_id = s.org_id AND m.user_id = s.user_id
@@ -150,11 +160,11 @@ class SqlSessionStore(SessionStore):
                          WHERE c.org_id = s.org_id AND c.user_id = s.user_id
                            AND c.session_id = s.session_id) AS msg_count
                   FROM agent_sessions s
-                 WHERE s.org_id = %s AND s.user_id = %s
+                 WHERE {where}
                  ORDER BY s.updated_at DESC
                  LIMIT %s OFFSET %s
                 """,
-                (org_id, user_id, limit, offset),
+                tuple(params),
             ).fetchall()
         return [
             SessionMeta(

@@ -141,6 +141,15 @@ def test_sessions_list_proxies_and_envelope():
     assert data[0]["updatedAt"] == "2026-06-04T01:00:00Z"
 
 
+def test_sessions_list_forwards_project_id():
+    fake = _FakeAgentClient(raw=[])
+    agent.agent_client = fake
+    c = _client(_PASSTHROUGH_CFG)
+    c.get("/api/v1/agent/sessions", headers=_HEADERS)  # X-Project-Id: demo-proj
+    _ident, params = fake.calls[0]
+    assert params["project_id"] == "demo-proj"  # 鉴权项目透传给 agent 做隔离
+
+
 def test_session_messages_proxies_and_envelope():
     fake = _FakeAgentClient(raw=[
         {"role": "user", "content": "hi"},

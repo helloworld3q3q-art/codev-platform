@@ -98,6 +98,19 @@ def test_org_user_isolation(monkeypatch):
     assert len(r.json()) == 1
 
 
+def test_list_sessions_filters_by_project(monkeypatch):
+    store = InMemorySessionStore()
+    a = store.new("alice", project_id="p1")
+    store.append(a, "alice", Message(role="user", content="一"))
+    b = store.new("alice", project_id="p2")
+    store.append(b, "alice", Message(role="user", content="二"))
+    c = _client(monkeypatch, store)
+    r = c.get("/sessions", params={"project_id": "p1"}, headers={"X-User-Id": "alice"})
+    assert [x["session_id"] for x in r.json()] == [a]  # 只回 p1 的会话
+    r2 = c.get("/sessions", headers={"X-User-Id": "alice"})  # 不带 project_id = 全列
+    assert len(r2.json()) == 2
+
+
 def test_messages_requires_session_id(monkeypatch):
     store = InMemorySessionStore()
     c = _client(monkeypatch, store)

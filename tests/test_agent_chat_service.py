@@ -60,6 +60,20 @@ def test_ask_returns_outcome_with_session():
     assert out.result.stop_reason == "answered"
 
 
+def test_ask_binds_session_to_project():
+    """新会话创建时绑当前 project_id, list_sessions 按项目隔离能查到/查不到。"""
+    store = InMemorySessionStore()
+    svc = ChatService(
+        sessions=store,
+        registry_factory=lambda pid: ToolRegistry(),
+        provider_factory=_FakeProvider,
+        default_max_steps=lambda: 5,
+    )
+    out = svc.ask("q", user_id="u", project_id="projX")
+    assert [r.session_id for r in store.list_sessions("u", project_id="projX")] == [out.session_id]
+    assert store.list_sessions("u", project_id="other") == []  # 别的项目看不到
+
+
 def test_ask_persists_tool_steps_into_assistant_extra():
     """工具调用流随 assistant 消息 extra 持久化(历史会话可回看 ToolFlow)。"""
     from codev_platform.agent.brain import AssistantTurn, LLMProvider, ToolCall, ToolResult
