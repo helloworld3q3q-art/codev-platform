@@ -248,6 +248,8 @@ class BusinessDomainAnalyzer:
     # ---- 缓存(per-cluster fingerprint) ----
 
     def _labels_with_cache(self, project_id, keyed):
+        # TODO(A1-3+): 缓存命中前查 ownership override —— 用户一键纠正过的 domain 必须盖过
+        #   LLM 旧值, 不被缓存命中覆盖(plan 护栏③: PPT vs 真功能分水岭)。
         cache = self._load_cache(project_id)
         cid_to_key = {req.cluster_id: key for req, key in keyed}
         labels, to_label = [], []
@@ -305,6 +307,8 @@ class BusinessDomainAnalyzer:
             return {}
 
     def _save_cache(self, project_id, entries):
+        # TODO(A1-3+): cache GC —— 只保留本轮出现的 fingerprint, 清理 cluster 拆分/合并后的
+        #   孤儿 entry(现全量写回, 长期单调增长)。
         path = self._cache_path(project_id)
         if path is None:
             return

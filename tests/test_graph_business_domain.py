@@ -9,6 +9,7 @@ from __future__ import annotations
 from codev_platform.graph.analyzers.business_domain import BusinessDomainAnalyzer
 from codev_platform.graph.analyzers.domain_labeler import ClusterLabel
 from codev_platform.graph.schema import (
+    AnalyzerResult,
     EdgeKind,
     GraphEdge,
     GraphNode,
@@ -178,3 +179,74 @@ def test_no_endpoints_no_clusters(tmp_path):
     assert not a.applies([t])
     r = a.analyze("p", [t], [])
     assert r.nodes == [] and r.edges == []
+
+
+def test_orphan_endpoint_forms_singleton_cluster():
+    # 无下游表的 endpoint → 独立 singleton cluster(不与他人合并)。
+    e = _ep("GET /health")
+    clusters, _ = BusinessDomainAnalyzer(FakeLabeler())._cluster([e], [])
+    assert len(clusters) == 1
+    assert clusters[0][1] == [e.id] and clusters[0][2] == []  # 1 endpoint, 0 表
+
+
+def test_member_rebind_on_node_id_change(tmp_path):
+    # 缓存命中(name 不变)但 endpoint node.id 变 → 软边重绑到新 id, 不复用缓存旧 id。
+    labeler = FakeLabeler(default_domain="订单")
+    a = BusinessDomainAnalyzer(labeler, cache_dir=tmp_path)
+    e1, t = _ep("GET /orders"), _tbl("orders")
+    a.analyze("p", [e1, t], [_reads(e1, t)])
+    assert labeler.calls == 1
+
+    e1b = GraphNode(id="p:backend_endpoint:NEW", kind=NodeKind.BACKEND_ENDPOINT,
+                    name="GET /orders", project_id="p")  # 同 name 不同 id
+    r2 = a.analyze("p", [e1b, t],
+                   [GraphEdge(source=e1b.id, target=t.id, kind=EdgeKind.READS_TABLE)])
+    assert labeler.calls == 1  # name 不变 → 缓存命中, 没再调 labeler
+    soft = [e for e in r2.edges if e.kind == EdgeKind.BELONGS_TO_DOMAIN.value]
+    assert soft and soft[0].source == "p:backend_endpoint:NEW"  # 重绑到新 id
+
+
+def test_corrupt_cache_tolerated(tmp_path):
+    # 缓存文件坏 json → 当空缓存, analyze 不崩、照常标注。
+    (tmp_path / "p.json").write_text("{ broken json", encoding="utf-8")
+    e, t = _ep("GET /orders"), _tbl("orders")
+    r = BusinessDomainAnalyzer(FakeLabeler(default_domain="订单"),
+                               cache_dir=tmp_path).analyze("p", [e, t], [_reads(e, t)])
+    assert any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in r.nodes)
+
+
+def test_business_domain_via_ingest_analyzers_pass(tmp_path):
+    """真 BusinessDomainAnalyzer 经 ingest _analyzers_pass + validate_soft_result 落库
+    (A1-3 放开生产注册前的集成确认: 软产物钳 confidence + grounding 到真 endpoint)。"""
+    from codev_platform.graph.analyzers import base as abase
+    from codev_platform.graph.analyzers import register_analyzer
+    from codev_platform.graph.ingest import (
+        ANALYZERS_PLUGIN,
+        IngestReport,
+        _analyzers_pass,
+    )
+    from codev_platform.graph.store import load_graph, open_store, upsert_result
+
+    saved = list(abase._ANALYZERS)
+    abase._ANALYZERS.clear()
+    try:
+        register_analyzer(BusinessDomainAnalyzer(
+            FakeLabeler(default_domain="订单"), cache_dir=tmp_path))
+        conn = open_store("p", path=tmp_path / "g.sqlite")
+        try:
+            e, t = _ep("GET /orders"), _tbl("orders")
+            upsert_result(conn, "p", AnalyzerResult(
+                nodes=[e, t], edges=[_reads(e, t)], plugin="builtin.backend_fastapi"))
+            _analyzers_pass(conn, "p", IngestReport(project_id="p"))
+            g = load_graph(conn, "p", plugin=ANALYZERS_PLUGIN)
+            doms = [n for n in g.nodes if n.kind == NodeKind.BUSINESS_DOMAIN.value]
+            assert doms and doms[0].name == "订单"
+            assert doms[0].meta["confidence"] < 1.0          # validate 后软标记
+            soft = [e2 for e2 in g.edges
+                    if e2.kind == EdgeKind.BELONGS_TO_DOMAIN.value]
+            assert soft and soft[0].source == e.id           # grounding 到真 endpoint
+        finally:
+            conn.close()
+    finally:
+        abase._ANALYZERS.clear()
+        abase._ANALYZERS.extend(saved)
