@@ -52,7 +52,7 @@ Bash 直读磁盘的对账,把"plan 说没做"逐项核到代码是否真没做�
 | 4 | B-M6 / C-Phase6 Connector — **Jira/飞书/Wiki**(+CI) | 除 schema 节点类型定义(`wiki_page`/`jira_issue`)外**零实现**。**注**:同列的 **Git 接入已做**(webhook push→reindex), 不在此; CI 未做 | 文档/任务接入空 |
 | 5 | B-M7 多模态/行为记忆 | 无 | Memory |
 | 6 | A-退役 Java codegraph-api(:18082)切流 | ~~代码仍 5 处引用 18082~~ **2026-06-04 复核纠正:5 处全是注释/docstring 历史说明("已退役"/"从 :18082 迁移"/"替代"),运行时 0 依赖 —— 无 HTTP 调用(grep requests/httpx/api_url→空)、`_query/_check_codegraph_api` 已移除。本条系把注释当依赖的误判** → **实为已完成** |
-| 7 | B-M4 四层权限闭环 | audit 路由在, "四层闭环"完整度需细核(本报告未深核) | 待细核 |
+| 7 | B-M4 四层权限闭环 | ~~需细核~~ **2026-06-04 细核: 实际已闭环** —— personal/project(acl.py)+ org/team(RbacStore `org_members`/`team_members` 表 + `core/rbac.py:memory_scope_decision` 按 org_role/team role 判权 + `agent/routes/memory.py:_scope_decision` 双轨调度)全在; 测试齐(rbac_core/rbac_wire/route_acl/org_cli/web_orgs)。acl.py "待 M5" 系陈旧注释(纯函数兜底, 真实校验经 RbacStore) | ✅ 已闭环 |
 
 ---
 

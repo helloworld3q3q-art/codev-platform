@@ -51,10 +51,13 @@ def can_access(cfg: dict | None, identity, project_id: str | None) -> AccessDeci
 
 
 def memory_scope_access(cfg: dict | None, identity, scope: str, scope_ref: str | None) -> AccessDecision:
-    """memory 作用域访问判定(write/read 共用)。M5 RBAC 表落地前的保守模型, 与 memory plan §3.4 对齐:
+    """memory 作用域访问判定 —— **纯函数兜底分支**(无 RBAC store 时), 与 memory plan §3.4 对齐:
     - personal: scope_ref 必须 == 自己 user_id 否则 deny;
     - project:  委托 can_access(cfg, identity, scope_ref);
-    - org/team:  passthrough(dev) 放行 advisory;token(prod) deny(待 M5 org_members/team_members);
+    - org/team:  本纯函数无成员数据 → passthrough(dev)放行 advisory / token(prod)兜底 deny。
+      ⚠️ **org/team 真实校验已闭环**(不是待做): memory 路由 _scope_decision 优先走 RbacStore
+      (org_members/team_members 表)+ core/rbac.py:memory_scope_decision(按 org_role/team role
+      判权), 仅在无 PG RbacStore 时才回退到本函数兜底。详见 agent/routes/memory.py:_scope_decision。
     - 其它 scope: deny。
     """
     if scope == "personal":
@@ -68,5 +71,5 @@ def memory_scope_access(cfg: dict | None, identity, scope: str, scope_ref: str |
         mode = _cfg_get(cfg or {}, "gateway.auth_mode", "passthrough")
         if mode != "token":
             return AccessDecision(True, f"passthrough(dev): {scope} advisory allow", advisory=True)
-        return AccessDecision(False, f"token mode: {scope} scope not yet enforced (M5 {scope}_members)")
+        return AccessDecision(False, f"no RBAC store: {scope} 兜底 deny (真实校验走 RbacStore, 见 memory 路由 _scope_decision)")
     return AccessDecision(False, f"unknown memory scope: {scope}")
