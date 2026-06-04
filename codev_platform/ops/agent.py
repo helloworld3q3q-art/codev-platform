@@ -34,10 +34,12 @@ def cmd_agent(args: argparse.Namespace) -> int:
         from codev_platform.core.config import load_config
         from codev_platform.gateway.auth import (
             build_authenticator, warn_if_insecure, deploy_policy_error,
+            multi_user_policy_error,
         )
         _cfg = load_config()
         # prod 硬拒(fail-fast): 非 token 认证对外暴露直接退出, 不让不安全服务起来。
-        err = deploy_policy_error(_cfg, args.host)
+        # 多 dev 共用却 passthrough(personal 串号)同样硬拒(dev-agent-memory P3 护栏)。
+        err = deploy_policy_error(_cfg, args.host) or multi_user_policy_error(_cfg)
         if err:
             print(f"[gateway] 拒绝启动: {err}", file=sys.stderr)
             sys.exit(2)

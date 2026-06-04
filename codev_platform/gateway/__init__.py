@@ -17,6 +17,8 @@ from codev_platform.gateway.auth import (
     TokenAuthenticator,
     Unauthorized,
     build_authenticator,
+    deploy_policy_error,
+    multi_user_policy_error,
 )
 from codev_platform.gateway.middleware import (
     AuthMiddleware,
@@ -31,6 +33,8 @@ __all__ = [
     "TokenAuthenticator",
     "Unauthorized",
     "build_authenticator",
+    "deploy_policy_error",
+    "multi_user_policy_error",
     "AuthMiddleware",
     "RateLimitMiddleware",
     "maybe_rate_limit_middleware",

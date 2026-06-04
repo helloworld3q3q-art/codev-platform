@@ -162,9 +162,41 @@ def _cmd_import_md(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_list(args: argparse.Namespace) -> int:
+    """可见性 CLI(P3):列某作用域 active 记忆。personal 自动用本机 user(隐私:只看自己的)。
+
+    org_id 取 env CODEV_ORG_ID > 'default'。store 按 (org_id, scope, scope_ref) 物理隔离 →
+    `--scope org` 绝不返回 personal 条(personal 对 org 不可见的断言由 store schema 保证)。
+    """
+    import os
+
+    from codev_platform.agent import deps
+    from codev_platform.core import identity as _id
+    store = deps.get_memory_store()
+    if store is None:
+        _err("memory 未启用(未配 memory.pg_dsn)。")
+        return 2
+    org_id = os.environ.get("CODEV_ORG_ID", "default")
+    if args.scope == "personal":
+        scope_ref = _id.resolve_local()  # 只看本机 user 自己的 personal(隐私)
+    else:
+        scope_ref = args.scope_ref
+        if not scope_ref:
+            _err("非 personal 作用域需 --scope-ref(org='org' / project=project_id / team=team_id)。")
+            return 2
+    entries = store.list_scope(args.scope, scope_ref, org_id=org_id, limit=args.limit)
+    _out(f"{args.scope}/{scope_ref} (org={org_id}) 现有 {len(entries)} 条 active 记忆:")
+    for e in entries:
+        rl = " [RL]" if e.is_redline else ""
+        _out(f"  {e.id[:8]} [{e.kind or '-'}]{rl} {e.topic_key or '-'}: {e.content[:70]}")
+    return 0
+
+
 def cmd_memory(args: argparse.Namespace) -> int:
     if args.action == "import-md":
         return _cmd_import_md(args)
+    if args.action == "list":
+        return _cmd_list(args)
     cfg = load_config()
     if args.action == "init-db":
         return _cmd_init_db(cfg)
@@ -189,4 +221,10 @@ def register(subparsers) -> None:
                      help="作用域 ref:project=project_id / personal=user_id(默认 org)")
     imp.add_argument("--owner", default="local", help="owner_user_id(默认 local)")
     imp.add_argument("--apply", action="store_true", help="真写入 PG(默认 dry-run)")
+    lst = sub.add_parser("list", help="可见性:列某作用域 active 记忆(personal 只看本机自己的)")
+    lst.add_argument("--scope", default="personal",
+                     help="org | team | project | personal(默认 personal)")
+    lst.add_argument("--scope-ref", dest="scope_ref", default="",
+                     help="作用域 ref:org='org' / project=project_id / team=team_id(personal 自动用本机 user)")
+    lst.add_argument("--limit", type=int, default=100, help="返回上限(默认 100)")
     p.set_defaults(func=cmd_memory)

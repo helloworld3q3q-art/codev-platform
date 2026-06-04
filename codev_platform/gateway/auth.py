@@ -221,6 +221,31 @@ def deploy_policy_error(cfg: dict | None, host: str) -> str | None:
     return None
 
 
+def multi_user_policy_error(cfg: dict | None) -> str | None:
+    """多 dev 共用的认证 fail-fast 策略(纯函数, 可测)—— dev-agent-memory P3 护栏。
+
+    单人自己机器的 WSL(loopback、只有自己)passthrough 无人可串, 零风险;但一旦变成"多人共用
+    同一台 WSL / 内网服务器"却没切 token, personal 记忆会串号(都落同一 advisory 身份)。这段
+    "忘了切配置"的过渡空窗用代码堵: 检测到多 dev 迹象 + 仍 passthrough → 拒绝启动(不靠人记得切)。
+
+    返回错误串 = 必须拒绝启动; None = 放行。判定(auth_mode!=token 且任一命中):
+      - gateway.multi_user == true(管理员显式声明多人)
+      - len(gateway.tokens) > 1(登记了多个 token = 多主体)
+    """
+    c = cfg or {}
+    auth_mode = _cfg_get(c, "gateway.auth_mode", "passthrough")
+    if auth_mode == "token":
+        return None
+    multi_user = bool(_cfg_get(c, "gateway.multi_user", False))
+    tokens = _cfg_get(c, "gateway.tokens", {}) or {}
+    n_tokens = len(tokens) if isinstance(tokens, dict) else 0
+    if multi_user or n_tokens > 1:
+        why = "gateway.multi_user=true" if multi_user else f"检测到 {n_tokens} 个登记 token"
+        return (f"{why} 但 gateway.auth_mode={auth_mode} —— 多 dev 共用必须 auth_mode=token "
+                "(passthrough 会 personal 串号;见 config.example.json)。")
+    return None
+
+
 def _url_is_loopback(url: str) -> bool:
     """从 platform.url 抽 host 判断是否 loopback。容错: 解析失败按非 loopback(更安全, 倾向拒绝)。"""
     from urllib.parse import urlparse
