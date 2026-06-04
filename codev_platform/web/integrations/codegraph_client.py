@@ -257,15 +257,19 @@ class CodegraphClient:
               kinds: list[str] | None, edge_kinds: list[str] | None) -> dict:
         c = self.conn
         lim = _clamp(limit, _DEFAULT_GRAPH_LIMIT, _MAX_GRAPH_LIMIT)
+        # 节点按 degree(连接数)取 top, 而非 file/class 优先。原 kind 排序(file>class>...>method>
+        # function)会让 file+class 塞满 limit 名额、把 method/function 全挤出, 而 calls 边几乎都在
+        # method 之间 → 边两端不在节点集被过滤光, 图谱稀疏(实测 openclaw 可见边 669/35546)。
+        # 改 degree 优先: 高连接的调用主体进图, 边可见(同库实测 4254, 6 倍)。
         node_sql = (
-            f"select {_NODE_COLS} from nodes where 1=1"
+            "with deg as (select nid, count(*) c from "
+            "(select source nid from edges union all select target from edges) group by nid) "
+            f"select {_NODE_COLS} from nodes left join deg on nodes.id = deg.nid where 1=1"
         )
         params: list = []
         lang_clause, lang_p = _in_clause("language", _norm(languages))
         kind_clause, kind_p = _in_clause("kind", _norm(kinds))
-        node_sql += lang_clause + kind_clause + (
-            " order by case kind when 'file' then 0 when 'class' then 1 when 'interface' then 2 "
-            "when 'method' then 3 when 'function' then 4 else 5 end, id limit ?")
+        node_sql += lang_clause + kind_clause + " order by coalesce(deg.c, 0) desc, id limit ?"
         params += lang_p + kind_p + [lim]
         node_rows = c.execute(node_sql, params).fetchall()
         nodes = [_node_dict(r) for r in node_rows]
