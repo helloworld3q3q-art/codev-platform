@@ -57,49 +57,6 @@ def _parse_dt(text: str) -> datetime | None:
     return None
 
 
-def _query_codegraph_api(base_url: str) -> Any:
-    """通过 codegraph-api(Java HTTP 服务, 默认 :18082)取 codegraph 统计 —— "访问 codegraph
-    数据走 HTTP" 的落地。成功返回 {'nodes','edges','source':'http'};服务没起/出错返回
-    'api_down' / 'api_error'(调用方退回本地 sqlite 或标注)。"""
-    import urllib.request
-    url = base_url.rstrip("/") + "/v1/codegraph/stats"
-    try:
-        req = urllib.request.Request(
-            url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            d = json.loads(r.read().decode("utf-8", "replace"))
-    except Exception:  # noqa: BLE001 - service 没起 / 网络
-        return "api_down"
-    if d.get("result") == 0 and isinstance(d.get("data"), dict):
-        s = d["data"]
-        return {"nodes": int(s.get("totalNodes") or 0),
-                "edges": int(s.get("totalEdges") or 0), "source": "http"}
-    return "api_error"
-
-
-def _query_crosslink_api(base_url: str) -> Any:
-    """通过 codegraph-api(:18082)取 cross-link 统计 —— POST /v1/cross-link/stats。
-    nodesByKind / edgesByRel 求和得总数。成功返回 {'nodes','edges','source':'http'};
-    服务没起 'api_down';无 cross-link 数据(库空/不适用)'no_data'。"""
-    import urllib.request
-    url = base_url.rstrip("/") + "/v1/cross-link/stats"
-    try:
-        req = urllib.request.Request(
-            url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            d = json.loads(r.read().decode("utf-8", "replace"))
-    except Exception:  # noqa: BLE001
-        return "api_down"
-    if d.get("result") == 0 and isinstance(d.get("data"), dict):
-        nk = d["data"].get("nodesByKind") or {}
-        ek = d["data"].get("edgesByRel") or {}
-        if nk:
-            return {"nodes": sum(int(v) for v in nk.values()),
-                    "edges": sum(int(v) for v in ek.values()), "source": "http"}
-        return "no_data"
-    return "api_error"
-
-
 def _local_crosslink(data_dir: Path, pid: str) -> Any:
     """平台本地 cross_layer.sqlite(中心化, 平台自有)读 nodes 数。未建返回 'not_built'。"""
     xdb = data_dir / "codegraph_ext" / pid / "cross_layer.sqlite"
@@ -207,39 +164,30 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
     pids = sorted(set(registered) | set(chroma_pid))
     projects: dict[str, Any] = {}
     for pid in pids:
-        # codegraph: 优先走 codegraph-api(HTTP, "访问 codegraph 数据走 HTTP");
-        # 没配 codegraph_api_url 才退回读本机 co-located 仓的 .codegraph 文件(repo_path 服务端配置)。
+        # codegraph: 读本机 co-located 仓的 .codegraph 文件(repo_path 服务端配置)。
+        # (Java codegraph-api :18082 HTTP 取数路径已退役 2026-06-04 —— 查询面由 codev web
+        #  routes graph 接口替代; 跨机取统计未来走 web routes, 不再用 Java api。)
         codegraph: Any
-        api_url = _cfg_get(cfg, f"projects.{pid}.codegraph_api_url")
-        if api_url:
-            codegraph = _query_codegraph_api(api_url)
+        if self_pid and pid == self_pid:
+            repo: Path | None = repo_root
         else:
-            if self_pid and pid == self_pid:
-                repo: Path | None = repo_root
+            rp = _cfg_get(cfg, f"projects.{pid}.repo_path")
+            repo = Path(rp).expanduser() if rp else None
+            if repo and not repo.exists():
+                repo = None
+        if repo is None:
+            codegraph = "no_repo_path"
+        else:
+            db = repo / ".codegraph" / "codegraph.db"
+            if db.is_file():
+                counts = _sqlite_counts(db, "nodes", "edges") or {}
+                codegraph = {"nodes": counts.get("nodes", 0),
+                             "edges": counts.get("edges", 0), "source": "local"}
             else:
-                rp = _cfg_get(cfg, f"projects.{pid}.repo_path")
-                repo = Path(rp).expanduser() if rp else None
-                if repo and not repo.exists():
-                    repo = None
-            if repo is None:
-                codegraph = "no_repo_path"
-            else:
-                db = repo / ".codegraph" / "codegraph.db"
-                if db.is_file():
-                    counts = _sqlite_counts(db, "nodes", "edges") or {}
-                    codegraph = {"nodes": counts.get("nodes", 0),
-                                 "edges": counts.get("edges", 0), "source": "local"}
-                else:
-                    codegraph = "no_db"
+                codegraph = "no_db"
 
-        # cross-link: 优先 codegraph-api /v1/cross-link/stats(HTTP);否则 / API 无数据时
-        # 退回平台本地 cross_layer.sqlite(中心化, 平台自有)。
-        cross_link: Any
-        if api_url:
-            cl = _query_crosslink_api(api_url)
-            cross_link = cl if isinstance(cl, dict) else _local_crosslink(data, pid)
-        else:
-            cross_link = _local_crosslink(data, pid)
+        # cross-link: 平台本地 cross_layer.sqlite(中心化, 平台自有)。
+        cross_link: Any = _local_crosslink(data, pid)
 
         projects[pid] = {
             "chroma_chunks": chroma_pid.get(pid, 0),

@@ -83,7 +83,7 @@ codev-platform health --json-out
 
 - **访问走 HTTP 服务地址**:`--all` 是客户端,GET 平台 daemon 的 `/platform/status`(`config.platform.url` 或默认 `http://127.0.0.1:<daemon.port>`);服务端跑在平台主机上聚合本机 data/+PG,客户端不碰路径。**子应用 / 远程机器查平台数据用同一个地址** —— 这才能多用户多项目共享。
 - **chroma / cross-link / memory** 中心化(`data/` + PG 一个库),服务端直读。
-- **codegraph**:优先走 **codegraph-api(Java HTTP 服务, 默认 :18082, 读其 .codegraph 只读)** —— 配 `config.projects.<id>.codegraph_api_url` 后平台 POST `/v1/codegraph/stats` 取统计(标 "via codegraph-api HTTP"),这就是 codegraph 数据走 HTTP / 跨机共享的路径;没配才退回读本机 `repo_path` 下 `.codegraph` sqlite(标 "本地 sqlite")。codegraph-api 没起则标 "api_down"。
+- **codegraph**:平台读本机 `repo_path` 下 `.codegraph` sqlite 取统计(标 "本地 sqlite")。(Java codegraph-api :18082 HTTP 取数路径已退役 2026-06-04 —— 查询面由 codev web routes graph 接口替代;跨机取统计未来走 web routes,不再用 Java api。)
 - **org 共享记忆**全项目通用(有意共享);**project 记忆**只该项目召回(隔离),`--all` 一眼看出谁有几条、串没串。
 - daemon 没起 → `--all` 报连不上 + 提示(访问平台数据一律走 HTTP,不退回本地读)。
 

@@ -28,7 +28,6 @@ Checks (parity with the .ps1):
   - cross_layer KG freshness (project-namespaced)
   - cross-link mcp process diagnostics
   - codegraph db (integrity + journal_mode + counts) + locks
-  - codegraph-api jar
   - post-commit hook missed-fire detection
   - git tools/ status
   - usage stats: search_recall / reindex 7d / platform-docs usage+adopt /
@@ -72,7 +71,6 @@ from ._checks import (  # noqa: F401
     _check_chroma_data,
     _check_chroma_freshness,
     _check_chroma_venv,
-    _check_codegraph_api,
     _check_codegraph_db,
     _check_codegraph_mcp,
     _check_cross_layer,
@@ -152,7 +150,6 @@ def cmd_health(args: argparse.Namespace) -> int:
     _check_cross_link_mcp(r, procs)
     _check_codegraph_db(r, repo, chroma_py)
     _check_codegraph_mcp(r, repo, procs)
-    _check_codegraph_api(r, repo)
     _check_hook_missed(r, repo, health)
     _check_git_tools(r, repo)
 
@@ -285,28 +282,18 @@ def cmd_health_all(args: argparse.Namespace) -> int:
         tot_chroma += ch
         cg = p.get("codegraph")
         if isinstance(cg, dict):
-            src = cg.get("source")
-            tag = " (via codegraph-api HTTP)" if src == "http" else " (本地 sqlite)" if src == "local" else ""
-            cg_s = f"nodes={cg.get('nodes', 0)} edges={cg.get('edges', 0)}{tag}"
+            cg_s = f"nodes={cg.get('nodes', 0)} edges={cg.get('edges', 0)} (本地 sqlite)"
         elif cg == "no_repo_path":
             cg_s = "?(仓路径未在平台登记)"
         elif cg == "no_db":
             cg_s = "无 .codegraph db"
-        elif cg == "api_down":
-            cg_s = "codegraph-api 未响应(启动 :18082 / 查 config.projects.<id>.codegraph_api_url)"
-        elif cg == "api_error":
-            cg_s = "codegraph-api 返回错误"
         else:
             cg_s = str(cg)
         xl = p.get("cross_link")
         if isinstance(xl, dict):
-            xsrc = xl.get("source")
-            xtag = " (via codegraph-api HTTP)" if xsrc == "http" else " (本地)" if xsrc == "local" else ""
-            xl_s = f"nodes={xl.get('nodes', 0)}{xtag}"
+            xl_s = f"nodes={xl.get('nodes', 0)} (本地)"
         elif xl == "not_built":
             xl_s = "未建(不适用/未建)"
-        elif xl == "api_down":
-            xl_s = "codegraph-api 未响应"
         else:
             xl_s = "未建/不可用"
         u = p.get("usage_7d", {})

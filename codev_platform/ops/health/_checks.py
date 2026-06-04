@@ -460,18 +460,6 @@ def _check_codegraph_mcp(r: Report, repo: Path, procs: list[dict[str, str]]) -> 
             r.line("codegraph cli lock", "WARN", f"probe failed: {exc!r}")
 
 
-def _check_codegraph_api(r: Report, repo: Path) -> None:
-    api_dir = repo / "apps" / "codegraph-api"
-    target = api_dir / "target"
-    jars = sorted(target.glob("codegraph-api-*.jar")) if target.is_dir() else []
-    if jars:
-        r.line("codegraph-api", "OK", jars[0].name)
-    elif not api_dir.is_dir():
-        r.line("codegraph-api", "INFO", "not configured")
-    else:
-        r.line("codegraph-api", "WARN", f"no jar in {target} (run mvn package if needed)")
-
-
 def _check_hook_missed(r: Report, repo: Path, health: dict) -> None:
     rc, head = _git(repo, "rev-parse", "HEAD")
     if rc != 0 or not head:
