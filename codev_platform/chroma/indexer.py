@@ -356,7 +356,14 @@ def index(force: bool = False) -> tuple[int, int]:
     docs_buf: list[str] = []
     metas_buf: list[dict] = []
     total = 0
-    BATCH = 100
+    # chromadb 1.5.9 compaction bug: 对同一 collection 做"多次"upsert(flush)、而库里已存在别的
+    # collection 时, 其 compaction 会写坏 sqlite(Error purging logs / Failed to pull logs from the
+    # log store / database disk image is malformed)。单次 upsert 不触发。故默认 BATCH 调大到 5 万
+    # (现实 collection 几千 chunk → 一次性 upsert), 全量 --force 重建多 collection 库才安全。
+    # env PLATFORM_INDEX_FLUSH_BATCH 可覆盖: 超大库(> 5 万 chunk)须设到大于其 chunk 数以强制单 upsert,
+    # 或显存/内存紧时调小(代价: 多 flush 在多 collection 库上有损坏风险)。
+    # 详见 docs/incidents/2026-06-05-chromadb-multiflush-compaction.md。
+    BATCH = int(os.getenv("PLATFORM_INDEX_FLUSH_BATCH", "50000"))
 
     def _flush():
         if not ids_buf:
