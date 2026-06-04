@@ -2,9 +2,10 @@ import PageContainer from '@/components/PageContainer';
 import { useModel } from '@umijs/max';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { getMessages, getSessions, postAgentChat } from '@/services/apis/agentapi';
+
 import ChatPanel from './components/ChatPanel';
 import SessionSider from './components/SessionSider';
-import { fetchAgentChat, fetchSessionMessages, fetchSessions } from './services';
 import type { ChatMessage } from './types';
 
 const MAX_STEPS = 12;
@@ -25,8 +26,8 @@ const AgentPage: React.FC = () => {
 
   const loadSessions = useCallback(async (): Promise<void> => {
     try {
-      const list = await fetchSessions();
-      setSessions(list);
+      const res = await getSessions({ limit: 50, offset: 0 });
+      setSessions(res.data ?? []);
     } catch {
       setSessions([]);
     }
@@ -43,7 +44,8 @@ const AgentPage: React.FC = () => {
       setActiveSessionId(sessionId);
       setLoading(true);
       try {
-        const history = await fetchSessionMessages(sessionId);
+        const res = await getMessages({ sessionId });
+        const history: API.SessionMessageItem[] = res.data ?? [];
         seqRef.current = 0;
         setMessages(
           history.map((m) => ({
@@ -68,11 +70,12 @@ const AgentPage: React.FC = () => {
       setMessages((prev) => [...prev, userMsg, placeholder]);
       setLoading(true);
       try {
-        const data = await fetchAgentChat({
+        const res = await postAgentChat({
           question,
           sessionId: activeSessionId || undefined,
           maxSteps: MAX_STEPS,
         });
+        const data = res.data;
         if (data?.sessionId) {
           setActiveSessionId(data.sessionId);
         }
