@@ -1,11 +1,11 @@
 import { DownOutlined } from '@ant-design/icons';
 import type { ProColumns } from '@ant-design/pro-components';
 import type { MenuProps } from 'antd';
-import { Badge, Dropdown, Typography } from 'antd';
+import { Badge, Dropdown, Tag, Typography } from 'antd';
 import { useCallback, useMemo } from 'react';
 
 import type { UserRow } from './utils';
-import { STATUS_BADGE } from './utils';
+import { ROLE_COLOR, STATUS_BADGE } from './utils';
 
 interface ActionProps {
   record: UserRow;
@@ -55,6 +55,7 @@ const MoreAction: React.FC<MoreActionProps> = ({ record, onResetPwd, onChangeRol
 
 interface CreateColumnsContext {
   statusMap: Record<string, string>;
+  roleMap: Record<string, string>;
   onEdit: (record: UserRow) => void;
   onToggleStatus: (record: UserRow) => void;
   onResetPwd: (record: UserRow) => void;
@@ -66,13 +67,23 @@ export function createColumns({
 }: {
   context: CreateColumnsContext;
 }): ProColumns<UserRow>[] {
-  const { statusMap, onEdit, onToggleStatus, onResetPwd, onChangeRole } = context;
+  const { statusMap, roleMap, onEdit, onToggleStatus, onResetPwd, onChangeRole } = context;
 
   return [
     { title: '用户名', dataIndex: 'username', width: 160, copyable: true, search: false },
     { title: '显示名', dataIndex: 'displayName', width: 160, search: false },
     { title: '邮箱', dataIndex: 'email', width: 200, ellipsis: true, search: false },
     { title: '组织', dataIndex: 'orgId', width: 160, search: false },
+    {
+      title: '角色',
+      dataIndex: 'role',
+      width: 110,
+      search: false,
+      render: (_, record) => {
+        const role = record.role ?? '';
+        return role ? <Tag color={ROLE_COLOR[role] ?? 'default'}>{roleMap[role] ?? role}</Tag> : '-';
+      },
+    },
     {
       title: '状态',
       dataIndex: 'status',

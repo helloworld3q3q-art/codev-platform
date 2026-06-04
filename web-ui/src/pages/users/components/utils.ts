@@ -19,6 +19,13 @@ export const STATUS_BADGE: Record<string, 'success' | 'default' | 'error'> = {
   LOCKED: 'error',
 };
 
+// 角色 Tag 颜色 (纯 UI 映射; 角色文案走 useModel('enum').getFormattedEnums('MemberRoleEnum'))。
+export const ROLE_COLOR: Record<string, string> = {
+  admin: 'red',
+  member: 'blue',
+  viewer: 'default',
+};
+
 // 转换 ProTable 查询参数为后端分页 DTO。
 // ResizableTable 内部已将 ProTable 的 current 转为 pageNum。
 export const convertParams = (params: Record<string, unknown>): Record<string, unknown> => {

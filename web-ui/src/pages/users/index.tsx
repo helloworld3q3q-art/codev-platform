@@ -32,6 +32,7 @@ const UsersPage: React.FC = () => {
   const [orgOptions, setOrgOptions] = useState<{ label: string; value: string }[]>([]);
 
   const statusMap = useMemo(() => getFormattedEnums('UserStatusEnum'), [getFormattedEnums]);
+  const roleMap = useMemo(() => getFormattedEnums('MemberRoleEnum'), [getFormattedEnums]);
   const roleOptions = useMemo(() => getEnumOptions('MemberRoleEnum'), [getEnumOptions]);
 
   const loadOrgOptions = useCallback(async (): Promise<void> => {
@@ -103,13 +104,14 @@ const UsersPage: React.FC = () => {
       createColumns({
         context: {
           statusMap,
+          roleMap,
           onEdit: handleEdit,
           onToggleStatus: handleToggleStatus,
           onResetPwd: handleResetPwd,
           onChangeRole: handleChangeRole,
         },
       }),
-    [statusMap, handleEdit, handleToggleStatus, handleResetPwd, handleChangeRole],
+    [statusMap, roleMap, handleEdit, handleToggleStatus, handleResetPwd, handleChangeRole],
   );
 
   const handleTableRequest = useCallback(
