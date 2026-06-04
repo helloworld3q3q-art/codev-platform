@@ -13,7 +13,7 @@ export async function getProfile(): Promise<API.CommonResult_UserItem_> {
 }
 
 // 用户管理-用户列表
-export async function postUsersList(data: Partial<API.PostUsersListParams>): Promise<API.PageResult_UserItem_> {
+export async function postUsersList(data: Partial<API.any>): Promise<API.PageResult_UserItem_> {
   return await post<API.PageResult_UserItem_>({
     url: `${commonUrl}/api/v1/users/list`,
     data,

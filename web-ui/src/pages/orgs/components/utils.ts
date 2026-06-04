@@ -68,7 +68,7 @@ export const setOrgStatus = (
 export const fetchMemberList = (
   data: Record<string, unknown>,
 ): Promise<API.PageResult_MemberItem_> => {
-  return postMembersList(data as Partial<API.PostMembersListParams>);
+  return postMembersList(data as Partial<API.MemberListRequest>);
 };
 
 // 添加成员 (幂等 upsert)。

@@ -6,7 +6,7 @@ import {
 const commonUrl = '';
 
 // 组织管理-组织列表
-export async function postOrgsList(data: Partial<API.PostOrgsListParams>): Promise<API.PageResult_OrgItem_> {
+export async function postOrgsList(data: Partial<API.any>): Promise<API.PageResult_OrgItem_> {
   return await post<API.PageResult_OrgItem_>({
     url: `${commonUrl}/api/v1/orgs/list`,
     data,
@@ -54,7 +54,7 @@ export async function postSelections(): Promise<API.CommonResult_list_OrgSelecti
 }
 
 // 组织管理-成员列表
-export async function postMembersList(data: Partial<API.PostMembersListParams>): Promise<API.PageResult_MemberItem_> {
+export async function postMembersList(data: Partial<API.MemberListRequest>): Promise<API.PageResult_MemberItem_> {
   return await post<API.PageResult_MemberItem_>({
     url: `${commonUrl}/api/v1/orgs/members/list`,
     data,

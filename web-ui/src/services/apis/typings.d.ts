@@ -20,8 +20,10 @@ interface AuditItem {
   reason?: any; // 判定原因
 }
 
-// POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选)。
+// POST /api/v1/audit/list 请求体 —— 过滤条件 (全可选) + 分页 (继承 PageBody)。
 interface AuditListRequest {
+  pageNumber?: number; // 页码, 从 1 起
+  pageSize?: number; // 每页数量 (上限 200)
   service?: any; // 服务名: codev-web / codev-agent
   userId?: any; // 用户 ID
   orgId?: any; // 组织 ID (仅 platform_admin 可指定; org_admin 忽略)
@@ -564,13 +566,16 @@ interface McpCallUsage {
 interface McpChromaUsage {
   agentCalls?: number;
   devCalls?: number;
-  hits?: number;
+  agentHits?: number;
+  devHits?: number;
 }
 
 // McpModelUsage 接口
 interface McpModelUsage {
-  embedCalls?: number;
-  rerankCalls?: number;
+  agentEmbed?: number;
+  devEmbed?: number;
+  agentRerank?: number;
+  devRerank?: number;
 }
 
 // McpProjectUsage 接口
@@ -622,6 +627,13 @@ interface MemberItem {
   orgId: string;
   username: string;
   role?: string;
+}
+
+// 成员列表请求 (POST body)。前端 post() 走 body, 故 code/分页全收 body, 不用 query。
+interface MemberListRequest {
+  code: string; // 组织编码
+  pageNumber?: number; // 页码, 从 1 起
+  pageSize?: number; // 每页数量 (上限 200)
 }
 
 // MemberRemoveRequest 请求参数
@@ -700,6 +712,12 @@ interface OrgUpdateRequest {
   code: string; // 组织编码
   name?: any; // 组织名称
   description?: any; // 描述
+}
+
+// PageBody 接口
+interface PageBody {
+  pageNumber?: number; // 页码, 从 1 起
+  pageSize?: number; // 每页数量 (上限 200)
 }
 
 // PageDepsRequest 请求参数
@@ -926,6 +944,7 @@ interface UserItem {
   displayName?: any;
   email?: any;
   status?: string;
+  role?: any;
 }
 
 // 重置 / 生成初始密码。新明文仅入参, service hash 后落库。
@@ -969,28 +988,9 @@ interface ValidationError {
   ctx?: Record<string, any>;
 }
 
-// PostOrgsListParams 查询参数
-interface PostOrgsListParams {
-  pageNumber?: number; // 页码, 从 1 起
-  pageSize?: number; // 每页数量
-}
-
 // OrgsGetDetailParams 查询参数
 interface OrgsGetDetailParams {
   code: string; // 组织编码
-}
-
-// PostMembersListParams 查询参数
-interface PostMembersListParams {
-  code: string; // 组织编码
-  pageNumber?: number; // 页码, 从 1 起
-  pageSize?: number; // 每页数量
-}
-
-// PostUsersListParams 查询参数
-interface PostUsersListParams {
-  pageNumber?: number; // 页码, 从 1 起
-  pageSize?: number; // 每页数量
 }
 
 // UsersGetDetailParams 查询参数
@@ -1006,12 +1006,6 @@ interface ProjectsGetDetailParams {
 // JobsGetDetailParams 查询参数
 interface JobsGetDetailParams {
   jobId: string; // 任务 ID
-}
-
-// PostJobsListParams 查询参数
-interface PostJobsListParams {
-  pageNumber?: number; // 页码, 从 1 起
-  pageSize?: number; // 每页数量
 }
 
 // AgentGetSessionsParams 查询参数
