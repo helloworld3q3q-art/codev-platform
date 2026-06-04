@@ -143,7 +143,7 @@ const AgentPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <div className="flex h-700 bg-#ffffff rounded-6 overflow-hidden">
+      <div className="flex h-720 bg-#ffffff rounded-8 overflow-hidden border border-#f0f0f0 shadow-sm">
         <SessionSider
           items={sessions}
           activeKey={activeSessionId}
