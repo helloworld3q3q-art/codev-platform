@@ -102,15 +102,50 @@ def run_project(pid: str, provider: str, model: str) -> int:
     return 0
 
 
+def run_fix(pid: str, endpoint_name: str, domain: str) -> int:
+    """人工纠正(ownership): 找含该 endpoint 名的 cluster, 把整簇业务域纠正为 domain。
+    纯聚类 + set_override, 不调 LLM。下次 analyze 这簇用纠正值(跳 LLM, 跨模型保留)。"""
+    from codev_platform.graph.analyzers.brain_labeler import BrainDomainLabeler
+    from codev_platform.graph.analyzers.business_domain import BusinessDomainAnalyzer
+    from codev_platform.graph.store import load_graph, open_store
+
+    conn = open_store(pid)
+    try:
+        g = load_graph(conn, pid)
+    finally:
+        conn.close()
+    a = BusinessDomainAnalyzer(BrainDomainLabeler())   # 仅用 _cluster/set_override, 不调 LLM
+    clusters, by_id = a._cluster(g.nodes, g.edges)
+    target = None
+    for _cid, eps, _tables in clusters:
+        if any(by_id[ep].name == endpoint_name for ep in eps):
+            target = eps
+            break
+    if target is None:
+        print(f"FATAL: 没找到含 endpoint '{endpoint_name}' 的 cluster(先 ingest?)")
+        return 1
+    a.set_override(pid, target, domain)
+    print(f"OK: cluster(含 {endpoint_name}, 共 {len(target)} 个 endpoint)业务域纠正为 '{domain}'。")
+    print("下次 ingest/analyze 这簇用纠正值(跳 LLM, 跨模型保留)。")
+    return 0
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="A1-3 业务域映射验收")
+    ap = argparse.ArgumentParser(description="A1-3 业务域映射验收 + 人工纠正")
     ap.add_argument("--smoke", action="store_true", help="内置样例冒烟验 LLM 通路")
     ap.add_argument("--project", help="对该 project_id 的 graph store 跑 + 导出验收表")
+    ap.add_argument("--fix-endpoint", help="人工纠正: 含该 endpoint 名的 cluster 归到 --domain")
+    ap.add_argument("--domain", default="", help="--fix-endpoint 时纠正成的业务域名")
     ap.add_argument("--provider", default="deepseek", help="brain provider(默认 deepseek)")
     ap.add_argument("--model", default="", help="覆盖 model(默认走 provider spec)")
     args = ap.parse_args()
     if args.smoke:
         return run_smoke(args.provider, args.model)
+    if args.fix_endpoint:
+        if not args.project or not args.domain:
+            print("FATAL: --fix-endpoint 需同时配 --project 和 --domain")
+            return 1
+        return run_fix(args.project, args.fix_endpoint, args.domain)
     if args.project:
         return run_project(args.project, args.provider, args.model)
     ap.print_help()

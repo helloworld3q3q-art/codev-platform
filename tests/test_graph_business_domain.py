@@ -320,3 +320,31 @@ def test_cache_gc_drops_orphan_entries(tmp_path):
     a.analyze("p", [e2, t2], [_reads(e2, t2)])
     c2 = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["entries"]
     assert len(c2) == 1  # 孤儿清掉, 只剩本轮
+
+
+def test_ownership_override_beats_llm(tmp_path):
+    # 人工纠正过的 domain 盖过 LLM(FakeLabeler 标"错误域")。
+    a = BusinessDomainAnalyzer(FakeLabeler(default_domain="错误域"), cache_dir=tmp_path)
+    e, t = _ep("GET /orders"), _tbl("orders")
+    a.set_override("p", [e.id], "订单")
+    r = a.analyze("p", [e, t], [_reads(e, t)])
+    doms = [n for n in r.nodes if n.kind == NodeKind.BUSINESS_DOMAIN.value]
+    assert doms and doms[0].name == "订单"   # 纠正值, 非 LLM 的"错误域"
+
+
+def test_ownership_override_skips_labeler(tmp_path):
+    labeler = FakeLabeler(default_domain="错误域")
+    a = BusinessDomainAnalyzer(labeler, cache_dir=tmp_path)
+    e, t = _ep("GET /orders"), _tbl("orders")
+    a.set_override("p", [e.id], "订单")
+    a.analyze("p", [e, t], [_reads(e, t)])
+    assert labeler.calls == 0                # 纠正过 → 跳 LLM, 省钱
+
+
+def test_ownership_override_still_produces_edges(tmp_path):
+    a = BusinessDomainAnalyzer(FakeLabeler(default_domain="x"), cache_dir=tmp_path)
+    e, t = _ep("GET /orders"), _tbl("orders")
+    a.set_override("p", [e.id], "订单")
+    r = a.analyze("p", [e, t], [_reads(e, t)])
+    edges = [x for x in r.edges if x.kind == EdgeKind.BELONGS_TO_DOMAIN.value]
+    assert edges and edges[0].source == e.id  # endpoint→纠正域 软边照常产

@@ -102,14 +102,22 @@ class BusinessDomainAnalyzer:
                            len(clusters), self._max_clusters)
             clusters = clusters[: self._max_clusters]
 
+        override = self._load_override(project_id)   # 人工纠正过的 domain(盖 LLM, 跨模型保留)
         keyed: list[tuple[ClusterRequest, str]] = []
         ref_maps: dict[str, dict[str, str]] = {}
+        override_labels: list[ClusterLabel] = []
         for cid, eps, tables in clusters:
             req, ref_to_id = self._to_request(cid, eps, tables, by_id, self._max_members)
-            keyed.append((req, self._cache_key(req)))
             ref_maps[cid] = ref_to_id
+            ok = self._override_key(eps)
+            if ok in override:   # 纠正过: 跳 LLM, 用纠正 domain + 所有 endpoint(都归该域)
+                ep_refs = tuple(r for r in ref_to_id if r.startswith("e"))
+                override_labels.append(ClusterLabel(cid, override[ok], ep_refs))
+            else:
+                keyed.append((req, self._cache_key(req)))
 
         labels = self._labels_with_cache(project_id, keyed)
+        labels.extend(override_labels)
 
         soft_nodes: dict[str, GraphNode] = {}   # 按 dom_id 去重(同名域复用; nodes 表 INSERT 非 REPLACE)
         soft_edges: list[GraphEdge] = []
@@ -269,7 +277,7 @@ class BusinessDomainAnalyzer:
     # ---- 缓存(per-cluster fingerprint) ----
 
     def _labels_with_cache(self, project_id, keyed):
-        # TODO(批2): 缓存命中前查 ownership override —— 用户纠正过的 domain 盖过 LLM 旧值(plan 护栏③)。
+        # ownership override 已在 analyze 分流(纠正过的 cluster 跳 LLM); 本函数只管非纠正簇的 LLM/缓存。
         cache = self._load_cache(project_id)
         cid_to_key = {req.cluster_id: key for req, key in keyed}
         valid_keys = {key for _, key in keyed}  # 本轮出现的 fingerprint(cache GC 据此清孤儿)
@@ -331,14 +339,55 @@ class BusinessDomainAnalyzer:
             return {}
 
     def _save_cache(self, project_id, entries):
-        # TODO(A1-3+): cache GC —— 只保留本轮出现的 fingerprint, 清理 cluster 拆分/合并后的
-        #   孤儿 entry(现全量写回, 长期单调增长)。
         path = self._cache_path(project_id)
         if path is None:
             return
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
+                            encoding="utf-8")
+        except OSError:
+            pass
+
+    # ---- ownership 纠错(人工纠正的 domain 盖 LLM, 持久化跨模型保留; plan 护栏③) ----
+
+    @staticmethod
+    def _override_key(endpoint_ids):
+        """稳定 cluster 键 = endpoint id 排序集合 hash(不含 model/prompt, 纠正跨模型保留)。"""
+        joined = "\n".join(sorted(endpoint_ids))
+        return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+    def _override_path(self, project_id):
+        base = self._cache_dir
+        if base is None:
+            try:
+                base = data_root() / "business_domain_override"
+            except Exception:  # noqa: BLE001 — data_root 不可用 → 无 override, 不报错
+                return None
+        return base / f"{project_id}.override.json"
+
+    def _load_override(self, project_id):
+        path = self._override_path(project_id)
+        if path is None or not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8")).get("overrides", {})
+        except (OSError, ValueError):
+            return {}
+
+    def set_override(self, project_id, endpoint_ids, domain):
+        """人工纠正一个 cluster 的业务域 —— 之后 analyze 用它盖 LLM(跳 LLM, 跨模型保留)。
+
+        endpoint_ids: 该 cluster 的 endpoint node id 列表(稳定键)。domain 原样存(信任人工)。
+        """
+        path = self._override_path(project_id)
+        if path is None:
+            return
+        ovr = self._load_override(project_id)
+        ovr[self._override_key(endpoint_ids)] = domain
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"overrides": ovr}, ensure_ascii=False),
                             encoding="utf-8")
         except OSError:
             pass
