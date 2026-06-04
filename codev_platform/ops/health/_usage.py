@@ -32,7 +32,12 @@ def _usage_search_recall(r: Report, recall_file: Path, project_id: str | None = 
         return
     with_hits = sum(1 for o in recent if (o.get("hit") or 0) > 0)
     hit_rate = round(100.0 * with_hits / total, 1)
-    top1 = sorted(o["top5"][0]["distance"] for o in recent if o.get("top5"))
+    # distance 可能为 None(bm25/rrf 路径无向量距离)→ 过滤后再排序,否则 float 与 None 不可比报错
+    top1 = sorted(
+        o["top5"][0]["distance"]
+        for o in recent
+        if o.get("top5") and o["top5"][0].get("distance") is not None
+    )
     med = round(top1[len(top1) // 2], 3) if top1 else "n/a"
     if hit_rate < 80:
         status = "WARN"
