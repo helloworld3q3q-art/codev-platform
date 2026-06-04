@@ -90,6 +90,12 @@ const DraggablePanel: React.FC<DraggablePanelProps> = ({
     [storageKey],
   );
 
+  // 关闭按钮在拖拽手柄(标题栏)内:阻止 pointerdown 冒泡到手柄, 否则 setPointerCapture
+  // 会把 click 重定向到手柄、X 的 onClick 永不触发(点关闭关不掉的根因)。
+  const stopDragStart = useCallback((e: React.PointerEvent<HTMLElement>): void => {
+    e.stopPropagation();
+  }, []);
+
   if (!open) {
     return null;
   }
@@ -110,10 +116,13 @@ const DraggablePanel: React.FC<DraggablePanelProps> = ({
           {title}
         </span>
         {onClose ? (
-          <CloseOutlined
-            className="text-12 text-#8c8c8c cursor-pointer hover:text-#595959"
+          <span
+            className="flex items-center px-4 text-12 text-#8c8c8c cursor-pointer hover:text-#595959"
+            onPointerDown={stopDragStart}
             onClick={onClose}
-          />
+          >
+            <CloseOutlined />
+          </span>
         ) : null}
       </div>
       <div className="p-12 overflow-auto" style={{ maxHeight: '64vh' }}>
