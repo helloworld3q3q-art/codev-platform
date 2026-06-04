@@ -2,6 +2,10 @@ import PageContainer from '@/components/PageContainer';
 import { useModel } from '@umijs/max';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { MessageOutlined } from '@ant-design/icons';
+import { Button } from 'antd';
+
+import DraggablePanel from '@/components/DraggablePanel';
 import { getMessages, getSessions, postAgentChat } from '@/services/apis/agentapi';
 
 import ChatPanel from './components/ChatPanel';
@@ -17,7 +21,11 @@ const AgentPage: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [sessionPanelOpen, setSessionPanelOpen] = useState<boolean>(true);
   const seqRef = useRef<number>(0);
+
+  const openSessionPanel = useCallback((): void => setSessionPanelOpen(true), []);
+  const closeSessionPanel = useCallback((): void => setSessionPanelOpen(false), []);
   // 最近一次选中的会话 id(同步可读)。异步取消息返回后据它判断是否仍是当前会话,
   // 防止"切到 B 但 A 的慢响应后到、把 B 内容覆盖成 A"的竞态(最后选中者胜)。
   const activeSessionRef = useRef<string>('');
@@ -143,17 +151,36 @@ const AgentPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <div className="flex h-720 bg-#ffffff rounded-8 overflow-hidden border border-#f0f0f0 shadow-sm">
+      <div className="relative h-720 bg-#ffffff rounded-8 overflow-hidden border border-#f0f0f0 shadow-sm">
+        <ChatPanel messages={messages} loading={loading} onSend={handleSend} />
+        {/* 收起态: 左上角小按钮重新唤出会话浮层 */}
+        {sessionPanelOpen ? null : (
+          <Button
+            type="primary"
+            icon={<MessageOutlined />}
+            className="absolute left-16 top-16 z-100 shadow-md"
+            onClick={openSessionPanel}
+          >
+            会话
+          </Button>
+        )}
+      </div>
+      {/* 会话:可拖动浮层, 关闭即收起为上面的小按钮 */}
+      <DraggablePanel
+        open={sessionPanelOpen}
+        onClose={closeSessionPanel}
+        title="会话"
+        width={280}
+        defaultPosition={{ x: 40, y: 160 }}
+        storageKey="agent-sessions"
+      >
         <SessionSider
           items={sessions}
           activeKey={activeSessionId}
           onSelect={handleSelectSession}
           onNew={handleNewSession}
         />
-        <div className="flex-1 min-w-0">
-          <ChatPanel messages={messages} loading={loading} onSend={handleSend} />
-        </div>
-      </div>
+      </DraggablePanel>
     </PageContainer>
   );
 };

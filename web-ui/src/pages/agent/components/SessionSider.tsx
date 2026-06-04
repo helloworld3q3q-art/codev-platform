@@ -3,7 +3,7 @@ import { Conversations } from '@ant-design/x';
 import { Button, Empty } from 'antd';
 import { useMemo } from 'react';
 
-// 会话侧栏: 顶部"新建会话" + 历史会话列表。自洽组件, 只认 items + 两个回调。
+// 会话面板内容: 新建会话 + 历史列表。外层卡片/拖动由 DraggablePanel 提供, 本组件只管内容。
 interface SessionSiderProps {
   items: API.SessionItem[];
   activeKey: string;
@@ -22,27 +22,23 @@ const SessionSider: React.FC<SessionSiderProps> = ({ items, activeKey, onSelect,
   );
 
   return (
-    <div className="flex flex-col h-full w-280 bg-#fafafa border-r border-#f0f0f0">
-      <div className="p-12">
-        <Button type="primary" icon={<PlusOutlined />} block size="large" onClick={onNew}>
-          新建会话
-        </Button>
-      </div>
-      <div className="px-16 pb-6 text-12 text-#8c8c8c">历史会话</div>
-      <div className="flex-1 overflow-auto px-8 pb-8">
-        {convItems.length ? (
-          <Conversations
-            className="bg-transparent"
-            items={convItems}
-            activeKey={activeKey}
-            onActiveChange={onSelect}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-160">
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史会话" />
-          </div>
-        )}
-      </div>
+    <div className="flex flex-col gap-8 w-256">
+      <Button type="primary" icon={<PlusOutlined />} block onClick={onNew}>
+        新建会话
+      </Button>
+      <div className="text-12 text-#8c8c8c">历史会话</div>
+      {convItems.length ? (
+        <Conversations
+          className="bg-transparent"
+          items={convItems}
+          activeKey={activeKey}
+          onActiveChange={onSelect}
+        />
+      ) : (
+        <div className="flex items-center justify-center py-24">
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史会话" />
+        </div>
+      )}
     </div>
   );
 };
