@@ -37,6 +37,9 @@ CREATE INDEX IF NOT EXISTS ix_mem_topic
   ON memory_entries (org_id, topic_key, status);
 """
 
+# _COLS = list_scope 的 SELECT 列(14 列, 故意不含 ttl_at —— ttl_at 仅 archive_expired 在 SQL 层
+# 用, 不读进 MemoryEntry)。与 INSERT 列表(15 列, 含 ttl_at)结构不对称属设计, 勿照 _COLS 推断
+# INSERT 列序;_row_to_entry 按本顺序 r[0]..r[13] 映射(task_id=r[12] / task_state=r[13])。
 _COLS = "id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, is_redline, status, supersedes, extra, task_id, task_state"
 
 
