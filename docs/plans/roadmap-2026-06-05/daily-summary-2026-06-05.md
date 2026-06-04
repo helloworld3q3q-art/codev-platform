@@ -95,3 +95,10 @@ memory 写侧此前三个真缺口(安全+质量专家独立抓到):① `remembe
 4. **`pkill -f <模式>` 自杀**:`pkill -f codev_platform.agent.memory_mcp` 把承载该命令的 bash 自身一起杀了(命令行含同模式)→ 杀进程用更窄模式或 pid。
 
 commit(均 push 到 `fuwuqi/dev`):`f656c6a` `b6dd256`(P0)/ `19942c3` `6d70f06`(P1)/ `2bc7362` `9c8e8ae` `346d3b7` `97af3ae`(P2)/ `2e0d6b9` `facb208` `78e7dce`(P3)/ `5b5c74e`(e2e)/ `5cef5b0` `a124179` `84aa488` `23b86db`(B1)。Track M plan 序 `M→B1` 已走完。
+
+## 十二、B2 —— M4 维护 cron + 向量 GC(闭合 B1 审计 NIT)
+
+- **向量 GC**:`MemoryMaintenance` 加 `vector_index`;`compress_topic` 归档原条时同步删其向量(有 id+org_id 精确删),闭合 B1 审计 NIT —— 此前 archive 不经 store decorator 同步向量 → 索引堆积陈旧向量(虽被 `vec_ids ∩ active 池`闸防泄漏,但冗余膨胀)。GC 失败 swallow 不拖垮维护主流程;`deps.get_memory_maintenance` 传 `get_memory_vector_index()`。
+- **M4 cron**:`mcp_systemd.render_memory_maintenance_units` —— `codev-memory-maintenance` oneshot service + 每日 04:00 timer(跑 `run_memory_maintenance.py` 无 args = TTL 归档 + 向量 GC;**LLM 压缩仍手动**)+ 并入 `install_systemd`;单实例锁与手动跑互斥。
+- **WSL 实操**:授权切 `recall_backend=vector` + 重启 agent-memory,**vector 模式 e2e 复跑 PASS**;maintenance live 跑通(空库 TTL 0、compress 跳过、无崩)。config 备份 `config.json.bak.vecbackend`。
+- 测试:`test_agent_memory_maintenance.py`(GC 删原条/无索引 no-op/GC 失败不崩)+ `test_mcp_serve.py`(timer unit 渲染)。commit `4f53705`。
