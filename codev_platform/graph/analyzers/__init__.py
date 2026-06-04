@@ -15,7 +15,12 @@ from codev_platform.graph.analyzers.base import (
 )
 
 # 内置 analyzer 注册(加维度 = 加一行 import + register_analyzer)。
-# 当前空: LLM business_domain analyzer 待 A1-2 接入(需 brain provider + grounding 设计)。
+# A1-2b 已就绪(BusinessDomainAnalyzer + BrainDomainLabeler), 但**暂不注册生产** ——
+# 等 A1-3 验收(openclaw 10 endpoint 人工核对 domain 准确率 ≥70%)通过后再放开,
+# 避免未验证的 LLM 标注进生产图谱(plan "先证方向 ≥70% 再投")。验收通过后取消下三行注释:
+#   from codev_platform.graph.analyzers.brain_labeler import BrainDomainLabeler
+#   from codev_platform.graph.analyzers.business_domain import BusinessDomainAnalyzer
+#   register_analyzer(BusinessDomainAnalyzer(BrainDomainLabeler()))
 
 __all__ = [
     "Analyzer",

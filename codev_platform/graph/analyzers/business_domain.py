@@ -85,7 +85,11 @@ class BusinessDomainAnalyzer:
     # ---- Analyzer 协议 ----
 
     def applies(self, nodes: list[GraphNode]) -> bool:
-        return any(n.kind == NodeKind.BACKEND_ENDPOINT.value for n in nodes)
+        if not any(n.kind == NodeKind.BACKEND_ENDPOINT.value for n in nodes):
+            return False
+        # labeler 不可用(如 BrainDomainLabeler 无 key)→ 不适用 = no-op, 不拿废 labeler 乱标。
+        avail = getattr(self._labeler, "available", None)
+        return avail() if callable(avail) else True
 
     def analyze(self, project_id: str, nodes: list[GraphNode],
                 edges: list[GraphEdge]) -> AnalyzerResult:
