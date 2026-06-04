@@ -69,7 +69,11 @@
   "memory": {
     "_comment": "memory 持久化用的平台独立 PG 库 (codev_platform_memory)。pg_dsn=主库(写); pg_dsn_read=只读副本(读,预留,留空=读写同库)。安全红线: 含密码, 真值只写本机 config 或 env (CODEV_PLATFORM_MEMORY_DSN / _READ), 绝不进仓; 严禁复用业务库 DSN (见 memory plan §3.2b)。null = 不启用 memory PG, 会话仅内存。建库 (CREATE DATABASE) 见 P4 runbook; 表由 `codev-platform memory init-db` 幂等建。",
     "pg_dsn": null,
-    "pg_dsn_read": null
+    "pg_dsn_read": null,
+    "_comment_recall": "recall_backend: local(默认, 关键词子串 + 确定性冲突消解, 记忆量小够用) | vector(B1 语义召回, chroma per-org collection <org>__agent_memory, RRF 关键词∪向量, redline 仍置顶)。vector 缺 chromadb/sentence-transformers/模型 → 自动退回 local。embed_device: 向量嵌入设备, 默认 cpu(memory 低频写, 避免与 chroma daemon 抢 GPU → OOM); 大卡可设 cuda。conflict_policy: personal_first(默认) | org_first。",
+    "recall_backend": "local",
+    "embed_device": "cpu",
+    "conflict_policy": "personal_first"
   },
 
   "platform": {
