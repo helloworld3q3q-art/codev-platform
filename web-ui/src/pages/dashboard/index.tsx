@@ -14,9 +14,10 @@ import { DASHBOARD_DEFAULT, loadDashboard, type DashboardData } from './componen
 export default function DashboardPage() {
   // 订阅当前项目, 切项目后图谱统计原地重拉(KeepAlive 缓存页 mount 仍按旧 X-Project-Id)。
   const { currentProjectId } = useModel('project');
-  // MCP 调用分析仅管理员可见 (与菜单显隐同口径 isAdminRole; 后端 403 兜底)。
-  const { userInfo } = useModel('user');
-  const isAdmin = isAdminRole(userInfo.roles);
+  // MCP 调用分析仅管理员可见。roles 取 initialState (app.tsx getSession 下发的权威源,
+  // 与菜单/access 同口径);不读 useModel('user'), 因登录只往 localStorage 存 username 无 roles。
+  const { initialState } = useModel('@@initialState');
+  const isAdmin = isAdminRole(initialState?.userInfo?.roles);
   const [data, setData] = useState<DashboardData>(DASHBOARD_DEFAULT);
   const [loading, setLoading] = useState(false);
 
