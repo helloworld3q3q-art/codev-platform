@@ -32,6 +32,14 @@ def test_make_topic_key_keeps_cjk_and_strips_edges():
     assert memory_authz.make_topic_key("--foo--") == "foo"
 
 
+def test_make_topic_key_preserves_non_cjk_scripts():
+    # 审计 NIT: isalnum 归一须保留日/韩/带音标拉丁, 不得吞成空 key 漏去重。
+    assert memory_authz.make_topic_key("한국어") == "한국어"          # 纯韩文不丢
+    assert memory_authz.make_topic_key("日本語 テスト") == "日本語-テスト"  # 假名保留
+    assert memory_authz.make_topic_key("Café Résumé") == "café-résumé"   # 音标保留
+    assert memory_authz.make_topic_key("emoji 🔥 test") == "emoji-test"  # 符号/emoji 当分隔
+
+
 # ---- redline_write_allowed(缺口 3: 仅 org admin)----
 
 class _Rbac:

@@ -18,19 +18,22 @@ import re
 from codev_platform.core.acl import AccessDecision, can_access, memory_scope_access
 from codev_platform.core.rbac import memory_scope_decision, role_allows
 
-# 归一: 非 [数字/小写字母/中文] 折成单连字符。小写在前, 故只留 a-z; 中文用码点区间。
-_SLUG_NONWORD = re.compile("[^0-9a-z一-鿿]+")
+# 连续连字符折叠用。字符级保留判定走 str.isalnum()(Unicode-aware), 见 make_topic_key。
+_DASH_RUN = re.compile("-+")
 
 
 def make_topic_key(raw: str | None) -> str | None:
     """任意 topic 标签 → 稳定 slug。三写入端(remember 工具 / web 路由 / 迁移脚本)必须调同一
     函数, 否则同偏好被判两条不冲突、both 注入自相矛盾(design §五)。
 
-    规则: strip → 小写 → 非字词字符(保留中文)折成单连字符 → 去首尾连字符。空 / 全符号 → None。
+    规则: strip → 小写 → 非字母数字字符折成单连字符 → 去首尾连字符。空 / 全符号 → None。
+    保留判定用 ``str.isalnum()``(Unicode-aware): 中文 / 日文假名 / 韩文 / 带音标拉丁 / 数字
+    全部保留, 仅符号 / 空白 / 下划线当分隔符 —— 避免非中文脚本主题被吞成空 key 而漏去重。
     """
     if not raw:
         return None
-    s = _SLUG_NONWORD.sub("-", raw.strip().lower()).strip("-")
+    folded = "".join(c if c.isalnum() else "-" for c in raw.strip().lower())
+    s = _DASH_RUN.sub("-", folded).strip("-")
     return s or None
 
 
