@@ -245,11 +245,12 @@ class AgentLoop:
                     trace.step(n, _summarize(turn.text or ""), call.name, call.args, summary)
                 messages.append(Message(role="tool", content=result.content, tool_call_id=call.id))
 
-        # 用尽 step 仍未收尾。读取充分性门:几乎没真读到文件 → 疑似卡无效调用, 区分"空转" vs"读够了"。
+        # 用尽 step 仍未收尾。读取充分性门:几乎没真读到文件 **且尾部在连续无效调用** → 判卡无效调用。
+        # (加 consecutive_invalid 判据: 纯检索类任务可合法地从不 read_file, 不能仅凭"没读文件"误判空转。)
         if trace:
             trace.done("max_steps", self.policy.max_steps)
-        if len(guard.readonly_paths) < self.policy.min_read_for_finish:
-            answer = ("(达到 max_steps 上限仍未收尾;且几乎没读到文件——疑似卡在无效调用 / 参数错误。"
+        if len(guard.readonly_paths) < self.policy.min_read_for_finish and guard.consecutive_invalid > 0:
+            answer = ("(达到 max_steps 上限仍未收尾;且几乎没读到文件、尾部在连续无效调用——疑似卡在参数错误。"
                       "建议核对工具参数:路径用 list_dir 确认、module 用 list_collections 看合法值,"
                       "改对参数后再试,而非凭不足的信息下结论。)")
         else:

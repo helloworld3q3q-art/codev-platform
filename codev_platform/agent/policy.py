@@ -39,6 +39,7 @@ class LoopPolicy:
 
     def __post_init__(self) -> None:
         # 显式给了 per_tool_cap(旧构造 / 旧 config)→ 覆盖 retrieval_distinct_cap(向后兼容)。
+        # 注: 同时显式给 retrieval_distinct_cap 和 per_tool_cap 时, **以 per_tool_cap 为准**(别名胜出)。
         if self.per_tool_cap is not None:
             object.__setattr__(self, "retrieval_distinct_cap", int(self.per_tool_cap))
         # 让 .per_tool_cap 读取恒等于 retrieval_distinct_cap(deprecated 读别名,不破旧代码/旧断言)。

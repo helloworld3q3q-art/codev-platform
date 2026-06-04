@@ -171,6 +171,21 @@ def test_retrieval_identical_results_force_finish():
     assert any("无新增信息" in (s.result_summary or "") for s in result.steps)
 
 
+def test_retrieval_hash_normalizes_whitespace():
+    # P2 Gate: 归一化哈希挡"加空格/换行/大小写" —— 同语义不同空白的结果应判零增量。
+    def body(args, n):
+        return "Alpha Beta Gamma" if n == 1 else "alpha\n  beta   gamma"  # 同义, 仅空白/大小写差
+    tool = ScriptedTool("search_docs", content_fn=body)
+    reg = ToolRegistry()
+    reg.register(tool)
+    script = [("search_docs", {"query": f"q {i}"}) for i in range(3)]
+    loop = AgentLoop(ScriptProvider(script), reg,
+                     policy=_readonly_policy(no_progress_limit=3, novelty_check=True))
+    result = loop.run("q")
+    # 第 2 次结果归一化后与第 1 次等值 → 判零增量(若不归一化则原串不等、不会命中)。
+    assert any("无新增" in (s.result_summary or "") for s in result.steps)
+
+
 def test_retrieval_novel_results_not_blocked_by_novelty():
     # P2 Gate: 正常换查法(结果不同)放行, 不被零增量误杀(仅受 distinct-args cap 限)。
     tool = ScriptedTool("search_docs", content_fn=lambda a, n: f"distinct result {n}")
@@ -220,7 +235,20 @@ def test_finish_sufficiency_gate_flags_no_reads():
     loop = AgentLoop(prov, reg, policy=_readonly_policy(max_steps=6, min_read_for_finish=2))
     result = loop.run("q")
     assert result.stop_reason == "max_steps"
-    assert "疑似卡在无效调用" in result.answer
+    assert "疑似卡" in result.answer  # 无成功读 + 尾部连续无效 → 命中充分性门
+
+
+def test_finish_pure_retrieval_not_flagged_as_stuck():
+    # 充分性门修正: 纯检索任务(从不 read_file、零无效调用)跑满 max_steps 不应被误判"卡无效调用"。
+    tool = ScriptedTool("search_docs", content_fn=lambda a, n: f"novel result {n}")
+    reg = ToolRegistry()
+    reg.register(tool)
+    script = [("search_docs", {"query": f"q {i}"}) for i in range(10)]  # 长于 max_steps → 必到 max_steps
+    loop = AgentLoop(ScriptProvider(script), reg,
+                     policy=_readonly_policy(max_steps=4, retrieval_distinct_cap=8, min_read_for_finish=2))
+    result = loop.run("q")
+    assert result.stop_reason == "max_steps"
+    assert "疑似卡" not in result.answer  # 无 read + 无 invalid → 走通用收尾文案, 不误报
 
 
 class VaryingPathProvider(LLMProvider):
