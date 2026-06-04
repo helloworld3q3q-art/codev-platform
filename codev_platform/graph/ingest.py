@@ -144,7 +144,7 @@ def _frontend_deps_pass(conn, project_id: str, report: IngestReport, repo_path: 
     )
     report.ingested.append(FRONTEND_DEPS_PLUGIN)
     report.summaries[FRONTEND_DEPS_PLUGIN] = {
-        "components": len(nodes), "renders_edges": len(edges),
+        "components": len(nodes), "imports_edges": len(edges),
     }
 
 

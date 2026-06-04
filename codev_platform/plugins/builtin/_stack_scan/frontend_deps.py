@@ -38,7 +38,8 @@ _DEPCRUISE_CONFIG_TMPL = """module.exports = {
   }
 };
 """
-_DEPCRUISE_PKG = "dependency-cruiser@16"  # pin major: 防 @latest 漂移(大版本改 JSON schema 致解析突变)
+_DEPCRUISE_PKG = "dependency-cruiser@17"  # pin major(17 = 当前最新). ⚠️ 勿降 16: 实测 16.10.4
+# 解析不全(platform 依赖边 254 vs 17.4.3 的 524, barrel/re-export 传递链断 → 反向"影响页面"全空)
 _TIMEOUT_S = 300
 _SKIP_PARTS = frozenset({"node_modules", ".umi", ".umi-production", ".git", "dist", "build"})
 
