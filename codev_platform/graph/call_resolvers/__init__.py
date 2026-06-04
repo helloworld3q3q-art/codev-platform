@@ -11,9 +11,13 @@ from codev_platform.graph.call_resolvers.base import (
 )
 
 # 内置 resolver 注册(加语言 = 加一行 import + register_into)。
+# 顺序 = confidence 并列 tiebreak: codegraph(跨语言兜底, conf 0.7)先注册, 各语言专门
+# resolver(精确解析 conf 更高)后注册 —— 同边按 confidence 取胜, 专门者正确盖过兜底。
 from codev_platform.graph.call_resolvers import codegraph as _codegraph
+from codev_platform.graph.call_resolvers import fastapi as _fastapi
 
 _codegraph.register_into()
+_fastapi.register_into()
 
 __all__ = [
     "CallResolver",
