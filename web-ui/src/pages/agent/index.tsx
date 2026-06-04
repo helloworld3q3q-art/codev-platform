@@ -70,6 +70,7 @@ const AgentPage: React.FC = () => {
             id: nextId(),
             role: m.role === 'user' ? 'user' : 'assistant',
             content: m.content ?? '',
+            steps: m.steps, // 历史会话回看工具流(后端已持久化)
           })),
         );
       } catch {
