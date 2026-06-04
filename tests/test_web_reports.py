@@ -11,6 +11,8 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import codev_platform.web.security.deps as wdeps  # noqa: E402
+from codev_platform import platform_status  # noqa: E402
 from codev_platform.core.httpkit import build_app  # noqa: E402
 from codev_platform.graph.schema import (  # noqa: E402
     AnalyzerResult,
@@ -21,6 +23,7 @@ from codev_platform.graph.schema import (  # noqa: E402
 )
 from codev_platform.graph.store import open_store, upsert_result  # noqa: E402
 from codev_platform.web.routes import reports as reports_routes  # noqa: E402
+from codev_platform.web.security.sessions import session_store  # noqa: E402
 
 _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
 _PID = "testproj"
@@ -100,3 +103,42 @@ def test_store_missing_graceful(tmp_path, monkeypatch):
     app = build_app(title="t", routers=[reports_routes.router], cfg=_CFG)
     r = TestClient(app).post("/api/v1/reports/impact", json={"nodeRef": "users"}, headers=_H)
     assert r.status_code == 200 and r.json()["data"]["found"] is False
+
+
+# ---- GET /reports/mcp-usage: platform_admin 鉴权门 + 响应形状 ----
+
+_FAKE_METRICS = {"chroma": {"agentCalls": 1, "devCalls": 2, "hits": 2},
+                 "crossLink": {"calls": 1}, "codegraph": {"calls": 1},
+                 "model": {"embedCalls": 3, "rerankCalls": 1}}
+
+
+def _mcp_client(monkeypatch):
+    monkeypatch.setattr(wdeps, "load_config", lambda: {"platform_admins": ["super"]})
+    monkeypatch.setattr(platform_status, "mcp_usage_report", lambda repo: {
+        "last7d": {"projects": [{"projectId": "p1", **_FAKE_METRICS}], "total": _FAKE_METRICS},
+        "allTime": {"projects": [{"projectId": "p1", **_FAKE_METRICS}], "total": _FAKE_METRICS},
+    })
+    session_store.clear()
+    return TestClient(build_app(title="t", routers=[reports_routes.router], cfg=_CFG))
+
+
+def _bearer(username: str, org_id: str = "") -> dict:
+    t = session_store.create(username, org_id)
+    return {"Authorization": f"Bearer {t.access_token}"}
+
+
+def test_mcp_usage_platform_admin_ok(monkeypatch):
+    c = _mcp_client(monkeypatch)
+    r = c.get("/api/v1/reports/mcp-usage", headers=_bearer("super"))
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["last7d"]["projects"][0]["chroma"]["agentCalls"] == 1
+    assert d["last7d"]["total"]["model"]["embedCalls"] == 3
+    assert "allTime" in d
+
+
+def test_mcp_usage_non_admin_denied(monkeypatch):
+    c = _mcp_client(monkeypatch)
+    r = c.get("/api/v1/reports/mcp-usage", headers=_bearer("alice", "acme"))
+    assert r.status_code == 403
+    assert r.json()["errors"][0]["errorCode"] == "access_denied"
