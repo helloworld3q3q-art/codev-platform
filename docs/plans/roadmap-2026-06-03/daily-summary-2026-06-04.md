@@ -75,10 +75,23 @@ Track 2 交付后的优化收尾(用户挑做),实测又**推翻两个想当然*
 WSL 没我代码,折腾 remote / pull / cherry-pick(还撞上 WSL 无 remote、Win/WSL 分离仓的假象)。
 **教训**:运维问题先查清"代码在哪 / 服务跑哪版 / 数据在哪套图谱"再动手,别顺第一直觉一路改。
 
+## Track 4:Memory M4 四层权限 — 细核确认已闭环(`8acdab2`)✅
+
+用户以为 M4(org/team 权限)没做要做,细核发现**早已闭环**(又一个文档滞后):
+- personal/project 在 `acl.py`;org/team 在 RbacStore(`org_members`/`team_members` 表 +
+  `core/rbac.py:memory_scope_decision` 按 org_role/team role 判权 + memory 路由 `_scope_decision`
+  双轨: 有 PG store 走真实校验、无则纯函数兜底 deny),测试齐(rbac_core/rbac_wire/route_acl/org_cli/web_orgs)。
+- `acl.py` "待 M5 org_members" 是误导的陈旧注释 → 已更正 + audit M4 标 ✅。**仅改注释,零逻辑改动。**
+- **价值在"没动手"**: 直接做就会重写已存在的 rbac.py/membership/表。先核实救了重复劳动。
+- Memory M 系列最终: **M0-M4 全闭环**;剩 M5 benchmark(规模未到)/ M6 Connector(靠后)/ M7 多模态(需专轮),均 ROI 低暂缓。
+
 ## 剩余 backlog(非阻断)
 - **is_page**:Next app router 逻辑实现但未真实验证;umi `config/routes.ts` 显式注册路由仍盲区。
 - **vue 业务仓 scl-www-10** 未 `codev-platform init` 登记进平台(运维,需确认接入意愿)。
 - **endpoint→表 codev 自身 DI**:codegraph calls 图层面 service→store 边仍 0(audit 定 P3+;fastapi resolver 另一条路已绕过)。
 
-## 元教训补充(本日 3 次同款)
-"实测推翻想当然"本日出现 3 次:① pin @16 假设是最新(实际 17)② dependency-cruiser `--cache` 假设能省 spawn(实际不省)③ scan 慢假设在缓存(实际在 _frontend_roots 遍历 node_modules)。**性能/版本优化必配真实计时验证,别信直觉**。
+## 元教训(本日两条主线反复出现)
+
+**A. 实测推翻想当然(3 次)**:① pin @16 假设是最新(实际 17)② dependency-cruiser `--cache` 假设能省 spawn(实际不省)③ scan 慢假设在缓存(实际在 `_frontend_roots` 遍历 node_modules)。**性能/版本优化必配真实计时验证,别信直觉。**
+
+**B. 文档/注释滞后于代码(≥4 次)**:① codegraph 18082 退役("5 处引用"实为注释,运行时 0 依赖)② 影响分析(audit 判"完全没做",实为三层全在)③ M4 权限(`acl.py` "待 M5",实为 RbacStore 已闭环)④ codegraph 图谱修好后绕 reindex/remote/cherry-pick 弯路(实际只差一个 `restart codev-web`)。**盘点"未做"前先 Bash / 核实兄弟直读代码,别信 plan/注释的"待做" —— 本会话至少 4 次因此差点重复造轮子或走错路。**
