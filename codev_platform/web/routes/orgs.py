@@ -16,6 +16,7 @@ from codev_platform.web.schemas.orgs import (
     MemberActionResult,
     MemberAddRequest,
     MemberItem,
+    MemberListRequest,
     MemberRemoveRequest,
     MemberRoleRequest,
     OrgActionResult,
@@ -160,13 +161,14 @@ def list_org_selections(
 )
 def list_org_members(
     request: Request,
-    code: str = Query(..., min_length=1, max_length=64, description="组织编码"),
-    pg: PageParams = Depends(page_params),
+    body: MemberListRequest,
     _sess=Depends(current_session),
     svc: OrgService = Depends(_service),
 ) -> PageResult[MemberItem]:
-    items, total = svc.list_members(code, offset=pg.offset, limit=pg.page_size)
-    return page(items, page_number=pg.page_number, page_size=pg.page_size,
+    # code/分页从 body 取(前端 post() 一律发 body, 不是 query); 修 members/list 400。
+    offset = (body.pageNumber - 1) * body.pageSize
+    items, total = svc.list_members(body.code, offset=offset, limit=body.pageSize)
+    return page(items, page_number=body.pageNumber, page_size=body.pageSize,
                 total=total, request_id=_rid(request))
 
 

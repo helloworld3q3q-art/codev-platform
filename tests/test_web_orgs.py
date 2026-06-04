@@ -103,7 +103,7 @@ def test_member_add_then_roles(client):
                     json={"code": "acme", "username": "carol", "role": "admin"}, headers=admin_h)
     assert r.status_code == 200 and r.json()["data"]["role"] == "admin"
     # 成员列表含 carol
-    lst = client.post("/api/v1/orgs/members/list", params={"code": "acme"}, headers=admin_h)
+    lst = client.post("/api/v1/orgs/members/list", json={"code": "acme"}, headers=admin_h)
     names = {m["username"] for m in lst.json()["data"]}
     assert {"bob", "carol"} <= names
 

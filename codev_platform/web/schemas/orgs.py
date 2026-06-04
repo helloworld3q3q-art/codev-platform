@@ -50,6 +50,14 @@ class OrgSelectionItem(BaseModel):
     status: str = "ACTIVE"
 
 
+class MemberListRequest(BaseModel):
+    """成员列表请求 (POST body)。前端 post() 走 body, 故 code/分页全收 body, 不用 query。"""
+
+    code: str = Field(..., min_length=1, max_length=64, description="组织编码")
+    pageNumber: int = Field(1, ge=1, description="页码, 从 1 起")
+    pageSize: int = Field(20, ge=1, le=200, description="每页数量 (上限 200)")
+
+
 class MemberAddRequest(BaseModel):
     """加成员 (幂等 upsert; org_admin 管本 org)。role 对齐 MemberRoleEnum。"""
 
