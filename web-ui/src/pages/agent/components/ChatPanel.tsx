@@ -6,6 +6,7 @@ import { Avatar } from 'antd';
 import { useCallback, useMemo, useState } from 'react';
 
 import type { ChatMessage } from '../types';
+import ToolFlow from './ToolFlow';
 
 // assistant 气泡正文走 Markdown 渲染(代码块 / 列表 / 表格)。模块级函数, 避免 jsx-no-bind。
 const renderMarkdown: NonNullable<BubbleProps['contentRender']> = (content) => {
@@ -51,6 +52,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onSend }) => {
         role: m.role,
         content: m.content,
         loading: m.role === 'assistant' && !m.content, // 占位等待中显示 loading 点
+        // 答复末尾挂工具调用流(仅 assistant 且本轮有 steps)
+        footer: m.role === 'assistant' && m.steps?.length ? <ToolFlow steps={m.steps} /> : undefined,
       })),
     [messages],
   );
