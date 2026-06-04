@@ -11,7 +11,8 @@ from codev_platform.agent.recall_service import (
     _rank_for_query,
     visible_scopes,
 )
-from codev_platform.agent.prompts import _format_memories, build_code_understanding_system, CODE_UNDERSTANDING_SYSTEM
+from codev_platform.agent.context_plan import build_context_plan
+from codev_platform.agent.prompts import _format_context_plan, build_code_understanding_system, CODE_UNDERSTANDING_SYSTEM
 
 
 class FakeStore(MemoryStore):
@@ -176,20 +177,21 @@ def test_rank_redline_first_then_query_match():
 
 # ---- prompt 注入 ----
 
-def test_format_memories_marks_redline():
-    block = _format_memories([
+def test_format_context_plan_groups_and_redline():
+    plan = build_context_plan([
         _e("org", "org", "提交不带AI痕迹", is_redline=True),
         _e("personal", "alice", "喜欢简洁"),
     ])
-    assert "[redline/org] 提交不带AI痕迹" in block
-    assert "[personal] 喜欢简洁" in block
+    block = _format_context_plan(plan)
+    assert "提交不带AI痕迹" in block and "喜欢简洁" in block
     assert "redline" in block and "组织硬约束" in block
+    assert "个人偏好" in block  # 分组小标题
 
 
 def test_build_system_injects_memories():
     sys = build_code_understanding_system(
         project_id="proj1", user_id="alice", org_id="acme",
-        memories=[_e("personal", "alice", "喜欢简洁")])
+        context_plan=build_context_plan([_e("personal", "alice", "喜欢简洁")]))
     assert "【当前会话上下文】" in sys
     assert "【已知记忆" in sys and "喜欢简洁" in sys
     assert CODE_UNDERSTANDING_SYSTEM in sys

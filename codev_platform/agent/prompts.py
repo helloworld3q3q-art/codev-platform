@@ -3,6 +3,8 @@
 """
 from __future__ import annotations
 
+from codev_platform.agent.context_plan import GROUP_ORDER
+
 # A 能力(只读代码理解)系统提示
 CODE_UNDERSTANDING_SYSTEM = """你是 codev-platform 的只读代码理解 agent。回答关于本仓代码 / 架构 / 规则的问题。
 
@@ -36,16 +38,30 @@ MEMORY_FUSION_SYSTEM = """你是记忆压缩器。把同一主题下的多条记
 """
 
 
-def _format_memories(memories) -> str:
-    """把召回的记忆(MemoryEntry 列表)排成 prompt 段。redline 明确标注为组织硬约束。
+# context_plan 分组 → 中文小标题(prompt 展示用)。
+_GROUP_LABEL = {
+    "redline": "组织硬约束(redline, 任何情况不得违背)",
+    "task": "当前任务记忆",
+    "project": "项目记忆",
+    "personal": "个人偏好",
+    "org": "组织记忆",
+}
 
-    duck-typed:只用 .content / .scope / .is_redline,不强依赖 MemoryEntry 类型(便于测试 / 解耦)。
+
+def _format_context_plan(plan) -> str:
+    """把 ContextPlan(M2 分组 + budget 裁剪后)排成 prompt 段:按优先级分组展示, redline 标硬约束。
+
+    只读 plan.groups / GROUP_ORDER, 不碰 DB / 召回逻辑(prompt 文案与 context 计划解耦)。
     """
-    lines = ["【已知记忆(按作用域 + 优先级召回,供回答时遵循)】"]
-    for m in memories:
-        tag = "redline/" + m.scope if m.is_redline else m.scope
-        lines.append(f"- [{tag}] {m.content}")
-    lines.append("遵循上述记忆;标 redline 的是组织硬约束,任何情况不得违背,与其它记忆冲突时以 redline 为准。")
+    lines = ["【已知记忆(按优先级分组召回, 供回答时遵循)】"]
+    for g in GROUP_ORDER:
+        items = plan.groups.get(g)
+        if not items:
+            continue
+        lines.append(f"· {_GROUP_LABEL.get(g, g)}:")
+        for m in items:
+            lines.append(f"  - {m.content}")
+    lines.append("遵循上述记忆;标 redline 的是组织硬约束, 任何情况不得违背, 冲突时以 redline 为准。")
     return "\n".join(lines)
 
 
@@ -53,14 +69,16 @@ def build_code_understanding_system(
     project_id: str | None = None,
     user_id: str | None = None,
     org_id: str | None = None,
-    memories=None,
+    context_plan=None,
 ) -> str:
     """在基础 prompt 前注入当前请求上下文 (org/user/project) + 召回的分层记忆,让模型
     "知道自己在为谁、在哪个组织/项目工作"并遵循已知偏好/约束。工具已按 project_id 路由
     (查对应项目的库),本注入让模型的自我认知与之一致 —— 否则问"现在哪个项目"会照写死
-    prompt 瞎猜。也是权限的认知地基。memories 由 RecallService 召回(M3),空则不注入。
+    prompt 瞎猜。也是权限的认知地基。context_plan 由 build_context_plan(M2 分组+budget)
+    产出, 空则不注入。
     """
-    if not (project_id or user_id or org_id or memories):
+    has_mem = context_plan is not None and not context_plan.is_empty()
+    if not (project_id or user_id or org_id or has_mem):
         return CODE_UNDERSTANDING_SYSTEM
     parts: list[str] = []
     if project_id or user_id or org_id:
@@ -78,7 +96,7 @@ def build_code_understanding_system(
         else:
             ctx_lines.append("- 项目:未指定(工具按进程默认仓)")
         parts.append("\n".join(ctx_lines))
-    if memories:
-        parts.append(_format_memories(memories))
+    if has_mem:
+        parts.append(_format_context_plan(context_plan))
     parts.append(CODE_UNDERSTANDING_SYSTEM)
     return "\n\n".join(parts)

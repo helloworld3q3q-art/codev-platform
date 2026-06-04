@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from collections.abc import Callable
 
 from codev_platform.agent.brain.base import LLMProvider, Message
+from codev_platform.agent.context_plan import build_context_plan
 from codev_platform.agent.loop import AgentLoop, AgentResult
 from codev_platform.agent.policy import LoopPolicy
 from codev_platform.agent.prompts import build_code_understanding_system
@@ -64,9 +65,13 @@ class ChatService:
 
         registry = self._registry_factory(project_id)  # 工具按 project_id 路由
         memories = self._recall_memories(org_id, user_id, project_id, question, task_id)
-        # 把上下文 + 召回记忆注入 system prompt,让模型"知道"自己在哪个项目 / 为谁 + 遵循已知偏好
+        # M2: 召回记忆 → 分组(redline>task>project>personal>org)+ budget 裁剪 → context_plan,
+        # 再注入 system prompt(让模型知道自己在哪个项目 / 为谁 + 遵循已知偏好, 受 budget 控制)。
+        # budget_max=recall_limit:召回已 [:recall_limit] 截断, 故此处 budget 主要做分组 +
+        # redline-never-cut 兜底;budget_max < recall_limit 时才进一步裁剪(防御纵深)。
+        plan = build_context_plan(memories, task_id=task_id, budget_max=self._recall_limit)
         system = build_code_understanding_system(
-            project_id=project_id, user_id=user_id, org_id=org_id, memories=memories)
+            project_id=project_id, user_id=user_id, org_id=org_id, context_plan=plan)
         # 每模型策略:有 factory 走它(按 provider 名解析 spec 默认 ⊕ config),否则退回全局 max_steps。
         if self._loop_policy_factory is not None:
             policy = self._loop_policy_factory(provider.name)
