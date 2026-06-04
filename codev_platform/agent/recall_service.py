@@ -104,9 +104,64 @@ class LocalRecallService(RecallService):
                query: str = "", limit: int = 8, policy: str | None = None,
                task_id: str | None = None) -> list[MemoryEntry]:
         policy = policy or self._policy
+        scopes = self._visible_scopes(org_id, user_id, project_id)
         pooled: list[MemoryEntry] = []
-        for scope, ref in self._visible_scopes(org_id, user_id, project_id):
+        for scope, ref in scopes:
             pooled.extend(self._store.list_scope(scope, ref, org_id=org_id, limit=self._per_scope_limit))
         resolved = resolve_conflicts(pooled, policy=policy)
+        # 排序层抽成 _rank 钩子: Local 用关键词, Vector(B1)覆写为 RRF(关键词∪向量), 前置流程共享。
+        return self._rank(resolved, query=query, task_id=task_id, limit=limit,
+                          org_id=org_id, scopes=scopes)
+
+    def _rank(self, resolved: list[MemoryEntry], *, query: str, task_id: str | None,
+              limit: int, org_id: str, scopes: list[tuple[str, str]]) -> list[MemoryEntry]:
         # M1: task_id 并入排序 key(redline > task > query 命中), redline 不变量不被破坏。
         return _rank_for_query(resolved, query, task_id=task_id)[:limit]
+
+
+class VectorRecallService(LocalRecallService):
+    """语义召回(B1 M3)。前置流程(visible_scopes → list_scope → resolve_conflicts)完全复用
+    Local;**只覆写排序层**: redline 仍永置顶(不参与 RRF), 非 redline 候选走 RRF(关键词 ∪ 向量)。
+
+    向量候选由 `MemoryVectorIndex.query_ids`(已按 org_id + 可见作用域过滤)给出, 与关键词序经
+    `chroma.bm25.rrf_fuse` 融合 —— 关键词∪向量都能命中的排前, 单边命中的次之, 都没命中的按关键词
+    序兜底补齐。空 query 无语义信号 → 退回 Local 关键词/recency 排序(向量在空 query 退化为纯
+    recency, 无增益, 见 design §九)。
+    """
+
+    def __init__(self, store: MemoryStore, index, *, default_policy: str = DEFAULT_POLICY,
+                 per_scope_limit: int = 50, rbac_store=None, rrf_k: int = 60) -> None:
+        super().__init__(store, default_policy=default_policy,
+                         per_scope_limit=per_scope_limit, rbac_store=rbac_store)
+        self._index = index
+        self._rrf_k = rrf_k
+
+    def _rank(self, resolved: list[MemoryEntry], *, query: str, task_id: str | None,
+              limit: int, org_id: str, scopes: list[tuple[str, str]]) -> list[MemoryEntry]:
+        if not query.strip():
+            # 空 query: 向量无信号, 退回关键词/recency(redline 仍置顶)。
+            return _rank_for_query(resolved, query, task_id=task_id)[:limit]
+
+        # redline 永置顶, 不参与 RRF(组织硬约束不可被语义相似度挤下去)。
+        redlines = [e for e in resolved if e.is_redline]
+        rest = [e for e in resolved if not e.is_redline]
+        by_id = {e.id: e for e in rest}
+
+        # 关键词序(task 匹配优先 → query 子串命中数), 复用 _rank_for_query 的口径但只对非 redline。
+        kw_ids = [e.id for e in _rank_for_query(rest, query, task_id=task_id)]
+        # 向量序: 只保留落在当前候选池内的 id(向量库可能含已被冲突消解压掉的条)。
+        try:
+            vec_raw = self._index.query_ids(query, org_id=org_id, scopes=scopes,
+                                            k=max(limit * 4, 20))
+        except Exception:  # noqa: BLE001 — 向量库不可用 → 退回纯关键词, 不让召回崩
+            return _rank_for_query(resolved, query, task_id=task_id)[:limit]
+        vec_ids = [i for i in vec_raw if i in by_id]
+
+        from codev_platform.chroma.bm25 import rrf_fuse  # lazy: 不为 Local 用户拉 jieba/rank_bm25
+        fused = rrf_fuse(vec_ids, kw_ids, k_const=self._rrf_k)
+        ordered: list[MemoryEntry] = [by_id[i] for i, _ in fused if i in by_id]
+        # 兜底补漏: RRF 未覆盖的(向量/关键词都没召回)按关键词序补到末尾, 不丢候选。
+        seen = {e.id for e in ordered}
+        ordered.extend(by_id[i] for i in kw_ids if i not in seen)
+        # redline 仍按既有优先级置顶(_rank_for_query 内部 redline 一致), 再接 RRF 序。
+        return (_rank_for_query(redlines, query, task_id=task_id) + ordered)[:limit]
