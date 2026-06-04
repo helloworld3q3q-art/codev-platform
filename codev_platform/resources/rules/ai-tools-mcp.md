@@ -5,6 +5,22 @@
 
 ---
 
+## 〇、MCP-first 决策卡（最高频,动手前先扫这一条）
+
+**判据**:要查的东西"codegraph/chroma 索引完整也答得上吗"——答得上就**别 grep**。
+
+| 我要找 | 用 | 别 grep |
+|---|---|---|
+| 符号定义 / 签名 / 位置 | `codegraph_search`(onboarding/架构问题用 `codegraph_context`)| 函数名 |
+| 调用方 / 影响面 / 改动波及 | `codegraph_callers` / `codegraph_impact` | 引用 |
+| 规则 / 设计 / 事故文档 | `search_docs` | `docs/` |
+| 前端↔端点↔表 跨层链路 | `cross-link` `find_table_refs` / `find_endpoint_link` | 多文件 |
+
+**grep+Read 仅 4 种兜底场景合法**(详见 §2.1):未提交改动命中查询范围 / 索引滞后 / MCP 不可用 / 核对最新源码行号。
+**自检(挂 §3.3 门禁)**:本轮用 grep 找了上面任一类?→ 先确认真命中兜底场景,否则改用 MCP 重来。
+
+---
+
 ## 一、三套工具职责（互补不重复）
 
 | 问题类型 | 用谁 | 关键工具 |
