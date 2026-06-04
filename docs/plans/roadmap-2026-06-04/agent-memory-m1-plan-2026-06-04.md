@@ -1,5 +1,10 @@
 # Agent Memory M1 任务记忆 + 写侧闭环 实施 plan(2026-06-04)
 
+> **✅ 6 步全实现(2026-06-04, commit 9fe5ab2 → c30ebe0)**:数据层(task_id/task_state)→
+> remember 写侧闭环 → 召回 task 加权(redline>task>query)→ /chat 全链路透传 → task_state
+> 状态机 API(owner 限定)→ 验收。每步走 实现→兄弟 review→修 nit→commit, 全套 868 passed +
+> 真 PG 三处冒烟。下方为原始 plan 留档(决策点 2 "先查 agent 零使用"已核实=误判, agent 实际在用)。
+
 > 关联 [`../roadmap-2026-06-03/`](../roadmap-2026-06-03/) **Track C(Memory M1 起步)**。
 > 本 plan = roadmap-2026-06-04 完成度核实后, 对唯一剩余大焦点缺口 M1 的专轮调研产出。
 > 设计真值源:`../roadmap-2026-06-01/agent-memory-platform-plan-2026-06-01.md` §M1。
