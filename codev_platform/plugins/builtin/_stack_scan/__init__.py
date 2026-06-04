@@ -32,6 +32,7 @@ from ._common import (
     logger,
 )
 from ._link import link_api_calls
+from .frontend_deps import scan_frontend_deps
 from .fastapi import (
     _HTTP_METHODS,
     _route_from_decorator,
@@ -92,6 +93,8 @@ __all__ = [
     "logger",
     # link
     "link_api_calls",
+    # frontend component dep graph (via dependency-cruiser)
+    "scan_frontend_deps",
     # react
     "react_detect",
     "scan_react",

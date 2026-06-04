@@ -30,4 +30,7 @@ KIND_OWNERS: dict[str, set[str]] = {
     NodeKind.FRONTEND_ROUTE.value: {"builtin.frontend_react", "builtin.vue"},
     NodeKind.FRONTEND_API_CALL.value: {"builtin.frontend_react", "builtin.vue"},
     NodeKind.FRONTEND_COMPONENT.value: {"builtin.vue"},
+    # 前端模块依赖图(dependency-cruiser 接入, react .tsx + vue .vue 统一, ingest post-pass 产)。
+    # 独立 kind, 不与 vue 的 FRONTEND_COMPONENT territory 重叠。
+    NodeKind.FRONTEND_MODULE.value: {"builtin.frontend_deps"},
 }

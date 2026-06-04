@@ -97,3 +97,29 @@ def test_cross_link_plugin_gone(tmp_path: Path) -> None:
 
     from codev_platform.plugins import registered_names
     assert "builtin.cross_link" not in registered_names()
+
+
+def test_frontend_module_owner_registered(tmp_path: Path, monkeypatch) -> None:
+    # frontend_deps pass 产 frontend_module 节点, 验其 owner 已在 KIND_OWNERS(防"假绿":
+    # 真 fixture 无 tsconfig 时 frontend_deps no-op, 故 mock 强制产节点, 让 owner 契约真被覆盖)。
+    from codev_platform.graph.schema import GraphNode, NodeKind
+
+    def _fake_scan(repo, project_id):
+        node = GraphNode(
+            id=f"{project_id}:frontend_module:src/components/A.tsx",
+            kind=NodeKind.FRONTEND_MODULE.value, name="A.tsx", project_id=project_id,
+        )
+        return [node], []
+
+    monkeypatch.setattr(
+        "codev_platform.plugins.builtin._stack_scan.scan_frontend_deps", _fake_scan)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _build(repo)
+    store = tmp_path / "store.sqlite"
+    ingest_project(repo, PID, store_path=store)
+
+    kind_plugins = _store_kind_plugins(store)
+    assert "frontend_module" in kind_plugins
+    rogue = kind_plugins["frontend_module"] - KIND_OWNERS["frontend_module"]
+    assert not rogue, f"frontend_module 被非 owner 产出: {rogue}"

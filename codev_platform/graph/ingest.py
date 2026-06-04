@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 LINKER_PLUGIN = "builtin.linker"
 CALLS_PLUGIN = "builtin.call_resolvers"  # 调用边(CALLS)统一归属: 多 resolver 去重后合并入此 plugin
+FRONTEND_DEPS_PLUGIN = "builtin.frontend_deps"  # 前端组件依赖图(接 dependency-cruiser)
 
 
 @dataclass
@@ -78,6 +79,11 @@ def ingest_project(
         # endpoint→function / 函数→函数 calls 边物化, store 自成连通解锁影响分析。按语言栈
         # 可扩展(graph/call_resolvers/), 全局去重, fail-soft。
         _calls_pass(conn, project_id, report, Path(repo_path))
+
+        # 前端组件依赖 post-pass: 接 dependency-cruiser(读 tsconfig paths 解 @/ alias)产
+        # frontend_component 节点 + renders 边, 解锁"改组件→影响哪些页面"(codegraph 盲区)。
+        # 框架无关(react .tsx + vue .vue 都吃), 自 detect, fail-soft 无 node/前端则空。
+        _frontend_deps_pass(conn, project_id, report, Path(repo_path))
     finally:
         conn.close()
     return report
@@ -121,6 +127,25 @@ def _calls_pass(conn, project_id: str, report: IngestReport, repo_path: Path) ->
     upsert_result(conn, project_id, AnalyzerResult(edges=all_edges, plugin=CALLS_PLUGIN))
     report.ingested.append(CALLS_PLUGIN)
     report.summaries[CALLS_PLUGIN] = {"calls_edges": len(all_edges), "by_resolver": by_resolver}
+
+
+def _frontend_deps_pass(conn, project_id: str, report: IngestReport, repo_path: Path) -> None:
+    """前端组件依赖 post-pass: 接 dependency-cruiser 产 frontend_component 节点 + renders 边。
+
+    框架无关(react .tsx / vue .vue 都吃, 自 detect 前端子目录)。fail-soft: 无 node/npx 或无
+    前端 => 空, 不拖垮 ingest。详见 plugins/builtin/_stack_scan/frontend_deps.py。
+    """
+    from codev_platform.plugins.builtin._stack_scan import scan_frontend_deps
+
+    nodes, edges = scan_frontend_deps(repo_path, project_id)
+    upsert_result(
+        conn, project_id,
+        AnalyzerResult(nodes=nodes, edges=edges, plugin=FRONTEND_DEPS_PLUGIN),
+    )
+    report.ingested.append(FRONTEND_DEPS_PLUGIN)
+    report.summaries[FRONTEND_DEPS_PLUGIN] = {
+        "components": len(nodes), "renders_edges": len(edges),
+    }
 
 
 def _link_pass(conn, project_id: str, report: IngestReport) -> None:

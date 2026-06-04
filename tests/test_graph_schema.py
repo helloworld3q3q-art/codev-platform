@@ -21,9 +21,9 @@ from codev_platform.graph import (
 def test_node_kind_covers_plan_list():
     expected = {
         "project", "file", "frontend_route", "frontend_component",
-        "frontend_api_call", "backend_endpoint", "backend_function",
-        "db_table", "db_column", "wiki_page", "jira_issue", "feishu_doc",
-        "git_commit", "pull_request",
+        "frontend_module", "frontend_api_call", "backend_endpoint",
+        "backend_function", "db_table", "db_column", "wiki_page", "jira_issue",
+        "feishu_doc", "git_commit", "pull_request",
     }
     assert {k.value for k in NodeKind} == expected
 

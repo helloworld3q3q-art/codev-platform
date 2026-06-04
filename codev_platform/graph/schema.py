@@ -36,6 +36,9 @@ class NodeKind(str, Enum):
     FILE = "file"
     FRONTEND_ROUTE = "frontend_route"
     FRONTEND_COMPONENT = "frontend_component"
+    # 前端模块依赖图节点(dependency-cruiser 文件级模块): 区别于 vue 的 FRONTEND_COMPONENT(SFC 语义),
+    # 这是"A 文件 import B 文件"的依赖图, 解锁"改组件→影响哪些页面"(codegraph 盲区)。
+    FRONTEND_MODULE = "frontend_module"
     FRONTEND_API_CALL = "frontend_api_call"
     BACKEND_ENDPOINT = "backend_endpoint"
     BACKEND_FUNCTION = "backend_function"
