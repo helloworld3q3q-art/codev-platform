@@ -54,6 +54,9 @@ class VectorSyncMemoryStore(MemoryStore):
         return self._inner.list_scope(scope, scope_ref, org_id=org_id, limit=limit)
 
     def archive(self, entry_id: str) -> bool:
+        # 注: archive/archive_expired 不同步删向量(archive 入参无 org_id, 无法定位 per-org
+        # collection; archive_expired 是批量无 id)。不构成泄漏 —— recall 的 `vec_ids ∩ active 池`
+        # 硬闸会过滤掉已归档条;残留向量仅是冗余,留待后续"向量 GC"(扫 status!=active 清理)。
         return self._inner.archive(entry_id)
 
     def archive_expired(self, org_id: str | None = None) -> int:

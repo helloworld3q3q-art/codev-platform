@@ -33,7 +33,7 @@ class _Index:
     def upsert(self, entry):  # 接口完整性
         pass
 
-    def delete(self, entry_id):
+    def delete(self, entry_id, *, org_id):  # 对齐 ABC 签名(per-org collection 需 org_id)
         pass
 
     def query_ids(self, query, *, org_id, scopes, k):
