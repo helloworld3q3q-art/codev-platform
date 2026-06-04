@@ -70,6 +70,23 @@ def test_cluster_merges_endpoints_sharing_table():
     assert set(clusters[0][1]) == {e1.id, e2.id}
 
 
+def test_cluster_groups_by_file_over_shared_table():
+    # file 主信号: 同 file 合并; 不同 file 不合并 —— 即使都读同一共享表(避免跨域表共享
+    # 退化成巨型 cluster, codev-platform A1-3 实测 58%->95% 的修复点)。
+    def _epf(name, f):
+        return GraphNode(id=f"p:backend_endpoint:{name}", kind=NodeKind.BACKEND_ENDPOINT,
+                         name=name, project_id="p", file=f)
+    e1, e2 = _epf("createOrg", "routes/orgs.py"), _epf("listOrgs", "routes/orgs.py")
+    e3 = _epf("createUser", "routes/users.py")
+    audit = _tbl("audit")
+    nodes = [e1, e2, e3, audit]
+    edges = [_reads(e1, audit), _reads(e2, audit), _reads(e3, audit)]  # 三者都读 audit
+    clusters, _ = BusinessDomainAnalyzer(FakeLabeler())._cluster(nodes, edges)
+    groups = [set(c[1]) for c in clusters]
+    assert {e1.id, e2.id} in groups   # orgs.py 两 endpoint 合并
+    assert {e3.id} in groups          # users.py 独立(file 优先于共享表)
+
+
 def test_cluster_separates_unrelated_endpoints():
     e1, e2 = _ep("GET /orders"), _ep("GET /users")
     t1, t2 = _tbl("orders"), _tbl("users")

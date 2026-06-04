@@ -140,12 +140,24 @@ class BusinessDomainAnalyzer:
         hub = self._hub_tables(ep_tables)
 
         uf = _UnionFind(endpoints)
-        table_to_eps: dict[str, list[str]] = {}
+        # 主信号: 同 file 的 endpoint 合并 —— 开发者按业务域分文件(routes/orgs.py、users.py),
+        # file 是比"共享表"强得多的域先验, 且不被跨域共享表(org_members 等)误连成巨型 cluster。
+        file_to_eps: dict[str, list[str]] = {}
         for ep in endpoints:
+            f = by_id[ep].file
+            if f:
+                file_to_eps.setdefault(f, []).append(ep)
+        for eps in file_to_eps.values():
+            for other in eps[1:]:
+                uf.union(eps[0], other)
+        # 辅: **仅无 file** 的 endpoint 才按共享非 hub 表合并 —— 防跨域表共享把不同 file 揉一起
+        # (codev-platform 实测: 表合并会退化成一个巨型 cluster)。
+        table_to_eps: dict[str, list[str]] = {}
+        for ep in (e for e in endpoints if not by_id[e].file):
             for t in ep_tables[ep]:
                 if t not in hub:
                     table_to_eps.setdefault(t, []).append(ep)
-        for eps in table_to_eps.values():  # 同一专属表的 endpoint 互相合并
+        for eps in table_to_eps.values():
             for other in eps[1:]:
                 uf.union(eps[0], other)
 
