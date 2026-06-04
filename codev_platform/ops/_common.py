@@ -104,7 +104,6 @@ DEFAULT_DOC_PATTERNS = [
     r".*CLAUDE\.md$", r".*AGENTS\.md$", r"^README\.md$",
 ]
 DEFAULT_CODEGRAPH_PATTERNS = [r"^apps/[^/]+/src/.*\.(java|ts|tsx)$"]
-DEFAULT_CROSS_LINK_PATTERNS: list[str] = []
 
 
 def reindex_patterns(health: dict[str, Any]) -> dict[str, list[str]]:
@@ -115,7 +114,6 @@ def reindex_patterns(health: dict[str, Any]) -> dict[str, list[str]]:
     return {
         "doc": ext("reindex_doc_patterns", DEFAULT_DOC_PATTERNS),
         "codegraph": ext("reindex_codegraph_patterns", DEFAULT_CODEGRAPH_PATTERNS),
-        "cross_link": ext("reindex_cross_link_patterns", DEFAULT_CROSS_LINK_PATTERNS),
     }
 
 
@@ -140,11 +138,6 @@ def chroma_python() -> Path | None:
         return None
     py = _venv_python(v)
     return py if py.exists() else py  # return path even if missing; caller Tests existence
-
-
-def cross_link_python() -> str:
-    """Python for cross_link build (config runtime.cross_link_python, else PATH 'python')."""
-    return cfg_get("runtime.cross_link_python") or "python"
 
 
 # ----------------------------------------------------------------------

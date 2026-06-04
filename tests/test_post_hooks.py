@@ -10,17 +10,16 @@ from codev_platform.ops import reindex
 
 
 def test_classify_scopes_buckets():
-    pats = {"doc": [r"\.md$"], "cross_link": [r"\.sql$"], "codegraph": [r"\.py$", r"\.java$"]}
-    changed = ["a.md", "b.py", "c.sql", "d.txt", "e.java"]
+    pats = {"doc": [r"\.md$"], "codegraph": [r"\.py$", r"\.java$"]}
+    changed = ["a.md", "b.py", "d.txt", "e.java"]
     scoped = reindex.classify_scopes(changed, pats)
     assert scoped["chroma"] == ["a.md"]
-    assert scoped["cross_link"] == ["c.sql"]
     assert sorted(scoped["codegraph"]) == ["b.py", "e.java"]
     assert "d.txt" not in str(scoped)          # 无 scope 命中的不进
 
 
 def test_classify_scopes_empty_when_no_match():
-    pats = {"doc": [r"\.md$"], "cross_link": [], "codegraph": []}
+    pats = {"doc": [r"\.md$"], "codegraph": []}
     assert reindex.classify_scopes(["x.txt", "y.png"], pats) == {}
 
 

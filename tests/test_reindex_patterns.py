@@ -3,19 +3,15 @@
 Bug context: reindex scope must be project-name-free by default so a brand-new
 project works with zero meta config. Each project EXTENDS the generic defaults
 via meta.health.reindex_*_patterns (single source of truth), it does not replace
-them. SQL/Mapper must map to cross_link only when the project declares it.
+them.
 """
 from __future__ import annotations
 
 import codev_platform.ops._common as common
 
 
-# Simulated openclaw-stock meta.health: declares cross_link patterns for SQL/Mapper.
+# Simulated openclaw-stock meta.health: declares extra codegraph patterns.
 OPENCLAW_HEALTH = {
-    "reindex_cross_link_patterns": [
-        r"db/migration/.*\.sql$",
-        r"mapper/.*Mapper\.xml$",
-    ],
     "reindex_codegraph_patterns": [
         r"python/.*\.py$",
     ],
@@ -26,14 +22,6 @@ def _scope_of(path: str, health: dict) -> set[str]:
     """Return the set of scopes a path matches."""
     pats = common.reindex_patterns(health)
     return {scope for scope, plist in pats.items() if common.matches_any(path, plist)}
-
-
-def test_sql_matches_cross_link_when_declared():
-    assert "cross_link" in _scope_of("apps/api/db/migration/V99__x.sql", OPENCLAW_HEALTH)
-
-
-def test_mapper_matches_cross_link_when_declared():
-    assert "cross_link" in _scope_of("apps/api/mapper/StockMapper.xml", OPENCLAW_HEALTH)
 
 
 def test_py_matches_codegraph_when_declared():
@@ -67,9 +55,9 @@ def test_random_txt_matches_nothing_empty_health():
 
 
 def test_defaults_extended_not_replaced():
-    # project cross_link extra is APPENDED to the (empty) default list
+    # project codegraph extra is APPENDED to the generic default list (not replacing)
     pats = common.reindex_patterns(OPENCLAW_HEALTH)
-    assert pats["cross_link"] == list(OPENCLAW_HEALTH["reindex_cross_link_patterns"])
+    assert r"python/.*\.py$" in pats["codegraph"]
     # generic doc/codegraph defaults survive even with project extras present
     for d in common.DEFAULT_DOC_PATTERNS:
         assert d in pats["doc"]

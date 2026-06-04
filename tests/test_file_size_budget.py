@@ -12,10 +12,9 @@ _LIMIT = 600
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # 当前已超、暂缓拆 (各有后续拆分计划)。新增超限文件**严禁**加这里——先拆。
-_WHITELIST = {
-    # cli.py / sql.py / _stack_scan.py / ops/reindex.py 已拆成同名包 (各 ≤600), 移出白名单。
-    "codev_platform/cross_link/server.py",            # cross-link MCP server, 退役中 (Track A6 迁 store)
-}
+_WHITELIST: set[str] = set()
+# cli.py / sql.py / _stack_scan.py / ops/reindex.py 已拆成同名包 (各 ≤600), 移出白名单。
+# cross_link/server.py 退役 (整包删除) 后白名单清空。
 
 
 def _line_count(p: pathlib.Path) -> int:

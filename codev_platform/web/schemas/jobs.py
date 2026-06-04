@@ -44,7 +44,7 @@ class IndexRebuildRequest(BaseModel):
     """POST /api/v1/indexes/rebuild 请求体。"""
 
     indexKind: str | None = Field(
-        None, description="索引类型: all / chroma / codegraph / cross_link; 不传默认 all"
+        None, description="索引类型: all / chroma / codegraph; 不传默认 all"
     )
 
 

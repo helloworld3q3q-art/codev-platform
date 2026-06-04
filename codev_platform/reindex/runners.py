@@ -110,10 +110,9 @@ class CodegraphReindexRunner(CliReindexRunner):
         return super().run(project_id, repo, cfg)
 
 
-# 内置四类 (与 ops/reindex.py 的 --chroma / --codegraph / --cross-link / --ingest 对齐)
+# 内置三类 (与 ops/reindex.py 的 --chroma / --codegraph / --ingest 对齐)
 register(CliReindexRunner("chroma", "--chroma"))
 register(CodegraphReindexRunner())
-register(CliReindexRunner("cross_link", "--cross-link"))
 # 统一图谱 ingest: 跑 analyzer 插件 -> graph store。委托 reindex --ingest (失败隔离在
 # ops/reindex.py 内: 插件层异常只 warn 不改退出码, 不拖垮基线索引)。
 register(CliReindexRunner("ingest", "--ingest"))

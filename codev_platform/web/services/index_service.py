@@ -5,7 +5,7 @@ POST /api/v1/indexes/rebuild 的业务编排: 校验 index_kind → 委托 JobSe
 互斥由 JobService 的项目级锁保证。本片不真跑 reindex (plan §12.1: 重活走平台既有
 reindex worker 串行写锁通道)。
 
-index_kind 取值对齐 reindex.runners 的注册集合 (chroma / codegraph / cross_link);
+index_kind 取值对齐 reindex.runners 的注册集合 (chroma / codegraph);
 不传 kind 默认 'all' (一次重建所有, job_type='index_rebuild:all')。
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from codev_platform.web.services.job_service import JobService, JobTrigger
 
 _ALL = "all"
 # 允许的索引类型 (对齐 reindex.runners.kinds() + 'all' 聚合)。
-_ALLOWED_KINDS = ("all", "chroma", "codegraph", "cross_link")
+_ALLOWED_KINDS = ("all", "chroma", "codegraph")
 
 _JOB_TYPE_PREFIX = "index_rebuild"
 

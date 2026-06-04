@@ -91,5 +91,5 @@ def register(subparsers) -> None:
     rq.add_argument("project", nargs="?", default=None,
                     help="enqueue: 目标 project_id (不给则从 cwd .claude/project.json 解析)")
     rq.add_argument("--kind", default="all",
-                    help="enqueue: chroma | codegraph | cross_link | all (默认 all)")
+                    help="enqueue: chroma | codegraph | all (默认 all)")
     rq.set_defaults(func=cmd_reindex_queue)

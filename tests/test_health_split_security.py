@@ -132,10 +132,9 @@ def test_webhook_healthz_minimal_no_provider_leak():
 def test_servers_public_paths_are_healthz_only():
     import inspect
     from codev_platform.chroma import server as chroma_srv
-    from codev_platform.cross_link import server as cl_srv
     from codev_platform.codegraph import server as cg_srv
 
-    for mod in (chroma_srv, cl_srv, cg_srv):
+    for mod in (chroma_srv, cg_srv):
         src = inspect.getsource(mod._run_http if hasattr(mod, "_run_http") else mod.run_http)
         assert 'public_paths={"/healthz", "/health"}' in src, f"{mod.__name__} public_paths 漂移"
         # 详情面路由存在且未被列入 public

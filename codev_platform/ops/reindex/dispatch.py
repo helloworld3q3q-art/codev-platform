@@ -12,28 +12,15 @@ from .logs import _append_log, _now, _reindex_log
 
 
 def classify_scopes(changed: list[str], pats: dict) -> dict[str, list[str]]:
-    """把改动文件按 doc/cross_link/codegraph 三 scope 归类(纯函数, 可单测)。
+    """把改动文件按 doc/codegraph 两 scope 归类(纯函数, 可单测)。
 
     返回 {scope: [matched paths]}, 只含命中的 scope。空 dict = 无需 reindex。
     """
     buckets = {
         "chroma": [p for p in changed if C.matches_any(p, pats["doc"])],
-        "cross_link": [p for p in changed if C.matches_any(p, pats["cross_link"])],
         "codegraph": [p for p in changed if C.matches_any(p, pats["codegraph"])],
     }
     return {k: v for k, v in buckets.items() if v}
-
-
-# A3 (parity 达标后退役): cross_link/cross_layer 已被统一图谱 store 完全取代
-# (store 每项覆盖 ≥ cross_layer, 见 tools/audit_graph_parity.py), 不再**自动**重建。
-# classify_scopes 仍诚实分类 (.sql/.xml 确与 cross-link 相关, 供 dirty 显示), 但自动入队
-# 层滤掉它; 手动 `reindex --cross-link` (do_cross_link 路径) + runner 保留, 可按需重建/回退。
-_AUTO_REINDEX_RETIRED = frozenset({"cross_link"})
-
-
-def auto_reindex_kinds(scoped: dict) -> list[str]:
-    """从 classify_scopes 结果取真正要自动入队的 runner kind, 滤掉已退役 scope (A3)。"""
-    return [k for k in scoped if k not in _AUTO_REINDEX_RETIRED]
 
 
 def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
@@ -48,9 +35,7 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
     scoped = classify_scopes(changed, pats)
     if not scoped:
         return 0  # silent no-op
-    scopes = auto_reindex_kinds(scoped)  # A3: 滤掉已退役 cross_link, 不自动重建 cross_layer
-    if not scopes:
-        return 0  # 仅命中退役 scope (cross_link) → 静默 no-op
+    scopes = list(scoped)
     # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest (插件重跑落 store)。
     # ingest 失败隔离在 reindex --ingest 内, 不影响 codegraph 自身索引。
     if "codegraph" in scoped and "ingest" not in scopes:

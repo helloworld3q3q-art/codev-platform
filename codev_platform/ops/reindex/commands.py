@@ -20,9 +20,9 @@ from .logs import _git_out, _reindex_log
 # 1. reindex  (port of update-local-ai.ps1)
 # ======================================================================
 def cmd_reindex(args: argparse.Namespace) -> int:
-    """Refresh local AI indexes. Default = run all three stages.
+    """Refresh local AI indexes. Default = run all stages.
 
-    --chroma / --codegraph / --cross-link select a subset (if ANY is given, only
+    --chroma / --codegraph select a subset (if ANY is given, only
     the named stages run). --force passes --force to the chroma indexer.
 
     Exit code: 0 success / non-zero on first stage failure (mirrors the .ps1).
@@ -34,13 +34,12 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         return 1
 
     do_ingest_flag = getattr(args, "ingest", False)
-    selected = bool(args.chroma or args.codegraph or args.cross_link or do_ingest_flag)
+    selected = bool(args.chroma or args.codegraph or do_ingest_flag)
     do_codegraph = args.codegraph if selected else True
     do_chroma = args.chroma if selected else True
-    do_cross_link = args.cross_link if selected else True
     do_ingest = do_ingest_flag if selected else True
 
-    if args.force or (do_codegraph and do_chroma and do_cross_link and not selected):
+    if args.force or (do_codegraph and do_chroma and not selected):
         C.out("[reindex] full rebuild: run in foreground to watch progress "
               "(post-commit handles incremental in background)")
 
@@ -49,7 +48,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     # --- stage 1/3: codegraph sync ---
     if do_codegraph:
         C.out("")
-        C.out("=== step 1/4: codegraph sync ===")
+        C.out("=== step 1/3: codegraph sync ===")
         try:
             cp = C.run(["codegraph", "sync"], cwd=str(repo))
             rc = cp.returncode
@@ -63,12 +62,12 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             C.err(f"FAIL: codegraph sync exit={rc}")
             return rc
     else:
-        C.out("step 1/4: codegraph sync   -- skipped")
+        C.out("step 1/3: codegraph sync   -- skipped")
 
     # --- stage 2/3: chroma reindex ---
     if do_chroma:
         C.out("")
-        C.out("=== step 2/4: chroma reindex ===")
+        C.out("=== step 2/3: chroma reindex ===")
         chroma_py = C.chroma_python()
         if not chroma_py or not Path(chroma_py).exists():
             C.err(f"FAIL: chroma python not found ({chroma_py}); set runtime.chroma_venv in config")
@@ -83,57 +82,18 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             C.err(f"FAIL: chroma reindex exit={rc}")
             return rc
     else:
-        C.out("step 2/4: chroma reindex   -- skipped")
+        C.out("step 2/3: chroma reindex   -- skipped")
 
-    # --- stage 3/3: cross-layer KG rebuild ---
-    if do_cross_link:
-        C.out("")
-        C.out("=== step 3/4: cross-layer KG rebuild ===")
-        # The cross_link build scanners (build_index + scan_*) are a BUSINESS-repo
-        # asset, not part of the codev_platform package. Projects without them
-        # (e.g. codev-platform itself) must skip — NOT scan some other repo and
-        # pollute their own DB. Gate on the target repo actually shipping them.
-        builder = repo / "tools" / "cross_link" / "build_index.py"
-        if not builder.is_file():
-            C.out(f"step 3/4: cross-layer KG   -- skipped "
-                  f"(no {builder.relative_to(repo)} in this repo)")
-        else:
-            cross_py = C.cross_link_python()
-            env = dict(os.environ)
-            # cross_link package lives under <repo>/tools (mirrors update-local-ai.ps1)
-            env["PYTHONPATH"] = str(repo / "tools")
-            env["PYTHONIOENCODING"] = "utf-8"
-            # Pin scan-root AND write-path to the SAME project so we never
-            # "scan repo A, write DB B" (cross-tenant pollution). The builder's
-            # DB_PATH is resolved from PLATFORM_PROJECT_ID; its scan-root
-            # (schema.REPO_ROOT) now honors CROSS_LINK_REPO_ROOT. Pinning both to
-            # this repo keeps them in lockstep regardless of cwd / __file__.
-            pid = C.project_id_of(repo)
-            if pid:
-                env["PLATFORM_PROJECT_ID"] = pid
-            env["CROSS_LINK_REPO_ROOT"] = str(repo)
-            try:
-                rc = C.run([cross_py, "-m", "cross_link.build_index"],
-                           env=env, cwd=str(repo)).returncode
-            except FileNotFoundError:
-                C.err(f"FAIL: cross_link python not found ({cross_py}); set runtime.cross_link_python")
-                return 1
-            if rc != 0:
-                C.err(f"FAIL: cross_link build exit={rc}")
-                return rc
-    else:
-        C.out("step 3/4: cross-layer KG   -- skipped")
-
-    # --- stage 4/4: unified graph ingest (plugins -> graph store) ---
+    # --- stage 3/3: unified graph ingest (plugins -> graph store) ---
     # 跑所有适用 analyzer 插件, 把产出灌进 per-project 统一图谱 store。与上面三个
     # stage 并列, 但 FAILURE-ISOLATED: 这是 Phase 3 聚合层, 任何异常只 warn 不
-    # 改 reindex 退出码 —— 绝不让插件层拖垮已稳定的 codegraph/chroma/cross-link 基线。
+    # 改 reindex 退出码 —— 绝不让插件层拖垮已稳定的 codegraph/chroma 基线。
     if do_ingest:
         C.out("")
-        C.out("=== step 4/4: unified graph ingest ===")
+        C.out("=== step 3/3: unified graph ingest ===")
         pid = C.project_id_of(repo)
         if not pid:
-            C.out("step 4/4: graph ingest     -- skipped (repo 无 .claude/project.json project_id)")
+            C.out("step 3/3: graph ingest     -- skipped (repo 无 .claude/project.json project_id)")
         else:
             try:
                 from codev_platform.graph.ingest import ingest_project
@@ -146,7 +106,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             except Exception as exc:  # noqa: BLE001 — 聚合层失败隔离, 不污染基线退出码
                 C.err(f"WARN: graph ingest failed (non-fatal, baseline indexes unaffected): {exc}")
     else:
-        C.out("step 4/4: graph ingest     -- skipped")
+        C.out("step 3/3: graph ingest     -- skipped")
 
     dur = int(time.monotonic() - started)
     C.out("")
@@ -272,10 +232,9 @@ def cmd_dirty_check(args: argparse.Namespace) -> int:
     pats = C.reindex_patterns(health)
 
     affected_cg = [p for p in dirty_paths if C.matches_any(p, pats["codegraph"])]
-    affected_cl = [p for p in dirty_paths if C.matches_any(p, pats["cross_link"])]
     affected_ch = [p for p in dirty_paths if C.matches_any(p, pats["doc"])]
 
-    total = sorted(set(affected_cg + affected_cl + affected_ch))
+    total = sorted(set(affected_cg + affected_ch))
     dirty = len(total) > 0
 
     if args.json:
@@ -283,7 +242,6 @@ def cmd_dirty_check(args: argparse.Namespace) -> int:
             "dirty": dirty,
             "affected": {
                 "codegraph": affected_cg,
-                "cross_link": affected_cl,
                 "chroma": affected_ch,
             },
             "total_dirty_files": len(dirty_paths),
@@ -304,7 +262,7 @@ def cmd_dirty_check(args: argparse.Namespace) -> int:
     if not dirty:
         C.out("no dirty files in AI index scope")
         C.out(f"working tree has {len(dirty_paths)} dirty file(s) but none in "
-              "CodeGraph/cross-link/Chroma scope")
+              "CodeGraph/Chroma scope")
         return 0
 
     C.out("WARN: dirty files in AI index scope - MCP results may be STALE")
@@ -312,10 +270,6 @@ def cmd_dirty_check(args: argparse.Namespace) -> int:
     if affected_cg:
         C.out(f"[CodeGraph  ] {len(affected_cg)} file(s):")
         for p in affected_cg:
-            C.out(f"  {p}")
-    if affected_cl:
-        C.out(f"[cross-link ] {len(affected_cl)} file(s):")
-        for p in affected_cl:
             C.out(f"  {p}")
     if affected_ch:
         C.out(f"[Chroma     ] {len(affected_ch)} file(s):")
@@ -367,7 +321,7 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
         changed = [ln.strip() for ln in changed_raw.splitlines() if ln.strip()]
         pid = C.project_id_of(repo)
         pats = C.reindex_patterns(C.meta_health(pid))
-        all_pats = pats["doc"] + pats["cross_link"] + pats["codegraph"]
+        all_pats = pats["doc"] + pats["codegraph"]
         has_indexable = any(C.matches_any(p, all_pats) for p in changed)
         if not has_indexable:
             C.out(f"[OK] {short} touches no indexable file, skip wait")
@@ -417,12 +371,11 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
 def register(subparsers) -> None:
     sp = subparsers.add_parser(
         "reindex",
-        help="刷新本地 AI 索引 (chroma / codegraph / cross-link; 默认全跑)",
+        help="刷新本地 AI 索引 (chroma / codegraph; 默认全跑)",
     )
     sp.add_argument("--repo", default=None, help="目标仓 (默认 git rev-parse 当前仓)")
     sp.add_argument("--chroma", action="store_true", help="只跑 chroma (与其它 flag 组合则只跑选中的)")
     sp.add_argument("--codegraph", action="store_true", help="只跑 codegraph sync")
-    sp.add_argument("--cross-link", action="store_true", dest="cross_link", help="只跑 cross-link 重建")
     sp.add_argument("--ingest", action="store_true", help="只跑统一图谱 ingest (plugins -> graph store)")
     sp.add_argument("--force", action="store_true", help="chroma indexer 传 --force (drop + rebuild)")
     sp.set_defaults(func=cmd_reindex)

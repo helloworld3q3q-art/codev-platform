@@ -34,9 +34,7 @@ from .proc import (
     _status_label,
 )
 from .dispatch import (
-    _AUTO_REINDEX_RETIRED,
     _dispatch_reindex,
-    auto_reindex_kinds,
     classify_scopes,
 )
 from .commands import (
@@ -52,7 +50,6 @@ from .commands import (
 
 __all__ = [
     "C",
-    "_AUTO_REINDEX_RETIRED",
     "_FINISHED_RE",
     "_append_log",
     "_dispatch_reindex",
@@ -64,7 +61,6 @@ __all__ = [
     "_run_logged_foreground",
     "_spawn_background",
     "_status_label",
-    "auto_reindex_kinds",
     "classify_scopes",
     "cmd_dirty_check",
     "cmd_post_checkout",

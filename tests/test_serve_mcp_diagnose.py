@@ -13,7 +13,7 @@ from codev_platform.mcp_serve import (
 )
 
 
-def _ep(kind: str = "cross_link") -> MCPEndpoint:
+def _ep(kind: str = "codegraph") -> MCPEndpoint:
     return MCPEndpoint(name="x", kind=kind, port=12345)
 
 
@@ -36,11 +36,6 @@ def test_port_closed_unit_unknown():
     assert "unit" not in r
 
 
-def test_dep_missing_cross_link():
-    r = diagnose_down(_ep("cross_link"), port_open=True, healthz_ok=False, dep_ok=False)
-    assert "依赖缺失" in r and "sqlglot" in r
-
-
 def test_dep_missing_codegraph():
     r = diagnose_down(_ep("codegraph"), port_open=True, healthz_ok=False, dep_ok=False)
     assert "依赖缺失" in r and "mcp-proxy" in r
@@ -52,9 +47,9 @@ def test_dep_missing_chroma():
 
 
 def test_db_missing():
-    r = diagnose_down(_ep("cross_link"), port_open=True, healthz_ok=False,
+    r = diagnose_down(_ep("codegraph"), port_open=True, healthz_ok=False,
                       dep_ok=True, db_present=False)
-    assert "数据缺失" in r and "cross_layer.sqlite" in r
+    assert "数据缺失" in r and "codegraph 索引" in r
 
 
 def test_healthz_abnormal_while_port_open():
