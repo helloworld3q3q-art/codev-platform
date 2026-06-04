@@ -1,0 +1,55 @@
+# 迭代日报 2026-06-04(roadmap-2026-06-03 续)
+
+> 本迭代主题延续:**统一图谱连通全链路 → 影响分析**。本日两大交付都是"补 codegraph 结构盲区":
+> ① 调用边 resolver 框架(endpoint→碰表函数, Python DI 盲区)② 前端组件依赖图(改组件→影响哪些页面, JSX/SFC 盲区)。
+> 测试基线 **897 → 908 passed**。提交区间 `907de4b … 195df1a`。
+
+---
+
+## Track 1:调用边 resolver 框架 — 按「只补盲区」收敛 ✅
+
+把原 `ingest._bridge_pass`(单一 codegraph 桥接)升格为**按语言栈可扩展**的 `graph/call_resolvers/` 框架,核心是一条用数据校准的原则。
+
+- **Phase 1 框架**(`907de4b`):`CallResolver` 协议(applies/resolve)+ registry,零 if-else(同 plugins/agent-provider 铁律)。codegraph 桥接升格为第一个 resolver(跨语言兜底)。
+- **去重 confidence 优先**(`9058abf`):同 (source,target,kind) 边保留置信最高者,注册顺序仅作并列 tiebreak。精确 resolver 盖过兜底,而非"先跑者赢"误丢高置信边。
+- **FastAPI/Python DI resolver(范本)**(`a73bad9`):codegraph 追不动 `self._store.x()`(要先解析注入类型),用**方法名 BFS**(AST 提被调方法名,不解析类型)绕过 DI。降噪三件套:通用名黑名单 + `_MAX_DEPTH=3` + `conf=0.65`(< codegraph 0.7)。**codev 自身 63 边补上,codegraph 兜底 0 边**;chat→agent_sessions 表穿透 3 跳 DI 真阳性。
+- **抽 `_bfs.py` 公共层**(`4a58d63`):方法名 BFS + 连边 + 去重抽出复用,加语言零成本。
+- **Spring/Java 撤回 + 盲区原则**(`7138a72`):**数据证伪**了"Spring 价值最高"的判断 —— platform 仓 Java 方法名 BFS 387 边与 codegraph 90 边**零重叠** + 串台严重(assignMenus→backtest mapper),增量为负,撤回。**判据钉进 base.py docstring**:"codegraph 即便索引完整也追不到这条边吗?" 答否 → 交 codegraph(强类型它更准),唯结构盲区(Python DI)才做 resolver。当前 registered 仅 `codegraph` + `fastapi`。
+
+> **元教训**:易解析 = codegraph 已解析,resolver 再做就是重复 + 加噪。Node/.NET/前端组件 calls 同理(codegraph 覆盖或无业务仓)→ 不做。
+
+---
+
+## Track 2:前端组件依赖图 — 接 dependency-cruiser 补盲区 ✅
+
+需求「改这个公共组件影响哪些页面」是 codegraph **真盲区**(import 停模块级、JSX/Vue-SFC 不建引用边,实测公共组件 incoming 仅 contains)。
+
+- **三条路验证**:codegraph 硬限制(改第三方解析器不可行)/ 手写正则劣解(前端模块解析 alias/barrel/index 坑太多)/ **dependency-cruiser**(成熟工具,读 tsconfig paths 解 `@/` alias)→ 选第三条,不造轮子。
+- **数据端**(`f941368`):`scan_frontend_deps` 接 dependency-cruiser → `FRONTEND_MODULE` 节点(独立 kind, 不碰 vue 的 frontend_component)+ `IMPORTS` 边,独立 ingest post-pass,框架无关(**react .tsx + vue .vue 都吃**),fail-soft。🔑 关键配置:`--config` 文件的 `tsConfig` 才启用 tsconfig-paths 解 alias(实测依赖边 7→524)。
+- **查询端**(`117d101`):`impact.find_impacted_pages`(反向 BFS imports,含传递 组件→barrel→页面,只取 is_page)+ cross_link MCP 工具 **`find_component_pages`**。agent 现在经 MCP 能查组件影响面。
+- **真实双仓验证**:react(stock-admin-web)`PermissionButton`→**12 页面**;vue(scl-www-10, vue3+vite)1687 .vue,`AiMenuComponent`→1277 页面。完整 ingest e2e + 真实 MCP call_tool 层全验证。
+
+### 端到端验证抓到 3 个真 bug(单元测试 mock 覆盖不到)
+1. **pin @16 回归**(`c4c3865` 修):完整 ingest 时边 524→254、反向链路全断 —— dependency-cruiser 16.10.4 解析不全,17.4.3 完整,改 pin **@17**。
+2. **owner 契约假绿**(审计抓):owner 测试 fixture 无 tsconfig → frontend_deps no-op 掩盖 kind 冲突 → 独立 `FRONTEND_MODULE` + mock 测试真覆盖。
+3. **节点 name 带扩展**(`117d101` 修):MCP 端查 `PermissionButton` 不命中(name 是 `.tsx`)→ 去扩展 + index 用父目录名。
+
+> **元教训**:补盲区**先评估成熟工具,别急着手写**;关键卖点配端到端验证(这次"都验证过了么"一问抓出 3 个潜伏 bug)。
+
+---
+
+## 收尾:Java codegraph-api :18082 退役确认(`195df1a`)
+
+completion-audit 列"5 处引用 18082 = 切流未完成"系**误判**:5 处全是注释/docstring 历史说明,运行时 **0 依赖**(无 HTTP 调用、`_query/_check_codegraph_api` helper 已移除)。codegraph 自身走 SSE :18091(mcp-proxy),与 :18082 无关。**退役实际早已完成**,audit 状态 ⚠️→✅ 已纠正。
+
+---
+
+## 验证
+- **908 passed / 5 skipped**;新增 resolver/frontend_deps/impact 专项测试(call_resolvers 框架 + fastapi DI + frontend_deps react/vue + find_impacted_pages + owner 契约覆盖)。
+- 真实验证:codev(fastapi 63 边)/ platform(spring 撤回数据 + react 12 页面)/ scl-www-10(vue 1277 页面)/ MCP call_tool 层(find_component_pages → 12 页面)。
+- memory 沉淀:`call-resolver-blind-spot-principle`(更新)+ `frontend-component-dep-graph`(新增)。
+
+## 剩余 backlog(本日产生,非阻断)
+- 前端依赖图:ingest 缓存(每次全量跑 depcruise ~分钟级)/ is_page 盲区(Next app/、umi config/routes 漏判)/ 生产 npx 预装 dependency-cruiser。
+- vue 业务仓 scl-www-10 未 `codev-platform init` 登记进平台。
+- endpoint→表 codev 自身 DI(codegraph calls 图层面 service→store 边仍 0,audit 定 P3+;fastapi resolver 是另一条路绕过)。
