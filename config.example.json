@@ -62,8 +62,8 @@
   },
 
   "analyzers": {
-    "_comment": "统一图谱综合分析器 (graph/analyzers, ingest 的 second post-pass)。business_domain: A1 业务域映射 — LLM 给 endpoint 链路归业务域 (软节点, confidence<1.0, impact 默认过滤不污染查依赖)。enabled 默认 false (关): 开启后 ingest 会调 LLM (走 agent.provider, 需 key) 按聚类标域, 有 per-cluster fingerprint 缓存。codev-platform 真 deepseek-chat 实测准确率 ~95% (A1-3 验收)。provider 缺 key 时自动 no-op。开启条件: enabled=true + agent.providers.<provider>.api_key (或 env) 在位。",
-    "business_domain": { "enabled": false }
+    "_comment": "统一图谱综合分析器 (graph/analyzers, ingest 的 second post-pass)。business_domain: A1 业务域映射 — LLM 给 endpoint 链路归业务域 (软节点, confidence<1.0, impact 默认过滤不污染查依赖)。enabled 默认 false (关): 开启后 ingest 会调 LLM 按聚类标域, 有 per-cluster fingerprint 缓存 (含 cache GC) + 超大簇 member 采样 (防噪声/爆 token)。codev-platform 真 deepseek-chat 实测 ~95% (A1-3 验收)。缺 key 自动 no-op。provider: 留空跟随全局 agent.provider; 也可独立指定 (deepseek/qwen/本地 ollama) 让 ① 对话用 claude、③ 标注用便宜/本地模型各走各的, key 仍公用 agent.providers.<name>。开启: enabled=true + 对应 provider 的 api_key (或 env) 在位。",
+    "business_domain": { "enabled": false, "provider": "" }
   },
 
   "memory": {

@@ -77,10 +77,11 @@ class BusinessDomainAnalyzer:
     name = "business_domain"
 
     def __init__(self, labeler: DomainLabeler, *, cache_dir: Path | None = None,
-                 max_clusters: int = 200) -> None:
+                 max_clusters: int = 200, max_members: int = 40) -> None:
         self._labeler = labeler
         self._cache_dir = cache_dir
         self._max_clusters = max_clusters
+        self._max_members = max_members  # 单簇喂 LLM 的 member 上限(防噪声 + 爆 token)
 
     # ---- Analyzer 协议 ----
 
@@ -104,7 +105,7 @@ class BusinessDomainAnalyzer:
         keyed: list[tuple[ClusterRequest, str]] = []
         ref_maps: dict[str, dict[str, str]] = {}
         for cid, eps, tables in clusters:
-            req, ref_to_id = self._to_request(cid, eps, tables, by_id)
+            req, ref_to_id = self._to_request(cid, eps, tables, by_id, self._max_members)
             keyed.append((req, self._cache_key(req)))
             ref_maps[cid] = ref_to_id
 
@@ -167,7 +168,11 @@ class BusinessDomainAnalyzer:
         clusters = []
         for root in sorted(groups):
             eps = sorted(groups[root])
-            ctables = sorted({t for ep in eps for t in ep_tables[ep] if t not in hub})
+            ctset = {t for ep in eps for t in ep_tables[ep] if t not in hub}
+            # 表按 cluster 内 degree(被多少 endpoint 读)降序, tie 按 id —— 喂 LLM 超额裁表时
+            # 保留最相关(高 degree), 丢边缘噪声表。确定性可复现。
+            tdeg = {t: sum(1 for ep in eps if t in ep_tables[ep]) for t in ctset}
+            ctables = sorted(ctset, key=lambda t: (-tdeg[t], t))
             clusters.append((root, eps, ctables))
         return clusters, by_id
 
@@ -205,13 +210,17 @@ class BusinessDomainAnalyzer:
     # ---- grounding 数据准备 ----
 
     @staticmethod
-    def _to_request(cid, eps, tables, by_id):
+    def _to_request(cid, eps, tables, by_id, max_members):
+        """渲染 ClusterRequest, 对超大簇采样防噪声/爆 token(确定性): endpoint 是标注主体
+        优先全留(超额才截), table 是上下文按 degree 降序填剩余配额(裁掉边缘噪声表)。"""
         members, ref_to_id = [], {}
-        for i, ep in enumerate(eps):
+        use_eps = eps[:max_members]                   # endpoint 优先(超额罕见, 截断保护)
+        for i, ep in enumerate(use_eps):
             ref = f"e{i + 1}"
             members.append(ClusterMember(ref=ref, kind="endpoint", name=by_id[ep].name))
             ref_to_id[ref] = ep
-        for i, t in enumerate(tables):
+        room = max(0, max_members - len(use_eps))     # 剩余配额给 table(已 degree 降序)
+        for i, t in enumerate(tables[:room]):
             ref = f"t{i + 1}"
             members.append(ClusterMember(ref=ref, kind="table", name=by_id[t].name))
             ref_to_id[ref] = t
@@ -260,10 +269,10 @@ class BusinessDomainAnalyzer:
     # ---- 缓存(per-cluster fingerprint) ----
 
     def _labels_with_cache(self, project_id, keyed):
-        # TODO(A1-3+): 缓存命中前查 ownership override —— 用户一键纠正过的 domain 必须盖过
-        #   LLM 旧值, 不被缓存命中覆盖(plan 护栏③: PPT vs 真功能分水岭)。
+        # TODO(批2): 缓存命中前查 ownership override —— 用户纠正过的 domain 盖过 LLM 旧值(plan 护栏③)。
         cache = self._load_cache(project_id)
         cid_to_key = {req.cluster_id: key for req, key in keyed}
+        valid_keys = {key for _, key in keyed}  # 本轮出现的 fingerprint(cache GC 据此清孤儿)
         labels, to_label = [], []
         for req, key in keyed:
             ent = cache.get(key)
@@ -279,7 +288,10 @@ class BusinessDomainAnalyzer:
                 if key is not None:
                     cache[key] = {"domain": lab.domain,
                                   "member_refs": list(lab.member_refs)}
-            self._save_cache(project_id, cache)
+        # cache GC: 只保留本轮 fingerprint —— cluster 拆分/合并后的孤儿 entry 清掉(防单调增长)。
+        pruned = {k: v for k, v in cache.items() if k in valid_keys}
+        if to_label or len(pruned) != len(cache):  # 有新标 / 有孤儿被清 才写盘
+            self._save_cache(project_id, pruned)
         return labels
 
     def _safe_label(self, batch):

@@ -107,7 +107,15 @@ class BrainDomainLabeler:
         self._resolved = True
         try:
             from codev_platform.agent.brain.registry import get_provider
-            self._provider = get_provider(self._cfg)
+            from codev_platform.core.config import get, load_config
+
+            cfg = self._cfg if self._cfg is not None else load_config()
+            # A1 可独立选模型(标注用便宜/本地的): analyzers.business_domain.provider 覆盖
+            # 全局 agent.provider —— ① 对话用 claude, ③ 标注用 deepseek 各走各的, key 仍公用 providers。
+            ap = get(cfg, "analyzers.business_domain.provider")
+            if ap:
+                cfg = {**cfg, "agent": {**cfg.get("agent", {}), "provider": ap}}
+            self._provider = get_provider(cfg)
         except Exception as exc:  # noqa: BLE001 — 缺 key/extra → 不可用(None), 不报错
             logger.debug("[business_domain] provider unavailable: %r", exc)
             self._provider = None

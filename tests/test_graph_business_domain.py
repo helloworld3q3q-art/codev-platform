@@ -284,3 +284,39 @@ def test_business_domain_registered_only_when_config_enabled():
     finally:
         base._ANALYZERS.clear()
         base._ANALYZERS.extend(saved)
+
+
+def test_to_request_caps_members_endpoint_priority():
+    # 超大簇采样: endpoint 优先全留, table 按剩余配额填(防噪声/爆 token)。
+    by_id, eps, tables = {}, [], []
+    for i in range(3):
+        e = _ep(f"GET /r{i}"); by_id[e.id] = e; eps.append(e.id)
+    for i in range(10):
+        t = _tbl(f"t{i}"); by_id[t.id] = t; tables.append(t.id)
+    req, _ = BusinessDomainAnalyzer._to_request("c", eps, tables, by_id, 5)
+    assert len(req.members) == 5
+    assert sum(1 for m in req.members if m.kind == "endpoint") == 3  # 全留
+    assert sum(1 for m in req.members if m.kind == "table") == 2     # 填剩余 2
+
+
+def test_to_request_caps_endpoints_when_over_budget():
+    by_id, eps = {}, []
+    for i in range(8):
+        e = _ep(f"GET /r{i}"); by_id[e.id] = e; eps.append(e.id)
+    req, _ = BusinessDomainAnalyzer._to_request("c", eps, [], by_id, 5)
+    assert len(req.members) == 5 and all(m.kind == "endpoint" for m in req.members)
+
+
+def test_cache_gc_drops_orphan_entries(tmp_path):
+    import json
+
+    a = BusinessDomainAnalyzer(FakeLabeler(default_domain="订单"), cache_dir=tmp_path)
+    e1, t1 = _ep("GET /orders"), _tbl("orders")
+    a.analyze("p", [e1, t1], [_reads(e1, t1)])
+    c1 = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["entries"]
+    assert len(c1) == 1
+    # 换完全不同的 endpoint → 新 cluster, 旧 entry 成孤儿应被 GC。
+    e2, t2 = _ep("GET /quotes"), _tbl("quotes")
+    a.analyze("p", [e2, t2], [_reads(e2, t2)])
+    c2 = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))["entries"]
+    assert len(c2) == 1  # 孤儿清掉, 只剩本轮
