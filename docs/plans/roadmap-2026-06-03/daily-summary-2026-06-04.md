@@ -57,6 +57,24 @@ Track 2 交付后的优化收尾(用户挑做),实测又**推翻两个想当然*
 - **is_page 扩展**:加 Next.js app router(`app/.../page.*`)。⚠️ Next 分支**无真实项目验证**(手头仅 umi/vue 仓)。
 - **连带修真 bug**:`_frontend_roots` 用 `rglob` 会遍历进 node_modules,monorepo 每次 scan ~22s → os.walk 原地剪枝秒级。**这才是 scan 慢的真因** —— fingerprint 缓存命中(0.06s)后才暴露瓶颈在 _frontend_roots、不在 depcruise。
 
+## Track 3:codegraph「节点图谱」稀疏 bug(`6ba71b6`)✅
+
+用户发现 `/codegraph/graph` 页面同一项目(codev-platform)边数忽多忽少(2289 vs 274)、图谱一盘散沙。
+- **根因**:节点取 top 2000 按 **kind** 排序(`file>class>...>method>function`),file+class 就塞满
+  名额、把 method/function 全挤出;而 `calls` 边都在 method 之间 + "边两端须都在节点集"过滤 →
+  method 间边**全被砍光**。忽多忽少 = codegraph.db 节点数随 reindex 变动,file 一旦跨过 2000
+  阈值就把 method 挤光、边骤降。**该按 degree 排序却按了 kind。**
+- **修复**(`codegraph_client.py`):节点改按 **degree(连接数)** 取 top,调用主体进图。openclaw 实测
+  可见边 **669→4169(6.2x)**,method/function 从 **0→626** 进图。不需 reindex(只改查询采样),web 重启即生效。
+
+## 运维复盘:一个 `systemctl restart` 绕成大弯
+
+把 codegraph fix 推上 WSL 平台,**实际只需 `sudo systemctl restart codev-web`** —— 代码早 push
+到 gitea、WSL 早 pull(`6ba71b6` 是 WSL HEAD 祖先),web 进程没重启加载新代码而已。但我连错三步:
+① 先以为要 reindex `frontend_module`(那是**另一套**统一图谱,跟 /codegraph/graph 无关)②又以为
+WSL 没我代码,折腾 remote / pull / cherry-pick(还撞上 WSL 无 remote、Win/WSL 分离仓的假象)。
+**教训**:运维问题先查清"代码在哪 / 服务跑哪版 / 数据在哪套图谱"再动手,别顺第一直觉一路改。
+
 ## 剩余 backlog(非阻断)
 - **is_page**:Next app router 逻辑实现但未真实验证;umi `config/routes.ts` 显式注册路由仍盲区。
 - **vue 业务仓 scl-www-10** 未 `codev-platform init` 登记进平台(运维,需确认接入意愿)。
