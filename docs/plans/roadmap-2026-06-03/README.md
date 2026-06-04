@@ -34,4 +34,5 @@
 ## 关联
 
 - 上一迭代:[`../roadmap-2026-06-01/`](../roadmap-2026-06-01/)(各 Track 的详细实施 plan 仍在那里,本目录只排序+追踪)
+- 完成度核实:[`../roadmap-2026-06-04/`](../roadmap-2026-06-04/)(2026-06-04 代码级核实本迭代 + 06-01 完成度 —— 纠正盘点高估"未做"9 项 + "影响分析没做"判反 + 大文件拆包交付)
 - 纪律真值源:`weekly-iteration-cadence.md` / `verification-checklist.md` / `commit-pr-conventions.md`
