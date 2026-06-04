@@ -90,7 +90,8 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
     try:
         outcome = deps.get_chat_service().ask(
             req.question, req.session_id, req.max_steps,
-            user_id=user_id, project_id=project_id, org_id=org_id, task_id=req.task_id)
+            user_id=user_id, project_id=project_id, org_id=org_id, task_id=req.task_id,
+            identity=_ident)  # P0: 透真 identity 给工具, remember 写 memory 走同一道 scope_decision
     except RuntimeError as e:  # provider 缺 key / 下游不可用 → UPSTREAM_UNAVAILABLE(503);str(e) 仅日志
         _log.warning("chat upstream unavailable: %s", e)
         raise HTTPException(status_code=503, detail=to_http_detail(

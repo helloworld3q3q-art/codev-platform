@@ -10,16 +10,18 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from codev_platform.agent import deps
+from codev_platform.agent.memory_authz import (
+    make_topic_key, redline_write_allowed, scope_decision,
+)
 from codev_platform.agent.memory_store import MemoryEntry, SCOPES, TASK_STATES
 from codev_platform.agent.schemas import (
     MemoryEntryOut, MemoryWriteRequest, TaskStateRequest, TaskStateResponse,
 )
 from codev_platform.core import identity
-from codev_platform.core.acl import AccessDecision, can_access, memory_scope_access
+from codev_platform.core.acl import AccessDecision
 from codev_platform.core.audit import audit_access
 from codev_platform.core.config import load_config
 from codev_platform.core.errors import ErrorCode, to_http_detail
-from codev_platform.core.rbac import memory_scope_decision
 from codev_platform.gateway.auth import Identity
 
 router = APIRouter()
@@ -28,21 +30,12 @@ _log = logging.getLogger(__name__)
 
 def _scope_decision(org_id: str, user_id: str, scope: str, scope_ref: str | None,
                     ident) -> AccessDecision:
-    """作用域访问判定:
-    - **project**: 由 P1 项目闸 `can_access`(token allowlist + org)决定 —— project memory 是项目资源,
-      与全栈 project 门禁同源;**不叠加 M5 RBAC project_role**(避免 allowlist 与 RBAC 双重门禁打架,
-      见 test_agent_memory_route_acl)。
-    - **org/team**: 有 RBAC store → 查真实 Membership 走 core.rbac.memory_scope_decision(角色制);
-      否则回退 interim core.acl.memory_scope_access(token 模式 org/team 拒)。
-    - **personal**: 两路均做 owner==本人 自校验,同源。
+    """作用域访问判定 —— 薄包装 memory_authz.scope_decision(单一真值源, route + remember 工具共用)。
+
+    本地保留 `load_config()` 取 cfg(测试 monkeypatch `memory_route.load_config` 仍生效), 把 cfg
+    显式传进共享判定, 不让 authz 模块绑定 config 名。
     """
-    if scope == "project":
-        return can_access(load_config(), ident, scope_ref)
-    store = deps.get_rbac_store()
-    if store is not None:
-        m = store.fetch_membership(org_id, user_id, None)
-        return memory_scope_decision(scope, scope_ref, user_id, m)
-    return memory_scope_access(load_config(), ident, scope, scope_ref)
+    return scope_decision(load_config(), org_id, user_id, scope, scope_ref, ident)
 
 
 def _resolve_identity(request: Request) -> tuple[str, str]:
@@ -106,9 +99,17 @@ def write_memory(req: MemoryWriteRequest, request: Request) -> MemoryEntryOut:
     if not _dec.allowed:  # 权限 → ACCESS_DENIED(403)
         raise HTTPException(status_code=403, detail=to_http_detail(
             "forbidden: memory scope access denied", ErrorCode.ACCESS_DENIED))
+    # redline 单独写闸(仅 org admin):持普通 member token 不得冒造 org 硬约束污染冲突消解。
+    if req.is_redline:
+        _rl = redline_write_allowed(org_id, user_id, _ident)
+        audit_access("agent-memory-redline", _ident, scope_ref, _rl)
+        if not _rl.allowed:
+            raise HTTPException(status_code=403, detail=to_http_detail(
+                "forbidden: redline write requires org admin", ErrorCode.ACCESS_DENIED))
     entry = MemoryEntry(
         id="", scope=req.scope, scope_ref=scope_ref, owner_user_id=user_id,
-        content=req.content, org_id=org_id, kind=req.kind, topic_key=req.topic_key,
+        content=req.content, org_id=org_id, kind=req.kind,
+        topic_key=make_topic_key(req.topic_key),  # 三写入端统一 slug, 参与去重
         is_redline=req.is_redline,
     )
     try:

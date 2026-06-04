@@ -212,6 +212,25 @@ def test_rbac_org_viewer_denied_both(monkeypatch):
     assert r_write.status_code == 403
 
 
+def test_redline_write_denied_for_org_member(monkeypatch):
+    # 缺口 3: org member 可写 org memory, 但 is_redline=True 需 admin → 403。
+    c = _client_with_rbac(
+        monkeypatch, identity=_ident(org_id="orgA", user_id="userA"),
+        memberships={("orgA", "userA"): Membership(org_role="member")})
+    r = c.post("/memory", headers=_hdrs(uid="userA", org="orgA"),
+               json={"scope": "org", "scope_ref": "orgA", "content": "x", "is_redline": True})
+    assert r.status_code == 403
+
+
+def test_redline_write_allowed_for_org_admin(monkeypatch):
+    c = _client_with_rbac(
+        monkeypatch, identity=_ident(org_id="orgA", user_id="userA"),
+        memberships={("orgA", "userA"): Membership(org_role="admin")})
+    r = c.post("/memory", headers=_hdrs(uid="userA", org="orgA"),
+               json={"scope": "org", "scope_ref": "orgA", "content": "x", "is_redline": True})
+    assert r.status_code == 200
+
+
 def test_rbac_team_member_allowed_crossteam_denied(monkeypatch):
     # userA 是 teamA 成员 → 读 teamA 放行; 读 teamB(非其 team)→ deny。
     c = _client_with_rbac(

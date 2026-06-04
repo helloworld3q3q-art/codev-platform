@@ -17,6 +17,9 @@ class RunContext:
     org_id: str
     project_id: str | None = None
     task_id: str | None = None       # M1: 当前会话绑定的任务(来自 /chat 请求, None=非任务会话)
+    identity: object | None = None   # P0: gateway 认证后的可信 Identity(token 模式下工具写 memory
+                                     #     走 scope_decision 需要真 identity 的 projects/via; None=
+                                     #     dev 单机无 gateway, 工具按 passthrough 合成 advisory 身份)
 
 
 _current: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar(

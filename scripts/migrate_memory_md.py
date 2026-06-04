@@ -113,24 +113,27 @@ def main() -> int:
         print("\n[ABORT] 当前解释器没装 psycopg。", file=sys.stderr)
         return 2
 
+    from codev_platform.agent.memory_authz import make_topic_key
     from codev_platform.agent.memory_store import MemoryEntry
     from codev_platform.agent.memory_store_pg import SqlMemoryStore
     read_dsn = env_or_config("CODEV_PLATFORM_MEMORY_DSN_READ", cfg, "memory.pg_dsn_read")
     store = SqlMemoryStore(dsn, read_dsn=read_dsn)
 
-    # 幂等:已存在的 (scope, scope_ref) topic_key 跳过
+    # 幂等:已存在的 (scope, scope_ref) topic_key 跳过。topic_key 经 make_topic_key 归一,
+    # 与 remember 工具 / web 路由同一 slug 函数(三写入端一致, 否则同主题判两条)。
     existing = {e.topic_key for e in store.list_scope(scope, scope_ref, org_id="default", limit=500)}
     written = skipped = 0
     print()
     for r in rows:
-        if r["stem"] in existing:
+        tk = make_topic_key(r["stem"])
+        if tk in existing:
             print(f"  [skip] {r['stem']}(已存在)")
             skipped += 1
             continue
         eid = store.write(MemoryEntry(
             id="", scope=scope, scope_ref=scope_ref, owner_user_id=owner,
             content=r["content"], org_id="default", kind=r["kind"],
-            topic_key=r["stem"], is_redline=r["is_redline"], extra=r["extra"],
+            topic_key=tk, is_redline=r["is_redline"], extra=r["extra"],
         ))
         print(f"  [写入] {r['stem']} -> {eid[:8]}{'  🔴红线' if r['is_redline'] else ''}")
         written += 1
