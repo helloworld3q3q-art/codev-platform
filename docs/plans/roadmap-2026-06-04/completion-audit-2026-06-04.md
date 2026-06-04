@@ -61,9 +61,11 @@ Bash 直读磁盘的对账,把"plan 说没做"逐项核到代码是否真没做�
 盘点原列的"三个最大缺口"有一个判反(缺口#1 实为已做)。修正后:
 
 1. **Agent Memory M1 任务记忆** —— `task_id` 全空。这是 Memory 平台化的核心大特性
-   (M0 doctor / M3 生命周期已做, M1 任务记忆闭环是大头)。配合本轮另一发现:**agent 对话
-   `agent_sessions=0`, 平台 AI 对话从未被真正使用** —— Memory 写侧闭环(agent 不自动 remember)
-   也需补。两者叠加 = Memory 当前是"读侧建完、写侧空转"。
+   (M0 doctor / M3 生命周期已做, M1 任务记忆闭环是大头)。**2026-06-04 纠正**:此前据
+   `agent_sessions=0` 判"agent 从未被用"系**误判** —— 那是 `session_backend=memory` 默认
+   (inmemory 不落 PG)所致;journalctl 实证 agent 端到端跑通过(deepseek LLM + MCP 工具)。
+   真缺口是**写侧闭环空**:agent loop 无 `remember` 工具, 对话不沉淀 memory(唯一写入人工 HTTP)
+   → Memory 当前"读侧建完、写侧空转", M1 正该补这一环。
 2. **影响分析的数据桥接(endpoint→表)** —— **代码链路完整(缺口#1 已做), 但 codev dogfood 数据断**:
    `service→store` 的 Python DI(`self._store.xxx()`)在 codegraph 的 calls 图里缺边, BFS 从
    route 经 service 到不了 PG store 碰表函数 → endpoint→表可达 = 0(2026-06-04 实测:

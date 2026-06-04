@@ -15,7 +15,8 @@
 
 | 文件 | 定位 | 状态 |
 |---|---|---|
-| [`completion-audit-2026-06-04.md`](completion-audit-2026-06-04.md) | roadmap-2026-06-01 完成度核实(盘点 vs 代码真实对账) | ✅ |
+| [`completion-audit-2026-06-04.md`](completion-audit-2026-06-04.md) | roadmap-2026-06-01 完成度核实(盘点 vs 代码真实对账)+ 影响分析 endpoint→表 backlog 决策 | ✅ |
+| [`agent-memory-m1-plan-2026-06-04.md`](agent-memory-m1-plan-2026-06-04.md) | M1 任务记忆 + 写侧闭环专轮 plan(关联 06-03 Track C) | 📋 待拍板写侧方向 |
 
 ---
 
