@@ -16,7 +16,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.call_resolvers._bfs import build_call_edges
+from codev_platform.graph.schema import GraphEdge, GraphNode, NodeKind
 
 _NAME = "fastapi"
 _CONF = 0.65  # < codegraph 0.7: 精确解析优先, 本 resolver 只补 codegraph 的 DI 盲区空白
@@ -67,27 +68,10 @@ class FastApiCallResolver:
         if not endpoints or not tablefns:
             return []
         calls_by_func = _scan_calls(repo)
-        # 碰表函数名 → 节点(同名可能多个文件)。
-        fn_by_name: dict[str, list[GraphNode]] = {}
-        for fn in tablefns:
-            fn_by_name.setdefault(fn.name, []).append(fn)
-
-        edges: list[GraphEdge] = []
-        seen: set[tuple[str, str]] = set()
-        for ep in endpoints:
-            handler = (ep.meta or {}).get("handler") or ep.name
-            for target_name in _reachable_names(handler, calls_by_func):
-                for fn in fn_by_name.get(target_name, ()):
-                    key = (ep.id, fn.id)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    edges.append(GraphEdge(
-                        source=ep.id, target=fn.id,
-                        kind=EdgeKind.CALLS.value, confidence=_CONF,
-                        meta={"resolver": _NAME, "via_handler": handler},
-                    ))
-        return edges
+        return build_call_edges(
+            endpoints, tablefns, calls_by_func,
+            resolver=_NAME, confidence=_CONF, max_depth=_MAX_DEPTH, max_visit=_MAX_VISIT,
+        )
 
 
 def _is_py_endpoint(n: GraphNode) -> bool:
@@ -145,23 +129,6 @@ def _scan_calls(repo: Path) -> dict[str, set[str]]:
         for name, callees in collector.calls_by_func.items():
             merged.setdefault(name, set()).update(callees)
     return merged
-
-
-def _reachable_names(start: str, calls_by_func: dict[str, set[str]]) -> set[str]:
-    """从 start 函数名 BFS, 返回深度 / 访问受限内可达的所有调用名(含中间 service 方法名)。"""
-    out: set[str] = set()
-    frontier = {start}
-    depth = 0
-    while frontier and depth < _MAX_DEPTH and len(out) < _MAX_VISIT:
-        nxt: set[str] = set()
-        for name in frontier:
-            for callee in calls_by_func.get(name, ()):
-                if callee not in out:
-                    out.add(callee)
-                    nxt.add(callee)
-        frontier = nxt
-        depth += 1
-    return out
 
 
 def register_into() -> None:
