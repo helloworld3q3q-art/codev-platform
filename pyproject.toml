@@ -74,9 +74,11 @@ extend-immutable-calls = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# 拆分后的 re-export hub: 故意 re-import 子模块符号对外暴露 (业务仓 shim 依赖), F401 不适用。
+# 拆分后的 re-export hub: 故意 re-import 子模块符号对外暴露 (业务仓 shim / 对外 import 路径不变), F401 不适用。
 "codev_platform/chroma/server.py" = ["F401", "F811"]
 "codev_platform/mcp_serve.py" = ["F401"]
+# sql.py 1254 行 -> sql/ 包 (ddl/orm/core 分文件), __init__ re-export 全部子模块符号保对外路径不变。
+"codev_platform/plugins/builtin/sql/__init__.py" = ["F401"]
 
 [project.scripts]
 codev-platform = "codev_platform.cli:main"
