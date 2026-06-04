@@ -49,7 +49,18 @@ completion-audit 列"5 处引用 18082 = 切流未完成"系**误判**:5 处全�
 - 真实验证:codev(fastapi 63 边)/ platform(spring 撤回数据 + react 12 页面)/ scl-www-10(vue 1277 页面)/ MCP call_tool 层(find_component_pages → 12 页面)。
 - memory 沉淀:`call-resolver-blind-spot-principle`(更新)+ `frontend-component-dep-graph`(新增)。
 
-## 剩余 backlog(本日产生,非阻断)
-- 前端依赖图:ingest 缓存(每次全量跑 depcruise ~分钟级)/ is_page 盲区(Next app/、umi config/routes 漏判)/ 生产 npx 预装 dependency-cruiser。
-- vue 业务仓 scl-www-10 未 `codev-platform init` 登记进平台。
-- endpoint→表 codev 自身 DI(codegraph calls 图层面 service→store 边仍 0,audit 定 P3+;fastapi resolver 是另一条路绕过)。
+## Track 2b:前端依赖图性能优化(`7de34c3`)✅
+
+Track 2 交付后的优化收尾(用户挑做),实测又**推翻两个想当然**:
+- **fingerprint 缓存**:src 文件 mtime/size 没变 → 跳过整个 depcruise spawn,**platform 47s→0.11s(442x)**。dependency-cruiser 内置 `--cache` 实测**不省 spawn**(第二次反更慢)→ 改自管 `data/frontend_deps_cache/<pid>.json`。
+- **npx 预装优先**:`_depcruise_base` 优先前端 `node_modules/.bin/depcruise`(快+离线),fallback `npx --yes`。生产应预装避免每次联网。
+- **is_page 扩展**:加 Next.js app router(`app/.../page.*`)。⚠️ Next 分支**无真实项目验证**(手头仅 umi/vue 仓)。
+- **连带修真 bug**:`_frontend_roots` 用 `rglob` 会遍历进 node_modules,monorepo 每次 scan ~22s → os.walk 原地剪枝秒级。**这才是 scan 慢的真因** —— fingerprint 缓存命中(0.06s)后才暴露瓶颈在 _frontend_roots、不在 depcruise。
+
+## 剩余 backlog(非阻断)
+- **is_page**:Next app router 逻辑实现但未真实验证;umi `config/routes.ts` 显式注册路由仍盲区。
+- **vue 业务仓 scl-www-10** 未 `codev-platform init` 登记进平台(运维,需确认接入意愿)。
+- **endpoint→表 codev 自身 DI**:codegraph calls 图层面 service→store 边仍 0(audit 定 P3+;fastapi resolver 另一条路已绕过)。
+
+## 元教训补充(本日 3 次同款)
+"实测推翻想当然"本日出现 3 次:① pin @16 假设是最新(实际 17)② dependency-cruiser `--cache` 假设能省 spawn(实际不省)③ scan 慢假设在缓存(实际在 _frontend_roots 遍历 node_modules)。**性能/版本优化必配真实计时验证,别信直觉**。
