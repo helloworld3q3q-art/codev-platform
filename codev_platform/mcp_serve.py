@@ -34,6 +34,7 @@ from codev_platform.core.config import get as _cfg_get, load_config
 DEFAULT_CHROMA_PORT = 18083
 DEFAULT_CROSS_LINK_PORT = 18086
 DEFAULT_CODEGRAPH_PORT = 18091  # codegraph 多租户代理端点 (单端点, mcp.codegraph_sse_port 覆盖)
+DEFAULT_AGENT_MEMORY_PORT = 18087  # agent memory MCP 前门 (mcp.agent_memory_sse_port 覆盖)
 
 
 @dataclass
@@ -102,6 +103,11 @@ def build_cross_link_cmd(python: str | Path, port: int) -> list[str]:
     return [str(python), "-m", "codev_platform.cross_link.server", "--http", "--port", str(port)]
 
 
+def build_agent_memory_cmd(python: str | Path, port: int) -> list[str]:
+    """构造 agent memory MCP 前门 HTTP 端点启动命令。"""
+    return [str(python), "-m", "codev_platform.agent.memory_mcp", "--http", "--port", str(port)]
+
+
 # ----------------------------------------------------------------------
 # 客户端可切换源 (双实例): 业务仓 .mcp.json 的 URL 指向哪个实例。
 #   local    = 本机本地实例 (索引 working tree, 含未提交; 默认 18xxx)
@@ -109,14 +115,16 @@ def build_cross_link_cmd(python: str | Path, port: int) -> list[str]:
 # config.mcp_sources.<target> 覆盖 host + 各 tool 端口 —— 换远程平台只改 host, 不改代码。
 # 详见 docs/plans/roadmap-2026-05-29/dual-instance-codeindex-2026-05-30.md §四。
 # ----------------------------------------------------------------------
-MCP_SOURCE_TOOLS = ("platform-docs", "cross-link", "codegraph")
+MCP_SOURCE_TOOLS = ("platform-docs", "cross-link", "codegraph", "agent-memory")
 DEFAULT_MCP_SOURCES: dict[str, dict[str, Any]] = {
     "local": {
         "host": "127.0.0.1", "platform-docs": DEFAULT_CHROMA_PORT,
         "cross-link": DEFAULT_CROSS_LINK_PORT, "codegraph": DEFAULT_CODEGRAPH_PORT,
+        "agent-memory": DEFAULT_AGENT_MEMORY_PORT,
     },
     "platform": {
         "host": "127.0.0.1", "platform-docs": 19083, "cross-link": 19086, "codegraph": 19091,
+        "agent-memory": 19087,
     },
 }
 
@@ -170,6 +178,12 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     cg_port = int(_cfg_get(cfg, "mcp.codegraph_sse_port") or DEFAULT_CODEGRAPH_PORT)
     out.append(MCPEndpoint(name="codegraph", kind="codegraph", port=cg_port,
                            cmd=build_codegraph_cmd(venv_py, cg_port)))
+
+    # agent-memory (本仓, 本编排器拉起)。同一 PG 靠 org_id 列隔离, 多租户单端点 (?project_id=
+    # 仅用于 project-scope 记忆 + 项目 ACL 闸); org/user 走认证身份 (见 agent/memory_mcp.py)。
+    mem_port = int(_cfg_get(cfg, "mcp.agent_memory_sse_port") or DEFAULT_AGENT_MEMORY_PORT)
+    out.append(MCPEndpoint(name="agent-memory", kind="agent_memory", port=mem_port,
+                           cmd=build_agent_memory_cmd(venv_py, mem_port)))
     return out
 
 
@@ -239,12 +253,14 @@ _DEP_HINT = {
     "chroma": "chromadb + 模型 (Qwen embedding/reranker)",
     "codegraph": "codegraph 命令 + mcp-proxy",
     "cross_link": "sqlglot",
+    "agent_memory": "psycopg (PG 驱动) + extra [agent]",
 }
 # 每 kind 缺数据时的人类可读提示 (diagnose_down db_present=False 用)。
 _DB_HINT = {
     "chroma": "chroma collection",
     "codegraph": "codegraph 索引",
     "cross_link": "cross_layer.sqlite (项目未注册?)",
+    "agent_memory": "memory.pg_dsn 未配 (PG 库未就绪?)",
 }
 
 
@@ -303,6 +319,9 @@ def _dep_ok(ep: MCPEndpoint, cfg: dict) -> bool:
     if ep.kind == "codegraph":
         import shutil
         return shutil.which("codegraph") is not None and _mcp_proxy_exe(cfg).exists()
+    if ep.kind == "agent_memory":
+        import importlib.util
+        return importlib.util.find_spec("psycopg") is not None
     return True
 
 
@@ -328,6 +347,9 @@ def _db_present(ep: MCPEndpoint, cfg: dict) -> bool:
             return chroma_dir().exists()
         except Exception:
             return True
+    if ep.kind == "agent_memory":
+        # 同一 PG, 不按 project 分库; memory.pg_dsn 配了即视为数据面就绪 (连通性由 healthz 兜)。
+        return bool(_cfg_get(cfg, "memory.pg_dsn") or os.environ.get("CODEV_PLATFORM_MEMORY_DSN"))
     return True
 
 

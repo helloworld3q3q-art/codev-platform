@@ -20,6 +20,41 @@ def test_build_cross_link_cmd():
     assert cmd == ["py", "-m", "codev_platform.cross_link.server", "--http", "--port", "18086"]
 
 
+def test_build_agent_memory_cmd():
+    cmd = ms.build_agent_memory_cmd("py", 18087)
+    assert cmd == ["py", "-m", "codev_platform.agent.memory_mcp", "--http", "--port", "18087"]
+
+
+def test_iter_endpoints_includes_agent_memory(tmp_path):
+    # 默认端口 + config 覆盖
+    eps = ms.iter_endpoints({"daemon": {"port": 18083}, "projects": {}})
+    mem = [e for e in eps if e.kind == "agent_memory"]
+    assert len(mem) == 1 and mem[0].name == "agent-memory"
+    assert mem[0].port == ms.DEFAULT_AGENT_MEMORY_PORT
+    assert "codev_platform.agent.memory_mcp" in mem[0].cmd
+    eps2 = ms.iter_endpoints({"mcp": {"agent_memory_sse_port": 19087}, "projects": {}})
+    assert [e for e in eps2 if e.kind == "agent_memory"][0].port == 19087
+
+
+def test_agent_memory_in_source_url():
+    cfg = {"projects": {}}
+    url = ms.mcp_source_url(cfg, "platform", "agent-memory", "openclaw-stock")
+    assert url == "http://127.0.0.1:19087/sse?project_id=openclaw-stock"
+
+
+def test_agent_memory_db_present_needs_dsn():
+    ep = MCPEndpoint(name="agent-memory", kind="agent_memory", port=18087)
+    assert ms._db_present(ep, {"memory": {"pg_dsn": "postgresql://x"}, "projects": {}}) is True
+    assert ms._db_present(ep, {"projects": {}}) is False
+
+
+def test_agent_memory_systemd_unit_generated():
+    from codev_platform import mcp_systemd
+    units = mcp_systemd.render_systemd_units({"projects": {}}, "deployer")
+    assert "codev-mcp-agent-memory.service" in units
+    assert "codev_platform.agent.memory_mcp" in units["codev-mcp-agent-memory.service"]
+
+
 def test_endpoint_health_url_for_all_kinds():
     chroma = MCPEndpoint(name="platform-docs", kind="chroma", port=18083)
     cl = MCPEndpoint(name="cross-link", kind="cross_link", port=18086)

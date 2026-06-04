@@ -23,7 +23,7 @@ from typing import Any
 from codev_platform.core.config import get as _cfg_get
 
 
-SYSTEMD_KINDS = ("chroma", "cross_link", "codegraph")
+SYSTEMD_KINDS = ("chroma", "cross_link", "codegraph", "agent_memory")
 
 
 def render_systemd_units(cfg: dict, user: str, *, kinds=SYSTEMD_KINDS) -> dict[str, str]:
