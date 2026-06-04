@@ -14,7 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from codev_platform.graph.schema import GraphNode, NodeKind
+from codev_platform.graph.schema import (
+    GraphNode,
+    NodeKind,
+    is_soft_edge_kind,
+    is_soft_node_kind,
+)
 from codev_platform.graph.store import load_graph
 
 _MAX_DEPTH = 10
@@ -53,10 +58,21 @@ class ImpactGraph:
         ]
 
 
-def build_impact_graph(conn, project_id: str) -> ImpactGraph:
+def build_impact_graph(conn, project_id: str, *, include_soft: bool = False) -> ImpactGraph:
+    """构建内存影响图。
+
+    include_soft=False(默认): 过滤软节点(BUSINESS_DOMAIN)+ 软边(BELONGS_TO_DOMAIN)——
+    "查依赖 / 影响面"走确定性硬骨架, 不被分析器/LLM 软产物污染(护城河保护)。
+    include_soft=True: 含软产物, 供"查理解"(业务域归属)类查询放开。
+    """
     merged = load_graph(conn, project_id)
-    g = ImpactGraph(nodes={n.id: n for n in merged.nodes})
-    for e in merged.edges:
+    if include_soft:
+        nodes, edges = merged.nodes, merged.edges
+    else:
+        nodes = [n for n in merged.nodes if not is_soft_node_kind(n.kind)]
+        edges = [e for e in merged.edges if not is_soft_edge_kind(e.kind)]
+    g = ImpactGraph(nodes={n.id: n for n in nodes})
+    for e in edges:
         g.fwd.setdefault(e.source, []).append((e.target, e.kind))
         g.rev.setdefault(e.target, []).append((e.source, e.kind))
     return g

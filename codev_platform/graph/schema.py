@@ -49,6 +49,9 @@ class NodeKind(str, Enum):
     FEISHU_DOC = "feishu_doc"
     GIT_COMMIT = "git_commit"
     PULL_REQUEST = "pull_request"
+    # 软节点(分析器/LLM 派生, 非确定性血缘): 业务域归类。confidence<1.0, impact 默认过滤,
+    # 与硬节点(plugins 确定性产)物理可分辨 —— 保护"查依赖"不被 LLM 噪声污染。
+    BUSINESS_DOMAIN = "business_domain"
 
 
 class EdgeKind(str, Enum):
@@ -67,11 +70,29 @@ class EdgeKind(str, Enum):
     MENTIONS = "mentions"
     RELATES_TO = "relates_to"
     CHANGED_BY = "changed_by"
+    # 软边(分析器派生): 硬节点 --belongs_to_domain--> BUSINESS_DOMAIN 软节点。
+    BELONGS_TO_DOMAIN = "belongs_to_domain"
 
 
 def _kind_str(value: Any) -> str:
     """把 NodeKind/EdgeKind 枚举或裸字符串统一成 str (序列化用)。"""
     return value.value if isinstance(value, Enum) else str(value)
+
+
+# 软节点/软边 (分析器/LLM 派生, 非确定性血缘) 的 kind 集合 + 判定。
+# 用途: ① impact 默认过滤软边 (查依赖护城河不被 LLM 噪声污染);
+#       ② ingest referential-integrity 校验 (软边端点必须指向真实硬节点, 悬空即丢)。
+# 软节点判据不止 kind (还有 confidence<1.0 + meta.derived_by), 但 kind 是最直接的物理标记。
+SOFT_NODE_KINDS: frozenset[str] = frozenset({NodeKind.BUSINESS_DOMAIN.value})
+SOFT_EDGE_KINDS: frozenset[str] = frozenset({EdgeKind.BELONGS_TO_DOMAIN.value})
+
+
+def is_soft_node_kind(kind: Any) -> bool:
+    return _kind_str(kind) in SOFT_NODE_KINDS
+
+
+def is_soft_edge_kind(kind: Any) -> bool:
+    return _kind_str(kind) in SOFT_EDGE_KINDS
 
 
 @dataclass

@@ -23,7 +23,7 @@ def test_node_kind_covers_plan_list():
         "project", "file", "frontend_route", "frontend_component",
         "frontend_module", "frontend_api_call", "backend_endpoint",
         "backend_function", "db_table", "db_column", "wiki_page", "jira_issue",
-        "feishu_doc", "git_commit", "pull_request",
+        "feishu_doc", "git_commit", "pull_request", "business_domain",
     }
     assert {k.value for k in NodeKind} == expected
 
@@ -32,7 +32,7 @@ def test_edge_kind_covers_plan_list():
     expected = {
         "contains", "imports", "calls", "renders", "defines_api", "calls_api",
         "implements", "reads_table", "writes_table", "updates_table",
-        "mentions", "relates_to", "changed_by",
+        "mentions", "relates_to", "changed_by", "belongs_to_domain",
     }
     assert {k.value for k in EdgeKind} == expected
 

@@ -33,4 +33,6 @@ KIND_OWNERS: dict[str, set[str]] = {
     # 前端模块依赖图(dependency-cruiser 接入, react .tsx + vue .vue 统一, ingest post-pass 产)。
     # 独立 kind, 不与 vue 的 FRONTEND_COMPONENT territory 重叠。
     NodeKind.FRONTEND_MODULE.value: {"builtin.frontend_deps"},
+    # 软节点(综合分析器派生, 非确定性血缘): 业务域归类。owner = analyzers 框架(ingest post-pass)。
+    NodeKind.BUSINESS_DOMAIN.value: {"builtin.analyzers"},
 }

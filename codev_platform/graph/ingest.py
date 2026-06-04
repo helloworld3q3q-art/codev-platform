@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from codev_platform.graph.schema import AnalyzerResult, GraphEdge, NodeKind
+from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode, NodeKind
 from codev_platform.graph.store import load_graph, open_store, upsert_result
 from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.registry import run_applicable
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 LINKER_PLUGIN = "builtin.linker"
 CALLS_PLUGIN = "builtin.call_resolvers"  # 调用边(CALLS)统一归属: 多 resolver 去重后合并入此 plugin
 FRONTEND_DEPS_PLUGIN = "builtin.frontend_deps"  # 前端组件依赖图(接 dependency-cruiser)
+ANALYZERS_PLUGIN = "builtin.analyzers"  # 综合分析器(软节点/软边: 业务域等)统一归属
 
 
 @dataclass
@@ -84,6 +85,11 @@ def ingest_project(
         # frontend_component 节点 + renders 边, 解锁"改组件→影响哪些页面"(codegraph 盲区)。
         # 框架无关(react .tsx + vue .vue 都吃), 自 detect, fail-soft 无 node/前端则空。
         _frontend_deps_pass(conn, project_id, report, Path(repo_path))
+
+        # 综合分析 second post-pass: 硬骨架全部落库且连通后, analyzer 在其上归纳软节点/软边
+        # (业务域等)。软产物 confidence<1.0 + referential-integrity 校验, 与硬骨架物理隔离。
+        # 无注册 analyzer 时 no-op(A1-1 框架先行, LLM business_domain analyzer 待 A1-2)。
+        _analyzers_pass(conn, project_id, report)
     finally:
         conn.close()
     return report
@@ -163,3 +169,44 @@ def _link_pass(conn, project_id: str, report: IngestReport) -> None:
     )
     report.ingested.append(LINKER_PLUGIN)
     report.summaries[LINKER_PLUGIN] = {"calls_api_edges": len(edges)}
+
+
+def _analyzers_pass(conn, project_id: str, report: IngestReport) -> None:
+    """综合分析 second post-pass: 在连通硬骨架上跑 analyzer, 产软节点/软边(业务域等)。
+
+    硬骨架(plugins + calls + frontend_deps)全部落库后才跑 —— analyzer 归纳需完整骨架。
+    每个 analyzer 产出经 referential-integrity 校验(软边端点必须是真实硬节点, 悬空即丢)+
+    软标记钳制(confidence<1.0), 再合并 upsert(plugin=ANALYZERS_PLUGIN, 重跑幂等替换)。
+    无注册 analyzer 时写空 result(no-op, 清旧软产物);单 analyzer 失败 fail-soft 不拖垮其余。
+    """
+    from codev_platform.graph.analyzers import (
+        applicable_analyzers,
+        validate_soft_result,
+    )
+
+    merged = load_graph(conn, project_id)
+    hard_nodes = merged.nodes
+    hard_ids = {n.id for n in hard_nodes}
+    soft_nodes: list[GraphNode] = []
+    soft_edges: list[GraphEdge] = []
+    by_analyzer: dict[str, int] = {}
+    for a in applicable_analyzers(hard_nodes):
+        by_analyzer.setdefault(a.name, 0)  # 跑过即登记(哪怕 0 产出 / 抛错), 审计可见
+        try:
+            raw = a.analyze(project_id, hard_nodes, merged.edges)
+        except Exception as exc:  # noqa: BLE001 — 单 analyzer 失败不拖垮其余 + 整个 pass
+            logger.warning("[analyzers] %s failed: %r", a.name, exc)
+            continue
+        clean = validate_soft_result(raw, hard_ids)  # 悬空软边丢弃 + 软标记钳制
+        soft_nodes.extend(clean.nodes)
+        soft_edges.extend(clean.edges)
+        by_analyzer[a.name] += len(clean.nodes)
+    upsert_result(
+        conn, project_id,
+        AnalyzerResult(nodes=soft_nodes, edges=soft_edges, plugin=ANALYZERS_PLUGIN),
+    )
+    report.ingested.append(ANALYZERS_PLUGIN)
+    report.summaries[ANALYZERS_PLUGIN] = {
+        "soft_nodes": len(soft_nodes), "soft_edges": len(soft_edges),
+        "by_analyzer": by_analyzer,
+    }
