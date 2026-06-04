@@ -14,12 +14,13 @@
 """
 from __future__ import annotations
 
-import re
 import sys
 
 from codev_platform.agent import deps
 from codev_platform.agent.runctx import RunContext, set_run_context
 from codev_platform.agent.tools import build_default_registry
+
+_PROBE_MARKER = "[agent_tool_health]"  # remember 探针内容标记, 用于体检后自清理
 
 # (工具名, 探针入参)。ref 取本仓真实实体,保证非空命中。
 PROBES = [
@@ -35,21 +36,21 @@ PROBES = [
 ]
 
 
-def _cleanup_remember(content: str) -> str:
-    """remember 探针会真写一条记忆;体检完即归档,避免每次跑都留垃圾(写完即删语义)。
-    从 '已记住(scope=project, id=XXXX)' 解析 id → memory store archive。"""
-    m = re.search(r"id=([0-9a-fA-F-]+)", content or "")
-    if not m:
-        return content
+def _cleanup_remember(project_id: str) -> int:
+    """remember 探针会真写一条 project 记忆;体检后按内容标记归档,不留垃圾(写完即删语义)。
+    按 _PROBE_MARKER 内容匹配(remember 工具只回显截断 id, 无法据 id 删),顺带清掉历史残留。
+    """
     store = deps.get_memory_store()
     if store is None:
-        return content
+        return 0
+    n = 0
     try:
-        if store.archive(m.group(1)):
-            return content + "  [已自动归档,不留垃圾]"
+        for e in store.list_scope("project", project_id, org_id="default", limit=500):
+            if _PROBE_MARKER in (e.content or "") and store.archive(e.id):
+                n += 1
     except Exception:  # noqa: BLE001 — 清理失败不影响体检结论
         pass
-    return content
+    return n
 
 
 def _is_failure(content: str, is_error: bool) -> bool:
@@ -77,7 +78,9 @@ def main() -> int:
             content = res.content or ""
             failed = _is_failure(content, bool(getattr(res, "is_error", False)))
             if name == "remember" and not failed:  # 探针写的记忆立即归档,不留垃圾
-                content = _cleanup_remember(content)
+                archived = _cleanup_remember(pid)
+                if archived:
+                    content += f"  [已自动归档 {archived} 条探针记忆]"
         except Exception as e:  # noqa: BLE001 — 体检要捕获任何异常并归为 FAIL
             content = f"{type(e).__name__}: {e}"
             failed = True
