@@ -2,24 +2,64 @@ import PageContainer from '@/components/PageContainer';
 import { useModel } from '@umijs/max';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import Composer from './components/Composer';
-import MessageList from './components/MessageList';
-import { fetchAgentChat } from './services';
+import ChatPanel from './components/ChatPanel';
+import SessionSider from './components/SessionSider';
+import { fetchAgentChat, fetchSessionMessages, fetchSessions } from './services';
 import type { ChatMessage } from './types';
 
 const MAX_STEPS = 12;
 
+// 轻量聚合页: 只持状态 + 编排回调(loadSessions / 新建 / 选择 / 发送), 业务逻辑下沉到 services + 子组件。
 const AgentPage: React.FC = () => {
   const { currentProjectId } = useModel('project');
+  const [sessions, setSessions] = useState<API.SessionItem[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  const [sessionId, setSessionId] = useState<string>('');
   const seqRef = useRef<number>(0);
 
   const nextId = useCallback((): string => {
     seqRef.current += 1;
     return `m${seqRef.current}`;
   }, []);
+
+  const loadSessions = useCallback(async (): Promise<void> => {
+    try {
+      const list = await fetchSessions();
+      setSessions(list);
+    } catch {
+      setSessions([]);
+    }
+  }, []);
+
+  const handleNewSession = useCallback((): void => {
+    setActiveSessionId('');
+    setMessages([]);
+    seqRef.current = 0;
+  }, []);
+
+  const handleSelectSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      setActiveSessionId(sessionId);
+      setLoading(true);
+      try {
+        const history = await fetchSessionMessages(sessionId);
+        seqRef.current = 0;
+        setMessages(
+          history.map((m) => ({
+            id: nextId(),
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: m.content ?? '',
+          })),
+        );
+      } catch {
+        setMessages([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [nextId],
+  );
 
   const handleSend = useCallback(
     async (question: string): Promise<void> => {
@@ -28,9 +68,13 @@ const AgentPage: React.FC = () => {
       setMessages((prev) => [...prev, userMsg, placeholder]);
       setLoading(true);
       try {
-        const data = await fetchAgentChat({ question, sessionId: sessionId || undefined, maxSteps: MAX_STEPS });
+        const data = await fetchAgentChat({
+          question,
+          sessionId: activeSessionId || undefined,
+          maxSteps: MAX_STEPS,
+        });
         if (data?.sessionId) {
-          setSessionId(data.sessionId);
+          setActiveSessionId(data.sessionId);
         }
         setMessages((prev) =>
           prev.map((msg) =>
@@ -45,6 +89,7 @@ const AgentPage: React.FC = () => {
               : msg,
           ),
         );
+        loadSessions(); // 新会话首答后刷新侧栏, 让其出现在历史列表
       } catch {
         setMessages((prev) =>
           prev.map((msg) =>
@@ -55,23 +100,29 @@ const AgentPage: React.FC = () => {
         setLoading(false);
       }
     },
-    [nextId, sessionId],
+    [nextId, activeSessionId, loadSessions],
   );
 
-  // 切项目: 清空会话重开 (会话与 project 上下文绑定)。
+  // 切项目: 清空会话重开 + 重拉会话列表 (会话与 project 上下文绑定)。
   useEffect(() => {
+    setActiveSessionId('');
     setMessages([]);
-    setSessionId('');
     seqRef.current = 0;
-  }, [currentProjectId]);
+    loadSessions();
+  }, [currentProjectId, loadSessions]);
 
   return (
     <PageContainer>
-      <div className="flex flex-col h-700 bg-#ffffff rounded-6">
-        <div className="flex-1 overflow-auto">
-          <MessageList messages={messages} />
+      <div className="flex h-700 bg-#ffffff rounded-6 overflow-hidden">
+        <SessionSider
+          items={sessions}
+          activeKey={activeSessionId}
+          onSelect={handleSelectSession}
+          onNew={handleNewSession}
+        />
+        <div className="flex-1 min-w-0">
+          <ChatPanel messages={messages} loading={loading} onSend={handleSend} />
         </div>
-        <Composer loading={loading} onSend={handleSend} />
       </div>
     </PageContainer>
   );
