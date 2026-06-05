@@ -1,9 +1,9 @@
 export const meta = {
   name: 'port-codegraph',
-  description: '把 stock-admin-web 的 codegraph 模块(5 子页)移植进 codev web-ui, 适配 graphapi + API.* 类型, 测试+审计',
+  description: '把 stock-admin-web 的 codegraph 模块(4 子页)移植进 codev web-ui, 适配 graphapi + API.* 类型, 测试+审计',
   phases: [
     { title: 'Phase1-common', detail: '建 common 适配层(services/types/utils/style)' },
-    { title: 'Phase2-subpages', detail: '5 子页并行移植: crosslink/filelist/files/graph/table' },
+    { title: 'Phase2-subpages', detail: '4 子页并行移植: filelist/files/graph/table (crosslink 子页因 cross-link 退役去掉)' },
     { title: 'Phase3-wiring', detail: 'routes.ts + 菜单接线' },
     { title: 'Phase4-audit', detail: '审计 diff: 规约符合度 + API 契约正确性' },
   ],
@@ -45,10 +45,10 @@ const phase1 = await agent(
     `【源参考】 ${SRC}\\common\\ (types.ts/services.ts/utils.ts/style.less) —— 这是 stock 版, 照搬结构但换数据源`,
     `【产出目录】 ${DST}\\common\\`,
     '【适配规则】',
-    `- services.ts: 把 stock 对 '@/services/apis/codegraph/codegraph' 的调用, 改为 import 自 '@/services/apis/graphapi'(同名 postStats/postSearch/postCodegraphNode/postNeighbors/postFileTree/postGraph 已存在); 同样提供 fetchStats/fetchSearch/fetchNode/fetchNeighbors/fetchFileTree/fetchGraph, 剥 res.data。若子页用到 cross-link, 一并补 fetchCrossLink* 包 graphapi 的 postStats2/postTables/postTableRefs/postEndpointLink/postSearchNodes/postGraph2`,
-    `- types.ts: stock 用 CG.* 命名空间; codev 改用 API.* —— 先读 ${TYPINGS} 找 API.Codegraph* 与 API.CrossLink* 的真实字段, 把 NodeDTO/EdgeDTO/StatsResponse/SearchResponse/NeighborsResponse/FileTreeResponse/GraphResponse 等别名指向对应 API.* 类型。NodeKind/EdgeKind/Language 等字面量联合类型直接照搬。若 API.* 字段名与 stock CG.* 不一致, 在 notes 里逐条列出差异`,
+    `- services.ts: 把 stock 对 '@/services/apis/codegraph/codegraph' 的调用, 改为 import 自 '@/services/apis/graphapi'(同名 postStats/postSearch/postCodegraphNode/postNeighbors/postFileTree/postGraph 已存在); 同样提供 fetchStats/fetchSearch/fetchNode/fetchNeighbors/fetchFileTree/fetchGraph, 剥 res.data`,
+    `- types.ts: stock 用 CG.* 命名空间; codev 改用 API.* —— 先读 ${TYPINGS} 找 API.Codegraph* 的真实字段, 把 NodeDTO/EdgeDTO/StatsResponse/SearchResponse/NeighborsResponse/FileTreeResponse/GraphResponse 等别名指向对应 API.* 类型。NodeKind/EdgeKind/Language 等字面量联合类型直接照搬。若 API.* 字段名与 stock CG.* 不一致, 在 notes 里逐条列出差异`,
     `- utils.ts / style.less: 照搬 stock 版, 仅按需调整 import 路径`,
-    `【必读】 ${GRAPHAPI} (确认可用函数与返回类型) + ${TYPINGS} (确认 API.Codegraph*/CrossLink* 字段)`,
+    `【必读】 ${GRAPHAPI} (确认可用函数与返回类型) + ${TYPINGS} (确认 API.Codegraph* 字段)`,
     '【禁止】 不动 graphapi.ts/typings.d.ts(生成物); 不用 any; 不 import typings.d.ts',
     '【规约】 ' + RULES.join(' / '),
     '【输出】 files + notes(重点: API.* vs CG.* 字段差异清单, 子页要据此改字段访问) + issues',
@@ -58,7 +58,7 @@ const phase1 = await agent(
 
 // ---------- Phase 2: 5 子页并行 ----------
 phase('Phase2-subpages');
-const SUBPAGES = ['crosslink', 'filelist', 'files', 'graph', 'table'];
+const SUBPAGES = ['filelist', 'files', 'graph', 'table'];
 const phase2 = await parallel(
   SUBPAGES.map((sub) => () =>
     agent(
@@ -88,8 +88,8 @@ const phase3 = await agent(
   [
     '【目标】 把新 codegraph 5 子页接进路由 + 顶层菜单',
     '【文件】 D:\\WorkSpace\\codev-platform\\web-ui\\config\\routes.ts (路由) + D:\\WorkSpace\\codev-platform\\web-ui\\src\\menus\\ (菜单定义, 先 grep MENU_ITEMS 定位)',
-    `【接什么】 ${DST}\\ 下的 5 子页: crosslink/filelist/files/graph/table, 各自的 index.tsx`,
-    '【做法】 先读现有 routes.ts 与 menus 的写法照葫芦画瓢; 建一个 "代码图谱/CodeGraph" 父菜单, 5 子页作子路由(path 形如 /codegraph/table 等); 标题中文',
+    `【接什么】 ${DST}\\ 下的 4 子页: filelist/files/graph/table, 各自的 index.tsx`,
+    '【做法】 先读现有 routes.ts 与 menus 的写法照葫芦画瓢; 建一个 "代码图谱/CodeGraph" 父菜单, 4 子页作子路由(path 形如 /codegraph/table 等); 标题中文',
     '【禁止】 不改其它路由; 不动既有 pages/graph; 路径全小写无符号',
     '【输出】 files + notes(新增的 path 清单) + issues',
   ].join('\n'),
@@ -106,7 +106,7 @@ const phase4 = await agent(
     '【目标】 审计本次 codegraph 移植的全部产出, 找规约违规 + API 契约错误, 不改代码只报告',
     '【审计文件】\n' + allFiles.join('\n'),
     '【审计维度】',
-    `1. API 契约: fetchXxx 调用的 graphapi 函数/入参/返回字段是否与 ${TYPINGS} 的 API.Codegraph*/CrossLink* 一致(字段名打错会运行时 undefined)`,
+    `1. API 契约: fetchXxx 调用的 graphapi 函数/入参/返回字段是否与 ${TYPINGS} 的 API.Codegraph* 一致(字段名打错会运行时 undefined)`,
     '2. 规约: 有无残留 useRequest / antd 原生 Drawer|Modal|Table / antd4 废弃 props(valueStyle/message=/destroyOnClose/Modal.confirm) / any / import typings.d.ts / 内联函数',
     '3. 命名: 组件文件 PascalCase 与 default export 同名; index/utils/types 小写',
     '4. 残留 stock 痕迹: 还在 import "@/services/apis/codegraph" 或用 CG.* 命名空间',

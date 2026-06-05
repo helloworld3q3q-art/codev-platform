@@ -19,7 +19,7 @@
 
 codev-platform = 多项目 AI 协作工具栈基础设施。
 
-- **真值源仓** — `tools/_platform/`、`tools/claude-platform/`、`tools/chroma/{mcp_server,bm25_index}.py`、`tools/cross_link/{schema,mcp_server}.py` 这些在 platform 业务仓内全是 shim re-export 自本仓
+- **真值源仓** — `tools/_platform/`、`tools/claude-platform/`、`tools/chroma/{mcp_server,bm25_index}.py` 这些在 platform 业务仓内全是 shim re-export 自本仓(cross_link 已退役删除; 统一图谱 graph 走 SSE 服务, 不经 shim)
 - **pip 安装** — `pip install -e D:\WorkSpace\codev-platform` 让 chroma .venv / system python 都能 `import codev_platform.*`
 - **CLI 入口** — `codev-platform` console script,6 子命令(init / current / list-projects / validate / sync-rules / sync-skills / config)
 - **跨项目共享数据** — `~/.codev-platform/config.json` 单一用户级配置驱动(模型 / 数据基目录 / daemon port / search 参数)
@@ -32,17 +32,18 @@ codev-platform = 多项目 AI 协作工具栈基础设施。
 codev_platform/
 ├── core/
 │   ├── project_id.py   project_id resolver (env > .claude/project.json > 硬失败 + X-Project-Id header)
-│   ├── paths.py        data_root / chroma_dir / chroma_collection_name / cross_link_db_path
+│   ├── paths.py        data_root / chroma_dir / chroma_collection_name / codegraph_db_path
 │   └── config.py       ~/.codev-platform/config.json 加载 (env > config > default)
 ├── chroma/
 │   ├── server.py       multi-tenant MCP daemon (870+ 行, contextvar 路由 + GPU semaphore)
 │   ├── bm25.py         BM25 倒排索引 (jieba + rank_bm25 + RRF)
 │   └── __init__.py
-├── cross_link/
-│   ├── schema.py       sqlite schema + open_db / upsert_node / set_meta
-│   ├── server.py       MCP server (find_endpoint_link / find_table_refs / search_nodes / cross_link_stats)
-│   ├── query.py        full-stack chain 查询 Python API
-│   └── __init__.py
+├── graph/              统一图谱 (替代退役的 cross_link; 跨层血缘 + A1 业务域)
+│   ├── store.py        per-project sqlite 存储 (nodes/edges/evidences/findings)
+│   ├── impact.py       跨层 BFS + A1 查询 (find_table_usage/find_api_callers/search_nodes...)
+│   ├── mcp_server.py   统一图谱 MCP server (第5端点 18092, 8 工具)
+│   ├── plugins/        各栈扫描插件 (frontend/backend/sql → GraphNode/Edge)
+│   └── analyzers/      A1 业务域软节点 (LLM labeler, second post-pass)
 ├── cli.py              codev-platform <subcommand>
 └── __init__.py
 
@@ -127,6 +128,6 @@ env > config > 代码默认。换机器只改 config,代码不动。
 ## 八、不要改
 
 - `.venv/`(本仓根,heavy ML 依赖 4.66GB,gitignored;**2026-05-28 平台所有权翻正**后归本仓自有,从 `requirements-runtime.txt` 重建,见 `docs/plans/roadmap-2026-05-28/platform-ownership-inversion-2026-05-28.md`)
-- `data/`(本仓根,chroma collection + cross_layer.sqlite 运行态,gitignored;多租户共享,按 project_id 隔离)
+- `data/`(本仓根,chroma collection + graph_store/<pid>.sqlite 运行态,gitignored;多租户共享,按 project_id 隔离)
 - 各业务仓 `.claude/project.json`(各仓自己写,本仓 CLI 只 init / 不远程改)
 - 用户 `~/.codev-platform/config.json`(用户主权,本仓代码不主动覆盖,只通过 CLI `config init` 或 `--force`)
