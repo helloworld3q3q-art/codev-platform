@@ -31,25 +31,6 @@ def build_scope_where(org_id: str, scopes: list[tuple[str, str]]) -> dict:
     return {"$and": [{"org_id": org_id}, scope_filter]}
 
 
-class _QwenCpuEmbedder(Embedder):
-    """复用平台 Qwen3-Embedding,device 可配(默认 cpu,避免抢 GPU)。lazy load,normalize。"""
-
-    def __init__(self, model_path: str, device: str = "cpu") -> None:
-        self._model_path = model_path
-        self._device = device
-        self._model = None
-
-    def _ensure(self):
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._model_path, device=self._device)
-        return self._model
-
-    def encode(self, text: str) -> list[float]:
-        vec = self._ensure().encode([text], normalize_embeddings=True)[0]
-        return vec.tolist()
-
-
 class ChromaMemoryVectorIndex(MemoryVectorIndex):
     """per-org chroma collection 实现。collection 懒建并缓存(org_id -> collection)。"""
 
@@ -97,16 +78,18 @@ class ChromaMemoryVectorIndex(MemoryVectorIndex):
 
 
 def build_memory_vector_index(cfg: dict):
-    """按 config 建 ChromaMemoryVectorIndex;缺 chromadb / sentence-transformers → None(调用方退回 local)。"""
-    import importlib.util
-    if (importlib.util.find_spec("chromadb") is None
-            or importlib.util.find_spec("sentence_transformers") is None):
-        _log.warning("[agent.memory_vector] chromadb / sentence-transformers 缺,向量召回不可用,退回 local")
-        return None
-    from pathlib import Path
+    """按 config 建 ChromaMemoryVectorIndex;缺 chromadb 或嵌入模型不可用 → None(调用方退回 local)。
 
-    from codev_platform.core.config import get as _cget
+    嵌入模型经 embed.registry 按 `memory.embed.backend` 选(可换模型,零核心改);缺 backend/依赖 → None。
+    """
+    import importlib.util
+    if importlib.util.find_spec("chromadb") is None:
+        _log.warning("[agent.memory_vector] chromadb 缺,向量召回不可用,退回 local")
+        return None
+    from codev_platform.agent.embed.registry import build_embedder
     from codev_platform.core.paths import chroma_dir
-    embed_path = _cget(cfg, "models.embed_path", str(Path.home() / "models" / "Qwen3-Embedding-0.6B"))
-    device = _cget(cfg, "memory.embed_device", "cpu")
-    return ChromaMemoryVectorIndex(_QwenCpuEmbedder(embed_path, device), chroma_dir())
+    embedder = build_embedder(cfg)
+    if embedder is None:
+        _log.warning("[agent.memory_vector] 嵌入模型不可用(memory.embed.backend),向量召回退回 local")
+        return None
+    return ChromaMemoryVectorIndex(embedder, chroma_dir())
