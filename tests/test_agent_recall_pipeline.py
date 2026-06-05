@@ -108,6 +108,21 @@ def test_bm25_empty_entries():
     assert Bm25Scorer().rank([], "x", RankCtx(org_id="o")) == []
 
 
+def test_bm25_all_zero_score_keeps_pool_order():
+    # query 词全不命中 → 全 0 分 → 稳定排序保候选池原序(契约,审计 NIT)
+    from codev_platform.agent.recall.base import RankCtx
+    from codev_platform.agent.recall.scorers import Bm25Scorer
+    entries = [_entry("a", "数据库连接池"), _entry("b", "前端配色"), _entry("c", "缓存策略")]
+    ids = Bm25Scorer().rank(entries, "完全无关的词xyz", RankCtx(org_id="o"))
+    assert ids == ["a", "b", "c"]
+
+
+def test_bm25_single_doc_corpus_no_crash():
+    from codev_platform.agent.recall.base import RankCtx
+    from codev_platform.agent.recall.scorers import Bm25Scorer
+    assert Bm25Scorer().rank([_entry("a", "数据库")], "数据库", RankCtx(org_id="o")) == ["a"]
+
+
 def test_registry_bm25_built_when_available():
     svc = build_recall_service({"memory": {"recall": {"scorers": ["bm25"]}}}, _Store())
     assert _names(svc) == ["bm25"]        # WSL venv 有 rank_bm25 + jieba

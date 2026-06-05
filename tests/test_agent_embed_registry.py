@@ -37,3 +37,13 @@ def test_build_index_uses_registry_unknown_backend_none():
     # build_memory_vector_index 经 registry 选 embedder;backend 未知 → embedder None → index None
     from codev_platform.agent.memory_vector_chroma import build_memory_vector_index
     assert build_memory_vector_index({"memory": {"embed": {"backend": "bogus-model"}}}) is None
+
+
+def test_build_index_none_when_chromadb_missing(monkeypatch):
+    # chromadb 缺 → 直接 None(短路,不进 embedder)→ 召回退 local(降级)
+    import importlib.util as iu
+    real = iu.find_spec
+    monkeypatch.setattr(iu, "find_spec",
+                        lambda name: None if name == "chromadb" else real(name))
+    from codev_platform.agent.memory_vector_chroma import build_memory_vector_index
+    assert build_memory_vector_index({}) is None
