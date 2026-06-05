@@ -522,7 +522,7 @@ interface ImpactRequest {
 
 // POST /api/v1/indexes/rebuild 请求体。
 interface IndexRebuildRequest {
-  indexKind?: any; // 索引类型: all / chroma / codegraph / cross_link; 不传默认 all
+  indexKind?: any; // 索引类型: all / chroma / codegraph; 不传默认 all
 }
 
 // POST /api/v1/jobs/cancel 请求体。
@@ -581,7 +581,6 @@ interface McpModelUsage {
 // McpProjectUsage 接口
 interface McpProjectUsage {
   chroma?: McpChromaUsage;
-  crossLink?: McpCallUsage;
   codegraph?: McpCallUsage;
   model?: McpModelUsage;
   projectId?: string;
@@ -590,7 +589,6 @@ interface McpProjectUsage {
 // McpUsageMetrics 接口
 interface McpUsageMetrics {
   chroma?: McpChromaUsage;
-  crossLink?: McpCallUsage;
   codegraph?: McpCallUsage;
   model?: McpModelUsage;
 }
