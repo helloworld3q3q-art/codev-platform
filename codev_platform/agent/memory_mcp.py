@@ -312,7 +312,7 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, Response
     from starlette.routing import Mount, Route
     import uvicorn
 
@@ -371,6 +371,8 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
             _ctx_project.reset(t_pid)
             _ctx_identity.reset(t_id)
             _flog(f"[sse] session end org={org_id} user={user_id} project={pid}")
+        # SDK 强制: SSE 结束后必返 Response (否则 starlette await None → TypeError 噪声)。
+        return Response()
 
     async def healthz(_request):
         return JSONResponse({"status": "ok", "service": "agent-memory"})

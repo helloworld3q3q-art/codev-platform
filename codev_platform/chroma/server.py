@@ -350,7 +350,7 @@ async def _run_http(port: int) -> None:
     """
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, Response
     from starlette.routing import Mount, Route
     import uvicorn
 
@@ -393,7 +393,7 @@ async def _run_http(port: int) -> None:
         if state is None or state.collection is None:
             err = (state.init_error if state else None) or "project init failed"
             _flog(f"[sse] reject: cannot load project {pid}: {err}")
-            return
+            return JSONResponse({"error": f"cannot load project: {err}"}, status_code=503)
 
         client = request.query_params.get("client") or "dev"
         global _sse_sessions
@@ -411,6 +411,8 @@ async def _run_http(port: int) -> None:
             _current_client.reset(ctok)
             _sse_sessions = max(0, _sse_sessions - 1)
             _flog(f"[sse] session end project_id={pid} (active={_sse_sessions})")
+        # SDK 强制: SSE 结束后必返 Response (否则 starlette await None → TypeError 噪声)。
+        return Response()
 
     async def healthz(_request):
         # PUBLIC 存活/就绪探针: 仅最小信息, 不泄敏 (审计 #4 — /health 旧版泄露

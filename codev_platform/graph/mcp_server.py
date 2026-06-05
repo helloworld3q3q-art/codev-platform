@@ -192,7 +192,7 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, Response
     from starlette.routing import Mount, Route
     import uvicorn
 
@@ -238,6 +238,9 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
                                  server.create_initialization_options())
         finally:
             _current_project_id.reset(token)
+        # SDK 强制(mcp/server/sse.py docstring): SSE 结束/客户端断开后必返 Response,
+        # 否则 starlette 1.2.0 request_response 走 `await None(...)` → TypeError 噪声日志。
+        return Response()
 
     async def healthz(_request):
         return JSONResponse({"status": "ok", "service": "graph"})
