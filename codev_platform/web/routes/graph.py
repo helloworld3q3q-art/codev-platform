@@ -1,6 +1,6 @@
 """Graph 组路由 (plan §十五 Graph + §二十) —— 替代 Java codegraph-api(:18082) 的 12 个只读接口。
 
-经 integrations 直读 per-project 只读 SQLite (codegraph.db / cross_layer.sqlite), 不经 daemon、
+经 integrations 直读 per-project 只读 SQLite (codegraph.db) + graph store, 不经 daemon、
 不起模型 (plan §12.1 资源隔离铁律)。全部 POST + X-Project-Id, 经 require_project_access 鉴权
 (core.acl 单一真值源, 与 3 MCP + agent + memory 同一套)。
 
@@ -172,9 +172,9 @@ def codegraph_graph(request: Request, body: S.CodegraphGraphRequest | None = Non
 # 统一图谱组 (2) —— 直读 graph/store.py 全量节点/边 (所有插件聚合)
 # ======================================================================
 #
-# 与 cross-link 组 (只筛 cross_link 适配器节点) 不同, 本组返回 store 内全部
-# GraphNode/GraphEdge (frontend/backend/database/cross_link 等所有插件), 用统一
-# NodeKind/EdgeKind 直出, 让插件产出 (尤其 sql 的 db_table/db_column) 完整可见。
+# 本组返回 store 内全部 GraphNode/GraphEdge (frontend/backend/database 等所有栈插件
+# + 核心 linker), 用统一 NodeKind/EdgeKind 直出, 让插件产出 (尤其 sql 的
+# db_table/db_column) 完整可见。
 # store 缺失 / 空 → 返回空 (200, 非错误), 与现有 graph 路由的 graceful-empty 一致。
 
 

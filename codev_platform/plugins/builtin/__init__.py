@@ -8,8 +8,7 @@ node (后端) · sql (DB + 表读写血缘), detect 探测 repo 内容自动适�
 
 注 (2026-06-03 全栈血缘收敛): cross-link 适配器插件已退场 —— 跨业务链路统一由 stack
 插件 (节点) + graph.ingest 的核心 linker pass (calls_api 边) 产出, 单一真值源走统一 store,
-不再由 cross_link 适配器重复灌库。适配器代码 (graph/adapters/cross_link.py) 仍保留供
-web /cross-link 路由按需读 legacy cross_layer.sqlite, 但不再接入 ingest。
+适配器代码已删除, 不再接入 ingest。
 """
 from __future__ import annotations
 

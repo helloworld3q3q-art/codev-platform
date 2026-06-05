@@ -12,7 +12,7 @@ from codev_platform import mcp_serve as ms
 def _cfg(tmp_path):
     return {
         "daemon": {"port": 18083},
-        "mcp": {"cross_link_sse_port": 18086, "codegraph_sse_port": 18095},
+        "mcp": {"graph_sse_port": 18092, "codegraph_sse_port": 18095},
         "projects": {"proj-a": {"repo_path": str(tmp_path / "repo_a")}},
     }
 

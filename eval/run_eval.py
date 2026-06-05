@@ -2,7 +2,6 @@
 
 用法:
     python eval/run_eval.py --suite all
-    python eval/run_eval.py --suite crosslink            # 无 GPU 即可跑
     python eval/run_eval.py --suite codegraph
     python eval/run_eval.py --suite retrieval            # 需 chroma daemon + 模型
     python eval/run_eval.py --suite all --json           # 机器可读输出
@@ -10,11 +9,11 @@
 三套 suite:
 - retrieval: 走已在跑的 chroma daemon (SSE), 算 recall@5 / hit@5 / MRR。
              daemon 没起 / 模型缺 -> 优雅报需要什么, 不崩 (status="skipped")。
-- crosslink: 直接查 cross_layer.sqlite (无需 GPU), 算命中率。
 - codegraph: 直接查 codegraph.db 的 nodes (无需 GPU), 算命中率。
+- memory:    冲突消解 (纯逻辑) + 召回 (需 PG)。
 
 数据集在 eval/datasets/*.jsonl。指标定义见 eval/metrics.py。
-project_id: 默认 openclaw-stock (cross-link / codegraph 真实链路数据在该项目);
+project_id: 默认 openclaw-stock (codegraph 真实链路数据在该项目);
             retrieval 默认 codev-platform (平台自身文档已索引)。可用 --project 覆盖。
 """
 from __future__ import annotations
@@ -115,66 +114,6 @@ def run_retrieval(project_id: str, k: int = 5) -> dict:
             "recall@{}".format(k): round(sum(recall_at_k(rt, rl, k) for rt, rl in per_query) / n, 3),
             "hit@{}".format(k): round(sum(1 for rt, rl in per_query if hit_at_k(rt, rl, k)) / n, 3),
             "mrr": round(aggregate_mrr(per_query), 3),
-        },
-        "details": details,
-    }
-
-
-# ---------------------------------------------------------------------------
-# crosslink suite (sqlite 直查, 无 GPU)
-# ---------------------------------------------------------------------------
-
-def run_crosslink(project_id: str) -> dict:
-    from codev_platform.core.paths import cross_link_db_path
-    from codev_platform.cross_link.query import CrossLayerDB
-
-    db_path = cross_link_db_path(project_id)
-    rows = _load_jsonl("crosslink.jsonl")
-    if not db_path.exists():
-        return {
-            "suite": "crosslink",
-            "status": "skipped",
-            "reason": f"cross_layer.sqlite 不存在: {db_path}。"
-                      f"先跑 `codev-platform reindex --cross-link` (或 cross_link.build_index) 建索引。",
-            "n": len(rows),
-        }
-    conn = sqlite3.connect(db_path)
-    db = CrossLayerDB(conn)
-    per_query: list[tuple[list[str], set]] = []
-    details = []
-    try:
-        for r in rows:
-            key, expect = r["key"], set(r["expect_contains"])
-            if r["kind"] == "table":
-                refs = db.find_all_references(key)
-                names = [
-                    x["name"]
-                    for group in refs.values()
-                    for x in group
-                ]
-            elif r["kind"] == "endpoint":
-                names = [x["name"] for x in db.list_endpoint_callers(key)]
-            else:
-                names = []
-            per_query.append((names, expect))
-            details.append({
-                "kind": r["kind"],
-                "key": key,
-                "recall": round(recall_at_k(names, expect, len(names) or 1), 3),
-                "hit": hit_at_k(names, expect, len(names) or 1),
-            })
-    finally:
-        db.close()
-    n = len(per_query)
-    # crosslink 用全量召回 (k = 命中列表长度), 衡量 "期望的链路是否都被索引到"
-    return {
-        "suite": "crosslink",
-        "status": "ok",
-        "n": n,
-        "project_id": project_id,
-        "metrics": {
-            "recall": round(sum(recall_at_k(rt, rl, len(rt) or 1) for rt, rl in per_query) / n, 3),
-            "hit_rate": round(sum(1 for rt, rl in per_query if hit_at_k(rt, rl, len(rt) or 1)) / n, 3),
         },
         "details": details,
     }
@@ -450,20 +389,18 @@ def _print_human(results: list[dict]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="codev-platform eval harness")
-    ap.add_argument("--suite", choices=["retrieval", "crosslink", "codegraph", "memory", "all"], default="all")
+    ap.add_argument("--suite", choices=["retrieval", "codegraph", "memory", "all"], default="all")
     ap.add_argument("--project", default=None, help="project_id 覆盖 (默认按 suite 选)")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("-k", type=int, default=5, help="retrieval top-k (默认 5)")
     args = ap.parse_args(argv)
 
-    suites = (["retrieval", "crosslink", "codegraph", "memory"]
+    suites = (["retrieval", "codegraph", "memory"]
               if args.suite == "all" else [args.suite])
     results: list[dict] = []
     for s in suites:
         if s == "retrieval":
             results.append(run_retrieval(args.project or _DEFAULT_RETRIEVAL_PID, k=args.k))
-        elif s == "crosslink":
-            results.append(run_crosslink(args.project or _DEFAULT_GRAPH_PID))
         elif s == "codegraph":
             results.append(run_codegraph(args.project or _DEFAULT_GRAPH_PID))
         elif s == "memory":

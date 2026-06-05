@@ -12,9 +12,9 @@ detect (基于 repo 内容, 不基于项目名 / 目录名):
 
 analyze:
   - 扫 SQL 文件里的 CREATE TABLE -> db_table 节点 + 列定义 -> db_column 节点。
-  - db_table --defines_column--> db_column 边 (裸字符串 kind, 对齐 cross_link 适配器
-    的 defines_column 约定; 原始 rel 同时写 meta["cross_link_rel"], 保证 Flyway 经
-    cross_link 产的边与本插件直扫 SQL 产的边同 kind, 跨插件可链接)。
+  - db_table --defines_column--> db_column 边 (裸字符串 kind; 前端 unifiedgraph /
+    codegraph utils 真消费此边渲染"定义字段"关系, 跨 DB 源 (.sql / python-ddl / ORM)
+    同 kind 可链接)。
   - 方言推断写进 db_table 节点 meta["dialect"] (sqlite / mysql / postgres / unknown):
     文件名后缀 (*.sqlite.sql) / 内容特征 (AUTO_INCREMENT=mysql, SERIAL=pg, AUTOINCREMENT=sqlite)。
 
@@ -22,7 +22,7 @@ analyze:
 `CREATE TABLE [IF NOT EXISTS] name (col type ..., ...)` 形态。约束 / 索引 / 复杂表达式
 列暂不深解析, 但保证产出非空且 schema 合法, 跨插件 node id 可链接。
 
-node id 统一 "<project_id>:<kind>:<stable-key>" (与 _stack_scan / cross_link 同构):
+node id 统一 "<project_id>:<kind>:<stable-key>" (与 _stack_scan / 其它栈插件同构):
   - db_table:  "<pid>:db_table:<table_name_lower>"
   - db_column: "<pid>:db_column:<table_name_lower>.<col_name_lower>"
 表名做大小写归一 (lower), 保证 endpoint->table 链路里 reads/writes_table 边能命中。

@@ -27,7 +27,7 @@ cd <你的项目仓>
 ```
 
 ### 2. `.mcp.json` —— 直写命令(把 `<CODEV>` 换成你的绝对路径)
-仓里**没有** `.mcp.json` → 新建下面这份;**已有**(脚手架常预置占位)→ 把 3 个 server 的 `command/args` 填成下面这样(键名沿用你仓已有的,如 `code-graph`/`doc-search`/`business-link` 均可):
+仓里**没有** `.mcp.json` → 新建下面这份;**已有**(脚手架常预置占位)→ 把 3 个 server 的 `command/args` 填成下面这样(键名沿用你仓已有的,如 `code-graph`/`doc-search`/`graph` 均可):
 
 ```json
 {
@@ -41,9 +41,9 @@ cd <你的项目仓>
       "args": ["-c", "cd \"$CLAUDE_PROJECT_DIR\" && exec \"<CODEV>/.venv/bin/python\" -m codev_platform.chroma.server"],
       "timeout": 90000
     },
-    "business-link": {
+    "graph": {
       "command": "sh",
-      "args": ["-c", "cd \"$CLAUDE_PROJECT_DIR\" && exec \"<CODEV>/.venv/bin/python\" -m codev_platform.cross_link.server"],
+      "args": ["-c", "cd \"$CLAUDE_PROJECT_DIR\" && exec \"<CODEV>/.venv/bin/python\" -m codev_platform.graph.mcp_server"],
       "timeout": 30000
     }
   }
@@ -51,7 +51,9 @@ cd <你的项目仓>
 ```
 > `$CLAUDE_PROJECT_DIR` 由 Claude Code 注入、sh 运行时展开 —— 它保证 server 在**你打开的仓根**解析 project_id + 数据,不靠 spawn 时的 cwd(那个不可靠)。
 >
-> ⚠️ **`business-link` 默认别放**。cross-link 只适用 **Java+Flyway SQL+Python 全栈**(扫接口↔表↔写库),且扫描器在那类业务仓里。TS / 前端 / 纯文档项目放了它,一调就报 `cross_layer.sqlite 不存在`。只在确为该类全栈项目时才加这第三个 server。
+> ⚠️ **`graph`(统一图谱)默认别放**。graph 提供前端↔接口↔表跨层链路(`find_table_usage` / `find_api_callers` / `search_nodes` 等 8 工具),只适用建过统一图谱的全栈项目(Java+Flyway SQL+Python / 前端组件依赖)。纯文档项目放了它,一调就报图谱数据不存在。只在确为该类项目时才加这第三个 server。
+>
+> 注:cross-link MCP(原 `business-link` / `cross_link.server` / 19086 端点)已于 2026-06-05 退役删包,其跨层链路能力并入 graph(统一图谱)。新项目一律走 graph,不再配 cross-link。
 
 ### 3. doc_patterns —— 文档不在默认位置时必做
 默认只扫 `CLAUDE.md` / `README.md` / `docs/**`。**设计文档在根目录或别处**(如 `PRD.md`、`prompts/*.md`)就建 `<你的仓>/.claude/index.json`:
@@ -81,7 +83,7 @@ echo "data/chroma/" >> .gitignore   # chroma 索引机器本地, 别提交(.code
 ## 说明 / 边界
 
 - **数据隔离**:`~/.codev-platform/config.json` 的 `data.platform_data_dir=null` 时,每个项目索引存各自仓 `data/`(gitignored),互不影响。
-- **cross-link(business-link)是进阶项,默认不放**:需 Flyway + Java mapper/controller(+前端/Python)全栈结构,扫描器在那类业务仓里,且要在 `platform_meta/projects/<id>/meta.json` 配 `health.*_patterns` 后单独建图。**非该类项目放了它,调用即报 `cross_layer.sqlite 不存在`** —— 直接从 .mcp.json 删掉。
+- **graph(统一图谱)是进阶项,默认不放**:需 Flyway + Java mapper/controller(+前端/Python)全栈结构或前端组件依赖,且要在 `platform_meta/projects/<id>/meta.json` 配 `health.*_patterns` 后单独建图。**非该类项目放了它,调用即报图谱数据不存在** —— 直接从 .mcp.json 删掉。(原 cross-link MCP 已退役,链路能力并入 graph。)
 - **日常维护**:改完重建 —— 在仓里 `codev-platform reindex --chroma --force` / `codegraph sync`;装了 `codev-platform install-hooks` 则 commit 自动重建。
 
 ---
@@ -90,7 +92,7 @@ echo "data/chroma/" >> .gitignore   # chroma 索引机器本地, 别提交(.code
 
 | 现象 | 处理 |
 |---|---|
-| `/mcp` doc-search/business-link failed | `.mcp.json` 里 `<CODEV>` 是否换成真实绝对路径;`<CODEV>/.venv/bin/python` 是否存在;Reload Window |
+| `/mcp` doc-search/graph failed | `.mcp.json` 里 `<CODEV>` 是否换成真实绝对路径;`<CODEV>/.venv/bin/python` 是否存在;Reload Window |
 | `current` 报无法解析 project_id | 没跑步骤 1,或不在仓根 → `codev-platform init <id>` |
 | search 返回空 | 该仓没建索引 / doc_patterns 没覆盖 → 看步骤 3、4 |
 | code-graph failed | `which codegraph` 空就装(`npm i -g @colbymchenry/codegraph`) |

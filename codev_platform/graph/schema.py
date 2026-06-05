@@ -1,8 +1,8 @@
 """统一图谱模型 — 插件与核心之间的通用货币 (Phase 1).
 
 定位:把 codev-platform 从固定工具集合升级为"模块化核心 + 插件化扩展"全链路
-AI 平台时,所有 analyzer 插件 (Frontend / Backend / Database / Connector / CodeGraph /
-CrossLink adapter) 都必须输出统一模型,平台核心据此存储、查询、给 Agent 使用:
+AI 平台时,所有 analyzer 插件 (Frontend / Backend / Database / Connector / CodeGraph)
+都必须输出统一模型,平台核心据此存储、查询、给 Agent 使用:
 
     GraphNode  发现了什么对象
     GraphEdge  对象之间有什么关系
@@ -12,7 +12,7 @@ CrossLink adapter) 都必须输出统一模型,平台核心据此存储、查询
 
 风格:与 agent/brain/types.py 一致,用 dataclass 作"中性类型"(模块间传递的领域货币),
 而非 pydantic BaseModel (后者在本仓专用于 HTTP 请求/响应)。本文件只定义 schema,
-不依赖 cross-link / codegraph 的现有存储,适配器 (把现有输出转成本模型) 留到后续。
+不依赖具体插件 (builtin.sql / stack 插件等) 的实现细节。
 
 序列化:每个类型提供 to_dict() / from_dict(),用于跨进程传递 + sqlite/JSON 落盘。
 NodeKind / EdgeKind 是开放枚举 (str 子类),核心值由 plan 列出,插件可在不破坏存储的
@@ -143,7 +143,7 @@ class GraphEdge:
 
     source / target: 端点 GraphNode.id。
     kind:       EdgeKind 枚举值或裸字符串 (开放枚举)。
-    confidence: 置信度,精确锚点=1.0,降级 fuzzy 识别<1.0 (与现有 cross-link 一致)。
+    confidence: 置信度,精确锚点=1.0,降级 fuzzy 识别<1.0 (栈插件粗粒度推断用)。
     meta:       插件专属字段 (如 evidence_ids 引用、命中规则名 ...)。
     """
 
@@ -173,7 +173,7 @@ class GraphEdge:
 class Evidence:
     """结论来源:某条 node/edge/finding 为什么成立。
 
-    source:  证据来源标识 (插件名 / 扫描器 / connector,如 "builtin.cross_link")。
+    source:  证据来源标识 (插件名 / 扫描器 / connector,如 "builtin.sql")。
     detail:  人类可读说明 (命中的代码片段、规则、匹配文本)。
     file:    证据所在文件 (可空)。
     line:    证据所在行号 (可空)。

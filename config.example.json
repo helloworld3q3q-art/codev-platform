@@ -39,9 +39,8 @@
   },
 
   "runtime": {
-    "_comment": "chroma_venv: chroma daemon + indexer 用的 venv (含 python.exe + mcp-proxy.exe)。cross_link_python: cross_link build 用的 python (需 sqlglot + javalang); 不配则回退 PATH 'python'。两者都不要硬编码进脚本 — 换机器只改这里。",
-    "chroma_venv": "D:/WorkSpace/codev-platform/.venv",
-    "cross_link_python": "D:/ProgramFiles/Python314/python.exe"
+    "_comment": "chroma_venv: chroma daemon + indexer 用的 venv (含 python.exe + mcp-proxy.exe)。不要硬编码进脚本 — 换机器只改这里。",
+    "chroma_venv": "D:/WorkSpace/codev-platform/.venv"
   },
 
   "agent": {

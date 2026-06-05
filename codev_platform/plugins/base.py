@@ -1,8 +1,8 @@
 """AnalyzerPlugin 协议 — 插件与核心之间的契约 (Phase 2).
 
 定位:把 codev-platform 升级为"模块化核心 + 插件化扩展"全链路 AI 平台时,客户差异
-能力 (Frontend / Backend / Database / Connector / CodeGraph / CrossLink adapter) 都以
-AnalyzerPlugin 形式接入。核心只依赖本协议,不关心具体语言 / 框架 / 外部系统:
+能力 (Frontend / Backend / Database / Connector / CodeGraph) 都以 AnalyzerPlugin 形式
+接入。核心只依赖本协议,不关心具体语言 / 框架 / 外部系统:
 
     name:     插件唯一标识 (如 "builtin.sql" / "frontend.vue")。
     version:  语义化版本 (用于审计 + 增量 reindex 归因)。

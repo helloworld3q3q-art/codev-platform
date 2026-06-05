@@ -3,7 +3,7 @@
 字段名严格对齐 Java codegraph-api 的 DTO (camelCase), 让前端 force-graph / openapi-typescript
 生成的类型与旧 :18082 无缝迁移 (见 plan §20.2 接口吸收映射)。
 - codegraph 组: 对齐 NodeDTO / EdgeDTO / StatsResponse / SearchResponse / ...
-- cross-link 组: 对齐 CrossLinkStatsResponse / CrossLinkTableRefsResponse / ...
+- 统一图谱组: UnifiedGraphNode / UnifiedGraphEdge (前端→后端→表全栈链路, 见 :129)。
 """
 from __future__ import annotations
 

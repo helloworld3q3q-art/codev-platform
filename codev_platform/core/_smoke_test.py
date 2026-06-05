@@ -11,8 +11,6 @@ from codev_platform.core.paths import (
     chroma_collection_name,
     chroma_dir,
     codegraph_db_path,
-    cross_link_db_path,
-    cross_link_legacy_db_path,
 )
 
 
@@ -22,13 +20,10 @@ def main() -> int:
     print(f"project_id resolved: {pid}")
     print(f"chroma collection:   {chroma_collection_name(pid, 'platform_docs')}")
     print(f"chroma data dir:     {chroma_dir()}")
-    print(f"cross-link new:      {cross_link_db_path(pid)}")
-    legacy = cross_link_legacy_db_path()
-    print(f"cross-link legacy:   {legacy} (exists={legacy.exists()})")
     print(f"codegraph db:        {codegraph_db_path(pid)} (per-repo via 3rd-party MCP server)")
     print()
     print("OK - codev_platform core resolves correctly")
-    print("(cross_link / chroma daemon 集成验证仍在 platform 仓 tools/_platform/_smoke_test.py)")
+    print("(chroma daemon 集成验证仍在 platform 仓 tools/_platform/_smoke_test.py)")
     return 0
 
 

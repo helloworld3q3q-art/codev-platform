@@ -257,9 +257,9 @@ pnpm exec eslint <file>       # 单文件 lint (AI 可跑)
 
 | Server | type | 端口 / 调用 | 用途 |
 |---|---|---|---|
-| codegraph | stdio | `codegraph serve --mcp` (Node + better-sqlite3) | 代码图谱(symbol / 调用链 / impact) |
-| platform-docs | stdio (内部 daemon HTTP) | 端口 18083(daemon) | 文档语义检索(Chroma + Qwen embedding + reranker) |
-| cross-link | stdio | `tools/cross_link/cross-link-mcp.cmd` | 跨层业务链(endpoint ↔ Mapper ↔ table ↔ Python 路径) |
+| codegraph | sse | 端口 18091(mcp-proxy 多租户代理) | 代码图谱(symbol / 调用链 / impact) |
+| platform-docs | sse (内部 daemon HTTP) | 端口 18083(daemon) | 文档语义检索(Chroma + Qwen embedding + reranker) |
+| graph(统一图谱) | sse | 端口 18092 | 跨层业务链 + 前端组件依赖(endpoint ↔ Mapper ↔ table ↔ Python ↔ 页面)+ A1 业务域 |
 
 ### 优先级铁律(`ai-tools-mcp.md`)
 
@@ -277,12 +277,12 @@ pnpm exec eslint <file>       # 单文件 lint (AI 可跑)
 | 找调用链 / 影响面 | `codegraph_callers` / `codegraph_callees` / `codegraph_impact` |
 | 想 "怎么实现 X" / 架构问题 | `codegraph_context`(PRIMARY,一次拿 search+node+callers+callees) |
 | 找规则 / 设计文档 / 事故复盘 | `search_docs(query, category?, module?)` |
-| 找跨层业务链路 | `find_endpoint_link` / `find_table_refs` / `search_nodes` |
+| 找跨层业务链路 | graph `find_table_usage` / `find_api_callers` / `find_impacted_pages` / `search_nodes` |
 
 ### 索引更新
 
 ```bash
-# post-commit hook 自动触发(看改动文件类型决定 scope: chroma / codegraph / cross_link)
+# post-commit hook 自动触发(看改动文件类型决定 scope: chroma / codegraph / graph)
 # 手动兜底
 powershell -File tools/dev/post-commit.ps1
 powershell -File scripts/codegraph/rebuild_index.ps1 -Full     # codegraph 全量
@@ -345,12 +345,12 @@ powershell -File tools/dev/update-local-ai.ps1                 # 三库一键
 |---|---|---|
 | **L1 小改** | 文案 / 注释 / 局部样式 / 单文件小 bug | `git status -s` + 定向读 + 最小验证 |
 | **L2 单模块** | 单模块逻辑 / 组件 props / repository 实现 | 相关模块 rules + codegraph 调用方 + 定向验证 |
-| **L3 跨层** | DTO / API / SQL / Python 写库 / Flyway / enum / 推荐 / 资金 / 百分比 / shadow / snapshot | platform-docs + codegraph + cross-link + 验证闭环 |
+| **L3 跨层** | DTO / API / SQL / Python 写库 / Flyway / enum / 推荐 / 资金 / 百分比 / shadow / snapshot | platform-docs + codegraph + graph + 验证闭环 |
 | **L4 高风险** | 生成文件 / 已发布 migration / AI 索引 / 依赖 / 全局 runtime / `.mcp.json` | 先说明影响范围;禁改项拒绝或走正确流程 |
 
-### 跨层业务链 → 必查 cross-link
+### 跨层业务链 → 必查 graph
 
-凡涉及 sql ↔ py / sql ↔ java / java ↔ 前端 / 跨语言枚举 → **改前必先 cross-link**,不许只改单层。
+凡涉及 sql ↔ py / sql ↔ java / java ↔ 前端 / 跨语言枚举 → **改前必先 graph**(`find_table_usage` / `find_api_callers`),不许只改单层。
 
 ### 改前门禁声明
 

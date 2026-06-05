@@ -15,10 +15,8 @@ from codev_platform.graph.schema import (
     NodeKind,
 )
 
-# DB 定义关系边 kind: 统一 EdgeKind 暂无精确枚举对应, 沿用 cross_link 适配器
-# (graph/adapters/cross_link.py) 既定的裸字符串约定, 保证两个 DB 来源 (Flyway 经
-# cross_link / 本插件直接扫 SQL) 产同一 kind, 跨插件可链接。原始值同时写进
-# meta["cross_link_rel"] 留底 (与适配器同范式)。
+# DB 定义关系边 kind: 统一 EdgeKind 暂无精确枚举对应, 用裸字符串 defines_column
+# (前端 unifiedgraph / codegraph utils 真消费此边 kind, 渲染"定义字段"关系)。
 _REL_DEFINES_COLUMN = "defines_column"
 
 
@@ -118,7 +116,6 @@ def _emit_table_nodes(
                 target=col_id,
                 kind=_REL_DEFINES_COLUMN,
                 meta={
-                    "cross_link_rel": _REL_DEFINES_COLUMN,
                     "evidence": f"column {col_name} of {table}",
                 },
             )

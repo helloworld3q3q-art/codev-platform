@@ -14,9 +14,6 @@
 
 - codegraph: 每 project 独立 SQLite DB
     路径: data/codegraph/<project_id>/codegraph.db
-
-- cross_link: 每 project 独立 SQLite DB
-    路径: data/cross_link/<project_id>/index.db
 """
 from __future__ import annotations
 
@@ -104,21 +101,7 @@ def codegraph_db_path(project_id: str) -> Path:
 
 
 def codegraph_index_dir(project_id: str) -> Path:
-    """codegraph 索引目录 (junction target)。与 cross_link_db_path 同父, 平台集中存放。
+    """codegraph 索引目录 (junction target)。平台集中存放。
     例: data/codegraph_ext/<project_id>/codegraph/ (含 codegraph.db + config.json + wal)。"""
     project_id = _validate_project_id(project_id)  # 防路径穿越 (../outside 等)
     return data_root() / "codegraph_ext" / project_id / "codegraph"
-
-
-def cross_link_db_path(project_id: str) -> Path:
-    """cross-link KG sqlite, per-project 隔离。
-    legacy 路径: data/codegraph_ext/cross_layer.sqlite (无 project_id 子目录)
-    新路径:      data/codegraph_ext/<project_id>/cross_layer.sqlite
-    """
-    project_id = _validate_project_id(project_id)  # 防路径穿越 (../outside 等)
-    return data_root() / "codegraph_ext" / project_id / "cross_layer.sqlite"
-
-
-def cross_link_legacy_db_path() -> Path:
-    """legacy cross-link DB, 用于一次性 fallback 兼容 (重建后即弃用)。"""
-    return data_root() / "codegraph_ext" / "cross_layer.sqlite"

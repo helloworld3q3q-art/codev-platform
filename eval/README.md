@@ -11,7 +11,6 @@
 .venv/bin/python eval/run_eval.py --suite all
 
 # 单 suite
-.venv/bin/python eval/run_eval.py --suite crosslink     # 无 GPU 即可跑
 .venv/bin/python eval/run_eval.py --suite codegraph     # 无 GPU 即可跑
 .venv/bin/python eval/run_eval.py --suite memory        # conflict 纯逻辑必跑; recall 需 PG
 .venv/bin/python eval/run_eval.py --suite retrieval     # 需 chroma daemon + 模型
@@ -26,7 +25,6 @@
 
 | suite | 后端 | GPU? | 数据来源 | 默认 project |
 |---|---|---|---|---|
-| **crosslink** | `cross_layer.sqlite` 直查 | 否,现在即可跑 | 真实 endpoint↔table↔writer/reader 链路 | `openclaw-stock` |
 | **codegraph** | `codegraph.db` 直查 nodes/FTS | 否,现在即可跑 | 真实符号 ↔ 文件 | `openclaw-stock` |
 | **memory** | conflict=纯逻辑 / recall=PG | conflict 否 / recall 需 PG | 记忆冲突消解 + 跨作用域召回 | — |
 | **retrieval** | chroma daemon (SSE) | 是,需模型 | 平台自身已索引文档 | `codev-platform` |
@@ -43,7 +41,6 @@ daemon 没起 / 模型缺 → runner 优雅报"需要什么",不抛异常(`statu
 | `MRR` | 1 / 首个相关命中的排名。衡量"相关结果排得够不够靠前"。 |
 | `precision@k` | 前 k 个命中的相关条目数 / k。衡量"返回的有多少是对的"。 |
 
-- crosslink 用**全量召回**(k=命中列表长度)算 `recall` / `hit_rate`,衡量"期望的跨层链路是否都被索引到"。
 - codegraph 算 `hit_rate`(期望符号/文件是否被搜到)+ `MRR`(排名)。
 - retrieval 算 `recall@5` / `hit@5` / `MRR`。
 - memory 算 `resolution_accuracy`(冲突消解胜出条 == 期望,纯逻辑始终可跑)+(有 PG 时)`recall@k` / `hit@k`。
@@ -67,7 +64,6 @@ daemon 没起 / 模型缺 → runner 优雅报"需要什么",不抛异常(`statu
 ## 数据集(`eval/datasets/*.jsonl`)
 
 - `retrieval.jsonl` —— `{query, relevant: [doc 路径]}`,基于平台自己已索引的 rules / docs / plan 主题(可答、有据)。
-- `crosslink.jsonl` —— `{kind: table|endpoint, key, expect_contains: [...]}`,基于 openclaw-stock 真实链路。
 - `codegraph.jsonl` —— `{query, expect_symbol_or_file}`,基于 codegraph 已索引的真实符号。
 - `memory.jsonl` —— 两类:`{kind:"conflict", entries, policy, expect_winner}`(纯逻辑)+ `{kind:"recall", seed, query, expect_contains}`(需 PG;seed 里 `__USER__`/`__PROJ__` 占位由 runner 替成隔离命名空间)。
 

@@ -15,7 +15,7 @@ from codev_platform.graph.schema import (
     NodeKind,
 )
 
-# table->column 边 kind: 裸字符串, 对齐 cross_link 适配器 defines_column 约定。
+# table->column 边 kind: 裸字符串 defines_column (前端 utils 真消费此边渲染"定义字段")。
 _DEFINES_COLUMN = "defines_column"
 from codev_platform.plugins import clear_registry, registered_names, run_applicable
 from codev_platform.plugins.builtin.sql import PLUGIN_NAME as SQL_NAME, SqlPlugin
@@ -93,10 +93,9 @@ def test_sql_analyze_extracts_tables_and_columns(tmp_path):
     col_names = {c.name for c in cols}
     assert col_names == {"id", "name", "email"}
     assert len(defines) == 3
-    # defines_column 边: 裸字符串 kind + meta 留底原始 rel (对齐 cross_link 适配器)。
+    # defines_column 边: 裸字符串 kind。
     for e in defines:
         assert e.kind == "defines_column"
-        assert e.meta.get("cross_link_rel") == "defines_column"
     # 边端点都指向已产出的节点 id (schema 合法 + 可链接)。
     node_ids = {n.id for n in result.nodes}
     for e in defines:
@@ -165,8 +164,7 @@ def test_sql_analyze_quoted_identifiers(tmp_path):
 # ---------------- 边契约 + 列抽取边形回归 (审计要求补) ----------------
 
 def test_sql_table_column_edge_kind_is_defines_column(tmp_path):
-    # taxonomy 契约: table->column 边必须是裸字符串 defines_column (不是 contains),
-    # 且原始 rel 写进 meta["cross_link_rel"], 与 graph/adapters/cross_link.py 对齐。
+    # taxonomy 契约: table->column 边必须是裸字符串 defines_column (不是 contains)。
     (tmp_path / "s.sql").write_text(
         "CREATE TABLE t (id INT, name TEXT);", encoding="utf-8"
     )
@@ -174,7 +172,6 @@ def test_sql_table_column_edge_kind_is_defines_column(tmp_path):
     assert result.edges, "应产出至少一条 defines_column 边"
     for e in result.edges:
         assert e.kind == "defines_column"
-        assert e.meta.get("cross_link_rel") == "defines_column"
     # 不再产 contains 边。
     assert all(e.kind != "contains" for e in result.edges)
 

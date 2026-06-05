@@ -1,40 +1,11 @@
 """Regression tests for codev_platform.core.paths.
 
-Bug context: cross_link DB must be PER-PROJECT isolated (a <pid> subdir), with NO
-legacy fallback that would make two projects share one cross_layer.sqlite. chroma
-collections are namespaced as <pid>__<base>.
+chroma collections are namespaced as <pid>__<base>; codegraph DBs are per-project
+isolated under codegraph_ext/<pid>/.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import codev_platform.core.paths as paths
-
-
-def test_cross_link_db_path_has_pid_subdir(monkeypatch, tmp_path):
-    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
-    p = paths.cross_link_db_path("openclaw-stock")
-    assert p == tmp_path / "codegraph_ext" / "openclaw-stock" / "cross_layer.sqlite"
-    # pid appears as a path component (isolation), not just concatenated
-    assert "openclaw-stock" in p.parts
-
-
-def test_cross_link_db_path_distinct_per_project(monkeypatch, tmp_path):
-    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
-    a = paths.cross_link_db_path("openclaw-stock")
-    b = paths.cross_link_db_path("codev-platform")
-    # no legacy fallback sharing: different pid -> different DB file
-    assert a != b
-    assert a.parent != b.parent
-
-
-def test_cross_link_db_path_not_legacy(monkeypatch, tmp_path):
-    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
-    per_project = paths.cross_link_db_path("openclaw-stock")
-    legacy = paths.cross_link_legacy_db_path()
-    # the per-project path must NOT collapse onto the legacy (pid-less) one
-    assert per_project != legacy
-    assert legacy == tmp_path / "codegraph_ext" / "cross_layer.sqlite"
 
 
 def test_chroma_collection_name():

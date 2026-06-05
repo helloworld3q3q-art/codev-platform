@@ -8,7 +8,7 @@
 设计要点:
 - detect 基于 **repo 内容** (package.json deps / *.tsx 存在 / import fastapi / @router 装饰器),
   不基于项目名或固定目录名 (web-ui / codev_platform 都不写死)。
-- node id 统一 "<project_id>:<kind>:<stable-key>" (与 graph/adapters/cross_link 同构,
+- node id 统一 "<project_id>:<kind>:<stable-key>" (与 builtin.sql / 其它栈插件同构,
   保证跨插件可链接)。
 - URL 匹配建 calls_api 边的逻辑集中在 link_api_calls() 一处 (单一真值源)。
 - 不吞异常返回空: 单文件 parse / read 失败记 warning 并跳过该文件, 不中断整体。

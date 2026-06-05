@@ -95,7 +95,7 @@ python -m codev_platform.chroma.indexer --force    # 删旧 collection 全量重
 拉起平台 MCP 端点(chroma daemon 预热 embedding ~30-60s):
 
 ```bash
-codev-platform serve-mcp start          # 幂等拉起 cross-link + 各项目 codegraph 端点
+codev-platform serve-mcp start          # 幂等拉起 graph(统一图谱) + 各项目 codegraph 端点
 ```
 
 或换机器/重 clone 后一键(venv 体检 + serve-mcp + codegraph link + memory):
@@ -104,7 +104,7 @@ codev-platform serve-mcp start          # 幂等拉起 cross-link + 各项目 co
 codev-platform bootstrap                # 加 --dry-run 先看有序步骤
 ```
 
-> chroma daemon 不由 `serve-mcp start` 拉起 —— 它由业务仓首次 Claude Code 会话经 launcher 自 spawn。本步只拉 cross-link / codegraph 端点 + 报 chroma 状态。
+> chroma daemon 不由 `serve-mcp start` 拉起 —— 它由业务仓首次 Claude Code 会话经 launcher 自 spawn。本步只拉 graph / codegraph 端点 + 报 chroma 状态。
 
 ---
 
@@ -147,7 +147,7 @@ codev-platform agent serve              # 默认本地 :8848
 - [ ] `codev-platform --version` 有输出（CLI 在 PATH）
 - [ ] `codev-platform config show` 显示本机正确的模型路径 / device / data_dir
 - [ ] `python -m codev_platform.chroma.indexer --force` 成功建出本仓文档 collection
-- [ ] `codev-platform serve-mcp status` 端点至少 cross-link / codegraph 为 OK
+- [ ] `codev-platform serve-mcp status` 端点至少 graph / codegraph 为 OK
 - [ ] `codev-platform daemon status` 显示 chroma daemon 已加载项目 + chunks > 0
 - [ ] `codev-platform health --mode light` banner 为 READY 或 ATTENTION（非 BROKEN）
 - [ ] Claude Code 会话里 `search_docs` 能命中本仓文档

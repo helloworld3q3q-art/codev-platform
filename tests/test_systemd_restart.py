@@ -9,17 +9,17 @@ from codev_platform import mcp_serve as ms
 
 
 def _cfg(tmp_path):
-    # projects 非空 → codegraph 端点也产出; chroma / cross_link 恒在
+    # projects 非空 → codegraph 端点也产出; chroma / graph 恒在
     return {
         "daemon": {"port": 18083},
-        "mcp": {"cross_link_sse_port": 18086, "codegraph_sse_port": 18095},
+        "mcp": {"graph_sse_port": 18092, "codegraph_sse_port": 18095},
         "projects": {"proj-a": {"repo_path": str(tmp_path / "repo_a")}},
     }
 
 
 def test_all_mcp_units_have_restart_always(tmp_path):
     units = ms.render_systemd_units(_cfg(tmp_path), user="tester")
-    assert units, "render_systemd_units 应至少产出 chroma + cross_link + codegraph"
+    assert units, "render_systemd_units 应至少产出 chroma + codegraph + graph"
     for name, content in units.items():
         assert "Restart=always" in content, f"{name} 缺 Restart=always (自愈被移除?)"
         assert "RestartSec=3" in content, f"{name} 缺 RestartSec"

@@ -61,12 +61,12 @@
 Gitea（git 中心）                            ▼
   │  ③ push webhook                  服务端 MCP 端点（同机 127.0.0.1:19xxx / 跨机 https://域名）
   ▼
-服务端 codev-webhook ─→ reindex 队列 ─→ worker：git pull clone → 重建 chroma/codegraph/cross-link</div>
+服务端 codev-webhook ─→ reindex 队列 ─→ worker：git pull clone → 重建 chroma/codegraph/graph</div>
 <table>
 <tr><th>组件</th><th>端口（默认本机）</th><th>systemd unit</th><th>作用</th></tr>
 <tr><td>platform-docs（chroma 文档检索）</td><td>19083</td><td>codev-mcp-platform-docs</td><td>语义检索文档/规则</td></tr>
-<tr><td>cross-link（跨层链路）</td><td>19086</td><td>codev-mcp-cross-link</td><td>表↔接口↔代码链路</td></tr>
 <tr><td>codegraph（代码图谱）</td><td>19091</td><td>codev-mcp-codegraph</td><td>符号/调用/影响面</td></tr>
+<tr><td>graph（统一图谱 / 跨层链路）</td><td>19092</td><td>codev-mcp-graph</td><td>表↔接口↔代码↔页面链路 + 业务域</td></tr>
 <tr><td>reindex worker</td><td>—</td><td>codev-reindex</td><td>消费重建队列（先 pull 后索引）</td></tr>
 <tr><td>webhook 接收器</td><td>19099</td><td>codev-webhook</td><td>收 Gitea push → 入队</td></tr>
 <tr><td>agent HTTP（可选）</td><td>8848</td><td>codev-agent</td><td>LLM 问答 /chat</td></tr>
@@ -81,7 +81,7 @@ Gitea（git 中心）                            ▼
 <tr><th>段</th><th>关键字段</th><th>说明</th></tr>
 <tr><td><code>models</code></td><td>embed_path / embed_device / reranker_path / reranker_device / <b>reranker_dtype</b>(auto/fp16/bf16/fp32) / <b>embed_batch_size</b></td><td>显卡参数。换机器（小卡↔服务器大卡）只改这段</td></tr>
 <tr><td><code>data</code></td><td>platform_data_dir</td><td>chroma/sqlite/索引数据根</td></tr>
-<tr><td><code>daemon</code> / <code>mcp</code></td><td>port(19083) / cross_link_sse_port / codegraph_sse_port</td><td>各 MCP 端口</td></tr>
+<tr><td><code>daemon</code> / <code>mcp</code></td><td>port(19083) / codegraph_sse_port / graph_sse_port</td><td>各 MCP 端口</td></tr>
 <tr><td><code>webhook</code></td><td>port(19099) / secret / allow_insecure</td><td>webhook 接收器</td></tr>
 <tr><td><code>memory</code></td><td>pg_dsn / recall_backend / conflict_policy</td><td>记忆 PG（独立库 codev_platform_memory）</td></tr>
 <tr><td><code>gateway</code></td><td>auth_mode(passthrough/token) / tokens</td><td>鉴权；dev=passthrough，对外=token</td></tr>
@@ -108,12 +108,11 @@ Gitea（git 中心）                            ▼
 
   "data":    { "platform_data_dir": "/home/helloworld/codev-platform/data" },
   "daemon":  { "port": 19083, "mode": true, "prewarm": true },
-  "mcp":     { "cross_link_sse_port": 19086, "codegraph_sse_port": 19091 },
+  "mcp":     { "codegraph_sse_port": 19091, "graph_sse_port": 19092 },
   "search":  { "recall_k": 30, "return_k": 5, "bm25_enabled": true, "rrf_k_const": 60, "gpu_concurrency": 1 },
 
   "runtime": {
-    "chroma_venv": "/home/helloworld/codev-platform/.venv",
-    "cross_link_python": "/home/helloworld/codev-platform/.venv/bin/python"
+    "chroma_venv": "/home/helloworld/codev-platform/.venv"
   },
 
   "webhook": { "port": 19099, "secret": "&lt;随机串, 与 Gitea webhook 的 secret 一致&gt;", "allow_insecure": false },
@@ -212,8 +211,8 @@ codev-platform metrics --prometheus # Prometheus 曝光格式（可被 node_expo
 <pre><code>{
   "mcpServers": {
     "platform-docs": { "type": "sse", "url": "http://127.0.0.1:19083/sse?project_id=&lt;你的项目&gt;" },
-    "cross-link":    { "type": "sse", "url": "http://127.0.0.1:19086/sse?project_id=&lt;你的项目&gt;" },
-    "codegraph":     { "type": "sse", "url": "http://127.0.0.1:19091/sse?project_id=&lt;你的项目&gt;" }
+    "codegraph":     { "type": "sse", "url": "http://127.0.0.1:19091/sse?project_id=&lt;你的项目&gt;" },
+    "graph":         { "type": "sse", "url": "http://127.0.0.1:19092/sse?project_id=&lt;你的项目&gt;" }
   }
 }</code></pre>
 <p>在业务仓目录开 Claude Code → <kbd>/mcp</kbd> 看三套已连接。<span class="ok">不会在开发机本地 spawn 任何服务</span>。</p>
