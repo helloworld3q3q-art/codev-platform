@@ -71,7 +71,7 @@ class TableUsageTool(Tool):
     name = "table_usage"
     description = (
         "查一张数据库表被谁使用:哪些后端函数读/写它、哪些端点、哪些前端 (跨层反向链路)。"
-        "入参 table=表名 (大小写不敏感)。统一图谱版, 替代 cross_link_table_refs。"
+        "入参 table=表名 (大小写不敏感)。"
     )
     input_schema = {
         "type": "object",
@@ -115,7 +115,6 @@ class ApiCallersTool(Tool):
     name = "api_callers"
     description = (
         "查一个后端端点被哪些前端调用 (endpoint ↔ 前端链路)。入参 endpointRef=端点 id 或 name。"
-        "统一图谱版, 替代 cross_link_endpoint_callers。"
     )
     input_schema = {
         "type": "object",

@@ -2,7 +2,7 @@
 
 约定:工具构造时拿到一个 project_id(可能为 None)。
 - None  → 单项目兼容:从进程 cwd 推导(resolve_local / cwd 上溯),与改造前行为一致。
-- 具体值 → 多租户:按 project_id 路由到对应数据(cross_link/chroma 走平台 data 目录;
+- 具体值 → 多租户:按 project_id 路由到对应数据(graph/chroma 走平台 data 目录;
   codegraph 走该项目仓的 .codegraph)。
 """
 from __future__ import annotations

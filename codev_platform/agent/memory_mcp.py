@@ -1,10 +1,10 @@
 """平台 Memory MCP 前门(SSE)—— 开发端编程 agent(Claude Code / Codex)接平台分层记忆。
 
-设计:dev-agent-memory-mcp-design-2026-06-05.md §3。对称 cross-link 的 SSE 骨架,但:
-- **不选库**:同一 PG,靠 ``org_id`` 列硬隔离(cross-link 是 per-project sqlite);project_id 仅用于
+设计:dev-agent-memory-mcp-design-2026-06-05.md §3。对称 codegraph/graph 的多租户 SSE 骨架,但:
+- **不选库**:同一 PG,靠 ``org_id`` 列硬隔离(graph 是 per-project sqlite);project_id 仅用于
   project-scope 记忆 + SSE 项目 ACL 闸。
 - **身份非对称**:org_id / user_id 从 AuthMiddleware 注入的 ``request.state.identity`` 取并绑 contextvar
-  ——**绝不由 client 传**(memory 有 personal + owner + redline 维度,cross-link 只读无此面)。
+  ——**绝不由 client 传**(memory 有 personal + owner + redline 维度,graph 只读无此面)。
 - **复用** ``deps.get_recall_service()`` + ``deps.get_memory_store()``,零新建 store。
 
 P1 MVP 只读:``recall``(最高频,query-aware 去冲突 top-N)+ ``list_scope``(精确列单作用域,诊断)。
@@ -30,7 +30,7 @@ from codev_platform.core.errors import ErrorCode, to_mcp_error
 
 # ----------------------------------------------------------------------
 # 多租户上下文:org/user 从认证身份绑定(SSE 建流时),project 从 ?project_id=。
-# 同 cross-link 的 contextvar 路由思路;asyncio 单线程,dict/contextvar 操作原子,不上锁。
+# 同 graph/codegraph 的 contextvar 路由思路;asyncio 单线程,dict/contextvar 操作原子,不上锁。
 # ----------------------------------------------------------------------
 _DEFAULT_ORG = "default"
 _DEFAULT_USER = "local"
