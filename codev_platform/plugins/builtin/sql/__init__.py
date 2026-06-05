@@ -125,6 +125,10 @@ from codev_platform.plugins.builtin.sql.core import (
     _sql_table_access,
     _upsert_outer_table,
 )
+from codev_platform.plugins.builtin.sql.xml_mapper import (
+    _scan_xml_mapper,
+    is_mybatis_mapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +167,14 @@ class SqlPlugin(AnalyzerPlugin):
             except OSError:
                 continue
             if _RE_JAVA_SQL_ANN.search(text):
+                return True
+        # 5) MyBatis XML Mapper (*.xml 含 <mapper ...> 根标签) 也算 DB 栈。
+        for f in _stack_scan._iter_files(repo, (".xml",)):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if is_mybatis_mapper(text):
                 return True
         return False
 
@@ -279,5 +291,18 @@ class SqlPlugin(AnalyzerPlugin):
             _absorb(*_scan_mybatis_plus(
                 java_srcs, project_id, known_tables, entity_table
             ))
+
+        # Pass 4d: MyBatis XML Mapper (*.xml 的 <select>/<insert>/<update>/<delete> SQL)。
+        # 第三种 Java 表访问写法 (注解 4b / Plus 4c 之外); 去动态标签后走同款 _sql_table_access。
+        for f in _stack_scan._iter_files(repo, (".xml",)):
+            try:
+                src = f.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.warning("read fail %s: %s", f, exc)
+                continue
+            rel = _stack_scan._rel(f, repo)
+            if _is_test_path(rel) or not is_mybatis_mapper(src):
+                continue
+            _absorb(*_scan_xml_mapper(src, rel, project_id, known_tables))
 
         return result
