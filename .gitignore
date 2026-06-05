@@ -59,3 +59,7 @@ dist/
 # 新 clone 后跑 codev-platform sync-rules / sync-skills 本地生成
 .claude/rules/
 .claude/skills/
+
+# WSL venv + 本机临时分析产物 (机器本地, 不入仓)
+linux-venv/
+aa.txt
