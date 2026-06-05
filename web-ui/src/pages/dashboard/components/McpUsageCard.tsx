@@ -19,6 +19,8 @@ interface McpUsageRow {
   chromaAgentHits: number;
   chromaDevHits: number;
   codegraph: number;
+  graphAgentCalls: number;
+  graphDevCalls: number;
   embedAgent: number;
   embedDev: number;
   rerankAgent: number;
@@ -31,6 +33,8 @@ interface McpUsageTotals {
   chromaAgentHits: number;
   chromaDevHits: number;
   codegraph: number;
+  graphAgentCalls: number;
+  graphDevCalls: number;
   embedAgent: number;
   embedDev: number;
   rerankAgent: number;
@@ -72,6 +76,13 @@ const COLUMNS: ProColumns<McpUsageRow>[] = [
     ],
   },
   { title: 'codegraph(开发端)', dataIndex: 'codegraph', align: 'right', width: 130 },
+  {
+    title: 'graph(统一图谱)',
+    children: [
+      { title: 'agent 调用', dataIndex: 'graphAgentCalls', align: 'right', width: 110 },
+      { title: 'dev 调用', dataIndex: 'graphDevCalls', align: 'right', width: 110 },
+    ],
+  },
 ];
 
 // 合计行各列在 summary 里的渲染顺序 (与扁平后的叶子列一一对应)。
@@ -85,6 +96,8 @@ const SUMMARY_FIELDS: (keyof McpUsageTotals)[] = [
   'rerankAgent',
   'rerankDev',
   'codegraph',
+  'graphAgentCalls',
+  'graphDevCalls',
 ];
 
 function buildRows(window?: API.McpUsageWindow): McpUsageRow[] {
@@ -99,6 +112,8 @@ function buildRows(window?: API.McpUsageWindow): McpUsageRow[] {
     chromaAgentHits: p.chroma?.agentHits ?? 0,
     chromaDevHits: p.chroma?.devHits ?? 0,
     codegraph: p.codegraph?.calls ?? 0,
+    graphAgentCalls: p.graph?.agentCalls ?? 0,
+    graphDevCalls: p.graph?.devCalls ?? 0,
     embedAgent: p.model?.agentEmbed ?? 0,
     embedDev: p.model?.devEmbed ?? 0,
     rerankAgent: p.model?.agentRerank ?? 0,
@@ -114,6 +129,8 @@ function buildTotals(window?: API.McpUsageWindow): McpUsageTotals {
     chromaAgentHits: t?.chroma?.agentHits ?? 0,
     chromaDevHits: t?.chroma?.devHits ?? 0,
     codegraph: t?.codegraph?.calls ?? 0,
+    graphAgentCalls: t?.graph?.agentCalls ?? 0,
+    graphDevCalls: t?.graph?.devCalls ?? 0,
     embedAgent: t?.model?.agentEmbed ?? 0,
     embedDev: t?.model?.devEmbed ?? 0,
     rerankAgent: t?.model?.agentRerank ?? 0,
@@ -176,7 +193,7 @@ const McpUsageCard: React.FC<McpUsageCardProps> = ({ data }) => {
           search={false}
           options={false}
           toolBarRender={false}
-          scroll={{ x: 1320 }}
+          scroll={{ x: 1540 }}
           summary={renderSummary}
         />
       )}

@@ -570,6 +570,12 @@ interface McpChromaUsage {
   devHits?: number;
 }
 
+// McpGraphUsage 接口
+interface McpGraphUsage {
+  agentCalls?: number;
+  devCalls?: number;
+}
+
 // McpModelUsage 接口
 interface McpModelUsage {
   agentEmbed?: number;
@@ -582,6 +588,7 @@ interface McpModelUsage {
 interface McpProjectUsage {
   chroma?: McpChromaUsage;
   codegraph?: McpCallUsage;
+  graph?: McpGraphUsage;
   model?: McpModelUsage;
   projectId?: string;
 }
@@ -590,6 +597,7 @@ interface McpProjectUsage {
 interface McpUsageMetrics {
   chroma?: McpChromaUsage;
   codegraph?: McpCallUsage;
+  graph?: McpGraphUsage;
   model?: McpModelUsage;
 }
 
