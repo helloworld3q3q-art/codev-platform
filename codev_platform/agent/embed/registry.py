@@ -9,16 +9,45 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from codev_platform.agent.memory_vector import Embedder
+from codev_platform.agent.memory_vector import Embedder, RerankModel
 
 _log = logging.getLogger(__name__)
 
 # name → (cfg) -> Embedder | None(None = 依赖不满足,降级)
 _EMBEDDERS: dict[str, Callable[[dict], Embedder | None]] = {}
+_RERANK_MODELS: dict[str, Callable[[dict], RerankModel | None]] = {}
 
 
 def register_embedder(name: str, factory: Callable[[dict], Embedder | None]) -> None:
     _EMBEDDERS[name] = factory
+
+
+def register_rerank_model(name: str, factory: Callable[[dict], RerankModel | None]) -> None:
+    _RERANK_MODELS[name] = factory
+
+
+def build_rerank_model(cfg: dict) -> RerankModel | None:
+    """按 config 建 RerankModel;未知 backend → None(调用方退 NoReranker)。默认 remote(共享 daemon)。"""
+    from codev_platform.core.config import get as _get
+    backend = _get(cfg, "memory.rerank_model.backend", "remote")
+    factory = _RERANK_MODELS.get(backend)
+    if factory is None:
+        _log.warning("[rerank] 未知 backend %r(可用:%s)", backend, list(_RERANK_MODELS))
+        return None
+    return factory(cfg)
+
+
+def _build_remote_rerank(cfg: dict) -> RerankModel | None:
+    from codev_platform.core.config import get as _get
+    from codev_platform.agent.embed.remote import RemoteRerankModel
+    url = _get(cfg, "memory.rerank_model.url")
+    if not url:
+        port = _get(cfg, "daemon.port", 18083)
+        url = f"http://127.0.0.1:{port}/rerank"
+    return RemoteRerankModel(url, token=_get(cfg, "memory.embed.token"))
+
+
+register_rerank_model("remote", _build_remote_rerank)
 
 
 def build_embedder(cfg: dict) -> Embedder | None:

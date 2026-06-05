@@ -10,7 +10,17 @@ from __future__ import annotations
 import json
 import urllib.request
 
-from codev_platform.agent.memory_vector import Embedder
+from codev_platform.agent.memory_vector import Embedder, RerankModel
+
+
+def _post_json(url: str, payload: dict, timeout: float, token: str | None) -> dict:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 class RemoteEmbedder(Embedder):
@@ -20,15 +30,24 @@ class RemoteEmbedder(Embedder):
         self._token = token
 
     def encode(self, text: str) -> list[float]:
-        headers = {"Content-Type": "application/json"}
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-        req = urllib.request.Request(
-            self._url, data=json.dumps({"text": text}).encode("utf-8"),
-            headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = _post_json(self._url, {"text": text}, self._timeout, self._token)
         vecs = data.get("vectors")
         if not vecs:
             raise ValueError(f"remote embed 返回无 vectors: {data}")
         return vecs[0]
+
+
+class RemoteRerankModel(RerankModel):
+    """调 chroma daemon /rerank,复用那份 GPU reranker。失败抛 → QwenReranker 吞(不动序,降级)。"""
+
+    def __init__(self, url: str, *, timeout: float = 30.0, token: str | None = None) -> None:
+        self._url = url
+        self._timeout = timeout
+        self._token = token
+
+    def score(self, query: str, docs: list[str]) -> list[float]:
+        data = _post_json(self._url, {"query": query, "docs": docs}, self._timeout, self._token)
+        scores = data.get("scores")
+        if scores is None:
+            raise ValueError(f"remote rerank 返回无 scores: {data}")
+        return scores

@@ -24,6 +24,15 @@ class Embedder(ABC):
         ...
 
 
+class RerankModel(ABC):
+    """(query, docs) → 每 doc 的相关性分(越高越相关)。reranker 精排用。
+    真实实现复用 chroma 的 Qwen3-Reranker(优先 remote 走 daemon /rerank 复用 GPU 那份)。"""
+
+    @abstractmethod
+    def score(self, query: str, docs: list[str]) -> list[float]:
+        ...
+
+
 class MemoryVectorIndex(ABC):
     """agent memory 的独立向量索引(chroma collection `<pid>__agent_memory`,与 platform_docs 隔离)。
 

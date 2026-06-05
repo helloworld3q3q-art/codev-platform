@@ -517,6 +517,29 @@ async def _run_http(port: int) -> None:
         except Exception as exc:  # noqa: BLE001
             return JSONResponse({"error": f"embed failed: {type(exc).__name__}"}, status_code=500)
 
+    async def rerank(request):
+        # 共享重排端点: 复用 daemon 已加载的 Qwen3-Reranker(yes/no logits 打分),给 agent-memory 等
+        # 复用,不再 load 第二份 reranker。body {query, docs} → {scores}(yes 概率)。鉴权同 /sse。
+        import asyncio
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"error": "invalid json"}, status_code=400)
+        query = body.get("query")
+        docs = body.get("docs")
+        if not isinstance(query, str) or not isinstance(docs, list) or not docs \
+                or not all(isinstance(d, str) for d in docs):
+            return JSONResponse({"error": "query (str) + docs (non-empty list[str]) required"},
+                                status_code=400)
+        try:
+            async with _get_gpu_sem():
+                scores = await asyncio.to_thread(lambda: _rerank_scores(query, docs))
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": f"rerank failed: {type(exc).__name__}"}, status_code=500)
+        if scores is None:
+            return JSONResponse({"error": "reranker unavailable"}, status_code=503)
+        return JSONResponse({"scores": scores})
+
     # 统一认证拦截: 复用 gateway 的纯 ASGI 中间件 (SSE 安全 + 高并发, 不缓冲 /sse 长连接)。
     # passthrough 模式非破坏 (无身份头 → local/default); token 模式对外按 Bearer 鉴权。
     # public_paths 仅 /healthz (最小存活探针, 不泄敏); 详情面 /platform/health + /platform/status
@@ -545,6 +568,7 @@ async def _run_http(port: int) -> None:
             Route("/platform/health", health, methods=["GET"]),  # 鉴权: daemon 详情
             Route("/platform/status", platform_status, methods=["GET"]),
             Route("/embed", embed, methods=["POST"]),  # 鉴权: 共享嵌入(复用 GPU 模型)
+            Route("/rerank", rerank, methods=["POST"]),  # 鉴权: 共享重排(复用 GPU reranker)
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],

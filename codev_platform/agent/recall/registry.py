@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 from codev_platform.agent.recall.base import Fusion, Reranker, Scorer
 from codev_platform.agent.recall.fusion import RrfFusion
-from codev_platform.agent.recall.reranker import NoReranker
+from codev_platform.agent.recall.reranker import NoReranker, QwenReranker
 from codev_platform.agent.recall.scorers import Bm25Scorer, KeywordScorer, VectorScorer
 from codev_platform.agent.recall.service import PipelineRecallService
 
@@ -43,7 +43,20 @@ register_scorer("keyword", lambda index=None, **_: KeywordScorer())
 register_scorer("vector", lambda index=None, **_: VectorScorer(index) if index is not None else None)
 register_scorer("bm25", lambda index=None, **_: Bm25Scorer() if _bm25_available() else None)
 register_fusion("rrf", lambda rrf_k=60, **_: RrfFusion(k=rrf_k))
-register_reranker("none", lambda **_: NoReranker())
+register_reranker("none", lambda cfg=None, **_: NoReranker())
+
+
+def _build_qwen_reranker(cfg=None, **_):
+    """qwen 精排:rerank 模型(默认 remote 复用 chroma daemon)不可用 → 退 NoReranker(降级)。"""
+    from codev_platform.agent.embed.registry import build_rerank_model
+    model = build_rerank_model(cfg or {})
+    if model is None:
+        _log.warning("[recall] rerank=qwen 但 rerank 模型不可用,退 NoReranker")
+        return NoReranker()
+    return QwenReranker(model)
+
+
+register_reranker("qwen", _build_qwen_reranker)
 
 
 def _bm25_available() -> bool:
@@ -89,7 +102,7 @@ def build_recall_service(cfg, store, *, index=None, rbac_store=None):
         scorers = [KeywordScorer()]
 
     fusion = _FUSIONS.get(cfg_get(cfg, "memory.recall.fusion", "rrf"), _FUSIONS["rrf"])(rrf_k=rrf_k)
-    reranker = _RERANKERS.get(cfg_get(cfg, "memory.recall.rerank", "none"), _RERANKERS["none"])()
+    reranker = _RERANKERS.get(cfg_get(cfg, "memory.recall.rerank", "none"), _RERANKERS["none"])(cfg)
 
     return PipelineRecallService(
         store, scorers=scorers, fusion=fusion, reranker=reranker,

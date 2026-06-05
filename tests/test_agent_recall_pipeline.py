@@ -123,6 +123,73 @@ def test_bm25_single_doc_corpus_no_crash():
     assert Bm25Scorer().rank([_entry("a", "数据库")], "数据库", RankCtx(org_id="o")) == ["a"]
 
 
+# ---- P3: QwenReranker ----
+
+class _FakeRerankModel:
+    def __init__(self, scores=None, raises=False):
+        self._scores = scores
+        self._raises = raises
+
+    def score(self, query, docs):
+        if self._raises:
+            raise RuntimeError("rerank down")
+        return self._scores if self._scores is not None else [0.0] * len(docs)
+
+
+def test_qwen_reranker_reorders_by_score():
+    from codev_platform.agent.recall.reranker import QwenReranker
+    entries = [_entry("a", "x"), _entry("b", "y"), _entry("c", "z")]
+    out = QwenReranker(_FakeRerankModel([0.1, 0.9, 0.5])).rerank("q", entries, top_k=8)
+    assert [e.id for e in out] == ["b", "c", "a"]
+
+
+def test_qwen_reranker_only_top_k_tail_unchanged():
+    from codev_platform.agent.recall.reranker import QwenReranker
+    entries = [_entry("a", "x"), _entry("b", "y"), _entry("c", "z")]
+    out = QwenReranker(_FakeRerankModel([0.1, 0.9])).rerank("q", entries, top_k=2)
+    assert [e.id for e in out] == ["b", "a", "c"]      # 前2重排, c 原样接后
+
+
+def test_qwen_reranker_failure_keeps_order():
+    from codev_platform.agent.recall.reranker import QwenReranker
+    entries = [_entry("a", "x"), _entry("b", "y")]
+    out = QwenReranker(_FakeRerankModel(raises=True)).rerank("q", entries, top_k=8)
+    assert [e.id for e in out] == ["a", "b"]            # 失败不动序(降级)
+
+
+def test_qwen_reranker_score_mismatch_keeps_order():
+    from codev_platform.agent.recall.reranker import QwenReranker
+    entries = [_entry("a", "x"), _entry("b", "y")]
+    out = QwenReranker(_FakeRerankModel([0.5])).rerank("q", entries, top_k=8)
+    assert [e.id for e in out] == ["a", "b"]
+
+
+def test_qwen_reranker_empty():
+    from codev_platform.agent.recall.reranker import QwenReranker
+    assert QwenReranker(_FakeRerankModel()).rerank("q", [], 8) == []
+
+
+# ---- registry: rerank 档 ----
+
+def test_registry_rerank_qwen_remote():
+    from codev_platform.agent.recall.reranker import QwenReranker
+    svc = build_recall_service(
+        {"memory": {"recall": {"rerank": "qwen"}, "rerank_model": {"backend": "remote"}}}, _Store())
+    assert isinstance(svc._reranker, QwenReranker)
+
+
+def test_registry_rerank_qwen_degrades_when_model_unknown():
+    from codev_platform.agent.recall.reranker import NoReranker
+    svc = build_recall_service(
+        {"memory": {"recall": {"rerank": "qwen"}, "rerank_model": {"backend": "bogus"}}}, _Store())
+    assert isinstance(svc._reranker, NoReranker)        # rerank 模型未知 → 退 NoReranker
+
+
+def test_registry_rerank_default_none():
+    from codev_platform.agent.recall.reranker import NoReranker
+    assert isinstance(build_recall_service({}, _Store())._reranker, NoReranker)
+
+
 def test_registry_bm25_built_when_available():
     svc = build_recall_service({"memory": {"recall": {"scorers": ["bm25"]}}}, _Store())
     assert _names(svc) == ["bm25"]        # WSL venv 有 rank_bm25 + jieba

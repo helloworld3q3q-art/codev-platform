@@ -78,6 +78,48 @@ def test_registry_remote_explicit_url():
     assert emb._url == "http://h:9/embed"
 
 
+# ---- rerank model(P3)----
+
+def test_remote_rerank_model_score(monkeypatch):
+    import json
+    import urllib.request
+
+    from codev_platform.agent.embed.remote import RemoteRerankModel
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"scores": [0.9, 0.1]}).encode("utf-8")
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data)
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    s = RemoteRerankModel("http://x/rerank").score("q", ["a", "b"])
+    assert s == [0.9, 0.1]
+    assert captured["url"] == "http://x/rerank" and captured["body"] == {"query": "q", "docs": ["a", "b"]}
+
+
+def test_build_rerank_model_remote_default_url():
+    from codev_platform.agent.embed.registry import build_rerank_model
+    from codev_platform.agent.embed.remote import RemoteRerankModel
+    m = build_rerank_model({"daemon": {"port": 19083}})       # 默认 backend=remote
+    assert isinstance(m, RemoteRerankModel) and m._url == "http://127.0.0.1:19083/rerank"
+
+
+def test_build_rerank_model_unknown_backend_none():
+    from codev_platform.agent.embed.registry import build_rerank_model
+    assert build_rerank_model({"memory": {"rerank_model": {"backend": "bogus"}}}) is None
+
+
 def test_build_index_none_when_chromadb_missing(monkeypatch):
     # chromadb 缺 → 直接 None(短路,不进 embedder)→ 召回退 local(降级)
     import importlib.util as iu
