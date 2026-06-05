@@ -26,6 +26,10 @@ BM25 / reranker 开关 = 在 `_rank` 里堆 `if use_bm25` / `if reranker` 分支
 3. **接口稳定**:对外仍是 `RecallService.recall(...)` 同签名 → web 端 / 开发端 / 现有测试零改
    (两端本就共用 `deps.get_recall_service()`)。
 4. **模型在接口后**:Embedder / RerankModel 抽象 + registry,换模型 = config + adapter,不动召回逻辑。
+5. **零依赖保底 + 优雅降级(硬要求)**:`KeywordScorer`(纯子串 + PG)是**不依赖任何模型 / chromadb /
+   jieba 的地板档**,任何机器永远能跑(效果差但可用)。config 要更高档(vector/bm25/reranker)但**依赖缺失**
+   (模型没装 / GPU 不可用 / chromadb 缺 / jieba 缺 / 向量库连不上)→ 该档**自动降级丢弃**,用剩下能用的,
+   **最低退到 keyword,绝不崩、绝不空**。降级只影响排序质量,不影响"能召回 + 不变量"。
 
 ## 三、架构:解构后的召回流水线
 
@@ -72,6 +76,23 @@ def recall(...):
     ranked  = self._reranker.rerank(query, ordered, self._rerank_top_k)  # 可插拔(默认恒等)
     return (_rank_for_query(redlines, query, task_id) + ranked)[:limit]  # 不变量
 ```
+
+### 3.4 降级阶梯(零依赖也能跑)
+
+`registry.build_from_config` 装配时**逐策略探依赖**(`importlib.util.find_spec` / 模型路径存在 / 端点可达),
+缺则**剔除该档**,装配出"当前环境能跑的最高档";Scorer 列表剔空则**强制补回 keyword**(地板永不为空)。
+运行期单档再抛错(如向量库连不上)→ 该档输出视为空,其余档照常,仍有 keyword 兜底。
+
+| 环境 | 装配出的实际档 | 说明 |
+|---|---|---|
+| 啥都没装(无 chromadb/模型/jieba) | `[keyword]` | 纯子串 + PG,**永远可用**(效果差) |
+| 有 jieba,无模型/chroma | `[keyword, bm25]` 或按 config | BM25 升级关键词,仍无模型 |
+| 有 chromadb + 嵌入模型 | 含 `vector` | 语义召回 |
+| 全装 + reranker 模型/RPC | 全套 | 最佳质量 |
+
+**铁律**:无论降到哪档,`visible_scopes / resolve_conflicts / redline 置顶 / top-N` 四个不变量恒成立 ——
+降级只换"排序好不好",不换"召回对不对、安不安全"。`KeywordScorer` 本身只依赖 PG(memory store),
+连 PG 都没有时是 memory 未启用(`get_memory_store()` 返 None),那是另一层、recall 不被调用。
 
 ## 四、config schema(声明式驱动)
 
@@ -136,6 +157,9 @@ codev_platform/agent/embed/        # 模型层(Embedder/RerankModel + registry)
 - **每个 adapter 独立单测**:KeywordScorer / Bm25Scorer / VectorScorer(fake index)/ RrfFusion /
   QwenReranker(fake model)。
 - **registry 测试**:config → 装出预期 pipeline;未知 backend 报错;别名映射。
+- **降级测试(对应原则 #5)**:mock 依赖缺失(chromadb/jieba/模型不可用)→ 装配自动剔除该档、最低退到
+  `[keyword]` 不报错;config 要 vector/bm25/reranker 但都缺 → 仍能召回(keyword);单档运行期抛错 → 不崩、
+  其余档 + keyword 兜底;**所有降级路径下四个不变量仍成立**(redline 置顶 / ACL / 去重 / 截断)。
 - **编排测试**:fake scorers 验"多路 → fuse → rerank → 不变量"顺序与裁剪。
 
 ## 九、风险 / 不做
