@@ -47,7 +47,7 @@ if (-not $Commit) {
 
 $shortSha = $Commit.Substring(0, [Math]::Min(7, $Commit.Length))
 
-# Pre-check: mirror post-commit.ps1's 3 patterns. If this commit touches NO
+# Pre-check: mirror post-commit.ps1's doc + codegraph patterns. If this commit touches NO
 # indexable file, the post-commit hook actively skips reindex, so reindex.log
 # will never write a trigger line -- waiting will always timeout. Exit 0 early.
 $changed = & git -C $RepoRoot diff-tree --no-commit-id --name-only -r $Commit 2>$null
@@ -63,20 +63,15 @@ if ($changed) {
         '|.*AGENTS\.md$' +
         '|README\.md$' +
         ')'
-    $crossLinkPattern = '^(' +
-        'apps/stock-admin-api/src/main/resources/db/migration/V.*\.sql$' +
-        '|apps/stock-admin-api/src/main/java/.*Mapper\.java$' +
-        '|apps/stock-admin-api/src/main/java/.*/controller/.*\.java$' +
-        '|apps/stock-admin-web/src/services/apis/.*\.ts$' +
-        '|python/stock-pipeline/stock_pipeline/repositories/.*\.py$' +
-        ')'
+    # (cross_link scope retired 2026-06-05; its .java/.ts/.py files fall under
+    # codegraphPattern below, migration .sql no longer triggers a post-commit reindex.)
     $codegraphPattern = '^(' +
         'apps/stock-admin-api/src/main/java/.*\.java$' +
         '|apps/stock-admin-web/src/.*\.(ts|tsx)$' +
         '|python/stock-pipeline/.*\.py$' +
         ')'
     $hasIndexable = $changed | Where-Object {
-        $_ -match $docPattern -or $_ -match $crossLinkPattern -or $_ -match $codegraphPattern
+        $_ -match $docPattern -or $_ -match $codegraphPattern
     }
     if (-not $hasIndexable) {
         Write-Host ('[OK] ' + $shortSha + ' touches no indexable file, skip wait')
