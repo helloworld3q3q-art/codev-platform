@@ -28,7 +28,7 @@ def test_ops_subcommands_registered():
 
 def test_core_subcommands_registered():
     choices = _subcommand_choices()
-    for name in ("init", "current", "validate", "config", "sync-rules", "sync-skills"):
+    for name in ("init", "current", "validate", "config", "sync-rules", "sync-skills", "sync-hooks"):
         assert name in choices
 
 

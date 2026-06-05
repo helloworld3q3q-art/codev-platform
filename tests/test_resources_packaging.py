@@ -29,3 +29,16 @@ def test_cli_sync_sources_resolve_to_existing_dirs():
     assert cli._SKILLS_SRC.is_dir(), f"_SKILLS_SRC 应存在: {cli._SKILLS_SRC}"
     # 解析结果应落在包内 resources(relocate 后的位置), 而非仓根旧布局
     assert "resources" in str(cli._RULES_SRC), "应解析到包内 resources/ 而非仓根 rules/"
+
+
+def test_resources_hooks_accessible_via_importlib():
+    p = files("codev_platform") / "resources" / "hooks"
+    assert p.is_dir(), "codev_platform/resources/hooks 应可经 importlib.resources 定位"
+    js = [c.name for c in p.iterdir() if c.name.endswith(".js")]
+    assert js, "resources/hooks 下应有 .js 护栏脚本(sync-hooks 分发源)"
+
+
+def test_cli_hooks_src_resolves():
+    from codev_platform import cli
+    assert cli._HOOKS_SRC.is_dir(), f"_HOOKS_SRC 应存在: {cli._HOOKS_SRC}"
+    assert "resources" in str(cli._HOOKS_SRC)
