@@ -23,7 +23,7 @@
   },
 
   "daemon": {
-    "_comment": "chroma daemon HTTP 端口 + 模式。mode=true 启 daemon (多 session 共享 GPU 模型, 默认); prewarm=true 启动期加载模型避免首次 query 60s 超时。",
+    "_comment": "chroma daemon 模式。mode=true 启 daemon (多 session 共享 GPU 模型, 默认); prewarm=true 启动期加载模型避免首次 query 60s 超时。注: port 为 platform-docs 端口的 deprecated 别名, 推荐用 mcp.platform_docs_sse_port (4 套统一命名); 两者都配时 mcp.platform_docs_sse_port 优先, port 仍兼容可读。",
     "port": 18083,
     "mode": true,
     "prewarm": true
@@ -92,14 +92,16 @@
   },
 
   "mcp": {
-    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。多租户单端点 + ?project_id= 路由。codegraph_sse_port: codegraph 多租户代理端口(默认 18091, 方案 B 平台自写代理, 按 ?project_id= 懒启动 per-repo `codegraph serve --mcp` 后端并转发)。graph_sse_port: 统一图谱 MCP(impact 跨层影响 + A1 业务域查询 + search_nodes, 替代退役的 cross-link, 默认 18092)。",
+    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。4 套端口统一命名 mcp.<service>_sse_port (端口真值单一入口, serve-mcp / systemd / 客户端 local 源全从此派生)。platform_docs_sse_port: chroma daemon (默认 18083; 历史别名 daemon.port 仍兼容)。codegraph_sse_port: codegraph 多租户代理 (默认 18091, 平台自写代理按 ?project_id= 懒启动 per-repo 后端转发)。agent_memory_sse_port: 分层记忆 MCP 前门 (默认 18087)。graph_sse_port: 统一图谱 MCP (impact 跨层影响 + A1 业务域 + search_nodes, 替代退役的 cross-link, 默认 18092)。",
+    "platform_docs_sse_port": 18083,
     "codegraph_sse_port": 18091,
+    "agent_memory_sse_port": 18087,
     "graph_sse_port": 18092
   },
 
   "mcp_sources": {
-    "_comment": "客户端可切换的两个实例源 (双实例: 本地活跃 + 平台基线), 给 `codev-platform mcp-source local|platform [tools...]` 改写业务仓 .mcp.json 用。local=本机本地实例(索引 working tree 含未提交); platform=平台基线服务器(索引 HEAD, 跨项目/团队共享)。单机开发期两者同主机不同端口(local 18xxx / platform 19xxx); 真团队部署把 platform.host 改成远程平台 IP 即可, 零改代码。缺省即下方端口, 整块可省。",
-    "local":    { "host": "127.0.0.1", "platform-docs": 18083, "codegraph": 18091, "agent-memory": 18087, "graph": 18092 },
+    "_comment": "客户端可切换的两个实例源 (双实例: 本地活跃 + 平台基线), 给 `codev-platform mcp-source local|platform [tools...]` 改写业务仓 .mcp.json 用。local=本机本地实例(索引 working tree 含未提交); platform=平台基线服务器(索引 HEAD, 跨项目/团队共享)。单机开发期两者同主机不同端口(local 18xxx / platform 19xxx); 真团队部署把 platform.host 改成远程平台 IP 即可, 零改代码。注: local 各 tool 端口缺省**派生自本机 bind 口** (mcp.<service>_sse_port), 改 bind 口自动跟随, local 整块可省; 显式写下方端口才覆盖 (与 bind 口不一致时 serve-mcp status 会 WARN)。platform 端口独立不派生。",
+    "local":    { "host": "127.0.0.1" },
     "platform": { "host": "127.0.0.1", "platform-docs": 19083, "codegraph": 19091, "agent-memory": 19087, "graph": 19092 }
   },
 

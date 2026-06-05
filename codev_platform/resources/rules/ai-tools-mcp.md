@@ -63,7 +63,7 @@ codev-platform serve-mcp status    # 确认全 OK(或 health --all 的 MCP 端�
 copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json   # 覆盖即恢复, 重启 Claude Code
 ```
 
-端口配在 `~/.codev-platform/config.json`(`mcp.graph_sse_port` / `projects.<id>.codegraph_sse_port`;业务仓连固定 URL 须显式 pin,防自动分配漂移)。单机图省事也可直接用 `.stdio.bak` 退回文件路径模式(略快 + 自动拉起);本套收益在**跨机共享**。
+端口配在 `~/.codev-platform/config.json`,4 套统一命名 `mcp.<service>_sse_port`(`platform_docs_sse_port` / `codegraph_sse_port` / `agent_memory_sse_port` / `graph_sse_port`;chroma 历史键 `daemon.port` 仍作 deprecated 别名)。客户端 `mcp_sources.local` 各 tool 端口缺省**派生自 bind 口**(改一处自动跟随,`local` 整块可省);显式配且与 bind 口不一致时 `serve-mcp status` 会 WARN。业务仓连固定 URL 须显式 pin,防自动分配漂移。单机图省事也可直接用 `.stdio.bak` 退回文件路径模式(略快 + 自动拉起);本套收益在**跨机共享**。
 
 **codegraph 索引数据也已集中到平台**(2026-05-30):
 - 数据物理在 `data/codegraph_ext/<pid>/codegraph/`,业务仓 `<repo>/.codegraph` 是 **junction/symlink** 指向平台 —— 第三方 codegraph 工具透明无感。

@@ -181,5 +181,16 @@ A1 标注准(95%)但"标签躺图谱里没人用"——缺开发端消费前门�
 
 - **审计**:P0/P1/P2a 已审(各自落项);**P2b+P3 审计 PASS-with-nits 无 BLOCKER** —— 安全(`/embed`/`/rerank` 在 AuthMiddleware 后不裸暴露 + 输入校验 + GPU 信号量真串行)、不变量(redline 在 scorer/reranker 之前拆出,reranker 拿不到)、降级、行为一致(plain encode 与 doc 侧一致)全 PASS。3 NIT 非阻塞:① chroma handler 是 `_run_http` 内闭包无直测;② RemoteRerankModel 真实远端失败路径无 e2e 测;③ `_timeout=30.0` 硬编码非 config。
 - **能力矩阵(用户诉求逐条兑现)**:解构 ✅ / 可插拔 ✅ / 可配置 ✅ / 不堆代码(加档=1 行+1 类)✅ / 模型可换 ✅ / 共用一个模型实例(remote RPC 复用 chroma daemon)✅ / 无模型无 bm25 也能跑(keyword 地板 + 全档降级)✅ / BM25+reranker 可配置开关 ✅。
-- **MCP 端口/配置键统一**:设计已 commit(`1ffc4fd`,`mcp-port-config-unification-2026-06-05.md`),实现**待做**。
+- **MCP 端口/配置键统一**:设计(`1ffc4fd`,`mcp-port-config-unification-2026-06-05.md`)+ 实现 P0→P2 **全落地**(见 §二十二)。
 - **commit**(push `fuwuqi/dev`):`9c96afe`(P0 解构)/ `d155982`(P0 测试)/ `060143a`(P1 BM25)/ `bb65cb8`(P2a embed registry)/ `e0c65ce`(P1/P2a NIT)/ `8510bc1`(P2b 共享嵌入)/ `5d1b3b0`(P3 共享重排)。
+
+## 二十二、MCP 端口/配置键统一(P0→P2 实现)
+
+接 §二十一,把散落的 MCP 端口配置收敛(设计 `mcp-port-config-unification-2026-06-05.md`),全程 back-compat:
+
+- **P0 端口解析收敛**(`1b9c3b3`):`mcp_serve.py` 加 `_SERVICE_PORTS` 服务键注册表 + `_bind_port(cfg, kind)` 单一端口真值入口 + `_warn_deprecated`(一次性 warn)。4 套统一 canonical 键 `mcp.<service>_sse_port`;chroma 历史键 `daemon.port` 降为 **deprecated 别名**(仍可读,命中 warn 一次,canonical 优先)。`iter_endpoints` 4 处端口改走 `_bind_port`;`mcp_systemd` 用 `ep.port` 自动跟随,无需改。
+- **P1 local 派生 + 一致性 WARN**(`4aaaebc`):`mcp_source_endpoint` 的 **local 端口缺省派生自 `_bind_port`**(本机连本机,改 bind 口自动跟随,不用两处手对齐);`DEFAULT_MCP_SOURCES.local` 去写死端口只留 host;显式 `mcp_sources.local.<tool>` 仍覆盖;platform(远程)端口不变。加 `check_port_consistency(cfg)`:显式 local 端口 ≠ bind 口 → WARN(不阻断,反代场景合法),`serve-mcp status` 末尾打印。
+- **P2 样本 + 文档**:`config.example.json` `mcp` 段补全 4 canonical 键(含此前缺的 `platform_docs_sse_port` / `agent_memory_sse_port`)+ `daemon._comment` 标 deprecated 别名 + `mcp_sources.local` 去写死端口改注释说明派生;真值源 `resources/rules/ai-tools-mcp.md` §一b 端口说明统一 4 canonical 键 + 派生/WARN,`sync-rules` 重生 `.claude/` 副本。
+- **测试**:`test_mcp_serve.py` 28 passed(P0 新 5:canonical 胜/默认/daemon.port 别名一次性 warn/canonical>别名/iter_endpoints 用 canonical;P1 新 8:派生默认/跟随 canonical/跟随 daemon 别名/显式覆盖/platform 不变/WARN 命中/派生无 WARN/显式相等无 WARN)。
+- **不做**(设计 §八):不重命名 `daemon.port` 物理键、不改 env `PLATFORM_DOCS_DAEMON_PORT`(部署接口)、不做端口自动分配、一致性只 WARN 不阻断。
+- **commit**:`1b9c3b3`(P0)/ `4aaaebc`(P1)/ P2 见本次提交。
