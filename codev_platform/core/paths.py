@@ -91,7 +91,7 @@ def chroma_collection_name(project_id: str, base: str) -> str:
 
 
 def codegraph_db_path(project_id: str) -> Path:
-    """codegraph 索引集中到平台后的 per-project 路径 (与 cross_layer.sqlite 并排)。
+    """codegraph 索引集中到平台后的 per-project 路径。
 
     2026-05-30 起: 业务仓 `.codegraph` 做成 junction 指向这里 (`codev-platform codegraph link`),
     索引数据物理落平台 data/, 平台经 SSE 服务 + reindex 写穿 junction 也落这里。

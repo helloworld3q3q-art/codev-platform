@@ -1,7 +1,7 @@
 """codev-platform codegraph —— 把业务项目的 codegraph 索引集中到平台 data/(目录联接)。
 
-让业务仓的 codegraph **数据 + 更新都走平台**(与 cross-link 对称):
-- 数据: `<repo>/.codegraph` 移进 `data/codegraph_ext/<pid>/codegraph/`(与 cross_layer.sqlite 并排),
+让业务仓的 codegraph **数据 + 更新都走平台**:
+- 数据: `<repo>/.codegraph` 移进 `data/codegraph_ext/<pid>/codegraph/`,
   业务仓 `.codegraph` 改成 junction/symlink 指向平台 —— 物理数据在平台, 第三方工具透明无感。
 - 服务: `serve-mcp` 的 codegraph 端点(mcp-proxy 包 `codegraph serve`,cwd=repo)经 junction 读平台数据。
 - 更新: `codev-platform reindex --codegraph` 跑的 `codegraph sync`(cwd=repo)写穿 junction 落平台 —— 更新天然走平台。
