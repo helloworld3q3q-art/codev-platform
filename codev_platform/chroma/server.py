@@ -312,6 +312,32 @@ async def _run_stdio() -> None:
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
+# /embed /rerank 请求体校验: 纯函数(不碰模型/GPU/starlette), 模块级可单测。
+# 返回 (parsed, None) 成功 / (None, err_msg) 失败 → handler 据 err 回 400。
+def validate_embed_body(body: object) -> tuple[list[str] | None, str | None]:
+    """{texts:[...]} 或 {text:"..."} → (texts, None);非法 → (None, err)。"""
+    if not isinstance(body, dict):
+        return None, "invalid json"
+    texts = body.get("texts")
+    if texts is None and body.get("text") is not None:
+        texts = [body["text"]]
+    if not isinstance(texts, list) or not texts or not all(isinstance(t, str) for t in texts):
+        return None, "texts (non-empty list[str]) required"
+    return texts, None
+
+
+def validate_rerank_body(body: object) -> tuple[tuple[str, list[str]] | None, str | None]:
+    """{query:str, docs:[str]} → ((query,docs), None);非法 → (None, err)。"""
+    if not isinstance(body, dict):
+        return None, "invalid json"
+    query = body.get("query")
+    docs = body.get("docs")
+    if not isinstance(query, str) or not isinstance(docs, list) or not docs \
+            or not all(isinstance(d, str) for d in docs):
+        return None, "query (str) + docs (non-empty list[str]) required"
+    return (query, docs), None
+
+
 async def _run_http(port: int) -> None:
     """HTTP/SSE transport: daemon 模式, 供多 Claude Code 会话共享。
 
@@ -501,11 +527,9 @@ async def _run_http(port: int) -> None:
             body = await request.json()
         except Exception:  # noqa: BLE001
             return JSONResponse({"error": "invalid json"}, status_code=400)
-        texts = body.get("texts")
-        if texts is None and body.get("text") is not None:
-            texts = [body["text"]]
-        if not isinstance(texts, list) or not texts or not all(isinstance(t, str) for t in texts):
-            return JSONResponse({"error": "texts (non-empty list[str]) required"}, status_code=400)
+        texts, err = validate_embed_body(body)
+        if err is not None:
+            return JSONResponse({"error": err}, status_code=400)
         m = _ensure_model()
         if m is None:
             return JSONResponse({"error": "embedding model unavailable"}, status_code=503)
@@ -525,12 +549,10 @@ async def _run_http(port: int) -> None:
             body = await request.json()
         except Exception:  # noqa: BLE001
             return JSONResponse({"error": "invalid json"}, status_code=400)
-        query = body.get("query")
-        docs = body.get("docs")
-        if not isinstance(query, str) or not isinstance(docs, list) or not docs \
-                or not all(isinstance(d, str) for d in docs):
-            return JSONResponse({"error": "query (str) + docs (non-empty list[str]) required"},
-                                status_code=400)
+        parsed, err = validate_rerank_body(body)
+        if err is not None:
+            return JSONResponse({"error": err}, status_code=400)
+        query, docs = parsed
         try:
             async with _get_gpu_sem():
                 scores = await asyncio.to_thread(lambda: _rerank_scores(query, docs))
