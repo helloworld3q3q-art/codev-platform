@@ -624,13 +624,13 @@
             </tr>
             <tr>
               <td><code>codev_platform/chroma/</code></td>
-              <td>多租户 MCP 常驻服务 + 词法倒排索引</td>
-              <td>server.py (870+ 行) · bm25.py</td>
+              <td>多租户 MCP 常驻服务 + 词法倒排索引(server 按 file-discipline 拆包:状态机 / 模型 / reranker / 工具各成 sibling 模块)</td>
+              <td>server.py (512 行) · _project_state.py · _models.py · _reranker.py · bm25.py</td>
             </tr>
             <tr>
-              <td><code>codev_platform/graph_store/</code></td>
-              <td>统一图谱存储 + MCP server + 查询 API(原 cross_link 2026-06-05 退役并入)</td>
-              <td>store · server · query</td>
+              <td><code>codev_platform/graph/</code></td>
+              <td>统一图谱:跨层血缘 + A1 业务域,8 工具 MCP(原 cross-link 2026-06-05 退役并入;数据在 <code>data/graph_store/&lt;pid&gt;.sqlite</code>)</td>
+              <td>store · impact · mcp_server · plugins/ · analyzers/</td>
             </tr>
             <tr>
               <td><code>codev_platform/agent/</code></td>
@@ -728,7 +728,7 @@
 
         <section id="mcp">
           <h2>MCP 与索引</h2>
-          <p>三套 MCP 服务的代码全在 <code>codev_platform/</code>,业务仓只放 shim re-export。<strong>2026-05-30 服务化后:三套都是平台 SSE 服务,业务仓 <code>.mcp.json</code> 走 <code>type:sse</code> 连服务地址(不再 stdio 文件路径)</strong>,由 <code>codev-platform serve-mcp start</code> 编排常驻;单机可用 <code>.mcp.json.stdio.bak</code> 回退 stdio 自 spawn。</p>
+          <p>四套 MCP 服务的代码全在 <code>codev_platform/</code>,业务仓只放 shim re-export。<strong>2026-05-30 服务化后:都是平台 SSE 服务,业务仓 <code>.mcp.json</code> 走 <code>type:sse</code> 连服务地址(不再 stdio 文件路径)</strong>,由 <code>codev-platform serve-mcp start</code> 编排常驻;单机可用 <code>.mcp.json.stdio.bak</code> 回退 stdio 自 spawn。<strong>(原 cross-link 第 5 套 2026-06-05 退役删包,能力并入 graph。)</strong></p>
           <table>
             <tr>
               <th>组件</th>
@@ -739,7 +739,7 @@
             <tr>
               <td>platform-docs</td>
               <td><strong>平台 SSE 服务</strong> <code>:18083/sse?project_id=</code>(常驻服务,多租户上下文);混合检索:Qwen3 向量召回 + 词法召回 + 融合排序后再用 Qwen3 重排精排</td>
-              <td><code>codev_platform/chroma/server.py</code> (870 行) + <code>bm25.py</code></td>
+              <td><code>codev_platform/chroma/server.py</code> (512 行,状态机拆出 <code>_project_state.py</code>) + <code>bm25.py</code></td>
               <td>spawn lock、health endpoint、listener PID + GPU PID 检查、Chroma reindex lock、DOC_PATTERNS 子目录覆盖 audit (pre-push gate 6/6)、jieba/rank_bm25 缺失自动降级纯向量、网关认证拦截。</td>
             </tr>
             <tr>
@@ -751,8 +751,14 @@
             <tr>
               <td>graph(统一图谱)</td>
               <td><strong>平台 SSE 服务</strong> <code>:18092/sse?project_id=</code>(<code>server --http</code>,per-project contextvar 路由,防串库)</td>
-              <td><code>codev_platform/graph_store/</code> + <code>mcp_serve.py</code></td>
+              <td><code>codev_platform/graph/</code> + <code>mcp_serve.py</code></td>
               <td>per-project 隔离、缺库瞬时重查(不永久缓存)、网关认证、freshness 检查、store backup 发布。</td>
+            </tr>
+            <tr>
+              <td>agent-memory</td>
+              <td><strong>平台 SSE 服务</strong> <code>:18087/sse?project_id=</code>(分层记忆前门:personal/project + RBAC + redline;org/user 取认证身份,绝不由 client 传)</td>
+              <td><code>codev_platform/agent/memory_mcp.py</code> + <code>memory_store</code></td>
+              <td>身份红线(token 模式防多 dev personal 串号)、多 dev fail-fast、ACL where 过滤、redline 永置顶。</td>
             </tr>
             <tr>
               <td>dirty-index</td>
@@ -980,7 +986,7 @@
             <tr><th>收益</th><th>没这平台之前</th><th>有了之后</th></tr>
             <tr>
               <td>代码不重复</td>
-              <td>Chroma 常驻服务 870 行 + 词法召回 + 跨层链路,每业务仓拷一份,改 bug 同步 3 处</td>
+              <td>Chroma 常驻服务 512 行 + 词法召回 + 跨层链路,每业务仓拷一份,改 bug 同步 3 处</td>
               <td>改本仓一处,3 个业务仓 pip -e 自动生效</td>
             </tr>
             <tr>
