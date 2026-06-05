@@ -7,7 +7,7 @@
 run_applicable 的成功列表),不影响其余插件入库。store 写入按 plugin 归属幂等替换,
 重跑 ingest 不产生重复。
 
-不改 cross_link / codegraph / 现有 graph 路由 —— 只新增这条聚合落盘路径。
+不改 codegraph / 现有 graph 路由 —— 只新增这条聚合落盘路径。
 """
 from __future__ import annotations
 

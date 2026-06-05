@@ -1,6 +1,6 @@
 """health 子包 —— 使用率统计 (近 7 天; 从 ops/health.py 抽出, file-discipline §1)。
 
-search_recall 命中率 / reindex 运行数 / platform-docs L2L3 采纳率 / cross-link 调用统计。
+search_recall 命中率 / reindex 运行数 / platform-docs L2L3 采纳率 / codegraph 调用统计。
 """
 from __future__ import annotations
 
@@ -86,10 +86,10 @@ def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict,
         r"^apps/[^/]+/src/.*\.(java|ts|tsx|less)$",
         r"^\.claude/(rules|skills)/.*\.md$",
         r"^apps/[^/]+/\.claude/rules/.*\.md$",
-        r"^tools/(dev|chroma|cross_link)/",
+        r"^tools/(dev|chroma)/",
         r"^scripts/.*\.(ps1|cmd|bat)$",
     ]
-    default_strict = [r"^\.claude/(rules|skills)/", r"^tools/(dev|chroma|cross_link)/"]
+    default_strict = [r"^\.claude/(rules|skills)/", r"^tools/(dev|chroma)/"]
     cand = default_cand + list(health.get("mcp_candidate_patterns") or [])
     strict = default_strict + list(health.get("mcp_strict_patterns") or [])
 
@@ -151,7 +151,7 @@ def _usage_platform_docs(r: Report, repo: Path, recall_file: Path, health: dict,
 
 
 def _usage_codegraph(r: Report, cg_usage: Path, project_id: str | None = None) -> None:
-    # 镜像 _usage_cross_link: 读 codegraph 自写代理 (server.py) 的 codegraph_usage.jsonl。
+    # 读 codegraph 自写代理 (server.py) 的 codegraph_usage.jsonl。
     if not cg_usage.is_file():
         r.line("codegraph usage", "INFO", "codegraph_usage.jsonl not found (no calls yet)")
         return

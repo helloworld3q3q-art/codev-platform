@@ -5,8 +5,7 @@
 
 复用场景:
 - chroma daemon spawn (避免多 launcher 并发 spawn 浪费 GPU)
-- cross_link build_index (避免多 user 并发 build 撞 tmp.sqlite)
-- 未来的 reindex / rebuild 等长时操作
+- reindex / graph ingest / rebuild 等长时操作 (避免多进程并发撞)
 
 用法 (context manager):
     from codev_platform.core.spawn_lock import acquire_lock

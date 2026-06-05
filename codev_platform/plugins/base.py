@@ -4,7 +4,7 @@
 能力 (Frontend / Backend / Database / Connector / CodeGraph / CrossLink adapter) 都以
 AnalyzerPlugin 形式接入。核心只依赖本协议,不关心具体语言 / 框架 / 外部系统:
 
-    name:     插件唯一标识 (如 "builtin.cross_link" / "frontend.vue")。
+    name:     插件唯一标识 (如 "builtin.sql" / "frontend.vue")。
     version:  语义化版本 (用于审计 + 增量 reindex 归因)。
     detect()  给定仓库路径,判断本插件是否适用 (技术栈命中)。
     analyze() 实际分析,返回统一图谱模型 AnalyzerResult (nodes/edges/evidences/findings)。
