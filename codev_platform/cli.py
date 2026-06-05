@@ -37,10 +37,12 @@ from codev_platform.cli_cmds.config_cmd import cmd_config, redact_config
 from codev_platform.cli_cmds.mcp import cmd_daemon, cmd_mcp_source, cmd_serve_mcp
 from codev_platform.cli_cmds.setup_cmd import cmd_setup
 # _RULES_SRC / _SKILLS_SRC re-export: tests/test_resources_packaging 经 `cli._RULES_SRC` 取用。
-from codev_platform.cli_cmds.sync import _RULES_SRC, _SKILLS_SRC, cmd_sync_rules, cmd_sync_skills
+from codev_platform.cli_cmds.sync import (
+    _HOOKS_SRC, _RULES_SRC, _SKILLS_SRC, cmd_sync_hooks, cmd_sync_rules, cmd_sync_skills,
+)
 
 __all__ = ["build_parser", "main", "redact_config", "PLATFORM_META_PROJECTS",
-           "_RULES_SRC", "_SKILLS_SRC"]
+           "_RULES_SRC", "_SKILLS_SRC", "_HOOKS_SRC"]
 
 
 # platform_meta 注册表路径: 默认仓内, 可由 CODEV_PLATFORM_META 覆盖
@@ -309,6 +311,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp_ss = sub.add_parser("sync-skills", help="把 codev-platform/skills/ 拷到 <cwd>/.claude/skills/")
     sp_ss.add_argument("--dry-run", action="store_true", help="只列不写")
     sp_ss.set_defaults(func=cmd_sync_skills)
+
+    sp_sh = sub.add_parser("sync-hooks",
+                           help="把 codev-platform/hooks/ 拷到 <cwd>/.claude/hooks/ + merge MCP-first 护栏到 settings.json")
+    sp_sh.add_argument("--dry-run", action="store_true", help="只列不写")
+    sp_sh.set_defaults(func=cmd_sync_hooks)
 
     sp_setup = sub.add_parser("setup", help="新机器一键接入 (跨平台): venv / 模型探测 + 写 config + MCP 接入指引")
     sp_setup.add_argument("--dry-run", action="store_true", help="只探测不写 config")

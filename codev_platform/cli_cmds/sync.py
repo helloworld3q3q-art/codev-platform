@@ -6,6 +6,7 @@ wheel 也带得走)。_RULES_SRC / _SKILLS_SRC / _sync_dir 也被 setup_cmd 复�
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 from pathlib import Path
 
@@ -79,3 +80,61 @@ def cmd_sync_skills(args: argparse.Namespace) -> int:
     _print(f"sync skills: {_SKILLS_SRC} -> {dst}")
     n = _sync_dir(_SKILLS_SRC, dst, "skills", args.dry_run)
     return 0 if n >= 0 else 1
+
+
+# sync-hooks: 比 rules/skills 多一层 —— 脚本纯复制, 但 settings.json 的 hook 注册要 merge
+# (业务仓可能已有自己的 settings, 不能整覆盖; 幂等, 重复 sync 不叠加)。
+_HOOKS_SRC = _resource_src("hooks")
+
+# 要 merge 进业务仓 .claude/settings.json 的 PreToolUse(Grep) hook。command=node + args exec form:
+# Claude Code 自带 node, 三平台 (macOS/Linux/Windows) 通吃, 不依赖 powershell/git-bash。
+_GREP_HOOK = {
+    "matcher": "Grep",
+    "hooks": [{
+        "type": "command",
+        "command": "node",
+        "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mcp-first-guard.js"],
+    }],
+}
+
+
+def _merge_grep_hook(settings: dict) -> bool:
+    """幂等把 MCP-first PreToolUse(Grep) hook 加进 settings dict。已存在则不动。返回是否改动。"""
+    hooks = settings.setdefault("hooks", {})
+    pre = hooks.setdefault("PreToolUse", [])
+    for entry in pre:
+        if entry.get("matcher") != "Grep":
+            continue
+        for h in entry.get("hooks", []):
+            if any("mcp-first-guard" in str(a) for a in h.get("args", [])):
+                return False  # 已装, 幂等跳过
+    pre.append(_GREP_HOOK)
+    return True
+
+
+def cmd_sync_hooks(args: argparse.Namespace) -> int:
+    """复制 resources/hooks/ 脚本到 <cwd>/.claude/hooks/ + 幂等 merge MCP-first 护栏到
+    <cwd>/.claude/settings.json (项目级, commit; 保留业务仓现有 settings 不覆盖)."""
+    cwd = Path.cwd()
+    dst_hooks = cwd / ".claude" / "hooks"
+    _print(f"sync hooks: {_HOOKS_SRC} -> {dst_hooks}")
+    n = _sync_dir(_HOOKS_SRC, dst_hooks, "hooks", args.dry_run)
+    if n < 0:
+        return 1
+    settings_path = cwd / ".claude" / "settings.json"
+    settings: dict = {}
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            _eprint(f"FATAL: {settings_path} 解析失败, 不覆盖: {exc!s}")
+            return 1
+    changed = _merge_grep_hook(settings)
+    if changed and not args.dry_run:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    state = "hook 已加" if changed else "hook 已存在(幂等跳过)"
+    prefix = "  [dry-run] " if (changed and args.dry_run) else "  "
+    _print(f"{prefix}settings.json: {state}")
+    return 0
