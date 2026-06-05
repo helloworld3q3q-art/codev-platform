@@ -54,10 +54,27 @@ _missing: dict[str, str] = {}
 _current_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_graph_project_id", default=None
 )
+# 调用方来源(agent=web 端 chat / dev=开发端 Claude Code/Codex 直调), 给 dashboard MCP 调用分析分桶。
+# SSE/Streamable 的 ?client= 指定; 开发端 .mcp.json 不传 → 默认 dev。
+_current_client: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_graph_client", default="dev"
+)
 
 
 def _active_pid() -> str | None:
     return _current_project_id.get() or PROJECT_ID
+
+
+def _log_usage(record: dict) -> None:
+    """记一次 graph 工具调用到 graph_usage.jsonl(data_root/logs/, 运行态不进 git),
+    给 dashboard 的 MCP 调用分析聚合。写失败静默(不影响查询)。"""
+    try:
+        from codev_platform.core.paths import logs_dir
+        path = logs_dir() / "graph_usage.jsonl"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _conn_for(pid: str | None) -> sqlite3.Connection | None:
@@ -161,19 +178,35 @@ def dispatch(name: str, args: dict, conn, pid: str) -> dict:
 
 @server.call_tool()
 async def call_tool(name: str, args: dict) -> list[TextContent]:
+    t0 = datetime.datetime.now()
     pid = _active_pid()
-    conn = _conn_for(pid)
-    if conn is None:
-        return _err(_missing.get(pid, f"无 graph store(project_id={pid}); 先 ingest"))
+    ok = True
     try:
-        return _ok(dispatch(name, args, conn, pid))
-    except KeyError as exc:
-        return _err(f"tool '{name}' 缺必填参数: {exc!s}")
-    except ValueError as exc:
-        return _err(str(exc))
-    except Exception as exc:  # noqa: BLE001
-        traceback.print_exc()
-        return _err(f"tool '{name}' 执行失败: {exc!s}")
+        conn = _conn_for(pid)
+        if conn is None:
+            ok = False
+            return _err(_missing.get(pid, f"无 graph store(project_id={pid}); 先 ingest"))
+        try:
+            return _ok(dispatch(name, args, conn, pid))
+        except KeyError as exc:
+            ok = False
+            return _err(f"tool '{name}' 缺必填参数: {exc!s}")
+        except ValueError as exc:
+            ok = False
+            return _err(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            traceback.print_exc()
+            return _err(f"tool '{name}' 执行失败: {exc!s}")
+    finally:
+        _log_usage({
+            "ts": t0.strftime("%Y-%m-%dT%H:%M:%S"),
+            "project_id": pid,
+            "tool": name,
+            "client": _current_client.get(),
+            "ok": ok,
+            "elapsed_ms": round((datetime.datetime.now() - t0).total_seconds() * 1000, 1),
+        })
 
 
 async def main() -> None:
@@ -237,10 +270,13 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
             )
         if pid is None:
             pid = PROJECT_ID
+        client = request.query_params.get("client") or "dev"
         token = _current_project_id.set(pid)
+        ctok = _current_client.set(client)
 
         def reset() -> None:
             _current_project_id.reset(token)
+            _current_client.reset(ctok)
 
         return reset
 
@@ -264,7 +300,9 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
                                 status_code=403)
         if pid is None:
             pid = PROJECT_ID
+        client = request.query_params.get("client") or "dev"
         token = _current_project_id.set(pid)
+        ctok = _current_client.set(client)
         _flog(f"[sse] session start project_id={pid}")
         try:
             async with sse_transport.connect_sse(
@@ -274,6 +312,7 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
                                  server.create_initialization_options())
         finally:
             _current_project_id.reset(token)
+            _current_client.reset(ctok)
         # SDK 强制(mcp/server/sse.py docstring): SSE 结束/客户端断开后必返 Response,
         # 否则 starlette 1.2.0 request_response 走 `await None(...)` → TypeError 噪声日志。
         return Response()

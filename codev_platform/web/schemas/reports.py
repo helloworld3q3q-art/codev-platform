@@ -63,9 +63,16 @@ class McpModelUsage(BaseModel):
     devRerank: int = 0
 
 
+class McpGraphUsage(BaseModel):
+    # 统一图谱(graph)调用, 按来源分桶 (无命中率概念 —— 图查询非检索)
+    agentCalls: int = 0   # web 端 agent 调用
+    devCalls: int = 0     # 开发端 Claude Code / Codex 直调
+
+
 class McpUsageMetrics(BaseModel):
     chroma: McpChromaUsage = Field(default_factory=McpChromaUsage)
     codegraph: McpCallUsage = Field(default_factory=McpCallUsage)
+    graph: McpGraphUsage = Field(default_factory=McpGraphUsage)
     model: McpModelUsage = Field(default_factory=McpModelUsage)
 
 

@@ -126,6 +126,7 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
         return {
             "chroma": {"agentCalls": 0, "devCalls": 0, "agentHits": 0, "devHits": 0},
             "codegraph": {"calls": 0},   # 纯开发端(agent 不走此 MCP)
+            "graph": {"agentCalls": 0, "devCalls": 0},   # 统一图谱, 按来源(agent/dev)分桶
             "model": {"agentEmbed": 0, "devEmbed": 0, "agentRerank": 0, "devRerank": 0},
         }
 
@@ -152,6 +153,7 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
 
     recall = logs_dir() / "search_recall.jsonl"
     cg = repo_root / "codev_platform" / "codegraph" / "codegraph_usage.jsonl"
+    graph_log = logs_dir() / "graph_usage.jsonl"
 
     for o in _iter(recall):
         a = (o.get("client") or "dev") == "agent"   # agent(web) vs dev(开发端)
@@ -170,6 +172,11 @@ def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
         for o in _iter(path):
             for w in _windows(o):
                 _get(w, o.get("project_id"))[key]["calls"] += 1
+    for o in _iter(graph_log):
+        a = (o.get("client") or "dev") == "agent"   # agent(web) vs dev(开发端)
+        for w in _windows(o):
+            g = _get(w, o.get("project_id"))["graph"]
+            g["agentCalls" if a else "devCalls"] += 1
 
     def _shape(window: str) -> dict[str, Any]:
         total = _blank()
