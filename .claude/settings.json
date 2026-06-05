@@ -6,11 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell.exe",
+            "command": "node",
             "args": [
-              "-NoProfile",
-              "-File",
-              "${CLAUDE_PROJECT_DIR}\\.claude\\hooks\\mcp-first-guard.ps1"
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/mcp-first-guard.js"
             ]
           }
         ]
