@@ -141,9 +141,22 @@ A1 标注准(95%)但"标签躺图谱里没人用"——缺开发端消费前门�
 
 **验证**:全套 **1050 passed**(5 fail 是本机缺 `jieba` 的 W2 vector 测试,与退役无关)。**运维待办**(代码已就绪):① WSL `serve-mcp` 重启停还在跑的 cross-link daemon(否则旧进程跑已删代码)+ 起 graph 端点;② 前端 `pnpm run api` 重生 typings(删 `crossLink`);③ 业务仓 `.mcp.json` 删 cross-link 块。沉淀 memory `cross-link-retired-graph-takeover`。
 
+## 十五续、退役完整收口 + 深度审计(BLOCKER+死代码)+ XML Mapper 补盲
+
+§十五 的 6 批退了"外壳",但**全仓残留 + 深度审计**揭出更多,多轮收口至活引用清零:
+
+- **全仓残留清理(多批)**:skills(update-local-ai/ai-health/git-commit 的 reindex 档/usage/scope)/ docs(ai-toolchain-guide/USAGE/onboarding 的 .md **+ 此前漏的 .html**)/ cli(mcp-source/builtin 提示)/ ops.logs / 16 文件描述列举注释 / ai-tools-mcp `-SkipCrossLink` → graph。`sync-rules`/`sync-skills` 重生 `.claude/` 副本。
+- **深度审计(4 对抗 agent)**:① **BLOCKER** `webhook/server.py` 调已删的 `auto_reindex_kinds`(批D 删后某 commit 又引用却没恢复函数)→ 每个 webhook push 运行时 ImportError 崩(函数内 import 无测试覆盖),改 `list(classify_scopes(...))`(`e58a7f7`);② **死代码** `tools/cross_link/`(import 已删包)+ `tools/audit_graph_parity` + `eval run_crosslink` suite + `core/paths` cross_link_db_path/legacy(全仓 0 活用户)+ 死字段 `meta["cross_link_rel"]`(只写不读)+ web REST 组已删的 dangling 注释,**-976 行**(`6a849a8`);③ scripts/*.ps1(`update-local-ai.ps1` 跑已删的 `cross_link.build_index` 会 ModuleNotFoundError)+ post-commit/dirty-index-check/ai-health,**-236 行**(`fb02e19`)。功能链路(serve-mcp/health/metrics/reindex/dashboard/graph MCP)审计全 CLEAN,graph 8 工具承接无真损失。
+- **XML Mapper 补盲(审计揪出的能力缺口)**:sql 插件只扫注解 SQL(Pass 4b)+MyBatis-Plus(4c),**XML Mapper(`*.xml <select>`)静默不扫** → 用 XML 的 Java 仓"表↔Java"血缘整段丢且 detect 不报。补 **Pass 4d**(`sql/xml_mapper.py`,按 `agent-provider-architecture` 铁律做成 sql 插件内**扫描域非新顶级插件**:三种 MyBatis 写法=同职责三 Pass):`<select>` SQL 去动态标签(`<if>/<where>/<foreach>`)+CDATA 解包+占位符,复用 `_sql_table_access`/`_emit_table_access` 产 `backend_function(java)`+reads/writes_table 边。端到端 demo(动态标签/JOIN/CRUD/CDATA/namespace 全验)+6 单测 PASS(`4992171`)。
+- **反复"还有么"逐行普查**(用户连追,每轮挖出越来越细的残留):`eval/datasets/retrieval.jsonl` 2 评测 query 用 cross-link 关键词召回不到 → graph / `web-ui/README.md` API 路由 `/graph/cross-link/graph`(端点已删)→ `/unified/graph` / `config.example.json` projects+data 段注释 / `.gitignore` cross_link_asm/ts artifact 注释 / `test_web_reports` mock fixture `crossLink` 字段 / `wait-for-reindex.ps1` `$crossLinkPattern` **活逻辑**对齐 post-commit 两类 scope / paths+ops.codegraph+ai-tools-mcp "与 cross_layer.sqlite 并排" 失效对照 / ai-toolchain-guide.html 锚点 id。**逐行完整核查(Grep 工具,非抽样)确认:活引用(代码/配置/脚本逻辑/前端/测试/eval/API 文档)100% 清零**;旧工具名 `find_table_refs`/`find_endpoint_link`/`cross_link_stats` 全零命中(早改 `find_table_usage`/`find_api_callers`);剩余全是历史注释/反向断言守护(`assert cross_link not in`)/auto-gen typings/归档留痕/untracked 临时文件。
+
+**验证**:各批测试全绿(plugin+ingest 153 / 全套 1041~1050 passed,5 fail 恒为本机缺 `jieba` 的 W2 vector,与退役无关)。
+
 ## 十六、commit 清单(W1)
 
 均 push 到 `fuwuqi/dev`:`807b65a` `eeea201` `3820651`(统一图谱 MCP)/ `61dfa16`(search_nodes)/ `8ca21e5`(批1 编排)/ `1ac12f0`(批2a metrics)/ `af9dfea`(批A ops)/ `e709338`(批C web)/ `c57b309`(批D 删包)/ `5be567e`(批B 文档)。
+
+**退役完整收口(同日续,均 push `fuwuqi/dev`)**:`2afd3be`(残留清理 -976)/ `fcd5b83`(补漏)/ `e58a7f7`(webhook BLOCKER)/ `6a849a8`(死代码 -976)/ `fb02e19`(scripts -236)/ `4992171`(XML Pass 4d +183)/ `3fb2adf`(.html/前端/memory)/ `a6a4bdf`(wait-for-reindex)/ `a037bf6`+`adb2676`(eval/web-ui/config 末梢)/ `e0a785d`(周边失效对照)。
 
 ---
 
