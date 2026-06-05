@@ -244,7 +244,7 @@
 
               <!-- row 2: source projects + indexing -->
               <rect x="40" y="208" width="1400" height="190" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
-              <text class="lane-title" x="58" y="236" fill="#047857">2. 知识索引平面 · 文档检索增强 + 代码图谱 + 跨层链路: 多项目隔离、Chroma 集合、图谱代理、跨层 SQLite</text>
+              <text class="lane-title" x="58" y="236" fill="#047857">2. 知识索引平面 · 文档检索增强 + 代码图谱 + 统一图谱: 多项目隔离、Chroma 集合、图谱代理、graph store</text>
               <g filter="url(#shadow)">
                 <rect x="62" y="258" width="250" height="106" rx="8" fill="#eff6ff" stroke="#2563eb"/>
                 <text class="node-title" x="187" y="284" text-anchor="middle">业务源码仓</text>
@@ -265,9 +265,9 @@
               </g>
               <g filter="url(#shadow)">
                 <rect x="902" y="258" width="250" height="106" rx="8" fill="#dcfce7" stroke="#059669"/>
-                <text class="node-title" x="1027" y="284" text-anchor="middle">跨层链路图谱</text>
-                <text class="node-sub" x="1027" y="308" text-anchor="middle">跨层关系库 · SQLite</text>
-                <text class="node-note" x="1027" y="330" text-anchor="middle">数据表 · 接口端点 · 前端调用方</text>
+                <text class="node-title" x="1027" y="284" text-anchor="middle">统一图谱(graph)</text>
+                <text class="node-sub" x="1027" y="308" text-anchor="middle">跨层血缘 + A1 业务域 · graph store</text>
+                <text class="node-note" x="1027" y="330" text-anchor="middle">表↔接口↔前端 · 8 工具(承接退役 cross-link)</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="1182" y="258" width="238" height="106" rx="8" fill="#fef3c7" stroke="#b45309"/>
@@ -327,19 +327,24 @@
               <rect x="40" y="624" width="1400" height="158" rx="10" fill="#fffbeb" stroke="#fde68a"/>
               <text class="lane-title" x="58" y="652" fill="#b45309">5. 运行时平面 · MCP SSE + Agent HTTP 服务: 面向 Claude、Codex、MCP 客户端和平台调用方</text>
               <g filter="url(#shadow)">
-                <rect x="62" y="674" width="238" height="76" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="181" y="700" text-anchor="middle">文档检索 MCP</text>
-                <text class="node-sub" x="181" y="724" text-anchor="middle">Chroma 常驻服务 · :18083/sse</text>
+                <rect x="62" y="674" width="185" height="76" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="154" y="700" text-anchor="middle">文档检索 MCP</text>
+                <text class="node-sub" x="154" y="724" text-anchor="middle">Chroma · :18083/sse</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="324" y="674" width="238" height="76" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="443" y="700" text-anchor="middle">代码图谱 MCP</text>
-                <text class="node-sub" x="443" y="724" text-anchor="middle">:18091/sse · 租户路由</text>
+                <rect x="259" y="674" width="185" height="76" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="351" y="700" text-anchor="middle">代码图谱 MCP</text>
+                <text class="node-sub" x="351" y="724" text-anchor="middle">:18091/sse · 租户路由</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="586" y="674" width="238" height="76" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="705" y="700" text-anchor="middle">统一图谱 MCP</text>
-                <text class="node-sub" x="705" y="724" text-anchor="middle">:18092/sse · 表 / 接口调用查询</text>
+                <rect x="456" y="674" width="185" height="76" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="548" y="700" text-anchor="middle">统一图谱 MCP</text>
+                <text class="node-sub" x="548" y="724" text-anchor="middle">:18092/sse · 跨层查询</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="653" y="674" width="185" height="76" rx="8" fill="#fef3c7" stroke="#0891b2"/>
+                <text class="node-title" x="745" y="700" text-anchor="middle">团队记忆 MCP</text>
+                <text class="node-sub" x="745" y="724" text-anchor="middle">agent-memory · :18087/sse</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="858" y="666" width="270" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
@@ -350,7 +355,7 @@
               <g filter="url(#shadow)">
                 <rect x="1160" y="666" width="260" height="92" rx="8" fill="#e0f2fe" stroke="#0891b2"/>
                 <text class="node-title" x="1290" y="692" text-anchor="middle">工具注册表</text>
-                <text class="node-sub" x="1290" y="716" text-anchor="middle">文档检索 · 代码图谱 · 跨层链路</text>
+                <text class="node-sub" x="1290" y="716" text-anchor="middle">文档检索 · 代码图谱 · 统一图谱</text>
                 <text class="node-note" x="1290" y="738" text-anchor="middle">只读工具,按项目标识构建</text>
               </g>
 
@@ -381,15 +386,15 @@
               <!-- main flows -->
               <path class="edge-violet" d="M723 160 C723 188 725 218 725 258"/>
               <path class="edge-green" d="M747 364 C747 390 610 442 597 476"/>
-              <path class="edge-green" d="M747 364 C747 465 705 610 705 674"/>
+              <path class="edge-green" d="M747 364 C747 465 548 610 548 674"/>
               <path class="edge-blue" d="M382 560 C382 615 890 610 993 666"/>
               <path class="edge-red" d="M1102 560 C1102 614 1100 630 1100 666"/>
-              <path class="edge-blue" d="M705 750 C705 790 744 810 744 854"/>
+              <path class="edge-blue" d="M548 750 C548 790 744 810 744 854"/>
               <path class="edge-blue" d="M993 758 C993 810 1010 820 1010 854"/>
 
               <!-- bottom note -->
               <rect x="40" y="928" width="1400" height="30" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
-              <text class="node-sub" x="58" y="948">当前边界: 控制平面 + 知识索引平面(文档检索/代码图谱/跨层链路) + 记忆平面 + 网关权限 + MCP SSE / Agent HTTP 运行时。</text>
+              <text class="node-sub" x="58" y="948">当前边界: 控制平面 + 知识索引平面(文档检索/代码图谱/统一图谱) + 记忆平面 + 网关权限 + MCP SSE(4 套) / Agent HTTP 运行时。</text>
             </svg>
           </div>
         </section>
