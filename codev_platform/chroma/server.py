@@ -492,6 +492,31 @@ async def _run_http(port: int) -> None:
         except Exception as exc:  # noqa: BLE001
             return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
 
+    async def embed(request):
+        # 共享嵌入端点: 复用 daemon 已加载的 GPU 嵌入模型, 给 agent-memory 等"想 embed 但不想再
+        # load 第二份模型"的进程用(省第二份 → 不 OOM, 见 mcp GPU 教训)。plain encode(不加 query
+        # prompt), 与 agent.embed.QwenLocalEmbedder 行为一致。GPU 并发走同一信号量串行。鉴权同 /sse。
+        import asyncio
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"error": "invalid json"}, status_code=400)
+        texts = body.get("texts")
+        if texts is None and body.get("text") is not None:
+            texts = [body["text"]]
+        if not isinstance(texts, list) or not texts or not all(isinstance(t, str) for t in texts):
+            return JSONResponse({"error": "texts (non-empty list[str]) required"}, status_code=400)
+        m = _ensure_model()
+        if m is None:
+            return JSONResponse({"error": "embedding model unavailable"}, status_code=503)
+        try:
+            async with _get_gpu_sem():
+                vecs = await asyncio.to_thread(
+                    lambda: m.encode(texts, normalize_embeddings=True, convert_to_numpy=True))
+            return JSONResponse({"vectors": [v.tolist() for v in vecs]})
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": f"embed failed: {type(exc).__name__}"}, status_code=500)
+
     # 统一认证拦截: 复用 gateway 的纯 ASGI 中间件 (SSE 安全 + 高并发, 不缓冲 /sse 长连接)。
     # passthrough 模式非破坏 (无身份头 → local/default); token 模式对外按 Bearer 鉴权。
     # public_paths 仅 /healthz (最小存活探针, 不泄敏); 详情面 /platform/health + /platform/status
@@ -519,6 +544,7 @@ async def _run_http(port: int) -> None:
             Route("/health", healthz, methods=["GET"]),  # backward-compat public alias (最小)
             Route("/platform/health", health, methods=["GET"]),  # 鉴权: daemon 详情
             Route("/platform/status", platform_status, methods=["GET"]),
+            Route("/embed", embed, methods=["POST"]),  # 鉴权: 共享嵌入(复用 GPU 模型)
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],

@@ -48,4 +48,17 @@ def _build_qwen_local(cfg: dict) -> Embedder | None:
     return QwenLocalEmbedder(path, _embed_device(cfg))
 
 
+def _build_remote(cfg: dict) -> Embedder | None:
+    """共享 chroma daemon 嵌入:url = memory.embed.url > http://127.0.0.1:<daemon.port>/embed。
+    无依赖检查(urllib 自带);daemon 不可达在 encode 时降级。"""
+    from codev_platform.core.config import get as _get
+    from codev_platform.agent.embed.remote import RemoteEmbedder
+    url = _get(cfg, "memory.embed.url")
+    if not url:
+        port = _get(cfg, "daemon.port", 18083)
+        url = f"http://127.0.0.1:{port}/embed"
+    return RemoteEmbedder(url, token=_get(cfg, "memory.embed.token"))
+
+
 register_embedder("qwen-local", _build_qwen_local)
+register_embedder("remote", _build_remote)
