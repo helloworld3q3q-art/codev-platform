@@ -33,6 +33,6 @@ def test_codegraph_db_path_per_project(monkeypatch, tmp_path):
     a = paths.codegraph_db_path("p1")
     b = paths.codegraph_db_path("p2")
     assert a != b
-    # 集中到平台后与 cross_layer.sqlite 同父 (codegraph_ext/<pid>/codegraph/)
+    # 集中到平台后与 graph store 同父 (codegraph_ext/<pid>/codegraph/)
     assert a == tmp_path.resolve() / "codegraph_ext" / "p1" / "codegraph" / "codegraph.db"
     assert paths.codegraph_index_dir("p1") == tmp_path.resolve() / "codegraph_ext" / "p1" / "codegraph"

@@ -2,7 +2,7 @@
 
 跨项目通用的协作偏好 / 工具栈引用。任何业务项目接入 codev-platform 工具栈后这些 memory 都适用。
 
-## 清单(12)
+## 清单(11)
 
 | 文件 | 性质 |
 |---|---|
@@ -16,8 +16,7 @@
 | `feedback_weekly_iteration_cadence.md` | 每周新 roadmap-YYYY-MM-DD/,AI 不主动催 |
 | `feedback_fe_be_handoff_notification.md` | 后端 DTO/枚举改 → 先通知前端 `pnpm run api/enums` |
 | `feedback_dev_order.md` | 后端 → 前端 (Python → Java → Web 顺序) |
-| `reference_mcp_tools.md` | CodeGraph / platform-docs / cross-link MCP 入口速查 |
-| `reference_cross_link_lock_fix.md` | SQLite backup API > os.replace(Windows lock 规避)|
+| `reference_mcp_tools.md` | CodeGraph / platform-docs / graph 统一图谱 MCP 入口速查 |
 
 ## 同步策略
 

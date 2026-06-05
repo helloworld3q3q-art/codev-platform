@@ -5,10 +5,6 @@
   "rules_path": ".claude/rules",
   "memory_path": "memory",
   "health": {
-    "cross_layer_source_dirs": [
-      "apps/stock-admin-api/src/main/resources/db/migration",
-      "apps/stock-admin-api/src/main/java/com/openclaw/stock/admin/infrastructure/mapper"
-    ],
     "mcp_candidate_patterns": [
       "^python/stock-pipeline/.*\\.py$",
       "^python/stock-pipeline/\\.claude/rules/.*\\.md$"
@@ -22,16 +18,9 @@
     "reindex_doc_patterns": [
       "^python/stock-pipeline/\\.claude/rules/.*\\.md$"
     ],
-    "reindex_cross_link_patterns": [
-      "^apps/stock-admin-api/src/main/resources/db/migration/V.*\\.sql$",
-      "^apps/stock-admin-api/src/main/java/.*Mapper\\.java$",
-      "^apps/stock-admin-api/src/main/java/.*/controller/.*\\.java$",
-      "^apps/stock-admin-web/src/services/apis/.*\\.ts$",
-      "^python/stock-pipeline/stock_pipeline/repositories/.*\\.py$"
-    ],
     "reindex_codegraph_patterns": [
       "^python/stock-pipeline/.*\\.py$"
     ]
   },
-  "notes": "原型阶段: 单仓自托管, repo_path 相对 platform-meta/ 上级。未来 server 化后改为绝对 git url。health.cross_layer_source_dirs 声明哪些源喂 cross_layer (供 ai-health 算索引新鲜度), 路径相对 repo 根。"
+  "notes": "原型阶段: 单仓自托管, repo_path 相对 platform-meta/ 上级。未来 server 化后改为绝对 git url。(cross_layer_source_dirs / reindex_cross_link_patterns 于 2026-06-05 cross-link 退役后删除, graph 统一图谱承接, reindex 仅读 reindex_doc/codegraph_patterns。)"
 }

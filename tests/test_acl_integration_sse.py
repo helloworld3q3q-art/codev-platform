@@ -8,7 +8,7 @@ can_access → 403/放行), 验证 ACL 真在请求路径上生效。
 不进真实 connect_sse (长连接会 hang): handle_sse 命中 ACL 后, allow 分支返回 200 占位,
 deny 分支返回 403 JSONResponse — 与 server.py 中 deny 同一代码路径。
 
-⚠️ mock handle_sse 必须与 chroma/cross_link/codegraph server.py 的 handle_sse **回退顺序一致**:
+⚠️ mock handle_sse 必须与 chroma/graph/codegraph server.py 的 handle_sse **回退顺序一致**:
 无 ?project_id= 时先置 pid=None 过 ACL(token 模式 can_access(None)=deny), ACL 放行后才回退
 默认 _DEFAULT_PID。绝不能"先回退默认再 ACL"(那会让 token 省略 project_id 静默命中默认项目 =
 越权扫盲, audit 2026-06-01 #1 抓到的原始缺口)。test_sse_token_no_project_id_* 钉死此顺序。

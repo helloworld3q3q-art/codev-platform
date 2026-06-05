@@ -337,8 +337,8 @@
               </g>
               <g filter="url(#shadow)">
                 <rect x="586" y="674" width="238" height="76" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="705" y="700" text-anchor="middle">跨层链路 MCP</text>
-                <text class="node-sub" x="705" y="724" text-anchor="middle">:18086/sse · 表 / 接口调用查询</text>
+                <text class="node-title" x="705" y="700" text-anchor="middle">统一图谱 MCP</text>
+                <text class="node-sub" x="705" y="724" text-anchor="middle">:18092/sse · 表 / 接口调用查询</text>
               </g>
               <g filter="url(#shadow)">
                 <rect x="858" y="666" width="270" height="92" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
@@ -398,7 +398,7 @@
           <div class="grid">
             <div class="item">
               <h3>1. 真值源仓</h3>
-              <p>Chroma 常驻服务、词法召回、跨层链路、project_id / paths / config 这些核心代码集中在这。业务仓 <code>tools/_platform/</code> · <code>tools/chroma/</code> · <code>tools/cross_link/</code> 全是 thin shim re-export 自本仓。</p>
+              <p>Chroma 常驻服务、词法召回、统一图谱、project_id / paths / config 这些核心代码集中在这。业务仓 <code>tools/_platform/</code> · <code>tools/chroma/</code> 全是 thin shim re-export 自本仓。</p>
             </div>
             <div class="item">
               <h3>2. pip 包</h3>
@@ -558,7 +558,7 @@
               <text class="lane-title" x="58" y="416" fill="#5b21b6">④ 推理 + 多模型 ★(loop 只依赖中性类型与 LLMProvider 策略接口)</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="428" width="400" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="258" y="452" text-anchor="middle">AgentLoop</text><text class="node-sub" x="258" y="470" text-anchor="middle">plan→tool→observe · 重复调用拦截 / 倒数步收尾</text></g>
               <g filter="url(#shadow-ag)"><rect x="490" y="428" width="400" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="690" y="452" text-anchor="middle">Brain · 多 provider 注册表</text><text class="node-sub" x="690" y="470" text-anchor="middle">按协议族分文件,厂商是 config 数据</text></g>
-              <g filter="url(#shadow-ag)"><rect x="922" y="428" width="418" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="1131" y="452" text-anchor="middle">6 只读工具</text><text class="node-sub" x="1131" y="470" text-anchor="middle">codegraph / cross-link / search_docs(按 project 路由)</text></g>
+              <g filter="url(#shadow-ag)"><rect x="922" y="428" width="418" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="1131" y="452" text-anchor="middle">6 只读工具</text><text class="node-sub" x="1131" y="470" text-anchor="middle">codegraph / graph / search_docs(按 project 路由)</text></g>
               <text class="node-sub" x="58" y="508" fill="#5b21b6">协议族适配器(中性↔原生双向翻译,加厂商 = 改 config / 注册一行,非新文件):</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="516" width="300" height="38" rx="8" fill="#f3e8ff" stroke="#7c3aed"/><text class="node-title" x="208" y="540" text-anchor="middle">Anthropic 协议 · Claude</text></g>
               <g filter="url(#shadow-ag)"><rect x="386" y="516" width="300" height="38" rx="8" fill="#f3e8ff" stroke="#7c3aed"/><text class="node-title" x="536" y="540" text-anchor="middle">OpenAI 兼容 · DeepSeek</text></g>
@@ -628,9 +628,9 @@
               <td>server.py (870+ 行) · bm25.py</td>
             </tr>
             <tr>
-              <td><code>codev_platform/cross_link/</code></td>
-              <td>跨层链路 SQLite schema + MCP server + 查询 API</td>
-              <td>schema.py · server.py · query.py</td>
+              <td><code>codev_platform/graph_store/</code></td>
+              <td>统一图谱存储 + MCP server + 查询 API(原 cross_link 2026-06-05 退役并入)</td>
+              <td>store · server · query</td>
             </tr>
             <tr>
               <td><code>codev_platform/agent/</code></td>
@@ -702,12 +702,12 @@
             </tr>
             <tr>
               <td>数据目录</td>
-              <td><code>chroma_dir</code> / <code>cross_link_db_path</code> 按 project_id 分</td>
+              <td><code>chroma_dir</code> / <code>graph_store</code> 路径按 project_id 分</td>
               <td>✅ SQLite / Chroma 文件物理分开</td>
             </tr>
             <tr>
               <td>代码索引</td>
-              <td>codegraph / cross-link 按仓建</td>
+              <td>codegraph / graph 按仓建</td>
               <td>✅ A 仓看不到 B 仓代码 (这通常是想要的)</td>
             </tr>
             <tr>
@@ -749,10 +749,10 @@
               <td>serve-mcp 编排常驻、端口防撞(跳显式端口)、rebuild lock、DB integrity 检查、TCP reachability 探测。</td>
             </tr>
             <tr>
-              <td>cross-link</td>
-              <td><strong>平台 SSE 服务</strong> <code>:18086/sse?project_id=</code>(<code>server --http</code>,per-project contextvar 路由,防串库)</td>
-              <td><code>codev_platform/cross_link/{schema,server,query}.py</code> + <code>mcp_serve.py</code></td>
-              <td>per-project 隔离、缺库瞬时重查(不永久缓存)、网关认证、freshness 检查、SQLite backup 发布。</td>
+              <td>graph(统一图谱)</td>
+              <td><strong>平台 SSE 服务</strong> <code>:18092/sse?project_id=</code>(<code>server --http</code>,per-project contextvar 路由,防串库)</td>
+              <td><code>codev_platform/graph_store/</code> + <code>mcp_serve.py</code></td>
+              <td>per-project 隔离、缺库瞬时重查(不永久缓存)、网关认证、freshness 检查、store backup 发布。</td>
             </tr>
             <tr>
               <td>dirty-index</td>
@@ -845,7 +845,7 @@
             </div>
             <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
               <strong>2. 查证</strong>
-              <p>规则靠 platform-docs,代码结构靠 codegraph,数据契约靠 cross-link。dirty 命中读真实文件。</p>
+              <p>规则靠 platform-docs,代码结构靠 codegraph,数据契约靠 graph。dirty 命中读真实文件。</p>
             </div>
             <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
               <strong>3. 定边界</strong>
@@ -875,7 +875,7 @@
             </tr>
             <tr>
               <td>SQL / 表 / 字段 / endpoint / Python writer-reader</td>
-              <td>cross-link (本仓 cross_link MCP)</td>
+              <td>graph (本仓统一图谱 MCP)</td>
               <td>决定跨层契约、DB 写入、Mapper、前端 API 类型和数据一致性风险。</td>
             </tr>
             <tr>
@@ -888,8 +888,8 @@
           <table>
             <tr><th>等级</th><th>典型范围</th><th>工具强度</th></tr>
             <tr><td>L1</td><td>文案、注释、局部样式、单文件小修。</td><td>git status + 定向读 + 最小验证。</td></tr>
-            <tr><td>L2</td><td>单模块或同层多模块联动,不改 API / DB / DTO / enum / 跨语言字段契约。</td><td>模块 rules + codegraph 调用方/影响面;追问数据来源加 cross-link。</td></tr>
-            <tr><td>L3</td><td>DTO、API、SQL、写库字段、migration、enum、跨层契约。</td><td>platform-docs + codegraph + cross-link + 验证闭环。</td></tr>
+            <tr><td>L2</td><td>单模块或同层多模块联动,不改 API / DB / DTO / enum / 跨语言字段契约。</td><td>模块 rules + codegraph 调用方/影响面;追问数据来源加 graph。</td></tr>
+            <tr><td>L3</td><td>DTO、API、SQL、写库字段、migration、enum、跨层契约。</td><td>platform-docs + codegraph + graph + 验证闭环。</td></tr>
             <tr><td>L4</td><td>生成文件、依赖、全局 runtime、AI 工具链、历史数据边界。</td><td>先说明影响范围;禁改项拒绝或走正确生成流程。</td></tr>
           </table>
         </section>

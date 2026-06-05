@@ -2,7 +2,7 @@
 
 覆盖:
 - 默认 reindex (无 flag) 会跑 ingest stage (调 ingest_project)
-- --ingest 单选只跑 ingest, 不跑 codegraph/chroma/cross-link
+- --ingest 单选只跑 ingest, 不跑 codegraph/chroma
 - ingest 失败被隔离: 抛异常只 warn, reindex 退出码仍 0 (不拖垮基线)
 - 无 project_id 时跳过 ingest (不抛)
 - codegraph scope 改动 → _dispatch_reindex 顺带入队 ingest
@@ -19,7 +19,7 @@ from codev_platform.ops import reindex as R
 
 
 def _args(**kw) -> argparse.Namespace:
-    base = dict(repo=None, chroma=False, codegraph=False, cross_link=False,
+    base = dict(repo=None, chroma=False, codegraph=False,
                 ingest=False, force=False)
     base.update(kw)
     return argparse.Namespace(**base)
@@ -34,7 +34,7 @@ def _repo(tmp_path: Path) -> Path:
 
 
 def _stub_stages(monkeypatch):
-    """让 codegraph/chroma/cross-link 三 stage 都 no-op 成功, 只留 ingest 真跑。"""
+    """让 codegraph/chroma stage 都 no-op 成功, 只留 ingest 真跑。"""
     class _CP:
         returncode = 0
     monkeypatch.setattr(R.C, "run", lambda *a, **k: _CP())
@@ -65,7 +65,7 @@ def test_ingest_only_skips_other_stages(_repo, monkeypatch):
                         lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
     rc = R.cmd_reindex(_args(repo=str(_repo), ingest=True))
     assert rc == 0
-    assert ran["run"] is False  # codegraph/chroma/cross-link 一律没跑
+    assert ran["run"] is False  # codegraph/chroma 一律没跑
 
 
 def test_ingest_failure_isolated(_repo, monkeypatch):

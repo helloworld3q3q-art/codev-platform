@@ -169,7 +169,7 @@
   <h2>三大 MCP 工具</h2>
   <a href="#codegraph">2. CodeGraph 代码图谱</a>
   <a href="#chroma">3. platform-docs 文档检索</a>
-  <a href="#crosslink">4. cross-link 业务链路</a>
+  <a href="#crosslink">4. graph 业务链路</a>
   <a href="#compare">5. 三者边界对比</a>
 
   <h2>两阶段重排</h2>
@@ -243,7 +243,7 @@
               ▼              ▼              ▼
        ┌──────────┐   ┌──────────┐   ┌──────────┐
        │ 代码图谱 │   │ 文档语义 │   │ 业务链路 │
-       │CodeGraph │   │  Chroma  │   │cross-link│
+       │CodeGraph │   │  Chroma  │   │  graph   │
        └────┬─────┘   └────┬─────┘   └────┬─────┘
             │              │              │
             └──────────────┼──────────────┘
@@ -392,10 +392,10 @@
   </g>
   <g class="node">
     <rect x="260" y="315" width="180" height="80" rx="6" fill="#2a1e3a" stroke="#c678dd" stroke-width="1.5"/>
-    <text class="node-title" x="350" y="337" text-anchor="middle" fill="#c678dd">cross-link 构建器</text>
+    <text class="node-title" x="350" y="337" text-anchor="middle" fill="#c678dd">graph 构建器</text>
     <text class="node-sub" x="350" y="354" text-anchor="middle" fill="#d8dee9">Controller→Facade→Mapper</text>
     <text class="node-sub" x="350" y="368" text-anchor="middle" fill="#d8dee9">→Table 链路抽取</text>
-    <text class="node-sub" x="350" y="382" text-anchor="middle" fill="#d8dee9">tools/cross_link/</text>
+    <text class="node-sub" x="350" y="382" text-anchor="middle" fill="#d8dee9">codev_platform/graph_store/</text>
   </g>
 
   <!-- Qwen3 Embedding 模型节点 (副) -->
@@ -436,7 +436,7 @@
   </g>
   <g class="node">
     <rect x="490" y="330" width="180" height="60" rx="6" fill="#1f3a26" stroke="#7ec699" stroke-width="1.5"/>
-    <text class="node-title" x="580" y="352" text-anchor="middle" fill="#7ec699">cross_layer.sqlite</text>
+    <text class="node-title" x="580" y="352" text-anchor="middle" fill="#7ec699">graph_store</text>
     <text class="node-sub" x="580" y="369" text-anchor="middle" fill="#d8dee9">128 endpoint × 5 层</text>
     <text class="node-sub" x="580" y="382" text-anchor="middle" fill="#d8dee9">5,235 节点 / 8,794 边</text>
   </g>
@@ -461,9 +461,9 @@
   </g>
   <g class="node">
     <rect x="720" y="330" width="180" height="60" rx="6" fill="#1a2e3a" stroke="#5e9eff" stroke-width="1.5"/>
-    <text class="node-title" x="810" y="352" text-anchor="middle" fill="#5e9eff">cross-link MCP</text>
-    <text class="node-sub" x="810" y="369" text-anchor="middle" fill="#d8dee9">4 工具:find_endpoint_link</text>
-    <text class="node-sub" x="810" y="382" text-anchor="middle" fill="#d8dee9">find_table_refs / stats</text>
+    <text class="node-title" x="810" y="352" text-anchor="middle" fill="#5e9eff">graph MCP</text>
+    <text class="node-sub" x="810" y="369" text-anchor="middle" fill="#d8dee9">8 工具:find_api_callers</text>
+    <text class="node-sub" x="810" y="382" text-anchor="middle" fill="#d8dee9">find_table_usage / search_nodes</text>
   </g>
   <g class="node">
     <rect x="720" y="440" width="180" height="55" rx="6" fill="#1a2e3a" stroke="#5e9eff" stroke-width="1.5"/>
@@ -577,7 +577,7 @@
 <tr><td>LLM 不知道新写的规则</td><td>③ Chroma 库 chunks 数;② post-commit hook 是否触发</td></tr>
 <tr><td>LLM 召回结果不准</td><td>② Qwen3 模型;③ 索引是否用旧维度(384 vs 1024)</td></tr>
 <tr><td>LLM 找不到新加的函数</td><td>③ codegraph.db nodes 数;② 用户是否跑过 <code>-SkipChroma</code></td></tr>
-<tr><td>新加 API 但 cross-link 没反映</td><td>③ cross_layer.sqlite last_build_at;手工跑 update-local-ai</td></tr>
+<tr><td>新加 API 但 graph 没反映</td><td>③ graph_store last_build_at;手工跑 update-local-ai</td></tr>
 <tr><td>三套 MCP 全部连不上</td><td>④ MCP server 进程;<code>~/.claude.json</code> 配置</td></tr>
 </table>
 
@@ -884,12 +884,12 @@ def _ensure_model():
 </ul>
 
 <!-- =============================================== -->
-<h2 id="crosslink">4. cross-link — 跨层业务链路</h2>
+<h2 id="crosslink">4. graph(统一图谱) — 跨层业务链路</h2>
 
-<p><span class="tag yellow">用途</span> 找前端 API ↔ Java endpoint ↔ Table 的完整业务链</p>
+<p><span class="tag yellow">用途</span> 找前端 API ↔ Java endpoint ↔ Table 的完整业务链 + 业务域</p>
 
 <h3>4.1 它是什么</h3>
-<p>专门为<strong>本项目的三层架构</strong>(前端 → Java → DB / Python)定制的链路索引。CodeGraph 是通用图,cross-link 知道"Controller / Facade / Service / Mapper / Table"这些业务层级语义。</p>
+<p>专门为<strong>本项目的三层架构</strong>(前端 → Java → DB / Python)定制的统一图谱索引。CodeGraph 是通用图,graph 知道"Controller / Facade / Service / Mapper / Table"这些业务层级语义,并叠加业务域聚类。原 cross-link MCP(2026-06-05 退役删包)的链路能力全部并入本统一图谱。</p>
 
 <table>
 <tr><th>索引内容</th><th>数量</th></tr>
@@ -903,17 +903,18 @@ def _ensure_model():
 <tr><td>表 / 列</td><td>52 / 723</td></tr>
 </table>
 
-<h3>4.2 4 个查询工具</h3>
+<h3>4.2 查询工具</h3>
 <table>
 <tr><th>工具</th><th>用途</th></tr>
-<tr><td><code>find_endpoint_link</code></td><td>给定 endpoint,返回完整链:前端 API → Java endpoint → Facade → Service → Mapper → Table</td></tr>
-<tr><td><code>find_table_refs</code></td><td>给定表名,返回所有读/写它的 Java Mapper + Python 仓储</td></tr>
+<tr><td><code>find_api_callers</code></td><td>给定 endpoint,返回完整链:前端 API → Java endpoint → Facade → Service → Mapper → Table</td></tr>
+<tr><td><code>find_table_usage</code></td><td>给定表名,返回所有读/写它的 Java Mapper + Python 仓储</td></tr>
+<tr><td><code>find_impact</code> / <code>find_impacted_pages</code></td><td>改动影响面 / 受影响页面</td></tr>
+<tr><td><code>find_node_domain</code> / <code>list_domain_members</code></td><td>业务域归属 / 域成员</td></tr>
 <tr><td><code>search_nodes</code></td><td>跨层搜符号</td></tr>
-<tr><td><code>cross_link_stats</code></td><td>看库统计 + 索引时间</td></tr>
 </table>
 
 <div class="callout">
-<strong>典型场景</strong>:"我要改 <code>stock_recommend_result.shadow_mode</code> 字段语义,会影响哪些代码?" → <code>find_table_refs("stock_recommend_result")</code> 一次性返回 9 处 SQL + 2 处 Python 仓储,不会漏。
+<strong>典型场景</strong>:"我要改 <code>stock_recommend_result.shadow_mode</code> 字段语义,会影响哪些代码?" → <code>find_table_usage("stock_recommend_result")</code> 一次性返回 9 处 SQL + 2 处 Python 仓储,不会漏。
 </div>
 
 <!-- =============================================== -->
@@ -927,9 +928,9 @@ def _ensure_model():
 <tr><td>"shadow 规则相关的设计文档"</td><td><strong>Chroma</strong></td><td>语义检索 .md</td></tr>
 <tr><td>"5-18 那次跑批失败的复盘"</td><td><strong>Chroma</strong></td><td>事故归档语义匹配</td></tr>
 <tr><td>"PIT 红线有几条规则"</td><td><strong>Chroma</strong></td><td>规则文档搜索</td></tr>
-<tr><td>"<code>/v1/stocks/detail-full</code> 完整调用链"</td><td><strong>cross-link</strong></td><td>endpoint 链路图</td></tr>
-<tr><td>"<code>stock_alert_event</code> 表被谁读"</td><td><strong>cross-link</strong></td><td>表引用专表</td></tr>
-<tr><td>"前端 API 与后端 endpoint 是否一致"</td><td><strong>cross-link</strong></td><td>双源对账</td></tr>
+<tr><td>"<code>/v1/stocks/detail-full</code> 完整调用链"</td><td><strong>graph</strong></td><td>endpoint 链路图</td></tr>
+<tr><td>"<code>stock_alert_event</code> 表被谁读"</td><td><strong>graph</strong></td><td>表引用查询</td></tr>
+<tr><td>"前端 API 与后端 endpoint 是否一致"</td><td><strong>graph</strong></td><td>双源对账</td></tr>
 </table>
 
 <div class="callout danger">
@@ -1047,7 +1048,7 @@ col.query(query_embeddings=q_embeds)</code></pre>
 <tr><td><code>collection</code></td><td>chunks 数+维度+模型名匹配</td></tr>
 <tr><td><code>freshness</code></td><td>索引比 <code>.md</code> 最新 mtime 新(不落后于文档)</td></tr>
 <tr><td>规则一致性</td><td><code>rules vs incident</code></td><td>规则覆盖最新事故(防规则滞后)</td></tr>
-<tr><td rowspan="2">CodeGraph</td><td><code>cross_layer freshness</code></td><td>跨层图节点/边数 + 时间</td></tr>
+<tr><td rowspan="2">CodeGraph</td><td><code>graph freshness</code></td><td>跨层图节点/边数 + 时间</td></tr>
 <tr><td><code>codegraph db</code></td><td>sqlite 大小 + 节点/边数</td></tr>
 <tr><td>API 服务</td><td><code>codegraph-api</code></td><td>Java jar 存在</td></tr>
 <tr><td>清洁度</td><td><code>git tools/</code></td><td><code>tools/</code> 无未提交污染</td></tr>
@@ -1091,9 +1092,9 @@ SUMMARY: all green</code></pre>
 <p>一键重建本地 AI 索引。两个开关控制要重建哪部分:</p>
 <table>
 <tr><th>命令</th><th>做什么</th><th>耗时</th></tr>
-<tr><td><code>update-local-ai.ps1</code></td><td>全量(Chroma + CodeGraph + cross-link)</td><td>~3 分钟</td></tr>
-<tr><td><code>update-local-ai.ps1 -SkipCodeGraph</code></td><td>只重建 Chroma + cross-link(文档改动时)</td><td>~80 秒</td></tr>
-<tr><td><code>update-local-ai.ps1 -SkipChroma</code></td><td>只重建 CodeGraph + cross-link(代码改动时)</td><td>~2 分钟</td></tr>
+<tr><td><code>update-local-ai.ps1</code></td><td>全量(Chroma + CodeGraph + graph)</td><td>~3 分钟</td></tr>
+<tr><td><code>update-local-ai.ps1 -SkipCodeGraph</code></td><td>只重建 Chroma + graph(文档改动时)</td><td>~80 秒</td></tr>
+<tr><td><code>update-local-ai.ps1 -SkipChroma</code></td><td>只重建 CodeGraph + graph(代码改动时)</td><td>~2 分钟</td></tr>
 </table>
 
 <h3>9.2 何时手工跑</h3>
@@ -1129,7 +1130,7 @@ SUMMARY: all green</code></pre>
 
 <h3>10.5.1 用途</h3>
 
-<p>调 CodeGraph / cross-link / Chroma 之前先查工作树是否有 dirty 文件命中索引范围。命中 → 提示"索引可能滞后,建议 grep+Read 兜底"。</p>
+<p>调 CodeGraph / graph / Chroma 之前先查工作树是否有 dirty 文件命中索引范围。命中 → 提示"索引可能滞后,建议 grep+Read 兜底"。</p>
 
 <h3>10.5.2 三种使用模式</h3>
 
@@ -1267,7 +1268,7 @@ git commit  ─→  hook 被触发
 <table>
 <tr><th>Skill</th><th>包装的脚本</th><th>multiSelect</th></tr>
 <tr><td><code>/ai-health</code></td><td><code>ai-health.ps1</code> + <code>dirty-index-check.ps1</code></td><td>3 档:health / dirty / both</td></tr>
-<tr><td><code>/update-local-ai</code></td><td><code>update-local-ai.ps1</code></td><td>4 档:all / Chroma / CodeGraph / cross-link</td></tr>
+<tr><td><code>/update-local-ai</code></td><td><code>update-local-ai.ps1</code></td><td>4 档:all / Chroma / CodeGraph / graph</td></tr>
 <tr><td><code>/verify-pipeline-run</code></td><td>业务侧验证(不在本工具栈范围)</td><td>3 档:morning / eod / all</td></tr>
 </table>
 
@@ -1287,7 +1288,7 @@ git commit  ─→  hook 被触发
 # → 只重建 Chroma(等价于 update-local-ai.ps1 -SkipCodeGraph)
 
 > /update-local-ai all
-# → 全量重建(Chroma + CodeGraph + cross-link)</code></pre>
+# → 全量重建(Chroma + CodeGraph + graph)</code></pre>
 
 <!-- =============================================== -->
 <h2 id="workflows">13. 标准工作流</h2>
@@ -1298,7 +1299,7 @@ git commit  ─→  hook 被触发
   <li><code>codegraph_callers "BugSymbol"</code> — 找所有调用方</li>
   <li><code>codegraph_impact "BugSymbol"</code> — blast radius</li>
   <li><code>search_docs "BugSymbol 相关规则"</code> — 查约束</li>
-  <li><code>find_table_refs "相关表"</code> — 跨层引用</li>
+  <li><code>find_table_usage "相关表"</code> — 跨层引用</li>
   <li>动手 <code>Edit</code> / <code>Write</code></li>
 </ol>
 
@@ -1306,18 +1307,18 @@ git commit  ─→  hook 被触发
 <ol>
   <li><code>search_docs "类似功能 设计"</code> — 找设计文档参考</li>
   <li><code>codegraph_context "现有类似实现"</code> — 找参照</li>
-  <li><code>find_endpoint_link "类似 endpoint"</code> — 看完整链路</li>
+  <li><code>find_api_callers "类似 endpoint"</code> — 看完整链路</li>
   <li>动手实现</li>
   <li><code>pytest tests/</code> + <code>mvn test</code> 验证</li>
 </ol>
 
 <h3>13.3 跨层改动(Python ↔ Java ↔ 前端)</h3>
 <ol>
-  <li><code>find_endpoint_link "目标 endpoint"</code></li>
-  <li><code>find_table_refs "涉及表"</code></li>
+  <li><code>find_api_callers "目标 endpoint"</code></li>
+  <li><code>find_table_usage "涉及表"</code></li>
   <li>按 <strong>Python → Java → 前端</strong> 顺序改</li>
   <li><code>pnpm run api</code> — 前端类型重生成</li>
-  <li><code>cross_link_stats</code> — 看新 endpoint 是否被索引</li>
+  <li><code>search_nodes</code> — 看新 endpoint 是否被索引</li>
 </ol>
 
 <h3>13.4 平时的 hook 自动化</h3>
@@ -1350,7 +1351,7 @@ git commit  ─→  hook 被触发
 <tr><th>现象</th><th>处理</th></tr>
 <tr><td><code>codegraph database is locked</code></td><td>检查 <code>.codegraph/codegraph.db.lock</code>,stale(0 字节 + 数小时未变 + 无活进程)即删</td></tr>
 <tr><td>platform-docs 召回质量差</td><td>看 <code>ai-health</code> 的 <code>chroma freshness</code>;文档大改后跑 <code>update-local-ai.ps1 -SkipCodeGraph</code></td></tr>
-<tr><td>cross-link 数据陈旧</td><td>看 <code>cross_link_stats.build_meta.last_build_at</code>;跑 <code>update-local-ai.ps1</code></td></tr>
+<tr><td>graph 数据陈旧</td><td>看 <code>search_nodes</code> 抽样核对;跑 <code>update-local-ai.ps1</code></td></tr>
 <tr><td>MCP server 完全连不上</td><td>检查 <code>~/.claude.json</code> 配置;重启 Claude Code(<strong>不是 /clear</strong>)</td></tr>
 <tr><td>Qwen3 升级后查询没改善</td><td>确认绕开 EF 路径,索引侧 + 查询侧都自己 encode(详见 §7.4)</td></tr>
 <tr><td><code>ai-health</code> WARN <code>codegraph-api no jar</code></td><td><code>mvn -f apps/codegraph-api/pom.xml package -DskipTests</code></td></tr>
@@ -1362,7 +1363,7 @@ git commit  ─→  hook 被触发
 
 <h3>已完成</h3>
 <ul class="compact">
-  <li>✅ 三套 MCP server 全部联通(CodeGraph / Chroma / cross-link)</li>
+  <li>✅ 三套 MCP server 全部联通(CodeGraph / Chroma / graph)</li>
   <li>✅ Qwen3-Embedding-0.6B 上线 + instruction-aware</li>
   <li>✅ <strong>Qwen3-Reranker-0.6B 两阶段精排</strong>(2026-05-23) — top-30 召回 → top-5 精排</li>
   <li>✅ <strong>MCP server 热重载</strong>(2026-05-23) — 戳文件触发 client 重连,模型常驻 GPU</li>
@@ -1404,8 +1405,8 @@ git commit  ─→  hook 被触发
 <tr><td><code>tools/chroma/README.md</code></td><td>完整文档</td></tr>
 <tr><td><code>D:\models\Qwen3-Embedding-0.6B</code></td><td>嵌入模型(仓库外,1.2GB)</td></tr>
 <tr><td><code>D:\models\Qwen3-Reranker-0.6B</code></td><td>精排模型 ⭐(仓库外,1.1GB,2026-05-23)</td></tr>
-<tr><td rowspan="3">cross-link</td><td><code>data/codegraph_ext/cross_layer.sqlite</code></td><td>跨层数据库</td></tr>
-<tr><td><code>tools/cross_link/</code></td><td>构建脚本(Python)</td></tr>
+<tr><td rowspan="3">graph</td><td><code>data/codegraph_ext/&lt;pid&gt;/</code></td><td>统一图谱存储(graph_store)</td></tr>
+<tr><td><code>codev_platform/graph_store/</code></td><td>构建脚本(Python)</td></tr>
 <tr><td><code>.codegraph/.rebuild.lock</code></td><td>rebuild lock ⭐(防 race,2026-05-23)</td></tr>
 <tr><td rowspan="8">脚本</td><td><code>tools/dev/ai-health.ps1</code></td><td>体检(含 hook missed-fire + reranker 检测)</td></tr>
 <tr><td><code>tools/dev/update-local-ai.ps1</code></td><td>重建索引</td></tr>

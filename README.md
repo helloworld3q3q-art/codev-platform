@@ -1,6 +1,6 @@
 # codev-platform
 
-Multi-project AI 协作工具栈基础设施。让多个业务项目共享 project_id 命名空间 + chroma / cross-link 多租户索引 + GPU 模型 daemon,跨机器 portable。
+Multi-project AI 协作工具栈基础设施。让多个业务项目共享 project_id 命名空间 + chroma / graph(统一图谱)多租户索引 + GPU 模型 daemon,跨机器 portable。
 
 ## 新机器接入(零冷启 SOP)
 
@@ -37,7 +37,7 @@ codev-platform setup --auto
 
 - ✅ project_id resolver + paths + config
 - ✅ chroma daemon multi-tenant (本仓 codev_platform/chroma/)
-- ✅ cross-link engine + linker
+- ✅ graph(统一图谱)engine + linker(原 cross-link 2026-06-05 退役并入)
 - ✅ CLI 7 子命令: init / current / list-projects / validate / sync-rules / sync-skills / setup / config
 - ✅ 三仓 .mcp.json 全用相对路径, 跨机 portable
 - ✅ platform_meta 跨项目登记表
@@ -80,7 +80,7 @@ codev-platform list-projects               # 看登记表
 ├── chroma/                              # 单 DB 多 collection
 │   └── <project_id>__platform_docs      # collection 前缀隔离
 ├── codegraph/<project_id>/codegraph.db  # per-project (第三方 MCP server 天然 per-repo)
-└── codegraph_ext/<project_id>/cross_layer.sqlite  # cross-link KG, per-project
+└── codegraph_ext/<project_id>/                    # graph 统一图谱 KG, per-project
 ```
 
 ## 关联
@@ -98,7 +98,7 @@ codev-platform list-projects               # 看登记表
 | `platform_meta/` | ✅ 已抽 |
 | `docs/plans/team-deploy-*` | ✅ 已抽 |
 | `tools/chroma/` (multi-tenant daemon) | ⏸️ platform 仓内, 待抽 |
-| `tools/cross_link/` | ⏸️ platform 仓内, 待抽 |
+| `codev_platform/graph_store/` (统一图谱) | ✅ 已抽 (原 tools/cross_link 退役并入) |
 | `.claude/rules/` 跨项目通用 (workflow / commit / windows-ps 等) | ⏸️ platform 仓内, 待抽 |
 | `.claude/skills/` 跨项目通用 | ⏸️ platform 仓内, 待抽 |
 

@@ -98,7 +98,7 @@ def test_graph_edge_roundtrip():
 
 
 def test_evidence_roundtrip():
-    ev = Evidence(source="builtin.cross_link", detail="SQL: SELECT * FROM customer",
+    ev = Evidence(source="builtin.sql", detail="SQL: SELECT * FROM customer",
                   file="Mapper.xml", line=42, confidence=0.9)
     assert Evidence.from_dict(ev.to_dict()) == ev
 

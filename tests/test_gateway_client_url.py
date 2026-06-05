@@ -21,9 +21,9 @@ def _mcp_json(tmp_path):
                 "url": "http://127.0.0.1:18083/sse?project_id=demo",
                 "headers": {"Authorization": "Bearer ${PLATFORM_TOKEN}"},
             },
-            "cross-link": {
+            "graph": {
                 "type": "sse",
-                "url": "http://127.0.0.1:18086/sse?project_id=demo",
+                "url": "http://127.0.0.1:18092/sse?project_id=demo",
             },
             "codegraph": {
                 "type": "sse",
@@ -55,7 +55,7 @@ def test_rewrites_sse_url_by_server_name(tmp_path):
     assert rc == 0
     s = _servers(tmp_path)
     assert s["platform-docs"]["url"] == "https://platform.example.com/platform-docs/sse?project_id=demo"
-    assert s["cross-link"]["url"] == "https://platform.example.com/cross-link/sse?project_id=demo"
+    assert s["graph"]["url"] == "https://platform.example.com/graph/sse?project_id=demo"
     assert s["codegraph"]["url"] == "https://platform.example.com/codegraph/sse"
 
 
@@ -75,7 +75,7 @@ def test_trailing_slash_base_normalized(tmp_path):
     _mcp_json(tmp_path)
     cmd_gateway(_args(tmp_path, "https://platform.example.com/"))
     s = _servers(tmp_path)
-    assert s["cross-link"]["url"] == "https://platform.example.com/cross-link/sse?project_id=demo"
+    assert s["graph"]["url"] == "https://platform.example.com/graph/sse?project_id=demo"
 
 
 def test_invalid_base_returns_nonzero(tmp_path):

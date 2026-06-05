@@ -1,6 +1,6 @@
 """core.obslog 脱敏纯函数 + 日志模式推断测试 (生产默认脱敏)。
 
-obslog 已接到三套 MCP server (chroma _config/_tools, cross_link/server, codegraph/server)
+obslog 已接到三套 MCP server (chroma _config/_tools, graph/server, codegraph/server)
 的 usage/recall 日志路径, 但 logging_mode 的自动推断 (token 模式 → prod) 与
 redact_text / redact_args 一直无单测。这里补齐 —— 守护"生产默认脱敏"语义不回退。
 """

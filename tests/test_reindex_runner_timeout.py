@@ -67,7 +67,7 @@ def test_default_timeout_used_when_unset(monkeypatch):
     _patch_venv(monkeypatch)
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    runners.CliReindexRunner("cross_link", "--cross-link").run("demo", Path("."), {})
+    runners.CliReindexRunner("codegraph", "--codegraph").run("demo", Path("."), {})
 
     assert captured["timeout"] == float(runners._DEFAULT_RUNNER_TIMEOUT_SEC)
 

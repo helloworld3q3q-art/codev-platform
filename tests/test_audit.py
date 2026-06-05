@@ -42,12 +42,12 @@ def test_advisory_allow_skipped(log_file):
 
 
 def test_deny_written_with_fields(log_file):
-    audit.audit_access("cross-link", _ident(user_id="bob"), "secret-proj",
+    audit.audit_access("graph", _ident(user_id="bob"), "secret-proj",
                        _dec(False, "project secret-proj not in token allowlist"))
     recs = _lines(log_file)
     assert len(recs) == 1
     r = recs[0]
-    assert r["service"] == "cross-link"
+    assert r["service"] == "graph"
     assert r["user_id"] == "bob"
     assert r["project_id"] == "secret-proj"
     assert r["allowed"] is False

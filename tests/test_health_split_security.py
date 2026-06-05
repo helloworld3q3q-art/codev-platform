@@ -6,7 +6,7 @@ init_errors 等内部状态对**任何人**公开 (token 模式下无需 Bearer 
   - PUBLIC  GET /healthz        仅 {status, service[, tenant_mode]}, 不泄敏
   - 鉴权    GET /platform/status 详情 (loaded_projects / default_project_id ...)
 
-本测真起每个服务的 run_http app (cross-link/codegraph/webhook 直接 build, chroma 走
+本测真起每个服务的 run_http app (graph/codegraph/webhook 直接 build, chroma 走
 模块函数构造 app 较重 — 用各 server 实际的 handler 复刻 token-mode 鉴权)。复刻
 test_acl_integration_sse 的 token app 搭法验 401。
 """
@@ -38,7 +38,7 @@ _LEAKY_KEYS = {"default_project_id", "loaded_projects", "live_backends", "init_e
 
 
 # ---------------------------------------------------------------------------
-# cross-link: 真 build app
+# graph: 真 build app
 # ---------------------------------------------------------------------------
 def _build_app(healthz, platform_status, *, public_paths):
     """复刻 server.run_http 的 app 搭法 (token 模式中间件)。"""
@@ -55,10 +55,10 @@ def _build_app(healthz, platform_status, *, public_paths):
 
 def test_healthz_public_minimal_no_leak():
     async def healthz(_r):
-        return JSONResponse({"status": "ok", "service": "cross-link"})
+        return JSONResponse({"status": "ok", "service": "graph"})
 
     async def platform_status(_r):
-        return JSONResponse({"status": "ok", "service": "cross-link",
+        return JSONResponse({"status": "ok", "service": "graph",
                              "default_project_id": "openclaw-stock",
                              "loaded_projects": {"openclaw-stock": True}})
 
@@ -69,7 +69,7 @@ def test_healthz_public_minimal_no_leak():
     r = client.get("/healthz")
     assert r.status_code == 200
     body = r.json()
-    assert body == {"status": "ok", "service": "cross-link"}
+    assert body == {"status": "ok", "service": "graph"}
     assert not (_LEAKY_KEYS & set(body)), f"healthz 泄露敏感字段: {set(body) & _LEAKY_KEYS}"
 
     # /health 别名同样 public + 最小
@@ -80,10 +80,10 @@ def test_healthz_public_minimal_no_leak():
 
 def test_platform_status_requires_auth_in_token_mode():
     async def healthz(_r):
-        return JSONResponse({"status": "ok", "service": "cross-link"})
+        return JSONResponse({"status": "ok", "service": "graph"})
 
     async def platform_status(_r):
-        return JSONResponse({"status": "ok", "service": "cross-link",
+        return JSONResponse({"status": "ok", "service": "graph",
                              "default_project_id": "openclaw-stock",
                              "loaded_projects": {"openclaw-stock": True}})
 

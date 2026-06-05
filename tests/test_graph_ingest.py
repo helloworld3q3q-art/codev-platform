@@ -78,7 +78,6 @@ def test_ingest_end_to_end(tmp_path: Path) -> None:
     conn.close()
     assert len(got.nodes) == 1
     assert len(got.edges) == 1
-    # 注: registry 还发现内置 builtin.cross_link; 缺库时它返空 result 也会入库 (不报错)
 
 
 def test_ingest_isolates_crash(tmp_path: Path) -> None:

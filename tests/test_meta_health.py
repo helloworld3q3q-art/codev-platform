@@ -18,11 +18,11 @@ def test_meta_health_reads_health_section(monkeypatch, tmp_path):
     meta.parent.mkdir(parents=True)
     meta.write_text(
         json.dumps({"project_id": "openclaw-stock",
-                    "health": {"reindex_cross_link_patterns": [r"x\.sql$"]}}),
+                    "health": {"reindex_codegraph_patterns": [r"x\.py$"]}}),
         encoding="utf-8",
     )
     h = common.meta_health("openclaw-stock")
-    assert h == {"reindex_cross_link_patterns": [r"x\.sql$"]}
+    assert h == {"reindex_codegraph_patterns": [r"x\.py$"]}
 
 
 def test_meta_health_none_pid_returns_empty():
