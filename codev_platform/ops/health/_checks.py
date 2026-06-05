@@ -322,6 +322,29 @@ def _check_rules_vs_incident(r: Report, repo: Path) -> None:
         r.line("rules vs incident", "WARN", f"incident {gap}d ahead of rules ({incs[0].name}) - sync rules")
 
 
+def _check_graph_store(r: Report, project_id: str) -> None:
+    """统一图谱 store (graph_store/<pid>.sqlite) 节点/边 + 新鲜度。替代退役的 cross_layer 检查。"""
+    from codev_platform.graph.store import graph_store_path
+    db = graph_store_path(project_id)
+    if not db.is_file():
+        r.line("graph store", "INFO", "未建 (跑 reindex --ingest 生成统一图谱)")
+        return
+    try:
+        conn = sqlite3.connect(str(db))
+        n = conn.execute("select count(*) from nodes").fetchone()[0]
+        e = conn.execute("select count(*) from edges").fetchone()[0]
+        row = conn.execute("select max(ingested_at) from ingest_meta").fetchone()
+        last = row[0] if row and row[0] else "?"
+        conn.close()
+    except Exception as exc:  # noqa: BLE001
+        r.line("graph store", "FAIL", f"query failed: {exc!r}")
+        return
+    if n == 0:
+        r.line("graph store", "WARN", f"0 nodes (ingest 未跑/失败); last={last}")
+    else:
+        r.line("graph store", "OK", f"nodes={n} edges={e} last={last}")
+
+
 def _check_codegraph_db(r: Report, repo: Path, chroma_py: Path | None) -> None:
     lock = repo / ".codegraph" / ".rebuild.lock"
     db = repo / ".codegraph" / "codegraph.db"

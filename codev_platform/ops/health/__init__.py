@@ -75,6 +75,7 @@ from ._checks import (  # noqa: F401
     _check_embed_load,
     _check_embed_model,
     _check_git_tools,
+    _check_graph_store,
     _check_hook_missed,
     _check_mcp_proxy,
     _check_pd_servers,
@@ -141,6 +142,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     _check_mcp_proxy(r, cfg)
     _check_rules_vs_incident(r, repo)
     _check_codegraph_db(r, repo, chroma_py)
+    _check_graph_store(r, project_id)
     _check_codegraph_mcp(r, repo, procs)
     _check_hook_missed(r, repo, health)
     _check_git_tools(r, repo)
@@ -279,11 +281,17 @@ def cmd_health_all(args: argparse.Namespace) -> int:
             cg_s = "无 .codegraph db"
         else:
             cg_s = str(cg)
+        gr = p.get("graph")
+        if isinstance(gr, dict):
+            gr_s = f"nodes={gr.get('nodes', 0)} edges={gr.get('edges', 0)}"
+        else:
+            gr_s = "未建(跑 reindex --ingest)"
         u = p.get("usage_7d", {})
         reg_tag = "" if p.get("registered") else "  (未注册 platform_meta)"
         out(f"[{pid}]{reg_tag}")
         out(f"    chroma 文档 = {ch} chunks")
         out(f"    codegraph 代码 = {cg_s}")
+        out(f"    graph 图谱 = {gr_s}")
         out(f"    memory 项目专属 = {p.get('memory_project', 0)} 条  (+ org 共享 {mem_org})")
         out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / codegraph {u.get('codegraph', 0)}")
         out("")

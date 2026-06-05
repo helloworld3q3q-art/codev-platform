@@ -57,6 +57,16 @@ def _parse_dt(text: str) -> datetime | None:
     return None
 
 
+def _local_graph(pid: str) -> Any:
+    """统一图谱 store 节点/边数 (graph_store/<pid>.sqlite, 替代退役的 cross_layer)。未建返回 'not_built'。"""
+    from codev_platform.graph.store import graph_store_path
+    gdb = graph_store_path(pid)
+    if not gdb.is_file():
+        return "not_built"
+    c = _sqlite_counts(gdb, "nodes", "edges") or {}
+    return {"nodes": c.get("nodes", 0), "edges": c.get("edges", 0), "source": "local"}
+
+
 def _self_project_id(repo_root: Path) -> str | None:
     pj = repo_root / ".claude" / "project.json"
     if pj.is_file():
@@ -254,6 +264,7 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
         projects[pid] = {
             "chroma_chunks": chroma_pid.get(pid, 0),
             "codegraph": codegraph,
+            "graph": _local_graph(pid),
             "memory_project": mem_proj.get(pid, 0),
             "usage_7d": usage.get(pid, {"search_docs": 0}),
             "registered": pid in registered,

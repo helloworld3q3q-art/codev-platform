@@ -47,7 +47,8 @@ export default function DashboardPage() {
           <StatisticCard statistic={{ title: '项目数', value: projectCount }} />
           <StatisticCard statistic={{ title: '组织数', value: orgCount }} />
           <StatisticCard statistic={{ title: 'CodeGraph 节点', value: codegraph?.totalNodes ?? 0 }} />
-          <StatisticCard statistic={{ title: 'CodeGraph 边', value: codegraph?.totalEdges ?? 0 }} />
+          <StatisticCard statistic={{ title: '统一图谱 节点', value: unified?.totalNodes ?? 0 }} />
+          <StatisticCard statistic={{ title: '统一图谱 边', value: unified?.totalEdges ?? 0 }} />
         </StatisticCard.Group>
 
         <ProCard title="平台健康" variant="outlined" classNames={{ root: 'i:mb-16' }}>
@@ -69,6 +70,8 @@ export default function DashboardPage() {
             <Descriptions.Item label="CodeGraph 文件">{codegraph?.totalFiles ?? 0}</Descriptions.Item>
             <Descriptions.Item label="CodeGraph 节点">{codegraph?.totalNodes ?? 0}</Descriptions.Item>
             <Descriptions.Item label="CodeGraph 边">{codegraph?.totalEdges ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="统一图谱 节点">{unified?.totalNodes ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="统一图谱 边">{unified?.totalEdges ?? 0}</Descriptions.Item>
             <Descriptions.Item label="统一图谱 节点类">
               {Object.keys(unified?.nodesByKind ?? {}).length}
             </Descriptions.Item>
