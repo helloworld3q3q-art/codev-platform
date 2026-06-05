@@ -230,6 +230,7 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
         _dec = can_access(load_config(), _ident, pid)
         audit_access("graph", _ident, pid, _dec)
         if not _dec.allowed:
+            _flog(f"[mcp] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
             return JSONResponse(
                 {"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value},
                 status_code=403,
