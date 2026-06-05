@@ -179,3 +179,53 @@ def test_iter_endpoints_uses_canonical_chroma_port():
     eps = ms.iter_endpoints({"mcp": {"platform_docs_sse_port": 27083}, "projects": {}})
     chroma = next(e for e in eps if e.kind == "chroma")
     assert chroma.port == 27083
+
+
+# ---- P1: local 端口派生自 bind 口 + 一致性 WARN ----
+
+def test_local_source_port_derives_from_bind_default():
+    # 未配 mcp_sources.local → local 端口 == 该服务默认 bind 口(派生)
+    for tool, default in [("platform-docs", ms.DEFAULT_CHROMA_PORT),
+                          ("codegraph", ms.DEFAULT_CODEGRAPH_PORT),
+                          ("agent-memory", ms.DEFAULT_AGENT_MEMORY_PORT),
+                          ("graph", ms.DEFAULT_GRAPH_PORT)]:
+        host, port = ms.mcp_source_endpoint({}, "local", tool)
+        assert (host, port) == ("127.0.0.1", default)
+
+
+def test_local_source_port_follows_bind_override():
+    # 改 bind 口(canonical 键)→ local 派生自动跟随, 不用在 mcp_sources 再配一遍
+    cfg = {"mcp": {"platform_docs_sse_port": 27083, "graph_sse_port": 27092}}
+    assert ms.mcp_source_endpoint(cfg, "local", "platform-docs")[1] == 27083
+    assert ms.mcp_source_endpoint(cfg, "local", "graph")[1] == 27092
+
+
+def test_local_source_port_follows_daemon_alias():
+    # chroma 走 daemon.port 别名时 local 也跟随派生
+    assert ms.mcp_source_endpoint({"daemon": {"port": 19083}}, "local", "platform-docs")[1] == 19083
+
+
+def test_local_source_explicit_override_wins():
+    cfg = {"mcp_sources": {"local": {"graph": 31092}}, "mcp": {"graph_sse_port": 27092}}
+    assert ms.mcp_source_endpoint(cfg, "local", "graph")[1] == 31092
+
+
+def test_platform_source_ports_unchanged():
+    assert ms.mcp_source_endpoint({}, "platform", "platform-docs") == ("127.0.0.1", 19083)
+    assert ms.mcp_source_endpoint({}, "platform", "graph") == ("127.0.0.1", 19092)
+
+
+def test_check_port_consistency_warns_on_mismatch():
+    cfg = {"mcp_sources": {"local": {"graph": 31092}}, "mcp": {"graph_sse_port": 27092}}
+    warns = ms.check_port_consistency(cfg)
+    assert len(warns) == 1 and "graph" in warns[0] and "31092" in warns[0] and "27092" in warns[0]
+
+
+def test_check_port_consistency_clean_when_derived():
+    # 未显式配 local → 全派生 → 无 WARN
+    assert ms.check_port_consistency({"mcp": {"graph_sse_port": 27092}}) == []
+
+
+def test_check_port_consistency_clean_when_explicit_matches_bind():
+    cfg = {"mcp_sources": {"local": {"graph": 27092}}, "mcp": {"graph_sse_port": 27092}}
+    assert ms.check_port_consistency(cfg) == []

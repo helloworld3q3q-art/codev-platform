@@ -160,12 +160,12 @@ def build_graph_cmd(python: str | Path, port: int) -> list[str]:
 # 详见 docs/plans/roadmap-2026-05-29/dual-instance-codeindex-2026-05-30.md §四。
 # ----------------------------------------------------------------------
 MCP_SOURCE_TOOLS = ("platform-docs", "codegraph", "agent-memory", "graph")
+# tool 名 -> kind (mcp_source_endpoint 的 local 端口派生用: 本机连本机, 缺省 = 该服务 bind 口)。
+_TOOL_TO_KIND = {tool: kind for kind, tool in _KIND_TO_TOOL.items()}
 DEFAULT_MCP_SOURCES: dict[str, dict[str, Any]] = {
-    "local": {
-        "host": "127.0.0.1", "platform-docs": DEFAULT_CHROMA_PORT,
-        "codegraph": DEFAULT_CODEGRAPH_PORT,
-        "agent-memory": DEFAULT_AGENT_MEMORY_PORT, "graph": DEFAULT_GRAPH_PORT,
-    },
+    # local = 本机本地实例: 各 tool 端口**不写死**, 缺省派生自 _bind_port(本机连本机, 自动跟随 bind 口,
+    # 不用在两处手对齐); 显式配 mcp_sources.local.<tool> 仍覆盖。
+    "local": {"host": "127.0.0.1"},
     "platform": {
         "host": "127.0.0.1", "platform-docs": 19083, "codegraph": 19091,
         "agent-memory": 19087, "graph": 19092,
@@ -174,15 +174,43 @@ DEFAULT_MCP_SOURCES: dict[str, dict[str, Any]] = {
 
 
 def mcp_source_endpoint(cfg: dict, target: str, tool: str) -> tuple[str, int]:
-    """(host, port) for 源 target + tool; config.mcp_sources.<target> 覆盖默认。"""
+    """(host, port) for 源 target + tool; config.mcp_sources.<target> 覆盖默认。
+
+    local 端口缺省**派生自本机 bind 口**(_bind_port, 同主机连同服务)—— 不再写死, 改 bind 口自动跟随;
+    显式 mcp_sources.local.<tool> 仍覆盖。platform(远程)端口独立, 不派生。
+    """
     src = dict(DEFAULT_MCP_SOURCES.get(target) or {})
     override = _cfg_get(cfg, f"mcp_sources.{target}") or {}
     if isinstance(override, dict):
         src.update(override)
+    host = str(src.get("host", "127.0.0.1"))
     port = src.get(tool)
+    if port is None and target == "local" and tool in _TOOL_TO_KIND:
+        return host, _bind_port(cfg, _TOOL_TO_KIND[tool])   # 派生: 本机客户端口 = 本机服务 bind 口
     if port is None:
         raise ValueError(f"源 '{target}' 未定义 tool '{tool}' 的端口 (config.mcp_sources.{target}.{tool})")
-    return str(src.get("host", "127.0.0.1")), int(port)
+    return host, int(port)
+
+
+def check_port_consistency(cfg: dict) -> list[str]:
+    """一致性自检: 显式配了 mcp_sources.local.<tool> 但与本机 bind 口不一致 → 返回 WARN 文案(不阻断)。
+
+    只 WARN 不报错: 反代/有意错开端口是合法场景; 但多数情况两边不一致是只改了一边的手抖。
+    """
+    warns: list[str] = []
+    override = _cfg_get(cfg, "mcp_sources.local") or {}
+    if not isinstance(override, dict):
+        return warns
+    for tool, kind in _TOOL_TO_KIND.items():
+        local_port = override.get(tool)
+        if local_port is None:
+            continue                         # 未显式配 → 派生, 必一致, 跳过
+        bind = _bind_port(cfg, kind)
+        if int(local_port) != bind:
+            warns.append(
+                f"端口不一致: mcp_sources.local.{tool}={local_port} ≠ {kind} bind 口 {bind} "
+                f"(派生默认即可对齐; 如非反代有意错开, 检查是否只改了一边)")
+    return warns
 
 
 def mcp_source_url(cfg: dict, target: str, tool: str, project_id: str) -> str:

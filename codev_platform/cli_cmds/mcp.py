@@ -71,6 +71,8 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
             tail = r["sse_url"] if r["status"] == "ok" else (r.get("reason") or r["sse_url"])
             _print(f"{r['name'].ljust(22)} {r['kind'].ljust(11)} {str(r['port']).ljust(6)} "
                    f"{mark}     {tail}")
+        for w in mcp_serve.check_port_consistency(cfg):   # 显式 local 端口 ≠ bind 口 → 提示(不阻断)
+            _print(f"WARN  {w}")
         return 1 if any_down else 0
     if args.action == "start":
         results = mcp_serve.ensure_serving(cfg)
