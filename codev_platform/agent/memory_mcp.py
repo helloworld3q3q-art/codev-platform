@@ -310,6 +310,7 @@ async def _dispatch(name: str, args: dict) -> list[TextContent]:
 # ----------------------------------------------------------------------
 async def run_http(port: int = _MEM_SSE_PORT) -> None:
     from mcp.server.sse import SseServerTransport
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.responses import JSONResponse, Response
@@ -324,6 +325,10 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
         AuthMiddleware, build_authenticator, maybe_rate_limit_middleware,
         deploy_policy_error, multi_user_policy_error,
     )
+    from codev_platform.mcp_streamable import (
+        ContextualStreamableHTTPASGIApp,
+        streamable_lifespan,
+    )
 
     # P3 护栏:多 dev 共用却仍 passthrough → 拒绝启动(personal 会串号);prod/对外同样 fail-fast。
     _cfg0 = load_config()
@@ -333,6 +338,42 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
             raise SystemExit(f"agent-memory 拒绝启动:{_err_msg}")
 
     sse_transport = SseServerTransport("/messages/")
+
+    def bind_mcp_context(request):
+        ident = getattr(request.state, "identity", None)
+        org_id = getattr(ident, "org_id", None) or _DEFAULT_ORG
+        user_id = getattr(ident, "user_id", None) or _DEFAULT_USER
+        pid_raw = request.query_params.get("project_id")
+        pid: str | None = None
+        if pid_raw:
+            try:
+                pid = _pid_validate(pid_raw)
+            except Exception as exc:  # noqa: BLE001
+                _flog(f"[mcp] reject invalid project_id {pid_raw!r}: {exc!s}")
+                return JSONResponse(
+                    {"error": "invalid project_id", "code": ErrorCode.INVALID_PARAMS.value},
+                    status_code=400,
+                )
+            dec = can_access(load_config(), ident, pid)
+            audit_access("agent-memory", ident, pid, dec)
+            if not dec.allowed:
+                _flog(f"[mcp] DENY project_id={pid} via={getattr(ident,'via',None)}: {dec.reason}")
+                return JSONResponse(
+                    {"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value},
+                    status_code=403,
+                )
+        t_org = _ctx_org.set(org_id)
+        t_user = _ctx_user.set(user_id)
+        t_pid = _ctx_project.set(pid)
+        t_id = _ctx_identity.set(ident)
+
+        def reset() -> None:
+            _ctx_org.reset(t_org)
+            _ctx_user.reset(t_user)
+            _ctx_project.reset(t_pid)
+            _ctx_identity.reset(t_id)
+
+        return reset
 
     async def handle_sse(request):
         ident = getattr(request.state, "identity", None)
@@ -392,18 +433,26 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
     if _rl is not None:
         _mw.append(_rl)
 
+    # stateless=True: 每请求复制当前 context → bind_mcp_context 设的 org/user/project contextvar
+    # 每请求新鲜生效 (与 /sse 等价)。stateful 只在 session 建立时绑一次 → 多 user 复用 session 会
+    # 串 org/user (身份红线被绕过), 这是安全闸, 必须 stateless。
+    mcp_session_manager = StreamableHTTPSessionManager(server, stateless=True)
+    mcp_http_app = ContextualStreamableHTTPASGIApp(mcp_session_manager, bind_mcp_context)
+
     app = Starlette(
         debug=False,
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
             Route("/health", healthz, methods=["GET"]),
             Route("/platform/status", platform_status, methods=["GET"]),
+            Route("/mcp", mcp_http_app, methods=["GET", "POST", "DELETE"]),
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],
         middleware=_mw,
+        lifespan=streamable_lifespan(mcp_session_manager),
     )
-    _flog(f"[http] agent-memory SSE server starting on 127.0.0.1:{port}")
+    _flog(f"[http] agent-memory SSE/MCP server starting on 127.0.0.1:{port}")
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()
 

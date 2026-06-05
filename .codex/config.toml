@@ -1,0 +1,19 @@
+[mcp_servers.platform-docs]
+url = "http://127.0.0.1:19083/mcp?project_id=codev-platform"
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+
+[mcp_servers.codegraph]
+url = "http://127.0.0.1:19091/mcp?project_id=codev-platform"
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+
+[mcp_servers.agent-memory]
+url = "http://127.0.0.1:19087/mcp?project_id=codev-platform"
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+
+[mcp_servers.graph]
+url = "http://127.0.0.1:19092/mcp?project_id=codev-platform"
+startup_timeout_sec = 60
+tool_timeout_sec = 120

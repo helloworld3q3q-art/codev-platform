@@ -300,6 +300,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 # ----------------------------------------------------------------------
 async def run_http(port: int = _CG_SSE_PORT) -> None:
     from mcp.server.sse import SseServerTransport
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.responses import JSONResponse
@@ -308,8 +309,46 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
 
     from codev_platform.core.project_id import validate as _pid_validate
     from codev_platform.gateway import AuthMiddleware, build_authenticator, maybe_rate_limit_middleware
+    from codev_platform.mcp_streamable import (
+        ContextualStreamableHTTPASGIApp,
+        streamable_lifespan,
+    )
 
     sse_transport = SseServerTransport("/messages/")
+
+    def bind_mcp_context(request):
+        pid_raw = request.query_params.get("project_id")
+        if pid_raw:
+            try:
+                pid = _pid_validate(pid_raw)
+            except Exception as exc:  # noqa: BLE001
+                _flog(f"[mcp] reject invalid project_id {pid_raw!r}: {exc!s}")
+                return JSONResponse(
+                    {"error": "invalid project_id", "code": ErrorCode.INVALID_PARAMS.value},
+                    status_code=400,
+                )
+        else:
+            pid = None
+        from codev_platform.core.acl import can_access
+        from codev_platform.core.audit import audit_access
+        _ident = getattr(request.state, "identity", None)
+        _dec = can_access(load_config(), _ident, pid)
+        audit_access("codegraph", _ident, pid, _dec)
+        if not _dec.allowed:
+            _flog(f"[mcp] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
+            return JSONResponse(
+                {"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value},
+                status_code=403,
+            )
+        if pid is None:
+            pid = PROJECT_ID
+            _flog(f"[mcp] no ?project_id=, fallback default {pid}")
+        token = _current_project_id.set(pid)
+
+        def reset() -> None:
+            _current_project_id.reset(token)
+
+        return reset
 
     async def handle_sse(request):
         pid_raw = request.query_params.get("project_id")
@@ -372,18 +411,25 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
     if _rl is not None:
         _mw.append(_rl)
 
+    # stateless=True: 每请求新鲜绑定 project_id contextvar (与 /sse 等价)。stateful 只在 session
+    # initialize 时绑一次, 会让多租户路由退化成"一 session 锁一个项目"。
+    mcp_session_manager = StreamableHTTPSessionManager(server, stateless=True)
+    mcp_http_app = ContextualStreamableHTTPASGIApp(mcp_session_manager, bind_mcp_context)
+
     app = Starlette(
         debug=False,
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
             Route("/health", healthz, methods=["GET"]),  # backward-compat public alias (最小)
             Route("/platform/status", platform_status, methods=["GET"]),  # 鉴权: 详情
+            Route("/mcp", mcp_http_app, methods=["GET", "POST", "DELETE"]),
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],
         middleware=_mw,
+        lifespan=streamable_lifespan(mcp_session_manager),
     )
-    _flog(f"[http] codegraph multi-tenant SSE server starting on 127.0.0.1:{port}")
+    _flog(f"[http] codegraph multi-tenant SSE/MCP server starting on 127.0.0.1:{port}")
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()
 

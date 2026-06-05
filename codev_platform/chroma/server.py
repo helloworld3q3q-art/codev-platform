@@ -193,12 +193,58 @@ async def _run_http(port: int) -> None:
     仅本地访问, 不暴露网络。
     """
     from mcp.server.sse import SseServerTransport
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse, Response
     from starlette.routing import Mount, Route
     import uvicorn
+    from codev_platform.mcp_streamable import (
+        ContextualStreamableHTTPASGIApp,
+        streamable_lifespan,
+    )
 
     sse_transport = SseServerTransport("/messages/")
+
+    def bind_mcp_context(request):
+        pid_raw = request.query_params.get("project_id")
+        if pid_raw:
+            try:
+                from codev_platform.core.project_id import validate as _pid_validate
+                pid = _pid_validate(pid_raw)
+            except Exception as exc:  # noqa: BLE001
+                _flog(f"[mcp] reject: invalid project_id {pid_raw!r}: {exc!s}")
+                return JSONResponse({"error": "invalid project_id"}, status_code=400)
+        else:
+            pid = None
+
+        from codev_platform.core.acl import can_access
+        from codev_platform.core.audit import audit_access
+        _ident = getattr(request.state, "identity", None)
+        _dec = can_access(load_config(), _ident, pid)
+        audit_access("platform-docs", _ident, pid, _dec)
+        if not _dec.allowed:
+            _flog(f"[mcp] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+
+        if pid is None:
+            pid = PROJECT_ID
+            _flog(f"[mcp] no ?project_id= in query, fallback to default {pid}")
+
+        state = _ensure_project(pid)
+        if state is None or state.collection is None:
+            err = (state.init_error if state else None) or "project init failed"
+            _flog(f"[mcp] reject: cannot load project {pid}: {err}")
+            return JSONResponse({"error": f"cannot load project: {err}"}, status_code=503)
+
+        client = request.query_params.get("client") or "codex"
+        token = _current_project_id.set(pid)
+        ctok = _current_client.set(client)
+
+        def reset() -> None:
+            _current_project_id.reset(token)
+            _current_client.reset(ctok)
+
+        return reset
 
     async def handle_sse(request):
         # MCP SSE 双向流: GET /sse?project_id=<pid> 建立 stream + 绑定 project_id 到 contextvar
@@ -428,6 +474,12 @@ async def _run_http(port: int) -> None:
     if _rl is not None:
         _mw.append(_rl)
 
+    # stateless=True: 每请求新建 transport + 复制当前请求 context → bind_mcp_context 设的
+    # project_id/client contextvar 每请求都新鲜生效 (与 /sse 语义等价)。stateful 模式只在
+    # session initialize 时绑定一次, 会让多租户路由退化成"一 session 锁一个项目"。
+    mcp_session_manager = StreamableHTTPSessionManager(server, stateless=True)
+    mcp_http_app = ContextualStreamableHTTPASGIApp(mcp_session_manager, bind_mcp_context)
+
     app = Starlette(
         debug=False,
         routes=[
@@ -437,13 +489,15 @@ async def _run_http(port: int) -> None:
             Route("/platform/status", platform_status, methods=["GET"]),
             Route("/embed", embed, methods=["POST"]),  # 鉴权: 共享嵌入(复用 GPU 模型)
             Route("/rerank", rerank, methods=["POST"]),  # 鉴权: 共享重排(复用 GPU reranker)
+            Route("/mcp", mcp_http_app, methods=["GET", "POST", "DELETE"]),
             Route("/sse", handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse_transport.handle_post_message),
         ],
         middleware=_mw,
+        lifespan=streamable_lifespan(mcp_session_manager),
     )
 
-    _flog(f"[daemon] HTTP server starting on 127.0.0.1:{port}")
+    _flog(f"[daemon] HTTP SSE/MCP server starting on 127.0.0.1:{port}")
     config = uvicorn.Config(
         app,
         host="127.0.0.1",
