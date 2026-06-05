@@ -18,7 +18,7 @@
   },
 
   "data": {
-    "_comment": "chroma + cross_link 共享基目录 (multi-tenant 设计核心)。null = 走业务项目 cwd 推导。setup 自动写为 <platform-repo>/data。",
+    "_comment": "chroma + graph store + codegraph 共享基目录 (multi-tenant 设计核心)。null = 走业务项目 cwd 推导。setup 自动写为 <platform-repo>/data。",
     "platform_data_dir": "~/Code/platform/data"
   },
 
