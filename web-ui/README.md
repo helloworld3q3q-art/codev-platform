@@ -42,7 +42,7 @@ pnpm dev          # 前端 (默认 :8000), 代理 /api -> :18088
 |---|---|---|
 | 项目管理(ProTable) | `/projects` | `POST /api/v1/projects/list` |
 | 任务中心 | `/jobs` | `/api/v1/indexes/rebuild` + `/api/v1/jobs/detail` |
-| 图谱(force-graph-3d) | `/graph` | `POST /api/v1/graph/cross-link/graph` |
+| 图谱(force-graph-3d) | `/graph` | `POST /api/v1/graph/unified/graph` |
 | 枚举元数据演示 | `/enums` | `useModel('enum')` ← `/api/v1/enums/list` |
 | 登录(passthrough 占位) | `/user/login` | 写 localStorage(真 auth 波接 `/api/v1/auth/login`) |
 

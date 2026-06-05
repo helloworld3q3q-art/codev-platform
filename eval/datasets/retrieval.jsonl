@@ -5,7 +5,7 @@
 {"query": "PowerShell 脚本 非 ASCII 字符 中文乱码 编码", "relevant": ["rules/windows-powershell.md"]}
 {"query": "前后端联调 pnpm run api enums 通知用户", "relevant": ["rules/frontend-backend-handoff.md"]}
 {"query": "每周迭代 roadmap 目录 归档 继承未完结项", "relevant": ["rules/weekly-iteration-cadence.md"]}
-{"query": "MCP 三套工具职责 codegraph chroma cross-link 触发", "relevant": ["rules/ai-tools-mcp.md", "docs/ai-toolchain-guide.md"]}
+{"query": "MCP 工具职责 codegraph chroma graph 统一图谱 触发", "relevant": ["rules/ai-tools-mcp.md", "docs/ai-toolchain-guide.md"]}
 {"query": "改前门禁 任务分级 L1 L2 L3 L4", "relevant": ["rules/workflow.md"]}
 {"query": "agent 多模型接入 按协议族分文件 不按厂商", "relevant": ["rules/agent-provider-architecture.md", "codev_platform/agent/brain/README.md"]}
 {"query": "单文件行数上限 docs 目录归类规则", "relevant": ["rules/file-discipline.md"]}
@@ -15,4 +15,4 @@
 {"query": "新机器接入 setup venv 模型探测 配置", "relevant": ["docs/SETUP.md", "docs/onboarding-new-project.md"]}
 {"query": "ai-health 体检 dirty check 索引一致性", "relevant": ["skills/ai-health/SKILL.md"]}
 {"query": "平台所有权翻正 venv 数据 launcher 归本仓", "relevant": ["docs/plans/roadmap-2026-05-28/platform-ownership-inversion-2026-05-28.md"]}
-{"query": "MCP 服务化 SSE 端点 cross-link codegraph 平台服务", "relevant": ["docs/plans/roadmap-2026-05-29/mcp-service-ification-2026-05-30.md"]}
+{"query": "MCP 服务化 SSE 端点 graph codegraph 平台服务", "relevant": ["docs/plans/roadmap-2026-05-29/mcp-service-ification-2026-05-30.md"]}

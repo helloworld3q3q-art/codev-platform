@@ -40,11 +40,11 @@ mcp_server.log
 search_recall.jsonl
 codegraph_usage.jsonl
 
-# maven build artifacts (cross_link_asm)
+# maven build artifacts
 target/
 *.class
 
-# node modules (cross_link_ts)
+# node modules
 node_modules/
 dist/
 
