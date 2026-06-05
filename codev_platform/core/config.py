@@ -12,7 +12,7 @@
     models.reranker_path     Qwen3-Reranker 模型目录
     models.reranker_device   cuda / cpu
     models.reranker_enabled  true / false
-    data.platform_data_dir   chroma / cross_link 共享基目录
+    data.platform_data_dir   chroma / graph 共享基目录
     daemon.port              chroma daemon HTTP 端口
     daemon.mode              true=daemon 共享 / false=每会话独立
     daemon.prewarm           启动期预热模型 (避免首次 query 60s 超时)

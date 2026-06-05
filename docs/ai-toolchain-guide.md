@@ -39,7 +39,7 @@
               ▼              ▼              ▼
        ┌──────────┐   ┌──────────┐   ┌──────────┐
        │ 代码图谱 │   │ 文档语义 │   │ 业务链路 │
-       │CodeGraph │   │  Chroma  │   │cross-link│
+       │CodeGraph │   │  Chroma  │   │  graph   │
        └────┬─────┘   └────┬─────┘   └────┬─────┘
             │              │              │
             └──────────────┼──────────────┘
@@ -115,7 +115,7 @@ Anthropic 制定的开放协议,允许 LLM 与外部"工具服务器"对话。�
 | LLM 不知道新写的规则 | ③ Chroma 库 chunks 数;② post-commit hook 是否触发 |
 | LLM 召回结果不准 | ② Qwen3 模型;③ 索引是否用旧维度(384 vs 1024) |
 | LLM 找不到新加的函数 | ③ codegraph.db nodes 数;② 用户是否跑过 `update-local-ai.ps1 -SkipChroma` |
-| 新加 API 但 cross-link 没反映 | ③ cross_layer.sqlite last_build_at;手工跑 update-local-ai |
+| 新加 API 但 graph 没反映 | ③ graph store last_build_at;手工跑 update-local-ai |
 | 三套 MCP 全部连不上 | ④ MCP server 进程;`~/.claude.json` 配置 |
 
 ## 2. CodeGraph — 通用代码图谱
@@ -416,13 +416,13 @@ tools/chroma/search_recall.jsonl
 - 对比 `rerank_score` vs `distance` 的 ranking,看精排实际收益
 - 查 `elapsed_ms` P95 / P99,看是不是真有性能瓶颈
 
-## 4. cross-link — 跨层业务链路
+## 4. graph(统一图谱) — 跨层业务链路
 
-用途 找前端 API ↔ Java endpoint ↔ Table 的完整业务链
+用途 找前端 API ↔ Java endpoint ↔ Table 的完整业务链 + 业务域
 
 ### 4.1 它是什么
 
-专门为**本项目的三层架构**(前端 → Java → DB / Python)定制的链路索引。CodeGraph 是通用图,cross-link 知道"Controller / Facade / Service / Mapper / Table"这些业务层级语义。
+专门为**本项目的三层架构**(前端 → Java → DB / Python)定制的统一图谱索引。CodeGraph 是通用图,graph 知道"Controller / Facade / Service / Mapper / Table"这些业务层级语义,并叠加业务域聚类。原 cross-link MCP(2026-06-05 退役删包)的链路能力全部并入本统一图谱。
 
 | 索引内容 | 数量 |
 | --- | --- |
@@ -435,16 +435,17 @@ tools/chroma/search_recall.jsonl
 | Flyway 迁移 | 90 |
 | 表 / 列 | 52 / 723 |
 
-### 4.2 4 个查询工具
+### 4.2 查询工具
 
 | 工具 | 用途 |
 | --- | --- |
-| `find_endpoint_link` | 给定 endpoint,返回完整链:前端 API → Java endpoint → Facade → Service → Mapper → Table |
-| `find_table_refs` | 给定表名,返回所有读/写它的 Java Mapper + Python 仓储 |
+| `find_api_callers` | 给定 endpoint,返回完整链:前端 API → Java endpoint → Facade → Service → Mapper → Table |
+| `find_table_usage` | 给定表名,返回所有读/写它的 Java Mapper + Python 仓储 |
+| `find_impact` / `find_impacted_pages` | 改动影响面 / 受影响页面 |
+| `find_node_domain` / `list_domain_members` | 业务域归属 / 域成员 |
 | `search_nodes` | 跨层搜符号 |
-| `cross_link_stats` | 看库统计 + 索引时间 |
 
-**典型场景**:"我要改 `stock_recommend_result.shadow_mode` 字段语义,会影响哪些代码?" → `find_table_refs("stock_recommend_result")` 一次性返回 9 处 SQL + 2 处 Python 仓储,不会漏。
+**典型场景**:"我要改 `stock_recommend_result.shadow_mode` 字段语义,会影响哪些代码?" → `find_table_usage("stock_recommend_result")` 一次性返回 9 处 SQL + 2 处 Python 仓储,不会漏。
 
 ## 5. 三者边界对比
 
@@ -456,9 +457,9 @@ tools/chroma/search_recall.jsonl
 | "shadow 规则相关的设计文档" | **Chroma** | 语义检索 .md |
 | "5-18 那次跑批失败的复盘" | **Chroma** | 事故归档语义匹配 |
 | "PIT 红线有几条规则" | **Chroma** | 规则文档搜索 |
-| "`/v1/stocks/detail-full` 完整调用链" | **cross-link** | endpoint 链路图 |
-| "`stock_alert_event` 表被谁读" | **cross-link** | 表引用专表 |
-| "前端 API 与后端 endpoint 是否一致" | **cross-link** | 双源对账 |
+| "`/v1/stocks/detail-full` 完整调用链" | **graph** | endpoint 链路图 |
+| "`stock_alert_event` 表被谁读" | **graph** | 表引用查询 |
+| "前端 API 与后端 endpoint 是否一致" | **graph** | 双源对账 |
 
 **反例**:不要无目的 `Grep` + `Read` 循环找代码或文档。MCP 索引已经预先做了大部分工作；只有 MCP 不可用、索引滞后、dirty 命中或需要确认最新源码时,才用本地搜索兜底。
 
@@ -577,7 +578,7 @@ col.query(query_embeddings=q_embeds)
 | Chroma 索引 | `collection` | chunks 数+维度+模型名匹配 |
 | Chroma 索引 | `freshness` | 索引比 `.md` 最新 mtime(不落后于文档) |
 | 规则一致性 | `rules vs incident` | 规则覆盖最新事故(防规则滞后) |
-| CodeGraph | `cross_layer freshness` | 跨层图节点/边数 + 时间 |
+| graph | `graph freshness` | 统一图谱节点/边数 + 时间 |
 | CodeGraph | `codegraph db` | sqlite 大小 + 节点/边数 |
 | API 服务 | `codegraph-api` | Java jar 存在 |
 | 清洁度 | `git tools/` | `tools/` 无未提交污染 |
@@ -623,9 +624,9 @@ Git for Windows 的 post-commit hook 偶发 errno 1 不执行(详见 §11)。`ai
 
 | 命令 | 做什么 | 耗时 |
 | --- | --- | --- |
-| `update-local-ai.ps1` | 全量(Chroma + CodeGraph + cross-link) | ~3 分钟 |
-| `update-local-ai.ps1 -SkipCodeGraph` | 只重建 Chroma + cross-link(文档改动时) | ~80 秒 |
-| `update-local-ai.ps1 -SkipChroma` | 只重建 CodeGraph + cross-link(代码改动时) | ~2 分钟 |
+| `update-local-ai.ps1` | 全量(Chroma + CodeGraph) | ~3 分钟 |
+| `update-local-ai.ps1 -SkipCodeGraph` | 只重建 Chroma(文档改动时) | ~80 秒 |
+| `update-local-ai.ps1 -SkipChroma` | 只重建 CodeGraph(代码改动时) | ~2 分钟 |
 
 ### 9.2 何时手工跑
 
@@ -659,7 +660,7 @@ Git for Windows 的 post-commit hook 偶发 errno 1 不执行(详见 §11)。`ai
 
 ### 10.5.1 用途
 
-调 CodeGraph / cross-link / Chroma 之前先查工作树是否有 dirty 文件命中索引范围。命中 → 提示"索引可能滞后,建议 grep+Read 兜底"。
+调 CodeGraph / graph / Chroma 之前先查工作树是否有 dirty 文件命中索引范围。命中 → 提示"索引可能滞后,建议 grep+Read 兜底"。
 
 ### 10.5.2 三种使用模式
 
@@ -789,7 +790,7 @@ Git 在 Windows 下用 sh.exe 执行 hook,但 Git Bash 子 shell 偶发 errno 1�
 | Skill | 包装的脚本 | multiSelect |
 | --- | --- | --- |
 | `/ai-health` | `ai-health.ps1` + `dirty-index-check.ps1` | 3 档:health / dirty / both |
-| `/update-local-ai` | `update-local-ai.ps1` | 4 档:all / Chroma / CodeGraph / cross-link |
+| `/update-local-ai` | `update-local-ai.ps1` | 3 档:all / Chroma / CodeGraph |
 | `/verify-pipeline-run` | 业务侧验证(不在本工具栈范围) | 3 档:morning / eod / all |
 
 ### 12.5.3 位置
@@ -811,7 +812,7 @@ Git 在 Windows 下用 sh.exe 执行 hook,但 Git Bash 子 shell 偶发 errno 1�
 # → 只重建 Chroma(等价于 update-local-ai.ps1 -SkipCodeGraph)
 
 > /update-local-ai all
-# → 全量重建(Chroma + CodeGraph + cross-link)
+# → 全量重建(Chroma + CodeGraph)
 ```
 
 ## 13. 标准工作流
@@ -822,24 +823,24 @@ Git 在 Windows 下用 sh.exe 执行 hook,但 Git Bash 子 shell 偶发 errno 1�
 2. `codegraph_callers "BugSymbol"` — 找所有调用方
 3. `codegraph_impact "BugSymbol"` — blast radius
 4. `search_docs "BugSymbol 相关规则"` — 查约束
-5. `find_table_refs "相关表"` — 跨层引用
+5. `find_table_usage "相关表"` — 跨层引用
 6. 动手 `Edit` / `Write`
 
 ### 13.2 写新功能的标准链
 
 1. `search_docs "类似功能 设计"` — 找设计文档参考
 2. `codegraph_context "现有类似实现"` — 找参照
-3. `find_endpoint_link "类似 endpoint"` — 看完整链路
+3. `find_api_callers "类似 endpoint"` — 看完整链路
 4. 动手实现
 5. `pytest tests/` + `mvn test` 验证
 
 ### 13.3 跨层改动(Python ↔ Java ↔ 前端)
 
-1. `find_endpoint_link "目标 endpoint"`
-2. `find_table_refs "涉及表"`
+1. `find_api_callers "目标 endpoint"`
+2. `find_table_usage "涉及表"`
 3. 按 **Python → Java → 前端** 顺序改
 4. `pnpm run api` — 前端类型重生成
-5. `cross_link_stats` — 看新 endpoint 是否被索引
+5. `search_nodes "新 endpoint"` — 看新 endpoint 是否被索引
 
 ### 13.4 平时的 hook 自动化
 
@@ -870,7 +871,7 @@ Git 在 Windows 下用 sh.exe 执行 hook,但 Git Bash 子 shell 偶发 errno 1�
 | --- | --- |
 | `codegraph database is locked` | 检查 `.codegraph/codegraph.db.lock`,stale(0 字节 + 数小时未变 + 无活进程)即删 |
 | platform-docs 召回质量差 | 看 `ai-health` 的 `chroma freshness`;文档大改后跑 `update-local-ai.ps1 -SkipCodeGraph` |
-| cross-link 数据陈旧 | 看 `cross_link_stats.build_meta.last_build_at`;跑 `update-local-ai.ps1` |
+| graph 数据陈旧 | 用 `search_nodes` 抽样核对节点是否更新;跑 `update-local-ai.ps1` |
 | MCP server 完全连不上 | 检查 `~/.claude.json` 配置;重启 Claude Code(**不是 /clear**) |
 | Qwen3 升级后查询没改善 | 确认绕开 EF 路径,索引侧 + 查询侧都自己 encode(详见 §7.4) |
 | `ai-health` WARN `codegraph-api no jar` | `mvn -f apps/codegraph-api/pom.xml package -DskipTests` |
@@ -880,7 +881,7 @@ Git 在 Windows 下用 sh.exe 执行 hook,但 Git Bash 子 shell 偶发 errno 1�
 
 ### 已完成
 
-- 三套 MCP server 全部联通(CodeGraph / Chroma / cross-link)
+- 三套 MCP server 全部联通(CodeGraph / Chroma / graph)
 - Qwen3-Embedding-0.6B 上线 + instruction-aware
 - **Qwen3-Reranker-0.6B 两阶段精排** — top-30 召回 → top-5 精排
 - **MCP server 热重载** — 戳文件触发 client 重连,模型常驻 GPU
@@ -920,9 +921,9 @@ Git 在 Windows 下用 sh.exe 执行 hook,但 Git Bash 子 shell 偶发 errno 1�
 | Chroma | `tools/chroma/README.md` | 完整文档 |
 | Chroma | `D:\models\Qwen3-Embedding-0.6B` | 嵌入模型(仓库外,1.2GB) |
 | Chroma | `D:\models\Qwen3-Reranker-0.6B` | 精排模型 |
-| cross-link | `data/codegraph_ext/cross_layer.sqlite` | 跨层数据库 |
-| cross-link | `tools/cross_link/` | 构建脚本(Python) |
-| cross-link | `.codegraph/.rebuild.lock` | rebuild lock |
+| graph | `data/codegraph_ext/<pid>/` | 统一图谱存储 |
+| graph | `codev_platform/graph/` | 构建脚本(Python) |
+| CodeGraph | `.codegraph/.rebuild.lock` | rebuild lock |
 | 脚本 | `tools/dev/ai-health.ps1` | 体检(含 hook missed-fire + reranker 检测) |
 | 脚本 | `tools/dev/update-local-ai.ps1` | 重建索引 |
 | 脚本 | `tools/dev/clean-local-artifacts.ps1` | 清理工作区 |

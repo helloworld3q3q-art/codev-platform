@@ -5,5 +5,5 @@
 
 子模块:
 - project_id: project_id 解析 (env / .claude/project.json / HTTP header) + 格式校验
-- paths: 索引产物路径约定 (chroma collection 前缀 / codegraph / cross-link)
+- paths: 索引产物路径约定 (chroma collection 前缀 / codegraph / graph)
 """

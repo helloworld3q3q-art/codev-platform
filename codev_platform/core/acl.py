@@ -1,6 +1,6 @@
 """项目级访问控制 — 身份能否访问某 project_id 的唯一真值源。
 
-3 MCP(platform-docs / cross-link / codegraph)+ agent + memory 五处共用本判定,
+3 MCP(platform-docs / graph / codegraph)+ agent + memory 五处共用本判定,
 不另造一套模型(与 memory §3.4 同源: org 是租户根, project 挂 org, 身份带 project 白名单)。
 
 纯函数, 无 IO: 只读传入的 cfg dict 与 identity 对象。mode 判定收敛一处, 闸逻辑线性。

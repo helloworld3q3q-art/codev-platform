@@ -60,10 +60,10 @@ codev-platform health --json-out
 | `chroma collection` | 当前仓 chunks 数 / 维度 / 模型名 |
 | `chroma freshness` | 索引比最新 .md 新 → 不滞后 |
 | `platform-docs daemon` | :18083 daemon 活着 + 模型/reranker 已 loaded |
-| `cross_layer` | 全栈仓才有(configured/not built/nodes 数)|
+| `graph store` | 统一图谱(承接退役的 cross-link);全栈仓才有(configured/not built/nodes 数)|
 | `codegraph db` | nodes / edges + integrity=ok + WAL |
 | `hook missed?` | HEAD commit 命中索引但没进 reindex.log → WARN 提示重跑 |
-| `usage stats` | search_recall 命中率 / reindex 7d / platform-docs 采纳率 / cross-link 调用 |
+| `usage stats` | search_recall 命中率 / reindex 7d / platform-docs 采纳率 / codegraph 调用 |
 
 **退出码**:全 OK → 0 / 任一 WARN → 2 / 任一 FAIL → 1。
 **注意**:exit 2 是 WARN 不是失败,harness 会标"Error"但工具栈正常,看 SUMMARY 行为准。
@@ -74,21 +74,21 @@ codev-platform health --json-out
 [<project_id>]
     chroma 文档 = N chunks
     codegraph 代码 = nodes=N edges=N        # 每仓 .codegraph,经 config.projects.<id>.repo_path 定位
-    cross-link 链路 = nodes=N / 未建        # 仅全栈仓建
+    graph 统一图谱 = nodes=N / 未建         # 跨层链路(承接退役的 cross-link)
     memory 项目专属 = N 条  (+ org 共享 M)  # project 作用域,只该项目召回
-    使用率(7d) = search_docs N / cross-link N / codegraph N  # 按 project_id 拆
+    使用率(7d) = search_docs N / graph N / codegraph N  # 按 project_id 拆
 合计: chroma 全项目总数 ; memory M org + K project
 ```
-> 使用率按 project_id 分:chroma 召回日志加了 project_id 字段(**daemon 重启后**新查询才分项目;旧日志归 "legacy 无 project_id");cross-link / codegraph 日志本就带 project_id(codegraph 自写代理 server.py 的 codegraph_usage.jsonl 每次调用打点)。
+> 使用率按 project_id 分:chroma 召回日志加了 project_id 字段(**daemon 重启后**新查询才分项目;旧日志归 "legacy 无 project_id");graph / codegraph 日志本就带 project_id(codegraph 自写代理 server.py 的 codegraph_usage.jsonl 每次调用打点)。
 
 - **访问走 HTTP 服务地址**:`--all` 是客户端,GET 平台 daemon 的 `/platform/status`(`config.platform.url` 或默认 `http://127.0.0.1:<daemon.port>`);服务端跑在平台主机上聚合本机 data/+PG,客户端不碰路径。**子应用 / 远程机器查平台数据用同一个地址** —— 这才能多用户多项目共享。
-- **chroma / cross-link / memory** 中心化(`data/` + PG 一个库),服务端直读。
+- **chroma / graph / memory** 中心化(`data/` + PG 一个库),服务端直读。
 - **codegraph**:平台读本机 `repo_path` 下 `.codegraph` sqlite 取统计(标 "本地 sqlite")。(Java codegraph-api :18082 HTTP 取数路径已退役 2026-06-04 —— 查询面由 codev web routes graph 接口替代;跨机取统计未来走 web routes,不再用 Java api。)
 - **org 共享记忆**全项目通用(有意共享);**project 记忆**只该项目召回(隔离),`--all` 一眼看出谁有几条、串没串。
 - daemon 没起 → `--all` 报连不上 + 提示(访问平台数据一律走 HTTP,不退回本地读)。
 
 ### dirty-check 输出
-列 `[CodeGraph] / [cross-link] / [Chroma]` 命中索引范围的 dirty 文件。**退出码**:干净→0 / 命中→1 / 非 git→2。命中时:允许 grep/read 兜底,或 commit 让 post-commit hook 重建。
+列 `[CodeGraph] / [Chroma]` 命中索引范围的 dirty 文件。**退出码**:干净→0 / 命中→1 / 非 git→2。命中时:允许 grep/read 兜底,或 commit 让 post-commit hook 重建。
 
 ## 故障应对速查
 
@@ -100,12 +100,12 @@ codev-platform health --json-out
 | `codegraph db` nodes 骤降 | 索引出错,`codegraph sync` / `codegraph init -i` 重建 |
 | `hook missed?` WARN | `codev-platform post-commit` 补触发 |
 | `--all` 某项目 codegraph "仓路径未登记" | 在 `~/.codev-platform/config.json` 配 `projects.<id>.repo_path` |
-| dirty 命中 CodeGraph / cross-link | 允许 grep/read 兜底,或 commit 让 hook 跑 |
+| dirty 命中 CodeGraph / Chroma | 允许 grep/read 兜底,或 commit 让 hook 跑 |
 
 ## 相关规则
 
-- 触发指南:`.claude/rules/ai-tools-mcp.md`(CodeGraph / Chroma / cross-link 何时用)
-- 重建:`codev-platform reindex`(四档:all / chroma / codegraph / cross-link)+ `post-commit`(提交后台重建)
+- 触发指南:`.claude/rules/ai-tools-mcp.md`(CodeGraph / Chroma / graph 何时用)
+- 重建:`codev-platform reindex`(三档:all / chroma / codegraph)+ `post-commit`(提交后台重建)
 
 ## 5 视角
 

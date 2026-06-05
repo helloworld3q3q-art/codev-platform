@@ -1,6 +1,6 @@
 # Agent Provider(LLM 大脑)配置 —— api_key 填哪里
 
-> 仅当你要用 **agent 问答 `/chat` / Web playground** 时需要。三套 MCP 知识平面(chroma 检索 / codegraph / cross-link)**不需要** key,照常工作。
+> 仅当你要用 **agent 问答 `/chat` / Web playground** 时需要。三套 MCP 知识平面(chroma 检索 / codegraph / graph 统一图谱)**不需要** key,照常工作。
 
 ## 一、key 填在哪里(二选一)
 
@@ -46,7 +46,7 @@ systemctl is-active codev-agent                                    # 应 active
 ## 三、当前状态(2026-06-01 我已配好的)
 - `~/.codev-platform/config.json` 的 `agent` 段已预置:`provider=claude` + 4 家 providers(**api_key 全空,待你填**)。
 - `codev-agent.service` 已装好但**已 disable**(缺 fastapi,起不来);装 fastapi 后按上面 enable。
-- 其余 6 服务(chroma/cross-link/codegraph/reindex/webhook/clock-resync)**全 active**,跑最新代码。
+- 其余 6 服务(chroma/graph/codegraph/reindex/webhook/clock-resync)**全 active**,跑最新代码。
 
 ## 四、Windows 那个明文 key(审计 #7)
 本次体检发现 **WSL config 无 provider key**(干净)。审计 #7 那个明文 key 多半在 **Windows** 的 `C:\Users\G1706256\.codev-platform\config.json`。查一下:

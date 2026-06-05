@@ -14,7 +14,7 @@ _LOG_MAX_BYTES = int(os.getenv("PLATFORM_LOG_MAX_BYTES", str(5 * 1024 * 1024))) 
 
 def _log_file() -> Path:
     # 落 data_root/logs (非 import 包目录: wheel/只读安装也可写, 见 core.paths.logs_dir)。
-    # 文件名加 chroma_ 前缀, 与 codegraph / cross_link daemon 的同名日志区分, 防多 daemon 碰撞。
+    # 文件名加 chroma_ 前缀, 与 codegraph / graph daemon 的同名日志区分, 防多 daemon 碰撞。
     from codev_platform.core.paths import logs_dir
     return logs_dir() / "chroma_mcp_server.log"
 

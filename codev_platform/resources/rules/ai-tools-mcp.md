@@ -135,7 +135,7 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 | **单独 codegraph SSE 红**(platform-docs/graph 正常) | mcp-proxy 没起 / `codegraph` 命令缺。看 `codev_platform/mcp_serve_logs/codegraph_<pid>.log`;`serve-mcp start` 重拉。确认 venv 有 `mcp-proxy.exe`(`ai-health` 的 `mcp-proxy` 行) |
 | **想退回旧 stdio 文件路径模式** | `copy <业务仓>\.mcp.json.stdio.bak <业务仓>\.mcp.json` → 重启 Claude Code,恢复 per-session 自 spawn(单机略快,无需 serve-mcp start) |
 | `codegraph database is locked` | 看 `.codegraph/codegraph.db.lock` stale(0 字节 + 数小时未变)即删 |
-| platform-docs 召回质量差 | `update-local-ai.ps1 -SkipCodeGraph -SkipCrossLink`(只重建 Chroma) |
+| platform-docs 召回质量差 | `update-local-ai.ps1 -SkipCodeGraph`(只重建 Chroma) |
 | platform-docs **第一次 search_docs 超时** | 冷启动模型加载(embedding + reranker 各 ~15-30s)。已加 `PLATFORM_DOCS_PREWARM=true` + reranker 显式 prewarm 应消除,若仍超时:不要凭超时下"索引没数据"结论 → 等 30-60s 重试一次再判断 |
 | platform-docs MCP `-32602 Invalid params` 持续 | 重启 Claude Code;若仍在,检查 `.cmd` 行尾 CRLF |
 | platform-docs **多会话 CUDA OOM** | 8GB GPU 上每个 stdio mcp_server 占 ~3GB,第 2 个会话 OOM。已切 daemon mode(2026-05-24):cmd 走 `platform_docs_launcher.py` → 第一个会话 spawn detached daemon (`mcp_server.py --http` 端口 18083),后续会话 stdio↔HTTP proxy 连同一 daemon,GPU 占用恒定 ~3GB 不随会话数增长。`ai-health` 的 `platform-docs daemon` / `platform-docs servers` 报告状态;真要回退旧 stdio 模式:`set PLATFORM_DOCS_DAEMON_MODE=false` |

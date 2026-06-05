@@ -1,7 +1,7 @@
 """平台 HTTP 网关层 —— 认证 + 统一请求拦截。
 
 独立模块,只依赖 codev_platform.core(identity / config),**不耦合**进 agent.routes /
-chroma / cross_link 业务。所有 HTTP 入口(agent 服务、chroma daemon、将来的 MCP-SSE 端点)
+chroma / graph 业务。所有 HTTP 入口(agent 服务、chroma daemon、将来的 MCP-SSE 端点)
 复用这一个网关:在请求入口统一认证 → 解析 (org_id, user_id) 上下文 → 挂到 request.state。
 
 auth 可插拔(config gateway.auth_mode):

@@ -142,4 +142,4 @@ sh hook 偶发 `errno 1` 是已知 Git for Windows 问题 — **不要解释**,�
 
 - post-commit 工作原理:`tools/dev/post-commit.ps1`
 - commit 规范:`.claude/rules/commit-pr-conventions.md`
-- 3 个 scope: `chroma`(docs/.md) / `codegraph`(.java/.py/.tsx) / `cross_link`(Mapper/Controller/repositories/Flyway)
+- 2 个 scope: `chroma`(docs/.md) / `codegraph`(.java/.py/.tsx)。(cross_link scope 已随 cross-link 退役删除,2026-06-05)

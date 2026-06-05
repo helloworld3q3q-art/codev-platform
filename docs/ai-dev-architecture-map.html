@@ -552,8 +552,8 @@
               </g>
               <g filter="url(#shadow)">
                 <rect x="1030" y="350" width="165" height="84" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="1112" y="377" text-anchor="middle">跨层链路服务</text>
-                <text class="node-sub" x="1112" y="397" text-anchor="middle">每会话 stdio</text>
+                <text class="node-title" x="1112" y="377" text-anchor="middle">graph 统一图谱服务</text>
+                <text class="node-sub" x="1112" y="397" text-anchor="middle">平台 SSE :18092</text>
                 <text class="node-sub" x="1112" y="415" text-anchor="middle">多读 / 临时发布</text>
               </g>
               <g filter="url(#shadow)">
@@ -653,7 +653,7 @@
 
         <section id="agent">
           <h2>Agent 服务 + Memory 基建(主动协作轴)</h2>
-          <p>上面的管道是"AI 调 MCP 被动检索";这一节是新增的"<strong>常驻 Agent 主动协作 + 分层记忆</strong>"轴。Agent 是 HTTP 服务(FastAPI),多模型按<strong>协议族</strong>可插拔(Anthropic 协议 + OpenAI 兼容协议族一个适配器全吃),自带 6 只读工具(复用上面的 codegraph / cross-link / search_docs)与防空转硬护栏;Memory 基建提供组织 / 团队 / 项目 / 个人四作用域记忆,落 PG 独立库,召回时跨作用域合并 + 冲突消解(红线最高),会话与记忆跨重启持久化,生命周期含 supersede / TTL 归档 / LLM 压缩融合。身份是请求级三元组 <code>(org_id, user_id, project_id)</code>,多租户物理隔离。</p>
+          <p>上面的管道是"AI 调 MCP 被动检索";这一节是新增的"<strong>常驻 Agent 主动协作 + 分层记忆</strong>"轴。Agent 是 HTTP 服务(FastAPI),多模型按<strong>协议族</strong>可插拔(Anthropic 协议 + OpenAI 兼容协议族一个适配器全吃),自带 6 只读工具(复用上面的 codegraph / graph / search_docs)与防空转硬护栏;Memory 基建提供组织 / 团队 / 项目 / 个人四作用域记忆,落 PG 独立库,召回时跨作用域合并 + 冲突消解(红线最高),会话与记忆跨重启持久化,生命周期含 supersede / TTL 归档 / LLM 压缩融合。身份是请求级三元组 <code>(org_id, user_id, project_id)</code>,多租户物理隔离。</p>
           <div class="legend">
             <span class="pill"><span class="dot cyan"></span>身份三元组(请求级)</span>
             <span class="pill"><span class="dot"></span>HTTP 传输层</span>
@@ -707,7 +707,7 @@
               <text class="lane-title" x="58" y="416" fill="#5b21b6">④ 推理 + 多模型 ★(loop 只依赖中性类型与 LLMProvider 策略接口)</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="428" width="400" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="258" y="452" text-anchor="middle">AgentLoop</text><text class="node-sub" x="258" y="470" text-anchor="middle">plan→tool→observe · 重复调用拦截 / 倒数步收尾</text></g>
               <g filter="url(#shadow-ag)"><rect x="490" y="428" width="400" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="690" y="452" text-anchor="middle">Brain · 多 provider 注册表</text><text class="node-sub" x="690" y="470" text-anchor="middle">按协议族分文件,厂商是 config 数据</text></g>
-              <g filter="url(#shadow-ag)"><rect x="922" y="428" width="418" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="1131" y="452" text-anchor="middle">6 只读工具</text><text class="node-sub" x="1131" y="470" text-anchor="middle">codegraph / cross-link / search_docs(按 project 路由)</text></g>
+              <g filter="url(#shadow-ag)"><rect x="922" y="428" width="418" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="1131" y="452" text-anchor="middle">6 只读工具</text><text class="node-sub" x="1131" y="470" text-anchor="middle">codegraph / graph / search_docs(按 project 路由)</text></g>
               <text class="node-sub" x="58" y="508" fill="#5b21b6">协议族适配器(中性↔原生双向翻译,加厂商 = 改 config / 注册一行,非新文件):</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="516" width="300" height="38" rx="8" fill="#f3e8ff" stroke="#7c3aed"/><text class="node-title" x="208" y="540" text-anchor="middle">Anthropic 协议 · Claude</text></g>
               <g filter="url(#shadow-ag)"><rect x="386" y="516" width="300" height="38" rx="8" fill="#f3e8ff" stroke="#7c3aed"/><text class="node-title" x="536" y="540" text-anchor="middle">OpenAI 兼容 · DeepSeek</text></g>
@@ -765,15 +765,15 @@
             </div>
             <div class="item">
               <h3>3. 索引器与模型层</h3>
-              <p>Chroma indexer 三级 chunk 切分(heading → paragraph → hard split,target 1000 / max 1500 字符),调用 Qwen3-Embedding-0.6B 向量化 + Qwen3-Reranker-0.6B 精排;同时 词法 倒排索引在 daemon 启动 / chroma 重建时同步构建(中英混合 tokenizer:jieba + ASCII 正则识别代码符号 / 版本号 / 规则编号)。CodeGraph sync 解析代码符号和调用;cross-link build 抽取 API-SQL-文件链路。独立 Flyway SQL 经过 commit/dirty 门禁后进入 cross-link;承载 SQL 的 Java/Python 代码文件会作为代码进入 CodeGraph,其中 SQL 变量/方法名可被搜到,但表/字段语义仍以 cross-link 为准。</p>
+              <p>Chroma indexer 三级 chunk 切分(heading → paragraph → hard split,target 1000 / max 1500 字符),调用 Qwen3-Embedding-0.6B 向量化 + Qwen3-Reranker-0.6B 精排;同时 词法 倒排索引在 daemon 启动 / chroma 重建时同步构建(中英混合 tokenizer:jieba + ASCII 正则识别代码符号 / 版本号 / 规则编号)。CodeGraph sync 解析代码符号和调用;graph(统一图谱)build 抽取 API-SQL-文件链路 + 业务域。独立 Flyway SQL 经过 commit/dirty 门禁后进入 graph;承载 SQL 的 Java/Python 代码文件会作为代码进入 CodeGraph,其中 SQL 变量/方法名可被搜到,但表/字段语义仍以 graph 为准。</p>
             </div>
             <div class="item">
               <h3>4. 本地存储层</h3>
-              <p>Chroma、codegraph.db、cross_layer.sqlite 和 memory 保存可查询上下文。它们是读多写少资源,重建必须串行,读取允许多会话并发。</p>
+              <p>Chroma、codegraph.db、graph store 和 memory 保存可查询上下文。它们是读多写少资源,重建必须串行,读取允许多会话并发。</p>
             </div>
             <div class="item">
               <h3>5. MCP 服务层</h3>
-              <p>platform-docs、codegraph、cross-link 把本地存储包装成 AI 可调用工具。platform-docs 走共享 daemon,codegraph/cross-link 当前是每会话 stdio。</p>
+              <p>platform-docs、codegraph、graph 把本地存储包装成 AI 可调用工具。platform-docs / graph 走平台 SSE 服务,codegraph 经 mcp-proxy 包成 SSE。</p>
             </div>
             <div class="item">
               <h3>6. 消费与闭环层</h3>
@@ -795,7 +795,7 @@
             <tr>
               <td>Claude Code</td>
               <td>项目根 `.mcp.json`</td>
-              <td>声明 `codegraph`、`platform-docs`、`cross-link` 三个 stdio MCP。</td>
+              <td>声明 `codegraph`、`platform-docs`、`graph` 三个 MCP(SSE)。</td>
               <td>不能随便改,否则 Claude Code 项目 MCP 会受影响。</td>
             </tr>
             <tr>
@@ -813,8 +813,8 @@
             <tr>
               <td>Git hook</td>
               <td>`.git/hooks/post-commit` → `tools/dev/post-commit.ps1`</td>
-              <td>提交后按命中文件自动触发 Chroma / codegraph / cross-link 的后台刷新。</td>
-              <td>文档变更主要刷新 Chroma;代码图谱和 cross-link 只在命中对应路径时刷新。</td>
+              <td>提交后按命中文件自动触发 Chroma / codegraph 的后台刷新。</td>
+              <td>文档变更主要刷新 Chroma;代码图谱只在命中对应路径时刷新。</td>
             </tr>
             <tr>
               <td>兜底刷新</td>
@@ -835,14 +835,14 @@
               <td>读侧可多份;重建时会被 lock / MCP 持有检测保护。</td>
             </tr>
             <tr>
-              <td>cross-link</td>
-              <td>`tools/cross_link/cross-link-mcp.cmd`</td>
-              <td>每个会话一个 stdio server,读取 `data/codegraph_ext/cross_layer.sqlite`。</td>
+              <td>graph(统一图谱)</td>
+              <td>平台 SSE 服务(:18092)</td>
+              <td>读取 `data/codegraph_ext/<pid>/` 统一图谱存储,提供链路 / 业务域查询。</td>
               <td>读侧可多份;构建走临时库和 SQLite backup 发布。</td>
             </tr>
           </table>
           <div class="warning">
-            当前核对结论:如果只打开一个 Codex 窗口仍看到两组 `codegraph / platform-docs proxy / cross-link`,优先怀疑是 `.mcp.json` 与 `codex-platform.ps1` 的 `-c mcp_servers...` 双路径同时生效,不是业务数据库数据错乱。
+            当前核对结论:如果只打开一个 Codex 窗口仍看到两组 `codegraph / platform-docs proxy / graph`,优先怀疑是 `.mcp.json` 与 `codex-platform.ps1` 的 `-c mcp_servers...` 双路径同时生效,不是业务数据库数据错乱。
           </div>
         </section>
 
@@ -868,9 +868,9 @@
               <td>rebuild lock、DB integrity 检查、WAL 检查、多会话只提示 INFO。</td>
             </tr>
             <tr>
-              <td>cross-link</td>
-              <td>每会话 stdio server</td>
-              <td>查跨层链路,确认接口、SQL、文件引用关系。</td>
+              <td>graph(统一图谱)</td>
+              <td>平台 SSE 服务(:18092)</td>
+              <td>查跨层链路 + 业务域,确认接口、SQL、文件引用关系。</td>
               <td>临时库构建、SQLite backup 发布、freshness 检查、多会话链路观测。</td>
             </tr>
             <tr>
@@ -909,7 +909,7 @@
             <tr>
               <td>索引重建</td>
               <td>不允许并发写。</td>
-              <td>Chroma reindex lock、CodeGraph rebuild lock、cross-link 临时库发布。</td>
+              <td>Chroma reindex lock、CodeGraph rebuild lock、graph 临时库发布。</td>
             </tr>
             <tr>
               <td>源码文件</td>
@@ -935,7 +935,7 @@
             </div>
             <div class="step">
               <strong>2. 查证</strong>
-              <p>先产出合并影响面:规则靠 platform-docs,代码结构靠 codegraph,数据契约和 SQL 链路靠 cross-link。dirty 命中时读真实文件。</p>
+              <p>先产出合并影响面:规则靠 platform-docs,代码结构靠 codegraph,数据契约和 SQL 链路靠 graph。dirty 命中时读真实文件。</p>
             </div>
             <div class="step">
               <strong>3. 定边界</strong>
@@ -969,7 +969,7 @@
             </tr>
             <tr>
               <td>SQL / 表 / 字段 / endpoint / Python writer-reader</td>
-              <td>cross-link</td>
+              <td>graph(统一图谱)</td>
               <td>决定跨层契约、DB 写入、Mapper、前端 API 类型和数据一致性风险。</td>
             </tr>
             <tr>
@@ -993,12 +993,12 @@
             <tr>
               <td>L2</td>
               <td>单模块或同层多模块联动,不改 API / DB / DTO / enum / 跨语言字段契约。</td>
-              <td>模块 rules + codegraph 调用方和影响面;追问数据来源/去向时加 cross-link。</td>
+              <td>模块 rules + codegraph 调用方和影响面;追问数据来源/去向时加 graph。</td>
             </tr>
             <tr>
               <td>L3</td>
               <td>DTO、API、SQL、写库字段、migration、enum、跨层契约。</td>
-              <td>platform-docs + codegraph + cross-link + 验证闭环。</td>
+              <td>platform-docs + codegraph + graph + 验证闭环。</td>
             </tr>
             <tr>
               <td>L4</td>
@@ -1018,7 +1018,7 @@
             </tr>
             <tr>
               <td>准确率</td>
-              <td>Rules/Skills 语义检索 + 词法 精确符号召回 + RRF 融合 + reranker + codegraph 影响面 + cross-link 跨层链路。</td>
+              <td>Rules/Skills 语义检索 + 词法 精确符号召回 + RRF 融合 + reranker + codegraph 影响面 + graph 跨层链路。</td>
               <td>减少凭记忆改代码,先查约束和影响面再编辑。词法 hybrid 补救向量漏掉的精确 token(版本号 / 规则编号 / 罕见术语)。</td>
             </tr>
             <tr>

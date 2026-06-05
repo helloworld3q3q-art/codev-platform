@@ -193,14 +193,14 @@ def cmd_plugins(args: argparse.Namespace) -> int:
     """plugins list: 列出已注册的 analyzer 插件 (name / version)。
 
     Phase 2 第一批只内置插件 (registry._discover_builtins 显式注册);列空属正常,
-    下一步把 cross-link 适配器包成 builtin.cross_link 后这里就有行。
+    内置插件 (builtin.sql / backend_spring / frontend_react / 分析器等) 注册后这里有行。
     """
     from codev_platform.plugins import list_plugins
     if args.action == "list":
         plugins = list_plugins()
         if not plugins:
             _print("(无已注册插件)")
-            _print("提示: Phase 2 只落地 plugin runtime; 内置插件 (如 builtin.cross_link) 待后续接入。")
+            _print("提示: 内置插件 (如 builtin.sql / backend_spring) 经 registry._discover_builtins 注册。")
             return 0
         width = max(len(p.name) for p in plugins)
         _print(f"{'name'.ljust(width)}  version")
@@ -360,7 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp_msrc.add_argument("target", choices=["local", "platform"],
                          help="local=本机本地实例(working tree) / platform=平台基线服务器(HEAD/共享)")
     sp_msrc.add_argument("tools", nargs="*",
-                         help="要切的 tool: docs / cross-link / codegraph (可多个); 不给=全部 3 套统一切")
+                         help="要切的 tool: docs / codegraph / graph / agent-memory (可多个); 不给=全部统一切")
     sp_msrc.add_argument("--repo", default=None, help="业务仓路径 (默认 cwd)")
     sp_msrc.set_defaults(func=cmd_mcp_source)
 

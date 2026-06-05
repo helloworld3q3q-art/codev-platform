@@ -52,7 +52,7 @@ def cmd_daemon(args: argparse.Namespace) -> int:
 
 
 def cmd_serve_mcp(args: argparse.Namespace) -> int:
-    """平台 MCP 端点编排: status (探测) / start (幂等拉起 cross-link + 各项目 codegraph)。
+    """平台 MCP 端点编排: status (探测) / start (幂等拉起 codegraph / graph / agent-memory 端点)。
 
     chroma daemon 由业务仓 Claude 会话经 launcher 自 spawn, 本命令不拉起它, 只报状态。
     """
@@ -138,8 +138,8 @@ def cmd_mcp_source(args: argparse.Namespace) -> int:
 
     alias = {
         "docs": "platform-docs", "chromadb": "platform-docs", "chroma": "platform-docs",
-        "platform-docs": "platform-docs", "cross-link": "cross-link", "crosslink": "cross-link",
-        "codegraph": "codegraph",
+        "platform-docs": "platform-docs", "graph": "graph",
+        "codegraph": "codegraph", "agent-memory": "agent-memory", "memory": "agent-memory",
     }
     cfg = load_config()
     try:

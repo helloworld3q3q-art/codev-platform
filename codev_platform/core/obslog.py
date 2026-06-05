@@ -1,6 +1,6 @@
 """Observability-log redaction helpers — dev vs prod 两套日志规则。
 
-三套 MCP server (chroma / cross_link / codegraph) 的 usage / recall 日志会写
+三套 MCP server (chroma / graph / codegraph) 的 usage / recall 日志会写
 query 原文、工具参数、召回文件 metadata。开发环境要全量便于排查;生产环境要脱敏
 (自由文本 / 文件路径不落明文)。用户明确: 开发全 / 生产优化, 是两套规则。
 

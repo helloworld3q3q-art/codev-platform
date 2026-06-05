@@ -57,7 +57,7 @@ cat > "$PLIST" <<'PLIST_EOF'
   <key>RunAtLoad</key><true/>
   <key>ProgramArguments</key><array>
     <string>/bin/sh</string><string>-c</string>
-    <string>launchctl setenv PLATFORM_MCP_SH sh; launchctl setenv PLATFORM_MCP_FLAG -c; launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'; launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'; launchctl setenv PLATFORM_CODEGRAPH /usr/local/bin/codegraph</string>
+    <string>launchctl setenv PLATFORM_MCP_SH sh; launchctl setenv PLATFORM_MCP_FLAG -c; launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'; launchctl setenv PLATFORM_MCP_GRAPH 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.graph.server'; launchctl setenv PLATFORM_CODEGRAPH /usr/local/bin/codegraph</string>
   </array>
 </dict></plist>
 PLIST_EOF
@@ -66,7 +66,7 @@ launchctl unload "$PLIST" 2>/dev/null; launchctl load "$PLIST"
 launchctl setenv PLATFORM_MCP_SH sh
 launchctl setenv PLATFORM_MCP_FLAG -c
 launchctl setenv PLATFORM_MCP_CHROMA 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.chroma.server'
-launchctl setenv PLATFORM_MCP_CROSSLINK 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.cross_link.server'
+launchctl setenv PLATFORM_MCP_GRAPH 'exec "$CLAUDE_PROJECT_DIR/.venv/bin/python" -m codev_platform.graph.server'
 launchctl setenv PLATFORM_CODEGRAPH /usr/local/bin/codegraph   # 仅装了 codegraph 才需要; 路径以 `which codegraph` 为准
 ```
 
@@ -94,9 +94,9 @@ cd <codev-platform 仓> && codegraph init -i   # 建本仓 .codegraph/codegraph.
 
 ## 验证
 
-1. Claude Code 里 `/mcp` → `platform-docs`、`cross-link` 应为 **connected**(装了 codegraph 则三个全 connected)。
+1. Claude Code 里 `/mcp` → `platform-docs`、`graph` 应为 **connected**(装了 codegraph 则三个全 connected)。
 2. 让 Claude 调一次 `search_docs`(如查"commit 规范"),应返回相关文档 chunk。
-3. `cross-link` connected,但其工具可能报"DB 不存在" —— 正常,cross-link 数据本流程没建(只覆盖 chroma 检索)。
+3. `graph` connected,但其工具可能报"DB 不存在" —— 正常,graph 统一图谱数据本流程没建(只覆盖 chroma 检索)。
 
 ---
 
@@ -107,7 +107,7 @@ cd <codev-platform 仓> && codegraph init -i   # 建本仓 .codegraph/codegraph.
 | 你想查的 | Claude 用 |
 |---|---|
 | 项目规则 / 设计 / 事故文档 | **platform-docs** `search_docs` |
-| 接口 ↔ 表 ↔ 代码 跨层链路 | **cross-link** |
+| 接口 ↔ 表 ↔ 代码 跨层链路 / 业务域 | **graph**(统一图谱) |
 | 符号 / 调用链 / 改动影响面 | **codegraph** |
 
 > Mac 上 chroma server 是**每个 Claude 会话起一个 stdio 子进程**(加载模型 ~1.1G),无常驻 18083 daemon。所以"重启 daemon" = **Cmd+Q 重开 VSCode**。
@@ -129,7 +129,7 @@ codegraph sync                                     # 代码改了 → 更新代�
 | 想干的事 | Claude 会用 |
 |---|---|
 | 查规则 / 设计 / 事故文档 | platform-docs `search_docs` |
-| 查接口↔表↔代码 全栈链路 | cross-link |
+| 查接口↔表↔代码 全栈链路 / 业务域 | graph(统一图谱) |
 | 查符号 / 调用链 / 影响面 | codegraph |
 
 改了代码 / 文档后**重建索引**(否则 Claude 查到的是旧的):

@@ -322,7 +322,7 @@ def _dep_ok(ep: MCPEndpoint, cfg: dict) -> bool:
 
 
 def _db_present(ep: MCPEndpoint, cfg: dict) -> bool:
-    """该 kind 的数据是否就绪 (cross_layer.sqlite / chroma collection / codegraph 索引)。
+    """该 kind 的数据是否就绪 (graph_store / chroma collection / codegraph 索引)。
 
     多租户单端点 → 按 config.projects 任一项目有数据即视为 present (端点本身可服务)。
     """

@@ -33,7 +33,7 @@ DATA_DIR = chroma_dir()
 _STAMP_PATH = DATA_DIR / ".last_build.json"
 
 # import 期 best-effort 解析单 project (stdio 默认); daemon 多租户按 ?project_id= 路由,
-# 故解析失败不退出 (与 cross_link/codegraph server 同款), 保证 import 始终可成功。
+# 故解析失败不退出 (与 graph/codegraph server 同款), 保证 import 始终可成功。
 try:
     PROJECT_ID = resolve_local()
 except ProjectIdError as _pid_exc:

@@ -113,7 +113,7 @@ def _gpu_free_info() -> dict[str, Any] | None:
 def _gpu_memory_mb() -> float | None:
     """返回 CUDA 当前已分配显存 (MiB), 不可用 / 非 CUDA 返回 None。
 
-    口径限制: 仅统计 daemon 当前 Python 进程 — 不含其它进程 (cross-link MCP / 别的占用).
+    口径限制: 仅统计 daemon 当前 Python 进程 — 不含其它进程 (graph MCP / 别的占用).
     用于 widget 观测 daemon 自身负载, 不等同整卡占用. 整卡 free/used 走
     torch.cuda.mem_get_info(), 后续 Phase 2 可暴露。
     """

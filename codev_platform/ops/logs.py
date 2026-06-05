@@ -1,12 +1,12 @@
 """codev_platform.ops.logs -- 集中查看平台侧日志末 N 行。
 
-  codev-platform logs [--service chroma|cross-link|codegraph|webhook|reindex|audit|all] [--tail N]
+  codev-platform logs [--service chroma|codegraph|webhook|reindex|audit|all] [--tail N]
 
 纯定位 (log_sources) + 薄 IO (tail_file/run_logs)。只读, 从不写。日志本身已是 prod
 脱敏的 (见 obslog), 原样打印, 不额外读 config secret。
 
 source 归属:
-  chroma/cross-link/codegraph : data_root/logs/<prefix>_mcp_server.log (MCP server 进程日志)
+  chroma/codegraph : data_root/logs/<prefix>_mcp_server.log (MCP server 进程日志)
   serve-mcp                   : mcp_serve_logs/*.log (serve-mcp spawn 的端点日志)
   audit                       : core.audit.audit_log_path()
   webhook/reindex             : systemd 服务, 输出走 journal (journalctl -u codev-webhook /

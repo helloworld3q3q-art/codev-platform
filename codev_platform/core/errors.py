@@ -20,7 +20,7 @@ class ErrorCode(str, Enum):
     ACCESS_DENIED = "access_denied"            # 403  ACL / org 不匹配
     PROJECT_UNKNOWN = "project_unknown"        # 404  project_id 未登记 / 未初始化
     DEPENDENCY_MISSING = "dependency_missing"  # 503  torch / 模型 / psycopg 等缺失
-    INDEX_MISSING = "index_missing"            # 503  chroma / cross_layer DB 不存在
+    INDEX_MISSING = "index_missing"            # 503  chroma / graph_store DB 不存在
     UPSTREAM_UNAVAILABLE = "upstream_unavailable"  # 503  下游 daemon / PG / LLM 不可用
     RATE_LIMITED = "rate_limited"              # 429
     INTERNAL = "internal"                      # 500  兜底 (不泄漏 str(e))

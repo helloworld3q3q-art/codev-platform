@@ -65,7 +65,7 @@ def _runner_timeout(cfg: dict) -> float | None:
 class CliReindexRunner:
     """通用 runner: 委托 `python -m codev_platform.cli reindex <flag> --repo <repo>`。
 
-    复用 ops/reindex.py 已测的 per-stage 逻辑 (codegraph sync / chroma indexer / cross_link
+    复用 ops/reindex.py 已测的 per-stage 逻辑 (codegraph sync / chroma indexer / graph
     build) —— "怎么 reindex" 只此一处, 本 runner 不重复。
     """
 

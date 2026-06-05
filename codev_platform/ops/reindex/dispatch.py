@@ -50,7 +50,7 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
 
     # 写侧走队列: hook 只 enqueue 即返回, 常驻 codev-reindex worker 串行消费 (合并/不丢尾/
     # 不并发写)。worker 跑完会刷 ai-health 快照, 故此处不再 spawn reindex / health。
-    # scoped 的 key (chroma/cross_link/codegraph) 即 runner kind, 直接入队。
+    # scoped 的 key (chroma/graph/codegraph) 即 runner kind, 直接入队。
     from codev_platform.reindex import open_default_queue
     q = open_default_queue()
     for kind in scopes:

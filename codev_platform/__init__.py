@@ -2,7 +2,7 @@
 
 模块组织:
     codev_platform.core.project_id   project_id resolver (env / .claude/project.json / HTTP header)
-    codev_platform.core.paths        chroma / cross-link / codegraph 路径约定
+    codev_platform.core.paths        chroma / graph / codegraph 路径约定
     codev_platform.cli               CLI 入口 (init / current / list-projects / validate)
 
 业务项目接入: pip install -e <path-to-codev-platform>; 仓根加 .claude/project.json

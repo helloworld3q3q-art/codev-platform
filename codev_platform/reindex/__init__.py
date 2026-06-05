@@ -20,7 +20,7 @@ __all__ = ["FileSpoolQueue", "Job", "JobQueue", "ReindexWorker", "open_default_q
 
 
 def spool_dir() -> Path:
-    """队列落盘目录: data_root()/reindex_queue (与 chroma / cross_link 数据同源 data/)。"""
+    """队列落盘目录: data_root()/reindex_queue (与 chroma / graph 数据同源 data/)。"""
     from codev_platform.core.paths import data_root
     return data_root() / "reindex_queue"
 

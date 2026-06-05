@@ -21,7 +21,7 @@ codev-platform <子命令> -h        # 看真实参数
 
 ### `health` — 工具栈体检
 
-20+ 项检查：chroma venv / 模型 / torch+CUDA / chroma collection（按 project_id 隔离）/ 索引新鲜度 / platform-docs daemon `/health` / mcp-proxy / cross_layer KG / codegraph db 完整性 / post-commit hook 漏触发 / 近 7 天 usage 统计。退出码：`0` 全绿 / `2` 仅 WARN / `1` 有 FAIL。
+20+ 项检查：chroma venv / 模型 / torch+CUDA / chroma collection（按 project_id 隔离）/ 索引新鲜度 / platform-docs daemon `/health` / mcp-proxy / graph 统一图谱 / codegraph db 完整性 / post-commit hook 漏触发 / 近 7 天 usage 统计。退出码：`0` 全绿 / `2` 仅 WARN / `1` 有 FAIL。
 
 ```bash
 codev-platform health                 # full 模式，体检当前仓
@@ -38,13 +38,12 @@ codev-platform health --json-out <path>   # 写到指定文件
 
 ### `reindex` — 刷新本地 AI 索引
 
-三阶段：codegraph sync → chroma reindex → cross-layer KG rebuild。**默认三个全跑**；给任一 flag 则只跑选中的。
+两阶段：codegraph sync → chroma reindex。**默认两个全跑**；给任一 flag 则只跑选中的。
 
 ```bash
 codev-platform reindex                 # 全跑（前台，看进度）
 codev-platform reindex --chroma        # 只重建 chroma
 codev-platform reindex --codegraph     # 只 codegraph sync
-codev-platform reindex --cross-link    # 只重建 cross-link
 codev-platform reindex --force         # chroma indexer 传 --force（drop + 全重建）
 codev-platform reindex --repo <path>   # 指定仓（默认 git rev-parse 当前仓）
 ```
@@ -53,7 +52,7 @@ codev-platform reindex --repo <path>   # 指定仓（默认 git rev-parse 当前
 
 ### `dirty-check` — 判 MCP 可信度
 
-检查工作树是否有 dirty 文件命中 AI 索引范围（codegraph / cross-link / chroma）。退出码：`0` clean（MCP 可信）/ `1` dirty（建议 grep+Read 兜底）/ `2` 非 git 仓。
+检查工作树是否有 dirty 文件命中 AI 索引范围（codegraph / graph / chroma）。退出码：`0` clean（MCP 可信）/ `1` dirty（建议 grep+Read 兜底）/ `2` 非 git 仓。
 
 ```bash
 codev-platform dirty-check             # 人类可读报告
@@ -63,7 +62,7 @@ codev-platform dirty-check --json      # 输出 JSON 给 AI / 工具（含 affec
 
 ### `post-commit` — git hook 入口
 
-diff 刚提交的 commit，把改动文件按 doc/cross_link/codegraph scope 分类，触发对应 reindex。**永不 fail commit**（异常也 exit 0）。一般不手动跑，由 hook 自动触发。
+diff 刚提交的 commit，把改动文件按 doc/codegraph scope 分类，触发对应 reindex。**永不 fail commit**（异常也 exit 0）。一般不手动跑，由 hook 自动触发。
 
 ```bash
 codev-platform post-commit             # 默认后台 detached 跑 reindex
@@ -162,7 +161,7 @@ codev-platform config init --force
 | **写完代码 commit** | 正常 `git commit`。post-commit hook 自动按 scope 后台 reindex（~30-90s）。需等就 `codev-platform wait-for-reindex` |
 | **改代码前判 MCP 能不能信** | `codev-platform dirty-check`：exit 0 = 索引干净，放心用 MCP；exit 1 = 有 dirty 命中索引范围，关键结论改回读真实文件 |
 | **怀疑工具栈坏了** | `codev-platform health`（三档：full 全探 / light 跳重探针 / `--project X` 审计他项目）。看 banner READY/ATTENTION/BROKEN |
-| **索引明显滞后 / 召回差** | `codev-platform reindex`（全量）或 `--chroma` / `--codegraph` / `--cross-link` 单跑 |
+| **索引明显滞后 / 召回差** | `codev-platform reindex`（全量）或 `--chroma` / `--codegraph` 单跑 |
 | **daemon 崩了 / 占 GPU** | `codev-platform daemon status` 看状态，`daemon stop` 结束（下次 Claude session 自动重拉） |
 | **hook 漏触发了**（health 报 `hook missed?` WARN） | `codev-platform post-commit --foreground` 手动补跑 |
 | **新机器 / 新仓接入** | 见 SETUP.md；新业务仓另跑一次 `install-hooks` |
@@ -177,7 +176,7 @@ codev-platform config init --force
 |---|---|---|
 | 找代码定义 / 调用关系 / 影响面 | **codegraph** | `codegraph_context`（PRIMARY）/ `codegraph_search` / `codegraph_callers` / `codegraph_callees` / `codegraph_impact` |
 | 找规则 / 设计文档 / 事故复盘 | **platform-docs** | `search_docs(query, module?, category?)` / `get_by_file` |
-| 找前端 API ↔ Java endpoint ↔ Table 业务链路 | **cross-link** | `find_endpoint_link` / `find_table_refs` / `search_nodes` / `cross_link_stats` |
+| 找前端 API ↔ Java endpoint ↔ Table 业务链路 / 业务域 | **graph**（统一图谱） | `find_api_callers` / `find_table_usage` / `find_impact` / `find_node_domain` / `search_nodes` |
 
 要点：MCP 已预索引，优先于 `grep`+`Read` 循环；但 dirty 命中索引范围 / 刚 commit 60s 内 / 索引滞后时，MCP 结果仅作导航，关键结论回读真实文件。详见 `.claude/rules/ai-tools-mcp.md`。
 

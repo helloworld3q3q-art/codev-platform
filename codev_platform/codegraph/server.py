@@ -1,5 +1,5 @@
 """codegraph 多租户代理 MCP server —— 把外部 `codegraph serve --mcp` (per-repo stdio,
-无 HTTP) 包成平台统一的多租户 SSE 端点, 与 chroma / cross-link 完全对齐 (?project_id= 路由)。
+无 HTTP) 包成平台统一的多租户 SSE 端点, 与 chroma / graph 完全对齐 (?project_id= 路由)。
 
 架构 (方案 B, 自写多路复用, 不依赖 mcp-proxy):
   业务仓 .mcp.json  --SSE ?project_id=X-->  本 server  --stdio MCP client-->  codegraph serve --mcp (cwd=repo[X])
@@ -7,7 +7,7 @@
 - 一个进程 / 一个端口 / 一个 systemd unit (codev-mcp-codegraph) 服务所有项目
 - 每 project_id 一个 codegraph stdio 后端 (codegraph 按仓, 绕不开), 懒启动 + 复用 + 崩溃重启
 - 工具集原样透传 codegraph 自身的 9 个工具 (callers/impact/context...), 不退化
-- 鉴权 / 健康 / 日志 / contextvar 路由 全镜像 cross_link.server
+- 鉴权 / 健康 / 日志 / contextvar 路由 全镜像 graph.mcp_server
 
 关键: 每后端跑一个**专属 worker task** 全程持有 stdio_client + ClientSession (anyio 的 task
 group / cancel scope 严格绑定创建它的 task, 不能跨 task 用)。请求经 asyncio.Queue 投递、
@@ -84,7 +84,7 @@ _USAGE_LOG = Path(__file__).resolve().parent / "codegraph_usage.jsonl"
 
 def _log_file() -> Path:
     # 落 data_root/logs (非 import 包目录: wheel/只读安装也可写, 见 core.paths.logs_dir)。
-    # 文件名加 codegraph_ 前缀, 与 chroma / cross_link daemon 的同名日志区分, 防多 daemon 碰撞。
+    # 文件名加 codegraph_ 前缀, 与 chroma / graph daemon 的同名日志区分, 防多 daemon 碰撞。
     from codev_platform.core.paths import logs_dir
     return logs_dir() / "codegraph_mcp_server.log"
 
@@ -296,7 +296,7 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
 
 
 # ----------------------------------------------------------------------
-# HTTP (SSE) transport —— 多租户单端点, 镜像 cross_link.run_http
+# HTTP (SSE) transport —— 多租户单端点, 镜像 graph.run_http
 # ----------------------------------------------------------------------
 async def run_http(port: int = _CG_SSE_PORT) -> None:
     from mcp.server.sse import SseServerTransport
