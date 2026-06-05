@@ -67,14 +67,15 @@ class UserService:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能跨组织创建用户")
         if get_user_store().exists(username):
             raise PlatformError(ErrorCode.INVALID_PARAMS, f"user already exists: {username}")
-        role = self._coerce_role(role) if role else None
+        # P0-4: 不传 role 默认 member —— 保证总写 org_members。否则 PG 模式下 org 归属从成员表
+        # 反推, 缺 membership 会落 'default' 丢真实归属 (内存/PG store 行为对齐)。
+        role = self._coerce_role(role) if role else MemberRoleEnum.MEMBER.enum_value
         user = User(
             username=username, password_hash=hash_password(password), org_id=org_id,
             status=STATUS_ACTIVE, display_name=display_name or "", email=email or "",
         )
         get_user_store().create(user)
-        if role:
-            get_member_store().upsert(OrgMember(org_id=org_id, username=username, role=role))
+        get_member_store().upsert(OrgMember(org_id=org_id, username=username, role=role))
         return UserActionResult(username=username, status=user.status)
 
     def update_user(self, *, username: str, display_name: str | None, email: str | None,
@@ -126,6 +127,9 @@ class UserService:
                   caller_is_admin: bool, actor: str) -> UserActionResult:
         """变更用户在某 org 的成员角色 (须审计)。"""
         user = self._require_user(username)
+        # P0-2 越权护栏: 校验目标用户属于 caller org (非 platform_admin), 堵"把外组用户写进本组
+        # 成员表"——其它 5 个写方法都调了此 guard, set_roles 此前漏调是真实跨 org 边界漏洞。
+        self._guard_same_org(user, caller_org_id, caller_is_admin)
         org_id = org_id.strip()
         if not caller_is_admin and org_id != caller_org_id:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能跨组织改角色")

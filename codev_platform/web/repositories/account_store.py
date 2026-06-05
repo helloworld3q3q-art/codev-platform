@@ -120,7 +120,12 @@ def bind_account_stores(cfg: dict | None = None) -> str:
         # 实例化即触发 psycopg_pool import (ConnectionPool open=False 不连库); 缺 psycopg 在此抛。
         pg = {"org": PgOrgStore(dsn), "user": PgUserStore(dsn), "member": PgMemberStore(dsn)}
     except ImportError:
-        # 平台 venv 常态: psycopg 未装 → 始终回退内存
+        # P0-3: prod 配了 PG dsn 却缺 psycopg → fail-fast, 不静默回退内存 (防运维以为用 PG 实际
+        # 走内存, 账户/RBAC 状态重启即丢)。与下方 Exception 分支同策略。
+        mode = _cfg_get(cfg or {}, "deployment.mode", "dev")
+        if mode == "prod":
+            raise
+        # dev / 平台 venv 常态: psycopg 未装 → 回退内存
         _active.update(org=org_store, user=user_store, member=member_store)
         return "memory"
     except Exception as exc:  # noqa: BLE001

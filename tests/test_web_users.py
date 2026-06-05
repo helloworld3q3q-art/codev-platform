@@ -186,6 +186,28 @@ def test_set_roles_updates_member(client):
     assert member_store.get("orgA", "r").role == "admin"
 
 
+def test_set_roles_rejected_for_other_org_user(client):
+    # P0-2: orgA org_admin 不能给 orgB 用户改角色 (即便请求 orgId 传 orgA)。防把外组用户写进本组成员表。
+    auth = _admin_session(org="orgA", username="boss")
+    user_store.upsert(User(username="outsider", password_hash=hash_password("pw123456"),
+                           org_id="orgB"))
+    r = client.post("/api/v1/users/roles", headers=auth,
+                    json={"username": "outsider", "orgId": "orgA", "role": "admin"})
+    assert r.status_code == 403
+    assert r.json()["errors"][0]["errorCode"] == "access_denied"
+    assert member_store.get("orgA", "outsider") is None
+
+
+def test_create_user_writes_default_member(client):
+    # P0-4: 不传 role 创建用户 → 默认写 member 成员关系 (PG 模式 org 归属从成员表反推不丢)。
+    auth = _admin_session(org="orgA", username="boss")
+    r = client.post("/api/v1/users/create", headers=auth,
+                    json={"username": "nomember", "password": "pw123456", "orgId": "orgA"})
+    assert r.status_code == 200
+    m = member_store.get("orgA", "nomember")
+    assert m is not None and m.role == "member"
+
+
 # ---- 授权: 非 admin 被拒 ----
 
 def test_non_admin_cannot_list(client):

@@ -1,4 +1,4 @@
-"""bind_account_stores: prod 模式 PG 初始化失败 fail-fast; dev 回退内存; psycopg 缺失(ImportError)始终回退。"""
+"""bind_account_stores: prod 模式 PG 初始化失败/依赖缺失(ImportError)均 fail-fast; dev 回退内存; 无 dsn 用内存。"""
 from __future__ import annotations
 
 import pytest
@@ -36,6 +36,14 @@ def test_dev_pg_init_failure_falls_back_to_memory(monkeypatch):
     assert account_store.bind_account_stores(_DEV_CFG) == "memory"
 
 
-def test_prod_psycopg_missing_falls_back_to_memory(monkeypatch):
+def test_prod_psycopg_missing_fails_fast(monkeypatch):
+    # P0-3: prod 配了 PG dsn 却缺 psycopg → fail-fast, 不静默回退内存 (防运维误以为用 PG 实际走内存丢数据)。
     monkeypatch.setattr(account_store_pg, "PgOrgStore", _raise_import)
-    assert account_store.bind_account_stores(_PROD_CFG) == "memory"
+    with pytest.raises(ImportError):
+        account_store.bind_account_stores(_PROD_CFG)
+
+
+def test_dev_psycopg_missing_falls_back_to_memory(monkeypatch):
+    # dev / 平台 venv 常态: psycopg 未装 → 回退内存 (开发便利)。
+    monkeypatch.setattr(account_store_pg, "PgOrgStore", _raise_import)
+    assert account_store.bind_account_stores(_DEV_CFG) == "memory"
