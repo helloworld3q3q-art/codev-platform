@@ -61,5 +61,5 @@ dist/
 .claude/skills/
 
 # WSL venv + 本机临时分析产物 (机器本地, 不入仓)
-linux-venv/
+linux-venv
 aa.txt
