@@ -109,6 +109,12 @@ Web 前端 / Java API / Python Pipeline / DB-Flyway / 跨层契约 / AI 工具�
 下表给出"改什么 → 至少读什么 + 必先调什么 MCP"。`workflow.md`(本文件)是默认底层。
 **MCP 优先于 Grep + Read**(Grep 仅在 MCP 不可用 / 索引滞后 / 看未提交改动时兜底)。
 
+> 🔒 **机制兜底(不再纯靠自律)**:本仓装了 PreToolUse(Grep)hook(`.claude/hooks/mcp-first-guard.js`,
+> 经 `codev-platform sync-hooks` 从平台分发),每次 Grep 前自动注入 MCP-first 提醒。防御分三层 ——
+> **① 文档(CLAUDE/rule 本表)→ ② hook(机制,当场拦)→ ③ grep(最后兜底)**。grep 是**最后**手段
+> (上述 4 类场景),不是第一选择;定位/分析先走 codegraph(符号/调用链)/ graph(跨层链路)/ platform-docs(规则文档)。
+> 新仓接入跑一次 `sync-hooks` 即装;hook 是 node 脚本,macOS/Linux/Windows 通吃。
+
 #### 单层任务
 
 | 任务类型 | 必读规则 + skill | 必先调 MCP |

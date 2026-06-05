@@ -73,14 +73,19 @@ pyproject.toml            pip 包定义 (package-data 含 resources/**)
 
 ---
 
-## 四、规则 + Skill 同步策略
+## 四、规则 + Skill + Hook 同步策略
 
-`.claude/rules/` 和 `.claude/skills/` 是 sync 后副本(真值源在 `codev_platform/resources/rules/` 和 `codev_platform/resources/skills/`,2026-06-01 relocate 进包)。
+`.claude/rules/`、`.claude/skills/`、`.claude/hooks/` 是 sync 后副本(真值源在 `codev_platform/resources/{rules,skills,hooks}/`;rules/skills 2026-06-01 relocate 进包,hooks 2026-06-05 加)。
 
 改规则 / skill 时:
 1. **改真值源** — 改 `codev_platform/resources/rules/<name>.md` 或 `codev_platform/resources/skills/<name>/SKILL.md`
 2. **本仓 sync** — `codev-platform sync-rules` + `sync-skills` 重生 `.claude/` 副本
 3. **推送其它业务仓** — 各业务仓跑同样 sync 命令 / 或后续机制(submodule / chroma 双扫)
+
+**Hook(MCP-first 护栏)同步**:`.claude/hooks/mcp-first-guard.js` 是 PreToolUse(Grep)护栏 —— 每次 grep 前注入 MCP-first 提醒,把"定位先走 MCP、grep 最后"从自律变机制(防御三层:文档→hook→grep)。真值源 `codev_platform/resources/hooks/`。
+1. **改真值源** — 改 `codev_platform/resources/hooks/mcp-first-guard.js`
+2. **sync** — `codev-platform sync-hooks`(复制脚本 + 幂等 merge PreToolUse hook 进 `.claude/settings.json`,保留现有 settings 不覆盖)
+3. **各业务仓** — 跑一次 `sync-hooks` 即装。node 脚本跨平台(macOS/Linux/Windows),不依赖 powershell/git-bash
 
 ---
 
