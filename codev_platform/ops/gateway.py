@@ -261,9 +261,10 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         _out(f"OK: {mcp_json}  重写 {changed} 个 sse server url -> {base}/<server>/sse")
         # 反代端口取自 config (非写死), 任何机器自洽: 默认 18xxx, 本机若改过 (如 19xxx) 这里如实打印。
         _cfg = load_config()
+        from codev_platform.mcp_serve import _bind_port  # 端口统一: canonical 键 + daemon.port 别名
         _ports = {
-            "platform-docs": get(_cfg, "daemon.port", 18083),
-            "codegraph": get(_cfg, "mcp.codegraph_sse_port", 18091),
+            "platform-docs": _bind_port(_cfg, "chroma"),
+            "codegraph": _bind_port(_cfg, "codegraph"),
             "webhook": get(_cfg, "webhook.port", 18099),
         }
         _out("  反代须按同前缀路由到对应本机端口 (取自你的 config; 见反代 runbook):")

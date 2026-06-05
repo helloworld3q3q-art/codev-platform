@@ -216,8 +216,9 @@ def _check_chroma_freshness(r: Report, chroma_data: Path, repo: Path) -> None:
 def _daemon_port(cfg: dict) -> str:
     env = os.environ.get("PLATFORM_DOCS_DAEMON_PORT")
     if env:
-        return env
-    return str(cfg_get("daemon.port", 18083, cfg=cfg))
+        return env                                      # 运行态真值(systemd 注入 bind 口)优先
+    from codev_platform.mcp_serve import _bind_port     # 端口统一: canonical 键 + daemon.port 别名
+    return str(_bind_port(cfg, "chroma"))
 
 
 def _check_daemon(r: Report, port: str) -> None:

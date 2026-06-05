@@ -22,8 +22,9 @@ _RETRY_BACKOFF_SEC = 3
 
 
 def _daemon_url() -> str:
-    from codev_platform.core.config import get, load_config
-    port = get(load_config(), "daemon.port", 18083)
+    from codev_platform.core.config import load_config
+    from codev_platform.mcp_serve import _bind_port  # 端口统一: 认 canonical 键 + daemon.port 别名
+    port = _bind_port(load_config(), "chroma")
     return f"http://127.0.0.1:{port}/sse"
 
 
