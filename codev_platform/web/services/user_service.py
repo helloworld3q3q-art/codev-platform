@@ -131,11 +131,13 @@ class UserService:
         # 成员表"——其它 5 个写方法都调了此 guard, set_roles 此前漏调是真实跨 org 边界漏洞。
         self._guard_same_org(user, caller_org_id, caller_is_admin)
         org_id = org_id.strip()
-        if not caller_is_admin and org_id != caller_org_id:
-            raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能跨组织改角色")
+        if org_id != user.org_id:
+            # 单一归属模型: 角色必须写用户真实归属 org (含 platform_admin 路径)。审计 MAJOR —— admin
+            # 路径此前不校验 org_id, 误传可在外组成员表造 orphan membership (RBAC 反推 org 读到幽灵归属)。
+            raise PlatformError(ErrorCode.INVALID_PARAMS, "org_id 与用户归属组织不一致")
         role = self._coerce_role(role)
-        get_member_store().upsert(OrgMember(org_id=org_id, username=username, role=role))
-        self._audit(actor, "user.roles", username, {"org_id": org_id, "role": role})
+        get_member_store().upsert(OrgMember(org_id=user.org_id, username=username, role=role))
+        self._audit(actor, "user.roles", username, {"org_id": user.org_id, "role": role})
         return UserActionResult(username=username, status=user.status)
 
     def selections(self, *, org_id: str) -> list[UserSelectionItem]:

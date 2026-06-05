@@ -118,6 +118,7 @@ def bind_account_stores(cfg: dict | None = None) -> str:
             PgUserStore,
         )
         # 实例化即触发 psycopg_pool import (ConnectionPool open=False 不连库); 缺 psycopg 在此抛。
+        # 注 (审计 MINOR): dsn 连通性 (库存在/网络可达) 不在此校验 —— 惰性连接, 首次真实 query 才暴露。
         pg = {"org": PgOrgStore(dsn), "user": PgUserStore(dsn), "member": PgMemberStore(dsn)}
     except ImportError:
         # P0-3: prod 配了 PG dsn 却缺 psycopg → fail-fast, 不静默回退内存 (防运维以为用 PG 实际

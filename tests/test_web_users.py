@@ -208,6 +208,27 @@ def test_create_user_writes_default_member(client):
     assert m is not None and m.role == "member"
 
 
+def test_create_user_respects_explicit_role(client):
+    # P0-4 对照 (审计补): 显式传 role 时尊重该 role, 不被默认 member 覆盖。
+    auth = _admin_session(org="orgA", username="boss")
+    r = client.post("/api/v1/users/create", headers=auth,
+                    json={"username": "adm", "password": "pw123456", "orgId": "orgA", "role": "admin"})
+    assert r.status_code == 200
+    m = member_store.get("orgA", "adm")
+    assert m is not None and m.role == "admin"
+
+
+def test_set_roles_rejects_mismatched_org_id(client):
+    # 审计 MAJOR 回归: org_id 必须 == 用户真实归属 org (单一归属), 防误传 org_id 造 orphan 成员。
+    auth = _admin_session(org="orgA", username="boss")
+    user_store.upsert(User(username="u2", password_hash=hash_password("pw123456"), org_id="orgA"))
+    # u2 归属 orgA, 传 org_id=orgB → 拒绝, orgB 成员表不留幽灵 membership
+    r = client.post("/api/v1/users/roles", headers=auth,
+                    json={"username": "u2", "orgId": "orgB", "role": "admin"})
+    assert r.status_code != 200
+    assert member_store.get("orgB", "u2") is None
+
+
 # ---- 授权: 非 admin 被拒 ----
 
 def test_non_admin_cannot_list(client):
