@@ -16,6 +16,28 @@ class KeywordScorer(Scorer):
         return [e.id for e in _rank_for_query(entries, query, task_id=ctx.task_id)]
 
 
+class Bm25Scorer(Scorer):
+    """BM25 关键词排序(jieba 中英混合分词 + rank_bm25,纯 CPU,无 GPU)。
+
+    对候选池(已是几十~几百条小集合)现算 BM25,比 KeywordScorer 的子串命中强(词频/分词)。
+    复用 `chroma.bm25.tokenize`(单源中英分词)。依赖(rank_bm25/jieba)缺失由 registry 工厂剔除降级。
+    """
+    name = "bm25"
+
+    def rank(self, entries: list[MemoryEntry], query: str, ctx: RankCtx) -> list[str]:
+        if not entries:
+            return []
+        from rank_bm25 import BM25Okapi  # lazy:仅 bm25 档启用时才付依赖
+
+        from codev_platform.chroma.bm25 import tokenize
+        corpus = [tokenize(e.content) for e in entries]
+        bm25 = BM25Okapi(corpus)
+        scores = bm25.get_scores(tokenize(query))
+        # 稳定降序:同分(如 query 词全不命中 → 全 0)保候选池原序(recency 兜底)
+        ranked = sorted(zip(entries, scores), key=lambda pair: -pair[1])
+        return [e.id for e, _ in ranked]
+
+
 class VectorScorer(Scorer):
     """语义向量排序:经 MemoryVectorIndex.query_ids(已按 org_id + 可见作用域过滤)。
 

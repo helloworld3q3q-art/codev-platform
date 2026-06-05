@@ -12,7 +12,7 @@ from collections.abc import Callable
 from codev_platform.agent.recall.base import Fusion, Reranker, Scorer
 from codev_platform.agent.recall.fusion import RrfFusion
 from codev_platform.agent.recall.reranker import NoReranker
-from codev_platform.agent.recall.scorers import KeywordScorer, VectorScorer
+from codev_platform.agent.recall.scorers import Bm25Scorer, KeywordScorer, VectorScorer
 from codev_platform.agent.recall.service import PipelineRecallService
 
 _log = logging.getLogger(__name__)
@@ -38,11 +38,19 @@ def register_reranker(name: str, factory: Callable[..., Reranker]) -> None:
     _RERANKERS[name] = factory
 
 
-# ---- 内置注册(P0:keyword/vector + rrf + none)----
+# ---- 内置注册(keyword/vector/bm25 + rrf + none)----
 register_scorer("keyword", lambda index=None, **_: KeywordScorer())
 register_scorer("vector", lambda index=None, **_: VectorScorer(index) if index is not None else None)
+register_scorer("bm25", lambda index=None, **_: Bm25Scorer() if _bm25_available() else None)
 register_fusion("rrf", lambda rrf_k=60, **_: RrfFusion(k=rrf_k))
 register_reranker("none", lambda **_: NoReranker())
+
+
+def _bm25_available() -> bool:
+    """rank_bm25 + jieba 都在才启 bm25 档;缺则工厂返 None → 降级跳过(原则 #5)。"""
+    import importlib.util
+    return (importlib.util.find_spec("rank_bm25") is not None
+            and importlib.util.find_spec("jieba") is not None)
 
 
 def _resolve_scorer_names(cfg_get, cfg) -> list[str]:

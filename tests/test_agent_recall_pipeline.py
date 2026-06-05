@@ -82,3 +82,45 @@ def test_rrf_k_and_policy_from_config():
     svc = build_recall_service(
         {"memory": {"recall": {"rrf_k": 42}, "conflict_policy": "org_first"}}, _Store())
     assert svc._fusion._k == 42 and svc._policy == "org_first"
+
+
+# ---- P1: Bm25Scorer ----
+
+def _entry(id, content):
+    from codev_platform.agent.memory_store import MemoryEntry
+    return MemoryEntry(id=id, scope="personal", scope_ref="u", owner_user_id="u", content=content)
+
+
+def test_bm25_ranks_term_match_first():
+    from codev_platform.agent.recall.base import RankCtx
+    from codev_platform.agent.recall.scorers import Bm25Scorer
+    entries = [_entry("a", "数据库连接池超时调优"),
+               _entry("b", "前端暗色主题配色方案"),
+               _entry("c", "数据库索引与查询优化")]
+    ids = Bm25Scorer().rank(entries, "数据库", RankCtx(org_id="o"))
+    assert ids[-1] == "b"                 # 不含"数据库"的垫底
+    assert set(ids[:2]) == {"a", "c"}     # 含"数据库"的排前
+
+
+def test_bm25_empty_entries():
+    from codev_platform.agent.recall.base import RankCtx
+    from codev_platform.agent.recall.scorers import Bm25Scorer
+    assert Bm25Scorer().rank([], "x", RankCtx(org_id="o")) == []
+
+
+def test_registry_bm25_built_when_available():
+    svc = build_recall_service({"memory": {"recall": {"scorers": ["bm25"]}}}, _Store())
+    assert _names(svc) == ["bm25"]        # WSL venv 有 rank_bm25 + jieba
+
+
+def test_registry_vector_plus_bm25():
+    svc = build_recall_service(
+        {"memory": {"recall": {"scorers": ["vector", "bm25"]}}}, _Store(), index=_Idx())
+    assert _names(svc) == ["vector", "bm25"]
+
+
+def test_bm25_degrades_when_deps_missing(monkeypatch):
+    import codev_platform.agent.recall.registry as reg
+    monkeypatch.setattr(reg, "_bm25_available", lambda: False)
+    svc = build_recall_service({"memory": {"recall": {"scorers": ["bm25"]}}}, _Store())
+    assert _names(svc) == ["keyword"]     # bm25 依赖缺 → 剔除 → keyword 地板
