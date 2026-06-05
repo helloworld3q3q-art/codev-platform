@@ -144,3 +144,42 @@ A1 标注准(95%)但"标签躺图谱里没人用"——缺开发端消费前门�
 ## 十六、commit 清单(W1)
 
 均 push 到 `fuwuqi/dev`:`807b65a` `eeea201` `3820651`(统一图谱 MCP)/ `61dfa16`(search_nodes)/ `8ca21e5`(批1 编排)/ `1ac12f0`(批2a metrics)/ `af9dfea`(批A ops)/ `e709338`(批C web)/ `c57b309`(批D 删包)/ `5be567e`(批B 文档)。
+
+---
+
+# W2 续 —— 召回可插拔重构(解构 P0→P3)
+
+> 范围:把召回从 monolith(`recall_service.py` 里 Local/Vector 两个具体类)重构成**可插拔流水线**。
+> 用户诉求原话:"解构,可插拔,可以配置,不要堆代码" + "两个 Qwen 未来要换更好的模型" + "不用那两个模型和 bm25 也能跑虽然效果不好"。plan:`memory-recall-pluggable-pipeline-2026-06-05.md`。commit 见 §二十一,均 push `fuwuqi/dev`。
+
+## 十七、架构 —— 固定不变量 + 可插拔三段 + 双 registry(套用 agent-provider 哲学)
+
+照搬 `agent-provider-architecture.md` 的"协议族 adapter + registry + config 驱动 + 零 if-else":
+- **固定不变量**(在 `recall/service.py:PipelineRecallService` 核心,不可插拔):ACL `visible_scopes` 过滤 → `resolve_conflicts` 去重 → **redline 永置顶** → top-N 截断。这四条是安全/正确性红线,任何 scorer/reranker 都改不动。
+- **可插拔三段**:`Scorer`(候选打分排序)→ `Fusion`(多 scorer 结果融合)→ `Reranker`(精排),全实现 `recall/base.py` 抽象。
+- **双 registry 零 if-else**:`recall/registry.py` 按 config 装 scorers/fusion/reranker;`embed/registry.py` 按 config 装 Embedder/RerankModel。加一档 = `register_*` 一行 + 一个 adapter 类,不动 service/build。
+- **降级地板(原则 #5)**:任何档依赖缺(向量库 None / jieba 缺 / 模型未装 / daemon 不可达)→ 工厂返 None → 跳过该档;scorers 剔空 → 强制补 `KeywordScorer` 地板。**保证零依赖也能跑出可用 pipeline**(即用户要的"不用模型和 bm25 也能跑")。
+
+`recall_service.py` 降为 back-compat shim,`LocalRecallService`/`VectorRecallService` 变 `PipelineRecallService` 薄子类 —— 行为等价由旧测试守(P0 重构后旧测试 60 passed,零回归)。
+
+## 十八、P0 解构 + P1 BM25
+
+- **P0**(`9c96afe` + `d155982` 测试):拆 `recall/` 包(base/scorers/fusion/reranker/service/registry)。`RrfFusion` **自包含 RRF**(公式 `Σ 1/(k+rank+1)`,稳定排序,不 import `chroma`/`core.ranking`)—— 刻意与 W1 正在做的 rrf 迁移解耦,免被其 churn 带崩。审计/测试兄弟过 P0。
+- **P1**(`060143a` + `e0c65ce` NIT 补测):`Bm25Scorer`(jieba 分词 + rank_bm25,纯 CPU,复用 `chroma.bm25.tokenize`),缺 `rank_bm25`/`jieba` 自动降级跳过。审计 NIT:补 tie-break 全 0 分保候选池原序、单文档语料不崩、chromadb 缺失短路降级。
+
+## 十九、P2 模型可换 + 共享实例(避第二份 GPU 模型)
+
+- **P2a 嵌入 registry**(`bb65cb8`):`embed/` 包(qwen/registry)。`QwenLocalEmbedder` 从 `memory_vector_chroma` 提出;`build_embedder(cfg)` 按 `memory.embed.backend` 选(默认 `qwen-local`),device 优先级 `embed.device > embed_device(旧别名) > cpu`。**换模型零核心改**(用户诉求兑现)。
+- **P2b 共享嵌入**(`8510bc1`):关键决策 —— 不让 agent-memory 再 load 第二份 Qwen(8GB GPU 会 OOM,见 memory 教训)。chroma daemon 加 `POST /embed`(复用已加载模型 plain encode),`RemoteEmbedder` RPC 调它。**WSL live PASS**:RemoteEmbedder dim 1024,e2e 走 remote 近瞬时(对比 CPU 本地 ~3.5s)。
+
+## 二十、P3 共享重排(QwenReranker)
+
+- `5d1b3b0`:chroma daemon 加 `POST /rerank`(复用 `_rerank_scores` + GPU 信号量);`RemoteRerankModel` + `recall/reranker.py:QwenReranker`(精排前 top_k,tail 原样接后,打分失败/数量不匹配不动序);`memory_vector.py` 加 `RerankModel` 抽象;registry `register_reranker("qwen")`。**默认关**(`rerank=none`;量小边际收益低,量大一行开)。
+- **WSL live PASS**:`/rerank` 相关文档 **0.9961** vs 无关 **0.0001**;`QwenReranker` 把 `[ui, db]` 重排成 `[db, ui]`,全程走 chroma daemon 那份共享 GPU reranker。
+
+## 二十一、审计 + 能力矩阵 + commit 清单
+
+- **审计**:P0/P1/P2a 已审(各自落项);**P2b+P3 审计 PASS-with-nits 无 BLOCKER** —— 安全(`/embed`/`/rerank` 在 AuthMiddleware 后不裸暴露 + 输入校验 + GPU 信号量真串行)、不变量(redline 在 scorer/reranker 之前拆出,reranker 拿不到)、降级、行为一致(plain encode 与 doc 侧一致)全 PASS。3 NIT 非阻塞:① chroma handler 是 `_run_http` 内闭包无直测;② RemoteRerankModel 真实远端失败路径无 e2e 测;③ `_timeout=30.0` 硬编码非 config。
+- **能力矩阵(用户诉求逐条兑现)**:解构 ✅ / 可插拔 ✅ / 可配置 ✅ / 不堆代码(加档=1 行+1 类)✅ / 模型可换 ✅ / 共用一个模型实例(remote RPC 复用 chroma daemon)✅ / 无模型无 bm25 也能跑(keyword 地板 + 全档降级)✅ / BM25+reranker 可配置开关 ✅。
+- **MCP 端口/配置键统一**:设计已 commit(`1ffc4fd`,`mcp-port-config-unification-2026-06-05.md`),实现**待做**。
+- **commit**(push `fuwuqi/dev`):`9c96afe`(P0 解构)/ `d155982`(P0 测试)/ `060143a`(P1 BM25)/ `bb65cb8`(P2a embed registry)/ `e0c65ce`(P1/P2a NIT)/ `8510bc1`(P2b 共享嵌入)/ `5d1b3b0`(P3 共享重排)。
