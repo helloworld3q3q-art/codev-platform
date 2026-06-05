@@ -37,14 +37,24 @@ def build_rerank_model(cfg: dict) -> RerankModel | None:
     return factory(cfg)
 
 
+def _chroma_base_port(cfg: dict) -> int:
+    """chroma daemon 端口(/embed /rerank 都在它上面)走端口统一的 _bind_port —— 认 canonical
+    键 mcp.platform_docs_sse_port + daemon.port 别名,避免只配 canonical 时这里仍默认 18083。"""
+    from codev_platform.mcp_serve import _bind_port
+    return _bind_port(cfg, "chroma")
+
+
+def _remote_timeout(cfg: dict) -> float:
+    """远端嵌入/重排 HTTP 超时(秒),config 可调;默认 30.0。挂死的 daemon 不会无限阻塞。"""
+    from codev_platform.core.config import get as _get
+    return float(_get(cfg, "memory.embed.timeout", 30.0))
+
+
 def _build_remote_rerank(cfg: dict) -> RerankModel | None:
     from codev_platform.core.config import get as _get
     from codev_platform.agent.embed.remote import RemoteRerankModel
-    url = _get(cfg, "memory.rerank_model.url")
-    if not url:
-        port = _get(cfg, "daemon.port", 18083)
-        url = f"http://127.0.0.1:{port}/rerank"
-    return RemoteRerankModel(url, token=_get(cfg, "memory.embed.token"))
+    url = _get(cfg, "memory.rerank_model.url") or f"http://127.0.0.1:{_chroma_base_port(cfg)}/rerank"
+    return RemoteRerankModel(url, timeout=_remote_timeout(cfg), token=_get(cfg, "memory.embed.token"))
 
 
 register_rerank_model("remote", _build_remote_rerank)
@@ -82,11 +92,8 @@ def _build_remote(cfg: dict) -> Embedder | None:
     无依赖检查(urllib 自带);daemon 不可达在 encode 时降级。"""
     from codev_platform.core.config import get as _get
     from codev_platform.agent.embed.remote import RemoteEmbedder
-    url = _get(cfg, "memory.embed.url")
-    if not url:
-        port = _get(cfg, "daemon.port", 18083)
-        url = f"http://127.0.0.1:{port}/embed"
-    return RemoteEmbedder(url, token=_get(cfg, "memory.embed.token"))
+    url = _get(cfg, "memory.embed.url") or f"http://127.0.0.1:{_chroma_base_port(cfg)}/embed"
+    return RemoteEmbedder(url, timeout=_remote_timeout(cfg), token=_get(cfg, "memory.embed.token"))
 
 
 register_embedder("qwen-local", _build_qwen_local)

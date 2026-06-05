@@ -128,3 +128,45 @@ def test_build_index_none_when_chromadb_missing(monkeypatch):
                         lambda name: None if name == "chromadb" else real(name))
     from codev_platform.agent.memory_vector_chroma import build_memory_vector_index
     assert build_memory_vector_index({}) is None
+
+
+# ---- 端口统一: remote 走 _bind_port(canonical 键)+ timeout config 驱动 ----
+
+def test_remote_embedder_url_honors_canonical_port():
+    # 只配 canonical mcp.platform_docs_sse_port(无 daemon.port)→ remote url 用它,不回落 18083
+    from codev_platform.agent.embed.remote import RemoteEmbedder
+    emb = build_embedder({"memory": {"embed": {"backend": "remote"}},
+                          "mcp": {"platform_docs_sse_port": 29083}})
+    assert isinstance(emb, RemoteEmbedder) and emb._url == "http://127.0.0.1:29083/embed"
+
+
+def test_remote_rerank_url_honors_canonical_port():
+    from codev_platform.agent.embed.registry import build_rerank_model
+    from codev_platform.agent.embed.remote import RemoteRerankModel
+    m = build_rerank_model({"mcp": {"platform_docs_sse_port": 29083}})
+    assert isinstance(m, RemoteRerankModel) and m._url == "http://127.0.0.1:29083/rerank"
+
+
+def test_remote_timeout_config_driven():
+    emb = build_embedder({"memory": {"embed": {"backend": "remote", "timeout": 5.0}}})
+    assert emb._timeout == 5.0
+    assert build_embedder({"memory": {"embed": {"backend": "remote"}}})._timeout == 30.0  # 默认
+
+
+def test_remote_rerank_failure_swallowed_by_qwen_reranker(monkeypatch):
+    # NIT: 真实 RemoteRerankModel 远端失败(urlopen 抛)→ QwenReranker 吞 → 不动序(端到端降级)
+    import urllib.error
+    import urllib.request
+
+    from codev_platform.agent.embed.remote import RemoteRerankModel
+    from codev_platform.agent.memory_store import MemoryEntry
+    from codev_platform.agent.recall.reranker import QwenReranker
+
+    def boom(req, timeout=None):
+        raise urllib.error.URLError("daemon down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    entries = [MemoryEntry(id="a", scope="personal", scope_ref="u", owner_user_id="u", content="x"),
+               MemoryEntry(id="b", scope="personal", scope_ref="u", owner_user_id="u", content="y")]
+    out = QwenReranker(RemoteRerankModel("http://127.0.0.1:1/rerank")).rerank("q", entries, top_k=8)
+    assert [e.id for e in out] == ["a", "b"]   # 远端崩 → 原序返回, 不丢候选不报错
