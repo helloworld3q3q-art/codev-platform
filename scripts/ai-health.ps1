@@ -28,7 +28,7 @@ param(
     # canonical copy in codev-platform/scripts) can health-check any business repo.
     [string]$Repo = '',
     # Optional: override which project's shared index is audited (chroma collection /
-    # cross_layer), independent of -Repo. Default empty = resolve from -Repo's
+    # codegraph), independent of -Repo. Default empty = resolve from -Repo's
     # .claude/project.json. Lets codev-platform inspect any project's index from one place.
     [string]$Project = ''
 )
@@ -168,7 +168,7 @@ if ($Project) {
 
 # Per-project health config (config-driven, no hardcoded per-project paths in code).
 # platform_meta/projects/<id>/meta.json may carry an optional "health" section, e.g.:
-#   "health": { "cross_layer_source_dirs": ["apps/.../migration", "apps/.../mapper"] }
+#   "health": { "reindex_doc_patterns": [...], "reindex_codegraph_patterns": [...] }
 # Absent / new projects => checks degrade gracefully (counts only, no project-specific probes).
 $script:healthCfg = $null
 $metaJsonPath = Join-Path $CodevRoot ('platform_meta\projects\' + $script:projectId + '\meta.json')
@@ -431,8 +431,8 @@ try {
 # 4b3. platform-docs server process count (catch real duplicate GPU daemons)
 try {
     # Match chroma daemon process (new module form `codev_platform.chroma.server`
-    # or legacy `tools\chroma\mcp_server.py`). cross_link MCP uses same chroma
-    # venv so we filter explicitly on chroma server module / script.
+    # or legacy `tools\chroma\mcp_server.py`). Filter explicitly on the chroma
+    # server module / script.
     $pdServers = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" |
         Where-Object {
             $_.CommandLine -and (
@@ -529,124 +529,9 @@ if ((Test-Path $IncidentDir) -and (Test-Path $RulesDir)) {
     Line 'rules vs incident'      'INFO' 'not configured'
 }
 
-# 4d. Cross-layer KG freshness.
-# Data lives in shared codev-platform\data\codegraph_ext, namespaced PER PROJECT.
-# NO legacy unprefixed fallback: the unprefixed cross_layer.sqlite is openclaw's
-# historical data, so falling back would make every project show openclaw's numbers
-# (the bug spotted 2026-05-28). Each project shows ONLY its own per-project DB; a
-# toolstack repo with no full-stack chains (e.g. codev-platform) correctly shows
-# 'not built'. Repos without a cross-link MCP (e.g. widget) skip cleanly.
-$hasCrossLink = $false
-$mcpFile = Join-Path $RepoRoot '.mcp.json'
-if (Test-Path $mcpFile) {
-    try {
-        $mcpData = Get-Content $mcpFile -Encoding UTF8 -Raw | ConvertFrom-Json
-        if ($mcpData.mcpServers -and $mcpData.mcpServers.'cross-link') { $hasCrossLink = $true }
-    } catch { }
-}
-$CrossLayerDb = Join-Path $CodevRoot ('data\codegraph_ext\' + $script:projectId + '\cross_layer.sqlite')
-if ($hasCrossLink -and (Test-Path $CrossLayerDb)) {
-    $size = [math]::Round((Get-Item $CrossLayerDb).Length / 1KB, 1)
-    if (Test-Path $ChromaPy) {
-        $probe3 = @'
-import sys, sqlite3
-try:
-    conn = sqlite3.connect(r"__DB__")
-    cur = conn.cursor()
-    cur.execute("select count(*) from nodes")
-    n = cur.fetchone()[0]
-    cur.execute("select count(*) from edges")
-    e = cur.fetchone()[0]
-    cur.execute("select value from build_meta where key='last_build_at'")
-    row = cur.fetchone()
-    last = row[0] if row else "?"
-    print("nodes=" + str(n) + " edges=" + str(e) + " last=" + last)
-except Exception as exc:
-    print("ERR " + repr(exc))
-    sys.exit(2)
-'@
-        $probe3 = $probe3.Replace('__DB__', $CrossLayerDb)
-        $tmp3 = Join-Path $env:TEMP ('ai_health_xlayer_' + [guid]::NewGuid().ToString('N') + '.py')
-        Set-Content -Path $tmp3 -Value $probe3 -Encoding ASCII
-        try {
-            $out3 = & cmd /c "`"$ChromaPy`" `"$tmp3`" 2>&1"
-            $rc3 = $LASTEXITCODE
-            if ($rc3 -eq 0) {
-                # Compare last_build_at vs latest source mtime. Source dirs are
-                # project-declared in meta.json health.cross_layer_source_dirs
-                # (no hardcoded per-project paths). Absent => skip lag, show counts only.
-                $srcDirs = @()
-                if ($script:healthCfg -and $script:healthCfg.cross_layer_source_dirs) {
-                    foreach ($rel in $script:healthCfg.cross_layer_source_dirs) {
-                        $srcDirs += (Join-Path $RepoRoot ($rel -replace '/', '\'))
-                    }
-                }
-                $latestSrc = $null
-                foreach ($d in $srcDirs) {
-                    if (Test-Path $d) {
-                        $c = Get-ChildItem -Path $d -Recurse -File -ErrorAction SilentlyContinue |
-                             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                        if ($c -and ($null -eq $latestSrc -or $c.LastWriteTime -gt $latestSrc.LastWriteTime)) {
-                            $latestSrc = $c
-                        }
-                    }
-                }
-                $buildAt = $null
-                if ($out3 -match 'last=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})') {
-                    $buildAt = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $null)
-                }
-                if ($buildAt -and $latestSrc) {
-                    $lagDays = [int]([math]::Round(($latestSrc.LastWriteTime - $buildAt).TotalDays))
-                    if ($lagDays -le 0) {
-                        Line 'cross_layer' 'OK'   ($out3 -join ' ')
-                    } elseif ($lagDays -le 1) {
-                        Line 'cross_layer' 'OK'   (($out3 -join ' ') + ' (lag <=1d)')
-                    } else {
-                        Line 'cross_layer' 'WARN' (($out3 -join ' ') + ' (lag ' + $lagDays + 'd vs ' + $latestSrc.Name + ' - run python -m cross_link.build_index)')
-                    }
-                } else {
-                    Line 'cross_layer' 'OK'   ($out3 -join ' ')
-                }
-            } else {
-                Line 'cross_layer' 'FAIL' ($out3 -join ' ')
-            }
-        } finally {
-            Remove-Item -Path $tmp3 -Force -ErrorAction SilentlyContinue
-        }
-    }
-} elseif (-not $hasCrossLink) {
-    Line 'cross_layer' 'INFO' 'not configured'
-} else {
-    Line 'cross_layer' 'INFO' 'configured, index not built'
-}
-
-# 4e. cross-link MCP process diagnostics
-# cross-link is still per-session stdio. Multiple sessions are expected, but
-# report process-chain roots so uv/venv shim children do not look like extra
-# independent sessions.
-try {
-    $clServers = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" |
-        Where-Object {
-            $_.CommandLine -and
-            $_.CommandLine -match 'cross_link[\\/]mcp_server\.py'
-        })
-    if ($clServers.Count -eq 0) {
-        Line 'cross-link mcp' 'OK' 'no running cross-link MCP server'
-    } else {
-        $clPidSet = @($clServers | ForEach-Object { [int]$_.ProcessId })
-        $clRootServers = @($clServers | Where-Object { -not ($clPidSet -contains [int]$_.ParentProcessId) })
-        $chainCount = $clRootServers.Count
-        if ($chainCount -le 0) { $chainCount = $clServers.Count }
-        $pids = ($clServers | ForEach-Object { $_.ProcessId }) -join ','
-        if ($chainCount -eq 1) {
-            Line 'cross-link mcp' 'INFO' ('stdio chain count=1 process-chain pids=' + $pids)
-        } else {
-            Line 'cross-link mcp' 'INFO' ('stdio chain count=' + $chainCount + ' process-chain pids=' + $pids + ' (expected with multiple AI sessions; read-only queries share cross_layer db)')
-        }
-    }
-} catch {
-    Line 'cross-link mcp' 'WARN' ('process probe failed: ' + $_.Exception.Message)
-}
+# 4d. cross-layer KG freshness + cross-link MCP diagnostics: retired 2026-06-05.
+# cross-link MCP removed (codev_platform.cross_link package deleted); the graph
+# unified-graph (find_table_usage / find_api_callers / search_nodes) took over.
 
 # 5. CodeGraph DB + node count
 # Check .rebuild.lock first - if rebuild in progress, DB may show half-truncated
@@ -773,7 +658,7 @@ try {
         # Reuse the same per-project reindex-scope patterns post-commit.ps1 uses
         # (single source of truth in meta.json health.reindex_*_patterns).
         $metaIndexable = @()
-        foreach ($k in @('reindex_doc_patterns', 'reindex_cross_link_patterns', 'reindex_codegraph_patterns')) {
+        foreach ($k in @('reindex_doc_patterns', 'reindex_codegraph_patterns')) {
             if ($script:healthCfg -and $script:healthCfg.$k) { $metaIndexable += @($script:healthCfg.$k) }
         }
         $indexablePatterns = $defaultIndexable + $metaIndexable
@@ -904,12 +789,12 @@ try {
         '^\.claude/(rules|skills)/.*\.md$',
         '^apps/[^/]+/\.claude/rules/.*\.md$',
         '^docs/.*\.md$',
-        '^tools/(dev|chroma|cross_link)/',
+        '^tools/(dev|chroma)/',
         '^scripts/.*\.(ps1|cmd|bat)$'
     )
     $defaultStrictPatterns = @(
         '^\.claude/(rules|skills)/',
-        '^tools/(dev|chroma|cross_link)/'
+        '^tools/(dev|chroma)/'
     )
     $metaCandidate = if ($script:healthCfg -and $script:healthCfg.mcp_candidate_patterns) { @($script:healthCfg.mcp_candidate_patterns) } else { @() }
     $metaStrict    = if ($script:healthCfg -and $script:healthCfg.mcp_strict_patterns) { @($script:healthCfg.mcp_strict_patterns) } else { @() }
@@ -995,44 +880,8 @@ try {
     Line 'mcp usage 7d'         'WARN' ('compute error: ' + $_.Exception.Message)
 }
 
-# 9.4 cross-link usage stats from structured cross_link_usage.jsonl (per-tool telemetry).
-# The log is written by codev_platform.cross_link.server next to its module file
-# (codev-platform package dir), shared across all projects; records carry project_id.
-# Locate via the canonical script root ($PSScriptRoot\.. = codev-platform root),
-# which is correct regardless of the -Repo business repo being audited.
-try {
-    $ClUsageLog = Join-Path $CodevRoot 'codev_platform\cross_link\cross_link_usage.jsonl'
-    if (Test-Path $ClUsageLog) {
-        $cutoff7b = (Get-Date).AddDays(-7)
-        $clRows = @()
-        Get-Content $ClUsageLog -Encoding UTF8 | ForEach-Object {
-            if ($_ -and $_.Trim()) {
-                try {
-                    $o = $_ | ConvertFrom-Json
-                    $keep = $true
-                    if ($o.ts) { $t = [datetime]$o.ts; if ($t -lt $cutoff7b) { $keep = $false } }
-                    if ($keep) { $clRows += $o }
-                } catch { }
-            }
-        }
-        $clTotal = $clRows.Count
-        if ($clTotal -eq 0) {
-            Line 'cross-link usage' 'INFO' 'no cross-link calls (last 7d)'
-        } else {
-            $byTool = @($clRows | Group-Object tool | ForEach-Object { $_.Name + '=' + $_.Count })
-            $okCount = @($clRows | Where-Object { $_.ok }).Count
-            $okRate = [math]::Round(100.0 * $okCount / $clTotal, 0)
-            $lat = @($clRows | Where-Object { $_.elapsed_ms -ne $null } | ForEach-Object { [double]$_.elapsed_ms } | Sort-Object)
-            $medLat = if ($lat.Count -gt 0) { [math]::Round($lat[[math]::Floor($lat.Count / 2)], 0).ToString() + 'ms' } else { 'n/a' }
-            $clDetail = $clTotal.ToString() + ' calls / ok=' + $okRate.ToString() + '% / median=' + $medLat + ' / ' + ($byTool -join ',')
-            Line 'cross-link usage' 'INFO' ($clDetail + ' last 7d')
-        }
-    } else {
-        Line 'cross-link usage' 'INFO' 'cross_link_usage.jsonl not found (no calls yet)'
-    }
-} catch {
-    Line 'cross-link usage' 'WARN' ('compute error: ' + $_.Exception.Message)
-}
+# 9.4 cross-link usage stats: retired 2026-06-05 (cross-link MCP removed; the graph
+# unified-graph took over its queries). Telemetry section dropped.
 
 Line 'codegraph usage' 'INFO' 'not logged by project scripts yet; ai-health reports process/db health only'
 

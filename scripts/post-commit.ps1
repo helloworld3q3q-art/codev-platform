@@ -1,24 +1,25 @@
 # --------------------------------------------------------------------
 # post-commit.ps1
-# Auto-trigger chroma reindex + cross_link rebuild after commits that
-# changed docs / rules / agents OR code that feeds the cross-layer KG.
+# Auto-trigger chroma reindex + codegraph sync after commits that
+# changed docs / rules / agents OR indexable source code.
 #
 # Invoked from .git/hooks/post-commit (sh stub) -> exec powershell -File post-commit.ps1
 # Rationale: Git for Windows sh.exe sometimes errors (add_item / errno 1)
 # on PATH conflicts; sh stub exec's PowerShell immediately so we never run
 # real logic in sh.
 #
-# Trigger categories (-> chroma / cross_link / codegraph reindex), dispatched
-# separately. Match patterns are PROJECT-DECLARED in meta.json health.* (project-
-# name-free generic defaults live in code; each project EXTENDS via its meta):
-#   DOC      -> chroma     : generic doc globs + health.reindex_doc_patterns
-#   CROSS_LINK -> cross_link: health.reindex_cross_link_patterns (no generic default)
-#   CODEGRAPH  -> codegraph : generic source glob + health.reindex_codegraph_patterns
+# Trigger categories (-> chroma / codegraph reindex), dispatched separately.
+# Match patterns are PROJECT-DECLARED in meta.json health.* (project-name-free
+# generic defaults live in code; each project EXTENDS via its meta):
+#   DOC       -> chroma   : generic doc globs + health.reindex_doc_patterns
+#   CODEGRAPH -> codegraph : generic source glob + health.reindex_codegraph_patterns
 # Adding a project needs no code edit here -- declare its paths in meta.json.
+# (The former CROSS_LINK -> cross_link category was retired 2026-06-05; cross-link
+# MCP removed, graph unified-graph took over.)
 #
-# When both match: spawn one bg job calling update-local-ai -SkipCodeGraph (both)
-# When only doc:   spawn chroma reindex only (skip cross_link save 2s)
-# When only code:  spawn cross_link rebuild only (skip chroma save ~90s)
+# When both match: spawn one bg job (chroma + codegraph)
+# When only doc:   spawn chroma reindex only (skip codegraph)
+# When only code:  spawn codegraph sync only (skip chroma save ~90s)
 # When neither:    silent no-op
 # Never fails the commit even if reindex spawn errors.
 #
@@ -68,17 +69,13 @@ try {
         '^docs/.*\.md$', '^\.claude/(rules|skills)/.*\.md$', '^apps/[^/]+/\.claude/rules/.*\.md$',
         '^tools/.*\.md$', '.*CLAUDE\.md$', '.*AGENTS\.md$', '^README\.md$'
     ) + (Get-MetaPatterns 'reindex_doc_patterns')
-    # CROSS_LINK -> cross_link rebuild. No universal default (feeds are stack-specific);
-    # project declares via reindex_cross_link_patterns.
-    $crossLinkPatterns = @() + (Get-MetaPatterns 'reindex_cross_link_patterns')
     # CODEGRAPH -> codegraph sync. Generic source default + reindex_codegraph_patterns.
     $codegraphPatterns = @('^apps/[^/]+/src/.*\.(java|ts|tsx)$') + (Get-MetaPatterns 'reindex_codegraph_patterns')
 
     $docMatched       = @($changed | Where-Object { Test-AnyPattern $_ $docPatterns })
-    $crossLinkMatched = @($changed | Where-Object { Test-AnyPattern $_ $crossLinkPatterns })
     $codegraphMatched = @($changed | Where-Object { Test-AnyPattern $_ $codegraphPatterns })
 
-    if ($docMatched.Count -eq 0 -and $crossLinkMatched.Count -eq 0 -and $codegraphMatched.Count -eq 0) { exit 0 }
+    if ($docMatched.Count -eq 0 -and $codegraphMatched.Count -eq 0) { exit 0 }
 
     $updateScript = Join-Path $repoRoot 'tools\dev\update-local-ai.ps1'
     $logFile      = Join-Path $repoRoot 'tools\chroma\reindex.log'
@@ -91,14 +88,12 @@ try {
     # 2026-05-22: codegraph watcher 弃用（写崩 db），改用 hook 触发增量 sync
     $scopes = @()
     if ($docMatched.Count       -gt 0) { $scopes += 'chroma' }
-    if ($crossLinkMatched.Count -gt 0) { $scopes += 'cross_link' }
     if ($codegraphMatched.Count -gt 0) { $scopes += 'codegraph' }
 
-    # update-local-ai takes inverse flags. Default = run all 3 stages.
+    # update-local-ai takes inverse flags. Default = run all stages.
     $extraFlags = @()
     if ($scopes -notcontains 'codegraph')  { $extraFlags += '-SkipCodeGraph' }
     if ($scopes -notcontains 'chroma')     { $extraFlags += '-SkipChroma' }
-    if ($scopes -notcontains 'cross_link') { $extraFlags += '-SkipCrossLink' }
 
     $commitSha = (& git rev-parse HEAD 2>$null).Trim()
     Write-Host ('[post-commit] ' + ($scopes -join '+') + ' changed, spawning background reindex...')
@@ -112,9 +107,8 @@ try {
     # Sync header (lands before background output)
     $startStamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     # De-duplicate matched paths (a file may match both doc + code patterns,
-    # e.g. tools/**/*.md hitting docPattern and codegraph rarely; or a Mapper.java
-    # hitting both crossLink + codegraph).
-    $allMatched = @($docMatched + $crossLinkMatched + $codegraphMatched) |
+    # e.g. tools/**/*.md hitting docPattern and codegraph rarely).
+    $allMatched = @($docMatched + $codegraphMatched) |
                   Sort-Object -Unique
     $headerLines = @(
         '',

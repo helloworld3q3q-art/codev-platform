@@ -6,8 +6,8 @@
 
 | 脚本 | 用途 | 参数化状态 |
 |---|---|---|
-| `ai-health.ps1` | 工具栈体检(12 项含 daemon /health + chroma chunks + cross-link nodes + codegraph + Qwen3 + GPU) | ✅ **已参数化 `-Repo`,本目录是真值源**;业务仓只留瘦 wrapper 转发 |
-| `update-local-ai.ps1` | 三件套刷新(codegraph + chroma + cross-link) | ⚠️ 同上 |
+| `ai-health.ps1` | 工具栈体检(daemon /health + chroma chunks + codegraph + graph 统一图谱 + Qwen3 + GPU) | ✅ **已参数化 `-Repo`,本目录是真值源**;业务仓只留瘦 wrapper 转发 |
+| `update-local-ai.ps1` | 两件套刷新(codegraph + chroma;cross-link 已退役,graph 统一图谱承接) | ⚠️ 同上 |
 | `wait-for-reindex.ps1` | polling reindex.log 等就绪 | ✅ 通用 |
 | `dirty-index-check.ps1` | git status × AI 索引范围交叉 | ✅ 通用 |
 | `clean-local-artifacts.ps1` | 清 logs / __pycache__ / temp | ✅ 通用,白名单可扩 |

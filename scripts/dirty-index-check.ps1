@@ -1,6 +1,6 @@
 # --------------------------------------------------------------------
 # dirty-index-check.ps1
-# 检查当前工作树是否有 dirty 文件命中 AI 索引范围(CodeGraph / cross-link / Chroma)。
+# 检查当前工作树是否有 dirty 文件命中 AI 索引范围(CodeGraph / Chroma)。
 # 命中即提示"索引可能滞后",建议跑 update-local-ai.ps1 或允许 grep+Read 兜底。
 #
 # 用法:
@@ -68,14 +68,12 @@ function Test-AnyPattern($text, $patterns) {
     return $false
 }
 $codegraphPats = @('^apps/[^/]+/src/.*\.(java|ts|tsx)$') + (Get-MetaPatterns 'reindex_codegraph_patterns')
-$crossLinkPats = @() + (Get-MetaPatterns 'reindex_cross_link_patterns')
 $chromaPats    = @('^docs/.*\.md$', '^\.claude/(rules|skills)/.*\.md$', '^apps/[^/]+/\.claude/rules/.*\.md$', '^tools/.*\.md$', '.*CLAUDE\.md$', '.*AGENTS\.md$', '^README\.md$') + (Get-MetaPatterns 'reindex_doc_patterns')
 
 $affectedCg  = @($dirtyPaths | Where-Object { Test-AnyPattern $_ $codegraphPats })
-$affectedCl  = @($dirtyPaths | Where-Object { Test-AnyPattern $_ $crossLinkPats })
 $affectedCh  = @($dirtyPaths | Where-Object { Test-AnyPattern $_ $chromaPats })
 
-$totalAffected = @($affectedCg + $affectedCl + $affectedCh) | Sort-Object -Unique
+$totalAffected = @($affectedCg + $affectedCh) | Sort-Object -Unique
 $dirty = $totalAffected.Count -gt 0
 
 if ($Json) {
@@ -83,7 +81,6 @@ if ($Json) {
         dirty    = $dirty
         affected = [ordered]@{
             codegraph  = $affectedCg
-            cross_link = $affectedCl
             chroma     = $affectedCh
         }
         total_dirty_files = $dirtyPaths.Count
@@ -101,7 +98,7 @@ if ($Quiet) {
 Write-Host ''
 if (-not $dirty) {
     Write-Host 'no dirty files in AI index scope' -ForegroundColor Green
-    Write-Host ('working tree has ' + $dirtyPaths.Count + ' dirty file(s) but none in CodeGraph/cross-link/Chroma scope') -ForegroundColor DarkGray
+    Write-Host ('working tree has ' + $dirtyPaths.Count + ' dirty file(s) but none in CodeGraph/Chroma scope') -ForegroundColor DarkGray
     exit 0
 }
 
@@ -110,10 +107,6 @@ Write-Host ''
 if ($affectedCg.Count -gt 0) {
     Write-Host ('[CodeGraph  ] ' + $affectedCg.Count + ' file(s):') -ForegroundColor Cyan
     $affectedCg | ForEach-Object { Write-Host ('  ' + $_) -ForegroundColor DarkGray }
-}
-if ($affectedCl.Count -gt 0) {
-    Write-Host ('[cross-link ] ' + $affectedCl.Count + ' file(s):') -ForegroundColor Cyan
-    $affectedCl | ForEach-Object { Write-Host ('  ' + $_) -ForegroundColor DarkGray }
 }
 if ($affectedCh.Count -gt 0) {
     Write-Host ('[Chroma     ] ' + $affectedCh.Count + ' file(s):') -ForegroundColor Cyan
