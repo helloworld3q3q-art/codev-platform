@@ -138,3 +138,44 @@ def test_probe_all_shape(monkeypatch):
     rows = ms.probe_all({"daemon": {"port": 18083}, "projects": {}})
     assert all({"name", "kind", "port", "status", "sse_url", "self_spawned"} <= set(r) for r in rows)
     assert any(r["kind"] == "graph" for r in rows)
+
+
+# ---- P0: _bind_port 端口解析收敛(canonical > deprecated 别名 > 默认)----
+
+def test_bind_port_canonical_key_wins():
+    cfg = {"mcp": {"platform_docs_sse_port": 29083, "codegraph_sse_port": 29091,
+                   "agent_memory_sse_port": 29087, "graph_sse_port": 29092}}
+    assert ms._bind_port(cfg, "chroma") == 29083
+    assert ms._bind_port(cfg, "codegraph") == 29091
+    assert ms._bind_port(cfg, "agent_memory") == 29087
+    assert ms._bind_port(cfg, "graph") == 29092
+
+
+def test_bind_port_defaults_when_unset():
+    assert ms._bind_port({}, "chroma") == ms.DEFAULT_CHROMA_PORT
+    assert ms._bind_port({}, "codegraph") == ms.DEFAULT_CODEGRAPH_PORT
+    assert ms._bind_port({}, "agent_memory") == ms.DEFAULT_AGENT_MEMORY_PORT
+    assert ms._bind_port({}, "graph") == ms.DEFAULT_GRAPH_PORT
+
+
+def test_bind_port_chroma_daemon_alias_works_and_warns_once(monkeypatch, caplog):
+    # chroma 历史键 daemon.port 仍可读(别名),命中时一次性 warn
+    monkeypatch.setattr(ms, "_warned_deprecated", set())  # 隔离一次性状态
+    import logging
+    with caplog.at_level(logging.WARNING):
+        assert ms._bind_port({"daemon": {"port": 19083}}, "chroma") == 19083
+        ms._bind_port({"daemon": {"port": 19083}}, "chroma")  # 第二次不再 warn
+    warns = [r for r in caplog.records if "daemon.port" in r.getMessage()]
+    assert len(warns) == 1 and "platform_docs_sse_port" in warns[0].getMessage()
+
+
+def test_bind_port_canonical_beats_alias():
+    # 同时配 canonical 与 daemon.port 别名 → canonical 胜,不 warn
+    cfg = {"mcp": {"platform_docs_sse_port": 28083}, "daemon": {"port": 19083}}
+    assert ms._bind_port(cfg, "chroma") == 28083
+
+
+def test_iter_endpoints_uses_canonical_chroma_port():
+    eps = ms.iter_endpoints({"mcp": {"platform_docs_sse_port": 27083}, "projects": {}})
+    chroma = next(e for e in eps if e.kind == "chroma")
+    assert chroma.port == 27083

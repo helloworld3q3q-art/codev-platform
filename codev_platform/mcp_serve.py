@@ -17,6 +17,7 @@ server 模式** 包成 SSE,保全工具集 (callers/impact/context...),不退化
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -29,12 +30,55 @@ from typing import Any
 
 from codev_platform.core.config import get as _cfg_get, load_config
 
+_log = logging.getLogger(__name__)
 
-# 默认端口 (config 可覆盖)。chroma 沿用 daemon.port;codegraph 走 mcp.*。
+
+# 默认端口 (config 可覆盖)。4 套统一 canonical 键 mcp.<service>_sse_port (见 _SERVICE_PORTS);
+# chroma 历史键 daemon.port 保留为 deprecated 别名 (env/systemd/launcher 链深, 不强迁)。
 DEFAULT_CHROMA_PORT = 18083
 DEFAULT_CODEGRAPH_PORT = 18091  # codegraph 多租户代理端点 (单端点, mcp.codegraph_sse_port 覆盖)
 DEFAULT_AGENT_MEMORY_PORT = 18087  # agent memory MCP 前门 (mcp.agent_memory_sse_port 覆盖)
 DEFAULT_GRAPH_PORT = 18092  # 统一图谱 MCP (impact + A1 业务域; mcp.graph_sse_port 覆盖)
+
+
+# 服务键注册表: kind -> (canonical 键, [deprecated 别名], 默认端口)。端口真值收敛此处,
+# iter_endpoints / systemd 注入 / local 源派生 全走 _bind_port,消灭散落的 `_cfg_get(...) or DEFAULT`。
+_SERVICE_PORTS: dict[str, tuple[str, list[str], int]] = {
+    "chroma":       ("mcp.platform_docs_sse_port", ["daemon.port"], DEFAULT_CHROMA_PORT),
+    "codegraph":    ("mcp.codegraph_sse_port",     [],              DEFAULT_CODEGRAPH_PORT),
+    "agent_memory": ("mcp.agent_memory_sse_port",  [],              DEFAULT_AGENT_MEMORY_PORT),
+    "graph":        ("mcp.graph_sse_port",         [],              DEFAULT_GRAPH_PORT),
+}
+
+# kind -> 客户端 tool 名 (mcp_sources / DEFAULT_MCP_SOURCES 里的键),local 源端口派生用。
+_KIND_TO_TOOL = {
+    "chroma": "platform-docs", "codegraph": "codegraph",
+    "agent_memory": "agent-memory", "graph": "graph",
+}
+
+_warned_deprecated: set[str] = set()
+
+
+def _warn_deprecated(old_key: str, canonical: str) -> None:
+    """旧别名命中时一次性 warn (避免日志刷屏);别名仍可读,只提示推荐键。"""
+    if old_key not in _warned_deprecated:
+        _warned_deprecated.add(old_key)
+        _log.warning("[mcp] config 键 %r 已废弃,请改用 %r(仍兼容可读,后续版本移除)",
+                     old_key, canonical)
+
+
+def _bind_port(cfg: dict, kind: str) -> int:
+    """服务端 bind 端口: canonical 键 > deprecated 别名(带一次性 warn)> 默认。端口真值单一入口。"""
+    canonical, aliases, default = _SERVICE_PORTS[kind]
+    v = _cfg_get(cfg, canonical)
+    if v is not None:
+        return int(v)
+    for alias in aliases:
+        v = _cfg_get(cfg, alias)
+        if v is not None:
+            _warn_deprecated(alias, canonical)
+            return int(v)
+    return default
 
 
 @dataclass
@@ -160,7 +204,7 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     # chroma daemon。业务仓 .mcp.json 走 type:sse 直连后, 失去 launcher 的 per-session
     # auto-spawn → `serve-mcp start` 负责把它拉起作常驻 (residency)。self_spawned=True 仅
     # 表示它也可被业务仓 Claude 会话经 launcher 拉起 (两条路径幂等: 已起则都跳过)。
-    chroma_port = int(_cfg_get(cfg, "daemon.port") or DEFAULT_CHROMA_PORT)
+    chroma_port = _bind_port(cfg, "chroma")
     out.append(MCPEndpoint(
         name="platform-docs", kind="chroma", port=chroma_port,
         cmd=[str(venv_py), "-m", "codev_platform.chroma.server", "--http"],
@@ -170,19 +214,19 @@ def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     # codegraph 多租户单端点 (方案 B): 平台自写代理, 按 ?project_id= 懒启动 per-repo 后端 +
     # 转发。端口固定 mcp.codegraph_sse_port (不再 per-project 浮动); repo_path 由代理自行
     # 从 config.projects 解析。一个进程 / 一个 systemd unit (codev-mcp-codegraph) 服务所有项目。
-    cg_port = int(_cfg_get(cfg, "mcp.codegraph_sse_port") or DEFAULT_CODEGRAPH_PORT)
+    cg_port = _bind_port(cfg, "codegraph")
     out.append(MCPEndpoint(name="codegraph", kind="codegraph", port=cg_port,
                            cmd=build_codegraph_cmd(venv_py, cg_port)))
 
     # agent-memory (本仓, 本编排器拉起)。同一 PG 靠 org_id 列隔离, 多租户单端点 (?project_id=
     # 仅用于 project-scope 记忆 + 项目 ACL 闸); org/user 走认证身份 (见 agent/memory_mcp.py)。
-    mem_port = int(_cfg_get(cfg, "mcp.agent_memory_sse_port") or DEFAULT_AGENT_MEMORY_PORT)
+    mem_port = _bind_port(cfg, "agent_memory")
     out.append(MCPEndpoint(name="agent-memory", kind="agent_memory", port=mem_port,
                            cmd=build_agent_memory_cmd(venv_py, mem_port)))
 
     # graph (本仓, 本编排器拉起)。统一图谱 MCP: impact + A1 业务域查询, 多租户单端点
     # (?project_id= 路由 data/graph_store/<pid>.sqlite)。让开发端 agent 查整个统一图谱 + 业务域。
-    graph_port = int(_cfg_get(cfg, "mcp.graph_sse_port") or DEFAULT_GRAPH_PORT)
+    graph_port = _bind_port(cfg, "graph")
     out.append(MCPEndpoint(name="graph", kind="graph", port=graph_port,
                            cmd=build_graph_cmd(venv_py, graph_port)))
     return out
