@@ -140,6 +140,7 @@
       <a href="#distribute">分发链路</a>
       <a href="#isolation">数据隔离</a>
       <a href="#mcp">MCP 与索引</a>
+      <a href="#tools">MCP 工具清单</a>
       <a href="#concurrency">并发治理</a>
       <a href="#workflow">开发工作流</a>
       <a href="#metrics">效率与准确率</a>
@@ -773,6 +774,62 @@
               <td>env &gt; project.json &gt; 硬失败;collection 名 <code>&lt;project_id&gt;__platform_docs</code> 物理隔离。</td>
             </tr>
           </table>
+        </section>
+
+        <section id="tools">
+          <h2>MCP 工具清单 (AI 实际调用的)</h2>
+          <p>四套 MCP 服务对外暴露给 Claude Code / Codex 等编程 AI 的工具全集。<strong>改代码前按"要查什么"选对工具,优先 MCP 而非 grep+Read</strong> —— 已预索引,精确且省上下文 10×。本地 <code>MEMORY.md</code> 自动加载(跨会话偏好,无需调工具)。</p>
+
+          <h3>① codegraph — 代码图谱(找定义 / 调用链 / 影响面)</h3>
+          <table>
+            <tr><th>工具</th><th>中文用途</th><th>何时用</th></tr>
+            <tr><td><code>codegraph_context</code></td><td><strong>PRIMARY</strong>:一次返回 search + node + callers + callees 组合(等价 4-5 次单调用)</td><td>onboarding /「如何理解 X」/「怎么改 Y」第一步</td></tr>
+            <tr><td><code>codegraph_search</code></td><td>找符号定义 / 签名 / 文件:行</td><td>找类、函数、接口在哪</td></tr>
+            <tr><td><code>codegraph_callers</code></td><td>谁调用了它(反向调用方)</td><td>改函数前看影响哪些调用方</td></tr>
+            <tr><td><code>codegraph_callees</code></td><td>它调用了谁(正向依赖)</td><td>理解某函数依赖什么</td></tr>
+            <tr><td><code>codegraph_impact</code></td><td>改动波及面(blast radius)</td><td>评估改动影响半径</td></tr>
+            <tr><td><code>codegraph_node</code> · <code>_explore</code> · <code>_files</code> · <code>_status</code> · <code>_trace</code></td><td>取节点源码 / 探索 / 列文件 / 索引状态 / 链路追踪</td><td>精确取源码、查索引新鲜度</td></tr>
+          </table>
+
+          <h3>② graph(统一图谱)— 前端↔端点↔表 跨层链路 + A1 业务域(8 工具)</h3>
+          <table>
+            <tr><th>工具</th><th>中文用途</th><th>何时用</th></tr>
+            <tr><td><code>find_table_usage</code></td><td>某表被谁读 / 写(跨 Python / Java / 前端全栈)</td><td>改表 / Flyway 前看全栈影响</td></tr>
+            <tr><td><code>find_api_callers</code></td><td>某 endpoint 的调用方 / 链路</td><td>改 DTO / API 前看谁依赖</td></tr>
+            <tr><td><code>find_impact</code></td><td>跨层影响面 BFS(blast radius)</td><td>评估跨层改动波及</td></tr>
+            <tr><td><code>find_page_dependencies</code> · <code>find_impacted_pages</code></td><td>页面依赖什么 / 改组件影响哪些页面</td><td>前端组件 / 页面改动</td></tr>
+            <tr><td><code>find_node_domain</code> · <code>list_domain_members</code></td><td>节点属哪个业务域 / 列业务域成员(A1 软节点)</td><td>按业务域理解链路</td></tr>
+            <tr><td><code>search_nodes</code></td><td>模糊搜节点(端点 / 表 / 函数 / 业务域)</td><td>找跨层节点(<strong>承接退役的 cross-link</strong>)</td></tr>
+          </table>
+
+          <h3>③ platform-docs(chroma)— 规则 / 设计 / 事故 语义检索</h3>
+          <table>
+            <tr><th>工具</th><th>中文用途</th><th>何时用</th></tr>
+            <tr><td><code>search_docs(query, category?, module?)</code></td><td>语义检索规则 / 设计文档 / 事故复盘 / 操作手册(向量召回 + 词法 + 重排)</td><td>改代码前查规则、找类似设计、查事故</td></tr>
+            <tr><td><code>get_by_file</code> · <code>list_collections</code></td><td>按文件路径取所有 chunks / 看知识库统计</td><td>精确取某文档、看库规模与 category</td></tr>
+          </table>
+
+          <h3>④ agent-memory — 跨机 / 跨开发者共享团队记忆(读侧 MVP)</h3>
+          <table>
+            <tr><th>工具</th><th>中文用途</th><th>何时用</th></tr>
+            <tr><td><code>recall(query)</code></td><td>query-aware 去冲突 top-N 召回(personal / project 分层 + redline 永置顶)</td><td>换机 / 重 clone 后同 token 召回本人记忆</td></tr>
+            <tr><td><code>list_scope</code></td><td>诊断单作用域记忆(可见性排查)</td><td>查记忆为什么召回 / 不召回</td></tr>
+          </table>
+
+          <h3>⑤ Skills — 平台封装的可复用工作流(斜杠命令)</h3>
+          <table>
+            <tr><th>Skill</th><th>中文用途</th></tr>
+            <tr><td><code>/ai-health</code></td><td>AI 工具栈体检:当前仓 12 项 + 工作树索引一致性(dirty-check)+ 平台全局视图(所有项目 × 三库 + 记忆)。排查 MCP 召回怪 / 索引滞后 / 重启电脑后验栈</td></tr>
+            <tr><td><code>/update-local-ai</code></td><td>手工重建索引(Chroma / CodeGraph / graph 多档);召回质量差或索引滞后时跑</td></tr>
+            <tr><td><code>/git-commit</code></td><td>标准提交流程:合并 commit + 兜底 <code>post-commit.ps1</code> + 校验 <code>reindex.log</code>,最少 token</td></tr>
+          </table>
+
+          <div class="ok">
+            ✅ <strong>决策卡(动手前先扫)</strong>:符号定义 / 调用链 / 影响面 → <strong>codegraph</strong>;前端↔端点↔表 跨层链路 / 业务域 → <strong>graph</strong>;规则 / 文档 / 事故复盘 → <strong>platform-docs</strong>(search_docs);跨机团队记忆 → <strong>agent-memory</strong>(recall)。本地 MEMORY.md 自动加载,不必调工具。
+          </div>
+          <div class="warning">
+            ⚠️ grep+Read 仅 4 种兜底场景合法:未提交改动命中查询范围 / 索引滞后 / MCP 不可用 / 核对最新源码行号。其余一律先用 MCP(预索引精确、省上下文)。
+          </div>
         </section>
 
         <section id="concurrency">
