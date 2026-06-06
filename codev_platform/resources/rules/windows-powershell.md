@@ -64,7 +64,7 @@ Claude Code CLI 对部分 PowerShell / Bash 模式有**硬编码安全检查**�
 
 | 触发器 | 例子 | 替代写法 |
 |---|---|---|
-| **复合命令含 `cd <path>;`** | `cd D:\path; mvn test` | `mvn -f D:\path\pom.xml test` / `pnpm --dir D:\path <cmd>` / `git -C D:\path <cmd>` / `python -m pytest D:\path\tests/` |
+| **复合命令含 `cd <path>;`** | `cd D:\path; <test command>` | 使用工具自带目录参数,如 `git -C D:\path <cmd>`、`python -m pytest D:\path\tests\...`、或在调用工具里设置 working directory |
 | **子表达式 `$(...)`** | `Set-Item "env:$($k.Trim())"` | 拆中间变量：`$key = $k.Trim(); Set-Item ('env:' + $key)` |
 | **`(pipeline).Property`** | `(Get-Content x \| Measure-Object).Count` | 拆步骤：`$lines = Get-Content x; $cnt = @($lines).Count` |
 | **双引号字符串含 `$变量` 插值** | `"progress: $cnt / 110"` | 单引号 + 多参数：`Write-Host 'progress:' $cnt '/ 110'`；或 `-f`：`('progress: {0}' -f $cnt)`；或拼接：`('progress: ' + $cnt)` |
@@ -73,12 +73,12 @@ Claude Code CLI 对部分 PowerShell / Bash 模式有**硬编码安全检查**�
 
 | 场景 | 不要这么做 | 改用 |
 |---|---|---|
-| 轮询等待后台任务（Java 启动 / 回测进度） | `for($i=0; ...) { Start-Sleep; Test-NetConnection ... }` 加字符串插值打印进度 | Claude Code 内置 `Monitor` 工具读后台任务 stdout 流，匹配关键字即返回 |
+| 轮询等待后台任务（服务启动 / 任务进度） | `for($i=0; ...) { Start-Sleep; Test-NetConnection ... }` 加字符串插值打印进度 | Claude Code 内置 `Monitor` 工具读后台任务 stdout 流，匹配关键字即返回 |
 | 读 harness 后台任务 stdout | `Get-Content "...\tasks\xxxx.output" -Tail N` 加 `(pipeline).Count` | `Monitor` 工具直接监听同一文件，零字符串拼接 |
 
 ### 复杂命令固化为 `.ps1`
 
-含 `.env` 加载 / 多步环境配置 / 子表达式的高频组合，统一封装到 `python/stock-pipeline/scripts/*.ps1`（参考 `scripts/run_python.ps1`），调用入口纯前缀匹配可被 allow 规则覆盖。`.ps1` 内部使用 `$()` 不再触发检查（检查只看调用方文本）。
+含 `.env` 加载 / 多步环境配置 / 子表达式的高频组合，统一封装到项目自己的 `scripts/*.ps1` 或 `tools/*.ps1`。调用入口纯前缀匹配可被 allow 规则覆盖。`.ps1` 内部使用 `$()` 不再触发检查（检查只看调用方文本）。
 
 ### 速查口诀
 

@@ -1,30 +1,27 @@
 # codev-platform 跨项目通用规则
 
-这里的规则适用于**任何**接入 codev-platform 工具栈的业务项目,不绑定具体业务领域。
+这里的规则会通过 `codev-platform sync-rules` 分发给各项目。它们只维护跨项目通用纪律,不绑定具体业务领域或技术栈。
 
-业务项目专属规则(stock 量化的 PIT 红线 / 影子隔离 / 推荐三件套等)仍在各业务仓 `.claude/rules/`。
+项目专属规则必须留在项目自己的 `.claude/rules/`,例如业务表、领域枚举、接口生成方式、框架约定、合规文案、部署流程。
 
-## 清单(11 条)
+## 清单(9 条)
 
 | 规则 | 性质 |
 |---|---|
-| `workflow.md` | 任务分级 + MCP 选型 + 改前门禁 + Subagent 模板(跨语言/层通用工作流) |
-| `file-discipline.md` | 单文件行数 + 跨语言判重 + docs/ 目录归类 |
-| `commit-pr-conventions.md` | 项目红线:禁 AI 痕迹 / Co-Authored-By |
-| `windows-powershell.md` | `.ps1` ASCII / 中文 UTF8 / Claude Code 安全检查友好写法 |
-| `ai-tools-mcp.md` | CodeGraph / platform-docs / graph MCP 触发指南 |
-| `verification-checklist.md` | 改动后验证清单 + pre-push 6 gates |
-| `weekly-iteration-cadence.md` | 每周迭代节奏 + 归档 SOP |
-| `security.md` | 敏感信息 + 免责声明 + token 处理 |
-| `cross-layer-enum-consistency.md` | 跨语言枚举值字面量一致性硬约束(Python / Java / TS / DTO 四层) |
-| `frontend-backend-handoff.md` | 后端 DTO / 枚举 / 端点改动必先通知前端 + `pnpm run api/enums` |
-| `not-null-write-guard.md` | DB NOT NULL 三道防线(SQL COALESCE / dataclass 透传 / sanity assert) |
+| `workflow.md` | 架构中立的任务分级、MCP 选型、改前门禁、Subagent 模板 |
+| `ai-tools-mcp.md` | CodeGraph / platform-docs / graph / agent-memory MCP 触发指南 |
+| `file-discipline.md` | 单文件规模、重复代码、docs 目录归类 |
+| `verification-checklist.md` | 改动后验证清单和测试基线口径 |
+| `security.md` | 敏感信息、日志、认证、MCP/RBAC 安全边界 |
+| `windows-powershell.md` | `.ps1` ASCII、中文 UTF-8、Windows 命令安全写法 |
+| `commit-pr-conventions.md` | commit / PR 文案约定,禁 AI 痕迹 |
+| `weekly-iteration-cadence.md` | 迭代目录生命周期和跨周继承 SOP |
+| `agent-provider-architecture.md` | agent provider / brain 架构约束 |
 
 ## 同步策略
 
-当前阶段:platform 仓 `.claude/rules/` 内保留**完整拷贝**(双份共存),改 codev-platform 版后**手动同步**回 platform 直至全切到从 codev-platform 拉取。
+真值源在 `codev_platform/resources/rules/`。改完后:
 
-后续机制 candidate:
-- platform 仓 `.claude/rules/` 中跨项目规则 → 软链或 git submodule 指 codev-platform
-- 或 chroma `index_docs.py` 同时扫两个目录,前端搜的时候不感知
-- 或 CLI `codev-platform sync-rules` 把 codev-platform/rules/ 复制到 cwd 业务仓
+1. 跑资源/打包相关测试,确认普通 wheel 也能带走规则。
+2. 跑关键字残留扫描,确认没有单项目架构画像。
+3. 需要分发到业务仓时,在业务仓跑 `codev-platform sync-rules` 并由业务仓提交。

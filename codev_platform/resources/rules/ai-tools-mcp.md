@@ -14,7 +14,7 @@
 | 符号定义 / 签名 / 位置 | `codegraph_search`(onboarding/架构问题用 `codegraph_context`)| 函数名 |
 | 调用方 / 影响面 / 改动波及 | `codegraph_callers` / `codegraph_impact` | 引用 |
 | 规则 / 设计 / 事故文档 | `search_docs` | `docs/` |
-| 前端↔端点↔表 跨层链路 / 业务域 | `graph` `find_table_usage` / `find_api_callers` | 多文件 |
+| 项目图谱 / 模块依赖 / 数据流 | `graph` `search_nodes` / `find_impact` / 项目图谱工具 | 多文件 |
 
 **grep+Read 仅 4 种兜底场景合法**(详见 §2.1):未提交改动命中查询范围 / 索引滞后 / MCP 不可用 / 核对最新源码行号。
 **自检(挂 §3.3 门禁)**:本轮用 grep 找了上面任一类?→ 先确认真命中兜底场景,否则改用 MCP 重来。
@@ -27,7 +27,7 @@
 |---|---|---|
 | 找代码定义 / 函数源码 / 调用关系 | **CodeGraph** | `codegraph_search` / `codegraph_context`（PRIMARY，组合 search+node+callers+callees）/ `codegraph_callers` / `codegraph_callees` / `codegraph_impact`（blast radius）/ `codegraph_node` / `codegraph_explore` / `codegraph_files` / `codegraph_status` |
 | 找规则 / 设计文档 / 事故复盘 / 操作手册 | **platform-docs / Chroma** | `search_docs(query, category?, module?)` / `get_by_file` / `list_collections` |
-| 找前端 API ↔ endpoint ↔ Table 跨层链路 / 业务域 | **graph**(统一图谱) | `find_impact` / `find_table_usage` / `find_api_callers` / `find_page_dependencies` / `find_impacted_pages` / `find_node_domain` / `list_domain_members` / `search_nodes` |
+| 找模块依赖 / 项目图谱 / 页面-接口-数据流 | **graph**(统一图谱) | `find_impact` / `find_page_dependencies` / `find_impacted_pages` / `find_node_domain` / `list_domain_members` / `search_nodes` |
 | 跨会话用户偏好 / 反馈 / 项目状态(本地自带) | **MEMORY** | 本地 MEMORY.md 自动加载,无需调工具 |
 | 跨机 / 跨开发者共享的团队记忆(平台 PG) | **agent-memory** | `recall`(query-aware 去冲突 top-N)/ `list_scope`(诊断单作用域)。换机/重 clone 后同 token 召回回本人记忆 |
 
@@ -99,15 +99,17 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 
 或调 `tools\dev\wait-for-reindex.ps1`(默认等 HEAD 对齐,超时 120s)。
 
-### 2.3 子模块规则强制触发（HIGHEST PRIORITY）
+### 2.3 项目本地规则强制触发（HIGHEST PRIORITY）
 
-子模块 `.claude/rules/`(约 2200 行)**不会自动加载**。改子模块代码**前**必须先:
+项目 `.claude/rules/` 中的本地规则不会总是自动加载。改项目代码前必须先按路径查项目画像:
 
 | 改动范围 | 必走查询 |
 |---|---|
-| `apps/stock-admin-api/**/*.java` | `search_docs(query="<主题>", module="stock-admin-api")` |
-| `apps/stock-admin-web/**/*.{ts,tsx,less}` | `search_docs(query="<主题>", module="stock-admin-web")` |
-| `python/stock-pipeline/**/*.py` | `search_docs(query="<主题>", module="stock-pipeline")` |
+| 前端 / UI / 页面 / 组件 | `search_docs(query="<主题> 前端 组件 API", module="<项目模块>")` 或读本地前端规则 |
+| 后端 / API / 服务 | `search_docs(query="<主题> 后端 API 服务", module="<项目模块>")` 或读本地后端规则 |
+| 数据 / schema / migration | `search_docs(query="<主题> 数据 schema migration", module="<项目模块>")` 或读本地数据规则 |
+| 任务 / 消息 / 异步链路 | `search_docs(query="<主题> 任务 消息 消费者", module="<项目模块>")` 或读本地任务规则 |
+| AI 工具 / MCP / 索引 | `search_docs(query="<主题> MCP 索引 graph codegraph")` |
 
 例外:纯格式化 / 拼写修正 / 单测断言数字微调。
 
@@ -121,9 +123,9 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 
 | 场景 | 链 |
 |---|---|
-| 修 bug | `codegraph_search` → `codegraph_callers` → `codegraph_impact` → `search_docs(相关规则)` → `find_table_usage(相关表)` → Edit |
-| 写新功能 | `search_docs(类似设计)` → `codegraph_context(类似实现)` → `find_api_callers(类似 endpoint)` → 实现 → 测试 |
-| 跨层改动 | `find_api_callers` → `find_table_usage` → 按 **Python → Java → 前端** 顺序 → `pnpm run api` → `search_nodes` 验证 |
+| 修 bug | `codegraph_search` → `codegraph_callers` / `codegraph_impact` → `search_docs(相关规则)` → Edit → 定向测试 |
+| 写新功能 | `search_docs(类似设计)` → `codegraph_context(类似实现)` → 实现 → 测试 |
+| 跨层改动 | `search_docs(项目本地契约规则)` → `graph` 链路查询(如已接入) → 生产者/消费者两侧实现 → 契约验证 |
 
 ---
 
@@ -160,7 +162,7 @@ post-commit hook 后台跑 ~30s,**窗口期内 MCP 可能拿到 HEAD~1 数据**�
 【目标】 30 字以内,1 行
 【文件路径】 1-3 行,绝对路径
 【禁止】 ≤5 条
-【验证】 grep / pytest / mvn 命令 1-2 条
+【验证】本地搜索 / 测试 / lint 命令 1-2 条
 【输出长度】 显式上限(如 "150-200 行内")
 ```
 
@@ -186,11 +188,11 @@ agent 自己应该会主动查相关规则,你不需要替它把规则贴在 pro
 ✅ 正例:
 
 ```
-【目标】 写一份"跨层枚举一致性"规则,沉淀 2026-05-23 N12 教训
-【文件路径】 .claude\rules\cross-layer-enum-consistency.md
-【背景关键词】 N12 / FETCHER_GROUP_MAP / 单一真值源
-【禁止】 不超过 150 行 / 不在 CLAUDE.md 加 @ 引用 / 不抄旧规则原文
-【输出】 含事故复盘 + 强制原则 + grep 自检 + PR 清单 4 章节
+【目标】 为配置 merge 增加幂等测试
+【文件路径】 <repo>\tests\test_config_merge.py
+【背景关键词】 settings.json / 保留既有配置 / 重复执行不叠加
+【禁止】 不改 CLI 行为 / 不碰无关测试 / 不写临时文件到仓根
+【验证】 <项目测试命令>
 ```
 
 让 agent 自己 `search_docs` 查参考规则,而非你贴进去。

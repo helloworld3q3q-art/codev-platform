@@ -73,14 +73,16 @@ pyproject.toml            pip 包定义 (package-data 含 resources/**)
 
 ---
 
-## 四、规则 + Skill + Hook 同步策略
+## 四、规则 + Skill + Hook 分层策略
 
-`.claude/rules/`、`.claude/skills/`、`.claude/hooks/` 是 sync 后副本(真值源在 `codev_platform/resources/{rules,skills,hooks}/`;rules/skills 2026-06-01 relocate 进包,hooks 2026-06-05 加)。
+`codev_platform/resources/{rules,skills,hooks}/` 是**分发真值源**:给其它项目通过 `codev-platform sync-*` 拉取。这里必须放跨项目通用内容,不要塞 codev-platform 本仓专属规则。
 
-改规则 / skill 时:
-1. **改真值源** — 改 `codev_platform/resources/rules/<name>.md` 或 `codev_platform/resources/skills/<name>/SKILL.md`
-2. **本仓 sync** — `codev-platform sync-rules` + `sync-skills` 重生 `.claude/` 副本
-3. **推送其它业务仓** — 各业务仓跑同样 sync 命令 / 或后续机制(submodule / chroma 双扫)
+`.claude/rules/` 是**本仓工作规则**。它可以引用/复制通用规则,也可以放 codev-platform 本仓私有覆盖(例如本仓自己的 `workflow.md`)。不要在平台仓随手跑 `sync-rules` 覆盖 `.claude/rules/` 本仓规则;只有明确要刷新分发副本时才这样做。
+
+改规则 / skill 时先分层:
+1. **跨项目通用** — 改 `codev_platform/resources/rules/<name>.md` 或 `codev_platform/resources/skills/<name>/SKILL.md`,再到目标业务仓跑 `codev-platform sync-rules` / `sync-skills`
+2. **平台本仓专属** — 改 `.claude/rules/<name>.md`,不要同步回 `resources/rules/`
+3. **业务仓专属** — 在业务仓自己的 `.claude/rules/` 维护,不进 codev-platform 分发真值源
 
 **Hook(MCP-first 护栏)同步**:`.claude/hooks/mcp-first-guard.js` 是 PreToolUse(Grep)护栏 —— 每次 grep 前注入 MCP-first 提醒,把"定位先走 MCP、grep 最后"从自律变机制(防御三层:文档→hook→grep)。真值源 `codev_platform/resources/hooks/`。
 1. **改真值源** — 改 `codev_platform/resources/hooks/mcp-first-guard.js`

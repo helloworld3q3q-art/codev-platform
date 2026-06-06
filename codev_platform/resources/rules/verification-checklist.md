@@ -1,100 +1,74 @@
-# 改动后验证清单 + 测试基线红线
+# 改动后验证清单
 
-## 1. 按改动层级验证
-
-| 改动层 | 验证命令 |
-|---|---|
-| Python | `python -m pytest tests/` + `python -m stock_pipeline.config.validate` |
-| Java | `mvn compile` + `mvn test` + 重启服务 + `bash test_endpoints.sh` |
-| 前端 | `pnpm run lint:fix` + 浏览器手测改动页面 |
-| 数据库 | 新迁移须本地起服务验证 Flyway 通过 |
-| 跨层 | 三端联调：先重启 Java，再 `pnpm run api` 重新生成接口 |
-
-## 2. 测试基线红线（任何改动后不许下降）
-
-| 项 | 数值（截至 2026-05-17 15:57 复核）|
-|---|---|
-| Python 单元测试 | 1228 / 1228 通过 |
-| Java 单元测试 | 175 收集 / 175 通过（2026-05-18 MarginTrading 加 `historyDerivesDailyNetInflowWhenRepayIsMissing` 覆盖深市无 repay 字段时的余额日差回退）|
-| Java 接口存活 | 120+ 个 `@PostMapping` 全部返回 200 + result=0（含 backtest / shadow / sample-progress / data-health 全栈）|
-
-## 2.1 pre-push hook 自动审计（N8）
-
-任何 `git push` 前本地 hook 强制跑 3 项静态 gate(无需 DB):
-
-| Gate | 工具 | 失败原因 |
-|---|---|---|
-| 1/3 parity | `python/stock-pipeline/tools/check_entity_dataclass_parity.py` | Python dataclass / Java Entity / Flyway 列三层字段漂移 |
-| 2/3 null cast | `scripts/audit-mapper-null-cast.ps1` | Java Mapper SQL `#{var} is null` 未 cast 类型 |
-| 3/3 sanity test | `pytest tests/test_track_sanity_check.py` | 业务闭环 sanity check 逻辑回归 |
-
-**安装**:`powershell -File tools/dev/install-git-hooks.ps1`(首次 clone 或 hook 源码改动后跑)
-
-**应急 bypass**(限正当理由,如热修需立即上线):`$env:SKIP_PREPUSH_AUDIT=1; git push`
-
-**不在 pre-push**(需 DB 或耗时长,留给 weekly SOP / EOD 跑批):
-- `audit_fetcher_date_consistency.py` —— EOD 每周一上午盘前手动跑或入 Task Scheduler
-- `track_sanity_check` runtime —— daily_pipeline.py 阶段 11 已集成
-
-## 3. 接到需求时的标准流程
-
-1. 通读 `CLAUDE.md` + `docs/architecture/` 下相关文档
-2. 用 5 视角评审需求（见 `.claude/rules/roles-5-perspectives.md`）
-3. 判断改动落在哪一层：
-   - 数据采集 / 算法 → Python
-   - 业务接口 / 任务调度 → Java
-   - UI / 表单 → 前端
-   - 跨层 → 按 **Python → Java → 前端** 顺序推进
-4. 设计完成前不动手，先与用户对齐
-
-## 4. 修改前必读清单
-
-任何改动落地前必须确认：
-
-- [ ] 看过 `CLAUDE.md` 的角色定位与已完成清单
-- [ ] 通读 `docs/architecture/<对应文档>.md`
-- [ ] 已用 5 视角评估影响（合规？真实可用？性能？算法？架构？）
-- [ ] 确认改动所属轨道（Track 1-5）；Track 4/5 需校验样本门控（50/100/150/200）+ Wilson 区间护栏（见 `.claude/rules/pit-redline-and-tracks.md`）
-- [ ] 落点层次明确（Python / Java / 前端 / 跨层）
-- [ ] 跨层改动按 **Python → Java → 前端** 顺序推进
-- [ ] 与用户对齐方案，不擅自扩大 / 缩小范围
-
-## 5. 快速诊断索引
-
-| 现象 | 排查路径 |
-|---|---|
-| Java 启动 Flyway 失败 | 看版本号是否乱序，启用 `flyway.out-of-order: true` |
-| 接口 500 全报 | 检查 `bash test_endpoints.sh`；常见为 PG NULL 参数缺 cast |
-| 前端调用 API 报 type 不存在 | 后端改完 DTO 后没跑 `pnpm run api` |
-| 前端枚举不更新 | 没跑 `pnpm run enums` 或没重启 Java |
-| Lombok @Data 报 "类 Data 找不到" | IDEA Annotation Processors 未启用，或 pom.xml 缺 lombok 依赖 |
-| Python pipeline 0 stocks | 检查 `OPENCLAW_STOCK_ROOT` 是否指向正确的 legacy 工作区 |
-| 推荐结果 0 条 | 样例股票全 HIGH 风险被过滤；改 `system_config.portfolio_defaults.max_risk_level=HIGH` |
+验证要和改动半径匹配。项目本地规则可覆盖具体命令;本文件只给通用口径。
 
 ---
 
-## 已有 assertion 兜底
+## 1. 按改动层级验证
 
-🟡 部分 assertion 化
+| 改动层 | 最小验证 |
+|---|---|
+| 单文件逻辑 | 对应单测 / lint / typecheck |
+| 前端 | 项目前端 lint/typecheck/组件测试 |
+| 后端 | 目标 handler/service/repository 单测或接口测试 |
+| 数据 / schema | migration/schema 检查 + 读写路径测试 |
+| 消息 / 事件 / 任务 | 生产者和消费者两侧定向测试 |
+| 认证 / 权限 | 正向授权 + 越权拒绝测试 |
+| 跨层契约 | 生产者 + 消费者 + 生成链路(如有) |
+| AI 工具 / MCP | status/dry-run + 目标测试 |
+| 文档 / 规则 | 引用路径存在 + 断链扫描 |
+| Hook / 脚本 | dry-run + 幂等测试 |
 
-测试基线（CI 跑批必跑）：
-- Python：`python -m pytest tests/` 1333 用例
-- Java：`mvn test` 183 用例
-- 任何 PR 测试数下降 → review 红线
+---
 
-环境校验：
-- 工具：`python -m stock_pipeline.config.validate`（启动前体检环境变量）
-- Flyway 启动校验：自动验证迁移与 schema 一致性
+## 2. 测试基线
 
-前端生成链路（替代部分 assertion）：
-- `pnpm run api` 强制走 Java DTO 真值源
-- `pnpm run enums` 强制走 Java 枚举真值源
+不要在通用规则里写死某项目的历史用例数。判断口径:
 
-工具：
-- `tools/pre_change_audit.py`（兄弟 C 新加，改动前自动扫规则适用性）
+- 定向测试必须通过。
+- 全量测试若失败,必须区分本次相关失败和既有失败。
+- 新增 CLI / sync / 生成 / 安全边界行为必须有单测。
+- 修复 bug 时优先补能失败的回归测试。
 
-盲区（建议未来补）：
-- 缺：CI 钩子在 PR merge 前强制跑 Python + Java + 前端 lint 三件套
-- 缺："测试数不下降"的 GitHub Actions 自动检测（diff 测试数 < 0 拒绝 merge）
-- 缺：接口存活探测（`test_endpoints.sh` 自动化跑全量 POST + result=0 断言）
-- 缺：跨层改动顺序检测（Python → Java → 前端 顺序未走完前 PR 不可合）
+项目可在本地规则里写自己的全量命令和最低用例数。
+
+---
+
+## 3. 改动前检查
+
+- `git status -s`:确认 dirty 范围,不覆盖用户改动。
+- 判断 L1/L2/L3/L4,按 `workflow.md` 选 MCP / 本地读取路径。
+- 命中生成物、迁移、依赖、认证、生产配置、MCP 配置时,先说明影响面。
+- 跨层改动先确认消费者和验证闭环。
+
+---
+
+## 4. 快速诊断索引
+
+| 现象 | 排查路径 |
+|---|---|
+| 命令缺子命令 / 参数 | CLI parser 测试 + 入口注册表 |
+| 分发资源找不到 | package-data / importlib.resources 测试 |
+| hook 重复写配置 | settings merge 幂等测试 |
+| MCP 全红 | 服务 status、端口、进程、客户端配置 |
+| 文档召回差 | 索引状态、collection、项目 id、最近重建时间 |
+| codegraph 结果旧 | dirty 范围、索引时间、项目路径 |
+| graph 查询缺节点 | project_id、graph store、扫描插件、节点证据 |
+| 前后端契约不一致 | schema / 生成链路 / 消费者调用点 |
+
+---
+
+## 5. 已有 assertion 兜底
+
+🟡 部分 assertion 化:
+
+- resources importlib 定位测试。
+- CLI 子命令注册测试。
+- hook/settings merge 幂等测试。
+- 项目可自行补安全、契约、生成链路测试。
+
+盲区:
+
+- 通用规则无法知道各项目全量验证命令。
+- MCP-first 纪律除 Grep hook 外仍依赖执行者自报和 review。
+- 跨层链路覆盖度依赖各项目 graph/codegraph 索引质量。
