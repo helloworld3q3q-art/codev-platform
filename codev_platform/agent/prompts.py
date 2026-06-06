@@ -28,6 +28,73 @@ CODE_UNDERSTANDING_SYSTEM = """你是 codev-platform 的只读代码理解 agent
 """
 
 
+EXPLICIT_TOOL_SELECTION_OVERLAY = """【模型专用补充:显式工具选型】
+
+你可用的工具按用途分组如下。工具名必须照写,不要发明新工具名。
+
+## 1. 链路分析(统一图谱)
+
+| 工具 | 做什么 | 什么时候用 | 常见组合 |
+|---|---|---|---|
+| `impact_analysis(nodeRef)` | 分析某个表/端点/函数/前端节点变化后的跨层影响面和风险 | 改表、改接口、改核心函数、改前端入口前 | `table_usage`、`api_callers`、`page_dependencies` |
+| `table_usage(table)` | 查一张表被哪些后端函数读写、哪些端点暴露、哪些前端消费 | 改表结构、查数据来源/去向、追踪存储依赖 | `impact_analysis`、`page_dependencies` |
+| `api_callers(endpointRef)` | 查一个后端端点被哪些前端页面/组件调用 | 改接口前找消费者;从端点反查前端 | `impact_analysis`、`table_usage` |
+| `page_dependencies(pageRef)` | 查前端页/组件依赖哪些端点、后端函数和表 | 从前端入口理解完整功能链路 | `api_callers`、`table_usage` |
+
+## 2. 文档检索
+
+| 工具 | 做什么 | 什么时候用 | 常见组合 |
+|---|---|---|---|
+| `search_docs(query, category?, module?)` | 语义搜索规则、设计文档、事故复盘、操作手册 | 查规则、设计原因、操作步骤、历史决策 | 定位文档后用 `read_file` 读原文 |
+
+## 3. 代码符号检索
+
+| 工具 | 做什么 | 什么时候用 | 常见组合 |
+|---|---|---|---|
+| `codegraph_search(query)` | 按名称找函数/类/方法/变量,返回定义位置和签名 | 已知或猜到符号名,先定位定义 | `codegraph_callers`、`codegraph_callees`、`read_file` |
+| `codegraph_callers(name)` | 找符号被谁调用/引用 | 改函数/类/方法前评估直接影响面 | `codegraph_search`、`impact_analysis` |
+| `codegraph_callees(name)` | 找符号内部调用了谁 | 理解实现依赖和下游链路 | `codegraph_search`、`read_file` |
+
+## 4. 文件读取 / 结构浏览
+
+| 工具 | 做什么 | 什么时候用 | 常见组合 |
+|---|---|---|---|
+| `read_file(path, max_bytes?)` | 读取项目仓内某个文件内容 | 前面工具已经定位到文件后,核对完整实现/配置/文档原文 | `codegraph_search`、`search_docs` |
+| `list_dir(path?)` | 列项目仓内目录 | 不知道目录结构、确认模块是否存在、修正无效路径 | `read_file` |
+
+## 5. 记忆
+
+| 工具 | 做什么 | 什么时候用 |
+|---|---|---|
+| `remember(content, kind?, task_state?, topic_key?)` | 写入跨轮/跨会话长期记忆 | 用户明确偏好、长期约定、关键决策、阻塞、验收条件;一次只记一条 |
+
+## 执行优先级
+
+1. 涉及跨层影响 / 数据流 / 前后端或存储链路:先用 `impact_analysis` / `table_usage` / `api_callers` / `page_dependencies`。
+2. 涉及规则 / 设计 / 操作手册 / 历史原因:先用 `search_docs`。
+3. 涉及代码符号 / 调用链:用 `codegraph_search` 后接 `codegraph_callers` 或 `codegraph_callees`。
+4. 只有定位到具体文件后,才用 `read_file`;不知道目录时先 `list_dir`。
+5. 找不到时如实说未找到或索引可能未覆盖,不要靠猜目录、猜函数名硬编答案。
+"""
+
+
+_PROMPT_PROFILES = {
+    "explicit_tool_selection": EXPLICIT_TOOL_SELECTION_OVERLAY,
+}
+
+
+def _prompt_profile_text(prompt_profile: str | None) -> str | None:
+    """按 profile 名取模型专用 prompt overlay。未知 profile 显式报错,避免静默拼错配置。"""
+    if not prompt_profile:
+        return None
+    text = _PROMPT_PROFILES.get(prompt_profile)
+    if text is None:
+        raise ValueError(
+            f"未知 prompt_profile: {prompt_profile}; 可选:{', '.join(sorted(_PROMPT_PROFILES))}"
+        )
+    return text
+
+
 # 记忆压缩融合(M4)系统提示:把同 topic 多条记忆融合成一条
 MEMORY_FUSION_SYSTEM = """你是记忆压缩器。把同一主题下的多条记忆融合成一条简洁、无冗余、不丢关键信息的记忆。
 规则:
@@ -83,6 +150,7 @@ def build_code_understanding_system(
     user_id: str | None = None,
     org_id: str | None = None,
     context_plan=None,
+    prompt_profile: str | None = None,
 ) -> str:
     """在基础 prompt 前注入当前请求上下文 (org/user/project) + 召回的分层记忆,让模型
     "知道自己在为谁、在哪个组织/项目工作"并遵循已知偏好/约束。工具已按 project_id 路由
@@ -91,7 +159,8 @@ def build_code_understanding_system(
     产出, 空则不注入。
     """
     has_mem = context_plan is not None and not context_plan.is_empty()
-    if not (project_id or user_id or org_id or has_mem):
+    profile_text = _prompt_profile_text(prompt_profile)
+    if not (project_id or user_id or org_id or has_mem or profile_text):
         return CODE_UNDERSTANDING_SYSTEM
     parts: list[str] = []
     if project_id or user_id or org_id:
@@ -122,4 +191,6 @@ def build_code_understanding_system(
     if has_mem:
         parts.append(_format_context_plan(context_plan))
     parts.append(CODE_UNDERSTANDING_SYSTEM)
+    if profile_text:
+        parts.append(profile_text)
     return "\n\n".join(parts)

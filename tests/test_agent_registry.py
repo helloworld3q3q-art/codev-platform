@@ -47,6 +47,21 @@ def test_loop_policy_capability_tiers():
     assert pd.max_steps == 12  # 未覆盖字段走全局默认
 
 
+def test_prompt_profile_defaults_and_overrides():
+    # DeepSeek 默认启用显式工具选型 overlay;强模型默认只用通用 prompt。
+    assert reg.prompt_profile({"agent": {"provider": "deepseek"}}, "deepseek") == "explicit_tool_selection"
+    assert reg.prompt_profile({"agent": {"provider": "claude"}}, "claude") is None
+    # provider 级配置可覆盖 / 禁用;config-only provider 也能通过配置启用 profile。
+    cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"prompt_profile": "off"}}}}
+    assert reg.prompt_profile(cfg, "deepseek") is None
+    cfg_empty = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"prompt_profile": ""}}}}
+    assert reg.prompt_profile(cfg_empty, "deepseek") is None
+    cfg2 = {"agent": {"provider": "newco", "providers": {
+        "newco": {"base_url": "https://x.test", "prompt_profile": "explicit_tool_selection"}
+    }}}
+    assert reg.prompt_profile(cfg2, "newco") == "explicit_tool_selection"
+
+
 def test_loop_policy_per_field_override():
     # (a) 每个新字段都能经 agent.providers.<name>.loop.<f> 逐字段覆盖(含 bool)。
     cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"loop": {

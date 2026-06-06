@@ -172,6 +172,22 @@ def test_recall_memories_injected_into_system():
     assert "用户喜欢钴蓝色" in prov.seen_system  # 召回记忆进了 system prompt
 
 
+def test_provider_prompt_profile_injected_into_system():
+    prov = _CapturingProvider()
+    prov.name = "deepseek"
+    svc = ChatService(
+        InMemorySessionStore(),
+        lambda pid: ToolRegistry(),
+        lambda: prov,
+        lambda: 5,
+        prompt_profile_factory=lambda name: "explicit_tool_selection" if name == "deepseek" else None,
+    )
+    svc.ask("q")
+    assert prov.seen_system is not None
+    assert "显式工具选型" in prov.seen_system
+    assert "impact_analysis" in prov.seen_system and "read_file" in prov.seen_system
+
+
 def test_recall_failure_does_not_block_answer():
     prov = _CapturingProvider()
     svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), lambda: prov,

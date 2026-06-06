@@ -36,6 +36,9 @@ class ProviderSpec:
     # 内置行为档(每模型策略的 code 默认层, 同 default_model)。None = 用全局 LoopPolicy 默认。
     # 弱模型(指令遵从差)在此调紧; config 可再覆盖。
     default_loop_policy: LoopPolicy | None = None
+    # 模型专用 prompt profile。None = 只用通用 prompt;config 可覆盖或置空禁用。
+    # 注意:profile 文案是可复用能力档,不要为 OpenAI 兼容厂商新建适配器文件。
+    default_prompt_profile: str | None = None
 
 
 _REGISTRY: dict[str, ProviderSpec] = {}
@@ -88,7 +91,8 @@ register_provider(ProviderSpec("deepseek", "DEEPSEEK_API_KEY", _build_openai_com
                                default_model="deepseek-chat", default_base_url="https://api.deepseek.com",
                                openai_compatible=True,
                                # deepseek-chat 工具选型 / 收敛偏弱: 弱档严管, 防变参 thrash + 换词空转。
-                               default_loop_policy=_WEAK))
+                               default_loop_policy=_WEAK,
+                               default_prompt_profile="explicit_tool_selection"))
 register_provider(ProviderSpec("qwen", "DASHSCOPE_API_KEY", _build_openai_compat,
                                default_model="qwen-max",
                                default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -172,6 +176,33 @@ def loop_policy(cfg: dict[str, Any] | None = None, name: str | None = None) -> L
         invalid_call_limit=_int("invalid_call_limit"),
         min_read_for_finish=_int("min_read_for_finish"),
     )
+
+
+def prompt_profile(cfg: dict[str, Any] | None = None, name: str | None = None) -> str | None:
+    """解析某 provider 的 prompt profile:
+      config `agent.providers.<name>.prompt_profile` > `agent.prompt_profile`
+      > spec.default_prompt_profile。
+
+    置为 "" / "none" / "off" 可显式禁用。profile 只决定 prompt overlay,
+    不影响 provider 协议适配或 loop 策略。
+    """
+    cfg = cfg or acfg.agent_cfg()
+    name = name or acfg.provider_name(cfg)
+    spec = _REGISTRY.get(name)
+    raw = None
+    for key in (f"agent.providers.{name}.prompt_profile", "agent.prompt_profile"):
+        v = acfg.get(cfg, key)
+        if v is not None:
+            raw = v
+            break
+    if raw is None and spec is not None:
+        raw = spec.default_prompt_profile
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if not value or value.lower() in {"none", "off", "false", "0"}:
+        return None
+    return value
 
 
 def list_providers(cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:

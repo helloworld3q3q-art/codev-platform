@@ -45,3 +45,32 @@ def test_display_name_helper_graceful_on_unknown():
     assert _project_display_name("no-such-project-xyz") is None
     s = build_code_understanding_system(project_id="no-such-project-xyz")
     assert "no-such-project-xyz" in s and "索引范围" in s  # 无 display_name 也照常注入守护
+
+
+def test_prompt_profile_explicit_tool_selection_overlay():
+    s = build_code_understanding_system(prompt_profile="explicit_tool_selection")
+    assert CODE_UNDERSTANDING_SYSTEM in s
+    assert "显式工具选型" in s
+    for name in (
+        "impact_analysis",
+        "table_usage",
+        "api_callers",
+        "page_dependencies",
+        "search_docs",
+        "codegraph_search",
+        "codegraph_callers",
+        "codegraph_callees",
+        "read_file",
+        "list_dir",
+        "remember",
+    ):
+        assert name in s
+
+
+def test_unknown_prompt_profile_raises():
+    try:
+        build_code_understanding_system(prompt_profile="no-such-profile")
+    except ValueError as e:
+        assert "未知 prompt_profile" in str(e)
+        return
+    raise AssertionError("未知 prompt_profile 应报错")
