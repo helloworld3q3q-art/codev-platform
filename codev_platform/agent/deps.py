@@ -11,7 +11,9 @@ from codev_platform.agent.brain.registry import get_provider as _get_provider
 from codev_platform.agent.brain.registry import loop_policy as _loop_policy
 from codev_platform.agent.brain.registry import prompt_profile as _prompt_profile
 from codev_platform.agent.brain.registry import rule_pack as _rule_pack
+from codev_platform.agent.brain.registry import rule_pack_sources as _rule_pack_sources
 from codev_platform.agent.brain.registry import skill_pack as _skill_pack
+from codev_platform.agent.brain.registry import skill_pack_sources as _skill_pack_sources
 from codev_platform.agent.services.chat_service import ChatService
 from codev_platform.agent.session import InMemorySessionStore, SessionStore
 from codev_platform.agent.tools import build_default_registry
@@ -209,5 +211,7 @@ def get_chat_service() -> ChatService:
             prompt_profile_factory=lambda name: _prompt_profile(acfg.agent_cfg(), name),
             rule_pack_factory=lambda name: _rule_pack(acfg.agent_cfg(), name),
             skill_pack_factory=lambda name: _skill_pack(acfg.agent_cfg(), name),
+            rule_pack_sources_factory=lambda name: _rule_pack_sources(acfg.agent_cfg(), name),
+            skill_pack_sources_factory=lambda name: _skill_pack_sources(acfg.agent_cfg(), name),
         )
     return _chat_service

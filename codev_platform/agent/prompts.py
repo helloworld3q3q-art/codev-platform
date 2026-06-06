@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from importlib.resources import files
+from pathlib import Path
+from typing import Any
 
 from codev_platform.agent.context_plan import GROUP_ORDER
 
@@ -129,29 +131,89 @@ def _prompt_profile_text(prompt_profile: str | None) -> str | None:
     return text
 
 
-def _rule_pack_text(rule_pack: str | None) -> str | None:
+def _read_pack_source(source: str, kind: str) -> tuple[str, str]:
+    """读取 rule/skill source。
+
+    source 支持:
+    - rules:<file-or-dir>   -> codev_platform/resources/rules
+    - skills:<file-or-dir>  -> codev_platform/resources/skills
+    - builtin:<skill-name>  -> 内置 Web-agent skill
+    - 绝对/相对文件系统路径;目录会按 kind 展开 md / SKILL.md
+    """
+    if source.startswith("builtin:"):
+        name = source.split(":", 1)[1]
+        if name == "code_understanding":
+            return source, CODE_UNDERSTANDING_SKILL
+        raise ValueError(f"未知 builtin skill source: {source}")
+
+    if source.startswith("rules:") or source.startswith("skills:"):
+        prefix, rel = source.split(":", 1)
+        base = files("codev_platform") / "resources" / prefix
+        target = base / rel
+        if target.is_dir():
+            chunks: list[str] = []
+            if kind == "rule":
+                children = sorted(c for c in target.iterdir() if c.name.endswith(".md"))
+            else:
+                children = sorted(c for c in target.iterdir() if c.name == "SKILL.md" or c.name.endswith(".md"))
+            for child in children:
+                chunks.append(f"## {source}/{child.name}\n{child.read_text(encoding='utf-8')}")
+            return source, "\n\n".join(chunks)
+        return source, target.read_text(encoding="utf-8")
+
+    path = Path(source).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if path.is_dir():
+        if kind == "rule":
+            children = sorted(path.glob("*.md"))
+        else:
+            children = sorted(path.glob("SKILL.md")) + sorted(path.glob("*/SKILL.md"))
+        chunks = [f"## {child}\n{child.read_text(encoding='utf-8')}" for child in children]
+        return str(path), "\n\n".join(chunks)
+    return str(path), path.read_text(encoding="utf-8")
+
+
+def _as_sources(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    return [str(v) for v in value]
+
+
+def _rule_pack_text(rule_pack: str | None, sources: Any = None) -> str | None:
     """按规则包名读取 package resources/rules。规则包用于 Web agent system prompt 注入。"""
     if not rule_pack:
         return None
-    names = _RULE_PACKS.get(rule_pack)
-    if names is None:
-        raise ValueError(f"未知 rule_pack: {rule_pack}; 可选:{', '.join(sorted(_RULE_PACKS))}")
-    root = files("codev_platform") / "resources" / "rules"
+    resolved_sources = _as_sources(sources)
+    if resolved_sources is None:
+        names = _RULE_PACKS.get(rule_pack)
+        if names is None:
+            raise ValueError(f"未知 rule_pack: {rule_pack}; 可选:{', '.join(sorted(_RULE_PACKS))}")
+        resolved_sources = [f"rules:{name}" for name in names]
     sections = ["【规则包】"]
-    for name in names:
-        p = root / name
-        sections.append(f"## {name}\n{p.read_text(encoding='utf-8')}")
+    for source in resolved_sources:
+        label, text = _read_pack_source(source, "rule")
+        sections.append(f"## {label}\n{text}")
     return "\n\n".join(sections)
 
 
-def _skill_pack_text(skill_pack: str | None) -> str | None:
+def _skill_pack_text(skill_pack: str | None, sources: Any = None) -> str | None:
     """按技能包名取 Web-agent 安全 skill。不要默认注入 Claude/Codex 专用 shell skill。"""
     if not skill_pack:
         return None
-    skills = _SKILL_PACKS.get(skill_pack)
-    if skills is None:
-        raise ValueError(f"未知 skill_pack: {skill_pack}; 可选:{', '.join(sorted(_SKILL_PACKS))}")
-    return "\n\n".join(("【技能包】", *skills))
+    resolved_sources = _as_sources(sources)
+    if resolved_sources is None:
+        skills = _SKILL_PACKS.get(skill_pack)
+        if skills is None:
+            raise ValueError(f"未知 skill_pack: {skill_pack}; 可选:{', '.join(sorted(_SKILL_PACKS))}")
+        return "\n\n".join(("【技能包】", *skills))
+    sections = ["【技能包】"]
+    for source in resolved_sources:
+        label, text = _read_pack_source(source, "skill")
+        sections.append(f"## {label}\n{text}")
+    return "\n\n".join(sections)
 
 
 # 记忆压缩融合(M4)系统提示:把同 topic 多条记忆融合成一条
@@ -212,6 +274,8 @@ def build_code_understanding_system(
     prompt_profile: str | None = None,
     rule_pack: str | None = None,
     skill_pack: str | None = None,
+    rule_pack_sources: Any = None,
+    skill_pack_sources: Any = None,
 ) -> str:
     """在基础 prompt 前注入当前请求上下文 (org/user/project) + 召回的分层记忆,让模型
     "知道自己在为谁、在哪个组织/项目工作"并遵循已知偏好/约束。工具已按 project_id 路由
@@ -221,8 +285,8 @@ def build_code_understanding_system(
     """
     has_mem = context_plan is not None and not context_plan.is_empty()
     profile_text = _prompt_profile_text(prompt_profile)
-    rule_text = _rule_pack_text(rule_pack)
-    skill_text = _skill_pack_text(skill_pack)
+    rule_text = _rule_pack_text(rule_pack, rule_pack_sources)
+    skill_text = _skill_pack_text(skill_pack, skill_pack_sources)
     if not (project_id or user_id or org_id or has_mem or profile_text or rule_text or skill_text):
         return CODE_UNDERSTANDING_SYSTEM
     parts: list[str] = []

@@ -207,6 +207,25 @@ def test_provider_rule_and_skill_packs_injected_into_system():
     assert "Skill: code-understanding" in prov.seen_system
 
 
+def test_provider_rule_and_skill_pack_sources_injected_into_system():
+    prov = _CapturingProvider()
+    prov.name = "deepseek"
+    svc = ChatService(
+        InMemorySessionStore(),
+        lambda pid: ToolRegistry(),
+        lambda: prov,
+        lambda: 5,
+        rule_pack_factory=lambda name: "custom_rules" if name == "deepseek" else None,
+        skill_pack_factory=lambda name: "custom_skills" if name == "deepseek" else None,
+        rule_pack_sources_factory=lambda name: ["rules:verification-checklist.md"],
+        skill_pack_sources_factory=lambda name: ["builtin:code_understanding"],
+    )
+    svc.ask("q")
+    assert prov.seen_system is not None
+    assert "verification-checklist.md" in prov.seen_system
+    assert "Skill: code-understanding" in prov.seen_system
+
+
 def test_recall_failure_does_not_block_answer():
     prov = _CapturingProvider()
     svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), lambda: prov,

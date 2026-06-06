@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from collections.abc import Callable
+from typing import Any
 
 from codev_platform.agent.brain.base import LLMProvider, Message
 from codev_platform.agent.context_plan import build_context_plan
@@ -40,6 +41,8 @@ class ChatService:
         prompt_profile_factory: Callable[[str], str | None] | None = None,
         rule_pack_factory: Callable[[str], str | None] | None = None,
         skill_pack_factory: Callable[[str], str | None] | None = None,
+        rule_pack_sources_factory: Callable[[str], Any] | None = None,
+        skill_pack_sources_factory: Callable[[str], Any] | None = None,
     ) -> None:
         # provider_factory: 每次调用重解析 config(支持运行中切 provider)。
         # registry_factory(project_id): 按请求 project_id 建工具集(P2 多租户路由)。
@@ -57,6 +60,8 @@ class ChatService:
         self._prompt_profile_factory = prompt_profile_factory
         self._rule_pack_factory = rule_pack_factory
         self._skill_pack_factory = skill_pack_factory
+        self._rule_pack_sources_factory = rule_pack_sources_factory
+        self._skill_pack_sources_factory = skill_pack_sources_factory
 
     def ask(self, question: str, session_id: str | None = None,
             max_steps: int | None = None, user_id: str = "local",
@@ -89,9 +94,18 @@ class ChatService:
             self._skill_pack_factory(provider.name)
             if self._skill_pack_factory is not None else None
         )
+        rule_pack_sources = (
+            self._rule_pack_sources_factory(provider.name)
+            if self._rule_pack_sources_factory is not None else None
+        )
+        skill_pack_sources = (
+            self._skill_pack_sources_factory(provider.name)
+            if self._skill_pack_sources_factory is not None else None
+        )
         system = build_code_understanding_system(
             project_id=project_id, user_id=user_id, org_id=org_id, context_plan=plan,
-            prompt_profile=prompt_profile, rule_pack=rule_pack, skill_pack=skill_pack)
+            prompt_profile=prompt_profile, rule_pack=rule_pack, skill_pack=skill_pack,
+            rule_pack_sources=rule_pack_sources, skill_pack_sources=skill_pack_sources)
         # 每模型策略:有 factory 走它(按 provider 名解析 spec 默认 ⊕ config),否则退回全局 max_steps。
         if self._loop_policy_factory is not None:
             policy = self._loop_policy_factory(provider.name)

@@ -103,3 +103,14 @@ def test_unknown_rule_or_skill_pack_raises():
         assert "未知 skill_pack" in str(e)
     else:
         raise AssertionError("未知 skill_pack 应报错")
+
+
+def test_pack_sources_override_builtin_mapping():
+    s = build_code_understanding_system(
+        rule_pack="custom_rules",
+        skill_pack="custom_skills",
+        rule_pack_sources=["rules:verification-checklist.md"],
+        skill_pack_sources=["builtin:code_understanding"],
+    )
+    assert "verification-checklist.md" in s
+    assert "Skill: code-understanding" in s

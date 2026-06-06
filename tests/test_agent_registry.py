@@ -84,6 +84,22 @@ def test_rule_and_skill_pack_defaults_and_overrides():
     assert reg.skill_pack(cfg2, "newco") == "code_understanding"
 
 
+def test_instruction_pack_sources_from_config():
+    cfg = {"agent": {
+        "provider": "deepseek",
+        "providers": {"deepseek": {
+            "rule_pack": "custom_rules",
+            "skill_pack": "custom_skills",
+        }},
+        "instruction_packs": {
+            "rule_packs": {"custom_rules": ["rules:ai-tools-mcp.md"]},
+            "skill_packs": {"custom_skills": ["builtin:code_understanding"]},
+        },
+    }}
+    assert reg.rule_pack_sources(cfg, "deepseek") == ["rules:ai-tools-mcp.md"]
+    assert reg.skill_pack_sources(cfg, "deepseek") == ["builtin:code_understanding"]
+
+
 def test_loop_policy_per_field_override():
     # (a) 每个新字段都能经 agent.providers.<name>.loop.<f> 逐字段覆盖(含 bool)。
     cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"loop": {

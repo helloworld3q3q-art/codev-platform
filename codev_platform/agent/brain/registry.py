@@ -240,6 +240,36 @@ def skill_pack(cfg: dict[str, Any] | None = None, name: str | None = None) -> st
     )
 
 
+def rule_pack_sources(cfg: dict[str, Any] | None = None, name: str | None = None) -> Any:
+    """解析 rule_pack 对应的可配置 source 列表。
+
+    路径写在 config:
+      agent.instruction_packs.rule_packs.<pack_name> = ["rules:ai-tools-mcp.md", "..."]
+    未配置返回 None,由 prompts.py 使用内置 pack 兜底。
+    """
+    cfg = cfg or acfg.agent_cfg()
+    name = name or acfg.provider_name(cfg)
+    pack = rule_pack(cfg, name)
+    if not pack:
+        return None
+    return acfg.get(cfg, f"agent.instruction_packs.rule_packs.{pack}")
+
+
+def skill_pack_sources(cfg: dict[str, Any] | None = None, name: str | None = None) -> Any:
+    """解析 skill_pack 对应的可配置 source 列表。
+
+    路径写在 config:
+      agent.instruction_packs.skill_packs.<pack_name> = ["builtin:code_understanding", "..."]
+    未配置返回 None,由 prompts.py 使用内置 pack 兜底。
+    """
+    cfg = cfg or acfg.agent_cfg()
+    name = name or acfg.provider_name(cfg)
+    pack = skill_pack(cfg, name)
+    if not pack:
+        return None
+    return acfg.get(cfg, f"agent.instruction_packs.skill_packs.{pack}")
+
+
 def list_providers(cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """给 /providers 端点:列内置 + config 声明的 provider 是否 configured(key 在位)。不返 key。"""
     cfg = cfg or acfg.agent_cfg()
