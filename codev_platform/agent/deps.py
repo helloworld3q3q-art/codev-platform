@@ -10,6 +10,8 @@ from codev_platform.agent.brain.base import LLMProvider
 from codev_platform.agent.brain.registry import get_provider as _get_provider
 from codev_platform.agent.brain.registry import loop_policy as _loop_policy
 from codev_platform.agent.brain.registry import prompt_profile as _prompt_profile
+from codev_platform.agent.brain.registry import rule_pack as _rule_pack
+from codev_platform.agent.brain.registry import skill_pack as _skill_pack
 from codev_platform.agent.services.chat_service import ChatService
 from codev_platform.agent.session import InMemorySessionStore, SessionStore
 from codev_platform.agent.tools import build_default_registry
@@ -203,7 +205,9 @@ def get_chat_service() -> ChatService:
             recall_limit=acfg.get(cfg, "memory.recall_limit", 8),
             # 每模型循环策略:按 provider 名解析 spec 内置档 ⊕ config 覆盖(运行中切 provider 也即时生效)。
             loop_policy_factory=lambda name: _loop_policy(acfg.agent_cfg(), name),
-            # 每模型 prompt overlay:DeepSeek 默认更显式的工具选型清单;其它模型默认通用 prompt。
+            # 每模型 instruction profile:prompt overlay + rule pack + Web-agent skill pack。
             prompt_profile_factory=lambda name: _prompt_profile(acfg.agent_cfg(), name),
+            rule_pack_factory=lambda name: _rule_pack(acfg.agent_cfg(), name),
+            skill_pack_factory=lambda name: _skill_pack(acfg.agent_cfg(), name),
         )
     return _chat_service

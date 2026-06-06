@@ -74,3 +74,32 @@ def test_unknown_prompt_profile_raises():
         assert "未知 prompt_profile" in str(e)
         return
     raise AssertionError("未知 prompt_profile 应报错")
+
+
+def test_rule_and_skill_packs_injected():
+    s = build_code_understanding_system(
+        rule_pack="mcp_first_code_understanding",
+        skill_pack="code_understanding",
+    )
+    assert CODE_UNDERSTANDING_SYSTEM in s
+    assert "【规则包】" in s
+    assert "ai-tools-mcp.md" in s
+    assert "verification-checklist.md" in s
+    assert "【技能包】" in s
+    assert "Skill: code-understanding" in s
+    assert "impact_analysis" in s
+
+
+def test_unknown_rule_or_skill_pack_raises():
+    try:
+        build_code_understanding_system(rule_pack="no-such-rule-pack")
+    except ValueError as e:
+        assert "未知 rule_pack" in str(e)
+    else:
+        raise AssertionError("未知 rule_pack 应报错")
+    try:
+        build_code_understanding_system(skill_pack="no-such-skill-pack")
+    except ValueError as e:
+        assert "未知 skill_pack" in str(e)
+    else:
+        raise AssertionError("未知 skill_pack 应报错")

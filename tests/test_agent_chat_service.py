@@ -188,6 +188,25 @@ def test_provider_prompt_profile_injected_into_system():
     assert "impact_analysis" in prov.seen_system and "read_file" in prov.seen_system
 
 
+def test_provider_rule_and_skill_packs_injected_into_system():
+    prov = _CapturingProvider()
+    prov.name = "deepseek"
+    svc = ChatService(
+        InMemorySessionStore(),
+        lambda pid: ToolRegistry(),
+        lambda: prov,
+        lambda: 5,
+        rule_pack_factory=lambda name: "mcp_first_code_understanding" if name == "deepseek" else None,
+        skill_pack_factory=lambda name: "code_understanding" if name == "deepseek" else None,
+    )
+    svc.ask("q")
+    assert prov.seen_system is not None
+    assert "【规则包】" in prov.seen_system
+    assert "ai-tools-mcp.md" in prov.seen_system
+    assert "【技能包】" in prov.seen_system
+    assert "Skill: code-understanding" in prov.seen_system
+
+
 def test_recall_failure_does_not_block_answer():
     prov = _CapturingProvider()
     svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), lambda: prov,

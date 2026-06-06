@@ -62,6 +62,28 @@ def test_prompt_profile_defaults_and_overrides():
     assert reg.prompt_profile(cfg2, "newco") == "explicit_tool_selection"
 
 
+def test_rule_and_skill_pack_defaults_and_overrides():
+    # DeepSeek 默认不只是 prompt,还带 Web-agent rule/skill pack;强模型默认不额外注入。
+    assert reg.rule_pack({"agent": {"provider": "deepseek"}}, "deepseek") == "mcp_first_code_understanding"
+    assert reg.skill_pack({"agent": {"provider": "deepseek"}}, "deepseek") == "code_understanding"
+    assert reg.rule_pack({"agent": {"provider": "claude"}}, "claude") is None
+    assert reg.skill_pack({"agent": {"provider": "claude"}}, "claude") is None
+
+    # provider 级配置可禁用;config-only 新模型也能显式选择 pack。
+    cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {
+        "rule_pack": "off", "skill_pack": "",
+    }}}}
+    assert reg.rule_pack(cfg, "deepseek") is None
+    assert reg.skill_pack(cfg, "deepseek") is None
+    cfg2 = {"agent": {"provider": "newco", "providers": {"newco": {
+        "base_url": "https://x.test",
+        "rule_pack": "mcp_first_code_understanding",
+        "skill_pack": "code_understanding",
+    }}}}
+    assert reg.rule_pack(cfg2, "newco") == "mcp_first_code_understanding"
+    assert reg.skill_pack(cfg2, "newco") == "code_understanding"
+
+
 def test_loop_policy_per_field_override():
     # (a) 每个新字段都能经 agent.providers.<name>.loop.<f> 逐字段覆盖(含 bool)。
     cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"loop": {

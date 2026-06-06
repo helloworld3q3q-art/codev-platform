@@ -3,6 +3,8 @@
 """
 from __future__ import annotations
 
+from importlib.resources import files
+
 from codev_platform.agent.context_plan import GROUP_ORDER
 
 # A 能力(只读代码理解)系统提示
@@ -83,6 +85,38 @@ _PROMPT_PROFILES = {
 }
 
 
+_RULE_PACKS = {
+    # Web agent 的 MCP-first / 证据优先基线。只选跨项目通用规则,不塞项目画像。
+    "mcp_first_code_understanding": (
+        "ai-tools-mcp.md",
+        "verification-checklist.md",
+    ),
+}
+
+
+CODE_UNDERSTANDING_SKILL = """【Skill: code-understanding】
+
+目标:回答代码 / 架构 / 规则问题时,用最少必要工具拿证据,然后给出可执行结论。
+
+触发:
+- 用户问"这个项目有什么用 / 某功能怎么改 / 前后端涉及哪些文件 / 某符号在哪里"。
+- 用户要修改面、影响面、排查路径、接口/表/页面关系。
+
+执行方式:
+1. 先判断问题类型:概览 / 修改面 / 影响面 / 符号定位 / 规则查询。
+2. 概览问题最多 3 个工具;普通修改面分析最多 8 个工具。用户明确要求完整审计时才扩展。
+3. `impact_analysis` 只在已拿到真实 nodeRef 后调用;不要把自然语言字符串硬塞进去。
+4. 先给最小闭环答案(要改哪些层、哪些文件、风险点),再补证据;不要默认读完整仓。
+5. 工具结果冲突或索引缺失时,如实说明限制,不要补造路径/符号。
+"""
+
+
+_SKILL_PACKS = {
+    # 模型可读的 Web-agent skill,不依赖 shell / AskUserQuestion / Claude Code 专用能力。
+    "code_understanding": (CODE_UNDERSTANDING_SKILL,),
+}
+
+
 def _prompt_profile_text(prompt_profile: str | None) -> str | None:
     """按 profile 名取模型专用 prompt overlay。未知 profile 显式报错,避免静默拼错配置。"""
     if not prompt_profile:
@@ -93,6 +127,31 @@ def _prompt_profile_text(prompt_profile: str | None) -> str | None:
             f"未知 prompt_profile: {prompt_profile}; 可选:{', '.join(sorted(_PROMPT_PROFILES))}"
         )
     return text
+
+
+def _rule_pack_text(rule_pack: str | None) -> str | None:
+    """按规则包名读取 package resources/rules。规则包用于 Web agent system prompt 注入。"""
+    if not rule_pack:
+        return None
+    names = _RULE_PACKS.get(rule_pack)
+    if names is None:
+        raise ValueError(f"未知 rule_pack: {rule_pack}; 可选:{', '.join(sorted(_RULE_PACKS))}")
+    root = files("codev_platform") / "resources" / "rules"
+    sections = ["【规则包】"]
+    for name in names:
+        p = root / name
+        sections.append(f"## {name}\n{p.read_text(encoding='utf-8')}")
+    return "\n\n".join(sections)
+
+
+def _skill_pack_text(skill_pack: str | None) -> str | None:
+    """按技能包名取 Web-agent 安全 skill。不要默认注入 Claude/Codex 专用 shell skill。"""
+    if not skill_pack:
+        return None
+    skills = _SKILL_PACKS.get(skill_pack)
+    if skills is None:
+        raise ValueError(f"未知 skill_pack: {skill_pack}; 可选:{', '.join(sorted(_SKILL_PACKS))}")
+    return "\n\n".join(("【技能包】", *skills))
 
 
 # 记忆压缩融合(M4)系统提示:把同 topic 多条记忆融合成一条
@@ -151,6 +210,8 @@ def build_code_understanding_system(
     org_id: str | None = None,
     context_plan=None,
     prompt_profile: str | None = None,
+    rule_pack: str | None = None,
+    skill_pack: str | None = None,
 ) -> str:
     """在基础 prompt 前注入当前请求上下文 (org/user/project) + 召回的分层记忆,让模型
     "知道自己在为谁、在哪个组织/项目工作"并遵循已知偏好/约束。工具已按 project_id 路由
@@ -160,7 +221,9 @@ def build_code_understanding_system(
     """
     has_mem = context_plan is not None and not context_plan.is_empty()
     profile_text = _prompt_profile_text(prompt_profile)
-    if not (project_id or user_id or org_id or has_mem or profile_text):
+    rule_text = _rule_pack_text(rule_pack)
+    skill_text = _skill_pack_text(skill_pack)
+    if not (project_id or user_id or org_id or has_mem or profile_text or rule_text or skill_text):
         return CODE_UNDERSTANDING_SYSTEM
     parts: list[str] = []
     if project_id or user_id or org_id:
@@ -193,4 +256,8 @@ def build_code_understanding_system(
     parts.append(CODE_UNDERSTANDING_SYSTEM)
     if profile_text:
         parts.append(profile_text)
+    if rule_text:
+        parts.append(rule_text)
+    if skill_text:
+        parts.append(skill_text)
     return "\n\n".join(parts)

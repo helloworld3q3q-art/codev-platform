@@ -38,13 +38,15 @@ class ChatService:
         recall_limit: int = 8,
         loop_policy_factory: Callable[[str], LoopPolicy] | None = None,
         prompt_profile_factory: Callable[[str], str | None] | None = None,
+        rule_pack_factory: Callable[[str], str | None] | None = None,
+        skill_pack_factory: Callable[[str], str | None] | None = None,
     ) -> None:
         # provider_factory: 每次调用重解析 config(支持运行中切 provider)。
         # registry_factory(project_id): 按请求 project_id 建工具集(P2 多租户路由)。
         # recall: 分层记忆召回(M3),None = 未启用 memory(召回段不注入)。
         # loop_policy_factory(provider_name): 每模型循环策略(步数 / 工具上限),None 时退回
         #   仅用 default_max_steps 的全局默认(向后兼容 + 测试)。
-        # prompt_profile_factory(provider_name): 每模型 prompt overlay。None = 只用通用 prompt。
+        # prompt/rule/skill factory(provider_name): 每模型 Web-agent instruction profile。
         self._sessions = sessions
         self._registry_factory = registry_factory
         self._provider_factory = provider_factory
@@ -53,6 +55,8 @@ class ChatService:
         self._recall_limit = recall_limit
         self._loop_policy_factory = loop_policy_factory
         self._prompt_profile_factory = prompt_profile_factory
+        self._rule_pack_factory = rule_pack_factory
+        self._skill_pack_factory = skill_pack_factory
 
     def ask(self, question: str, session_id: str | None = None,
             max_steps: int | None = None, user_id: str = "local",
@@ -77,9 +81,17 @@ class ChatService:
             self._prompt_profile_factory(provider.name)
             if self._prompt_profile_factory is not None else None
         )
+        rule_pack = (
+            self._rule_pack_factory(provider.name)
+            if self._rule_pack_factory is not None else None
+        )
+        skill_pack = (
+            self._skill_pack_factory(provider.name)
+            if self._skill_pack_factory is not None else None
+        )
         system = build_code_understanding_system(
             project_id=project_id, user_id=user_id, org_id=org_id, context_plan=plan,
-            prompt_profile=prompt_profile)
+            prompt_profile=prompt_profile, rule_pack=rule_pack, skill_pack=skill_pack)
         # 每模型策略:有 factory 走它(按 provider 名解析 spec 默认 ⊕ config),否则退回全局 max_steps。
         if self._loop_policy_factory is not None:
             policy = self._loop_policy_factory(provider.name)

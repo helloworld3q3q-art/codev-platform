@@ -39,6 +39,9 @@ class ProviderSpec:
     # 模型专用 prompt profile。None = 只用通用 prompt;config 可覆盖或置空禁用。
     # 注意:profile 文案是可复用能力档,不要为 OpenAI 兼容厂商新建适配器文件。
     default_prompt_profile: str | None = None
+    # Web agent 专用规则/技能包。与 prompt profile 分开,方便按模型独立调"规则源 + 能力流程"。
+    default_rule_pack: str | None = None
+    default_skill_pack: str | None = None
 
 
 _REGISTRY: dict[str, ProviderSpec] = {}
@@ -92,7 +95,9 @@ register_provider(ProviderSpec("deepseek", "DEEPSEEK_API_KEY", _build_openai_com
                                openai_compatible=True,
                                # deepseek-chat 工具选型 / 收敛偏弱: 弱档严管, 防变参 thrash + 换词空转。
                                default_loop_policy=_WEAK,
-                               default_prompt_profile="explicit_tool_selection"))
+                               default_prompt_profile="explicit_tool_selection",
+                               default_rule_pack="mcp_first_code_understanding",
+                               default_skill_pack="code_understanding"))
 register_provider(ProviderSpec("qwen", "DASHSCOPE_API_KEY", _build_openai_compat,
                                default_model="qwen-max",
                                default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -178,31 +183,61 @@ def loop_policy(cfg: dict[str, Any] | None = None, name: str | None = None) -> L
     )
 
 
-def prompt_profile(cfg: dict[str, Any] | None = None, name: str | None = None) -> str | None:
-    """解析某 provider 的 prompt profile:
-      config `agent.providers.<name>.prompt_profile` > `agent.prompt_profile`
-      > spec.default_prompt_profile。
+def _provider_setting(
+    cfg: dict[str, Any], name: str, field: str, default: str | None,
+) -> str | None:
+    """解析 provider 可插拔配置字段。
 
-    置为 "" / "none" / "off" 可显式禁用。profile 只决定 prompt overlay,
-    不影响 provider 协议适配或 loop 策略。
+    优先级:`agent.providers.<name>.<field>` > `agent.<field>` > provider spec 默认。
+    ""/none/off/false/0 显式禁用。用于 prompt_profile/rule_pack/skill_pack。
     """
-    cfg = cfg or acfg.agent_cfg()
-    name = name or acfg.provider_name(cfg)
-    spec = _REGISTRY.get(name)
     raw = None
-    for key in (f"agent.providers.{name}.prompt_profile", "agent.prompt_profile"):
+    for key in (f"agent.providers.{name}.{field}", f"agent.{field}"):
         v = acfg.get(cfg, key)
         if v is not None:
             raw = v
             break
-    if raw is None and spec is not None:
-        raw = spec.default_prompt_profile
+    if raw is None:
+        raw = default
     if raw is None:
         return None
     value = str(raw).strip()
     if not value or value.lower() in {"none", "off", "false", "0"}:
         return None
     return value
+
+
+def prompt_profile(cfg: dict[str, Any] | None = None, name: str | None = None) -> str | None:
+    """解析某 provider 的 prompt profile。"""
+    cfg = cfg or acfg.agent_cfg()
+    name = name or acfg.provider_name(cfg)
+    spec = _REGISTRY.get(name)
+    return _provider_setting(
+        cfg, name, "prompt_profile",
+        spec.default_prompt_profile if spec is not None else None,
+    )
+
+
+def rule_pack(cfg: dict[str, Any] | None = None, name: str | None = None) -> str | None:
+    """解析某 provider 的 Web-agent 规则包。"""
+    cfg = cfg or acfg.agent_cfg()
+    name = name or acfg.provider_name(cfg)
+    spec = _REGISTRY.get(name)
+    return _provider_setting(
+        cfg, name, "rule_pack",
+        spec.default_rule_pack if spec is not None else None,
+    )
+
+
+def skill_pack(cfg: dict[str, Any] | None = None, name: str | None = None) -> str | None:
+    """解析某 provider 的 Web-agent 技能包。"""
+    cfg = cfg or acfg.agent_cfg()
+    name = name or acfg.provider_name(cfg)
+    spec = _REGISTRY.get(name)
+    return _provider_setting(
+        cfg, name, "skill_pack",
+        spec.default_skill_pack if spec is not None else None,
+    )
 
 
 def list_providers(cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
