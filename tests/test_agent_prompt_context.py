@@ -83,8 +83,8 @@ def test_rule_and_skill_packs_injected():
     )
     assert CODE_UNDERSTANDING_SYSTEM in s
     assert "【规则包】" in s
-    assert "ai-tools-mcp.md" in s
-    assert "verification-checklist.md" in s
+    assert "mcp-first-code-understanding.md" in s
+    assert "MCP-first 代码理解规则" in s
     assert "【技能包】" in s
     assert "Skill: code-understanding" in s
     assert "impact_analysis" in s
@@ -109,8 +109,8 @@ def test_pack_sources_override_builtin_mapping():
     s = build_code_understanding_system(
         rule_pack="custom_rules",
         skill_pack="custom_skills",
-        rule_pack_sources=["rules:verification-checklist.md"],
-        skill_pack_sources=["builtin:code_understanding"],
+        rule_pack_sources=["agent-rules:mcp-first-code-understanding.md"],
+        skill_pack_sources=["agent-skills:code-understanding.md"],
     )
-    assert "verification-checklist.md" in s
+    assert "mcp-first-code-understanding.md" in s
     assert "Skill: code-understanding" in s

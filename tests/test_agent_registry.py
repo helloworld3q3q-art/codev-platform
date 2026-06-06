@@ -92,12 +92,12 @@ def test_instruction_pack_sources_from_config():
             "skill_pack": "custom_skills",
         }},
         "instruction_packs": {
-            "rule_packs": {"custom_rules": ["rules:ai-tools-mcp.md"]},
-            "skill_packs": {"custom_skills": ["builtin:code_understanding"]},
+            "rule_packs": {"custom_rules": ["agent-rules:mcp-first-code-understanding.md"]},
+            "skill_packs": {"custom_skills": ["agent-skills:code-understanding.md"]},
         },
     }}
-    assert reg.rule_pack_sources(cfg, "deepseek") == ["rules:ai-tools-mcp.md"]
-    assert reg.skill_pack_sources(cfg, "deepseek") == ["builtin:code_understanding"]
+    assert reg.rule_pack_sources(cfg, "deepseek") == ["agent-rules:mcp-first-code-understanding.md"]
+    assert reg.skill_pack_sources(cfg, "deepseek") == ["agent-skills:code-understanding.md"]
 
 
 def test_loop_policy_per_field_override():

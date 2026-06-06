@@ -42,3 +42,9 @@ def test_cli_hooks_src_resolves():
     from codev_platform import cli
     assert cli._HOOKS_SRC.is_dir(), f"_HOOKS_SRC 应存在: {cli._HOOKS_SRC}"
     assert "resources" in str(cli._HOOKS_SRC)
+
+
+def test_agent_instructions_accessible_via_importlib():
+    p = files("codev_platform") / "agent" / "instructions"
+    assert (p / "rules" / "mcp-first-code-understanding.md").is_file()
+    assert (p / "skills" / "code-understanding.md").is_file()

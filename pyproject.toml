@@ -91,7 +91,7 @@ where = ["."]
 include = ["codev_platform*"]
 exclude = ["platform_meta*", "docs*", "tests*"]
 
-# 真值源 rules / skills 现在包内 codev_platform/resources/ —— 作为 package-data 打进 wheel,
-# 普通 pip 安装(非 editable)后 sync-rules / sync-skills 才能找到源(audit-0601 #2)。
+# resources/ 是开发工作区分发真值源(sync-rules / sync-skills / sync-hooks);
+# agent/instructions/ 是 Web agent 运行时指令包。两者都要打进 wheel。
 [tool.setuptools.package-data]
-codev_platform = ["resources/**/*.md", "resources/**/*"]
+codev_platform = ["resources/**/*.md", "resources/**/*", "agent/instructions/**/*.md"]

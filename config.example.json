@@ -59,16 +59,15 @@
       "qwen":     { "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-max", "api_key": "" }
     },
     "instruction_packs": {
-      "_comment": "Web agent 的模型指令包。provider 通过 prompt_profile / rule_pack / skill_pack 选择包名;这里定义包名对应的具体来源。source 支持: rules:<包内 resources/rules 文件或目录>、skills:<包内 resources/skills 文件或目录>、builtin:<内置 Web-agent skill>、绝对路径、相对 agent 服务工作目录的路径。例: agent.providers.deepseek.rule_pack = mcp_first_code_understanding;也可给某新模型配自己的 pack。",
+      "_comment": "Web agent 的模型指令包。provider 通过 prompt_profile / rule_pack / skill_pack 选择包名;这里定义包名对应的具体来源。默认请使用 agent-rules:<codev_platform/agent/instructions/rules 下文件或目录>、agent-skills:<codev_platform/agent/instructions/skills 下文件或目录>。rules:/skills: 是开发工作区分发资源(codev_platform/resources)的显式兼容入口,不要作为 Web agent 默认来源。也支持绝对路径、相对 agent 服务工作目录的路径。例: agent.providers.deepseek.rule_pack = mcp_first_code_understanding;也可给某新模型配自己的 pack。",
       "rule_packs": {
         "mcp_first_code_understanding": [
-          "rules:ai-tools-mcp.md",
-          "rules:verification-checklist.md"
+          "agent-rules:mcp-first-code-understanding.md"
         ]
       },
       "skill_packs": {
         "code_understanding": [
-          "builtin:code_understanding"
+          "agent-skills:code-understanding.md"
         ]
       }
     }

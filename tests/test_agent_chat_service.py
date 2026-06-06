@@ -202,7 +202,7 @@ def test_provider_rule_and_skill_packs_injected_into_system():
     svc.ask("q")
     assert prov.seen_system is not None
     assert "【规则包】" in prov.seen_system
-    assert "ai-tools-mcp.md" in prov.seen_system
+    assert "mcp-first-code-understanding.md" in prov.seen_system
     assert "【技能包】" in prov.seen_system
     assert "Skill: code-understanding" in prov.seen_system
 
@@ -217,12 +217,12 @@ def test_provider_rule_and_skill_pack_sources_injected_into_system():
         lambda: 5,
         rule_pack_factory=lambda name: "custom_rules" if name == "deepseek" else None,
         skill_pack_factory=lambda name: "custom_skills" if name == "deepseek" else None,
-        rule_pack_sources_factory=lambda name: ["rules:verification-checklist.md"],
-        skill_pack_sources_factory=lambda name: ["builtin:code_understanding"],
+        rule_pack_sources_factory=lambda name: ["agent-rules:mcp-first-code-understanding.md"],
+        skill_pack_sources_factory=lambda name: ["agent-skills:code-understanding.md"],
     )
     svc.ask("q")
     assert prov.seen_system is not None
-    assert "verification-checklist.md" in prov.seen_system
+    assert "mcp-first-code-understanding.md" in prov.seen_system
     assert "Skill: code-understanding" in prov.seen_system
 
 
