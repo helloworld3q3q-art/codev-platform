@@ -35,6 +35,8 @@ from eval.metrics import accuracy, aggregate_mrr, hit_at_k, recall_at_k  # noqa:
 _DATASETS = Path(__file__).resolve().parent / "datasets"
 _DEFAULT_RETRIEVAL_PID = "codev-platform"
 _DEFAULT_GRAPH_PID = "openclaw-stock"
+# A1/A2 软标签准确率回归默认测平台自身 (analyzer 上线在 codev-platform 项目)。
+_DEFAULT_CODE_INTEL_PID = "codev-platform"
 # memory recall 子集用的隔离命名空间前缀 —— 只碰 eval 自己写的数据,清理按此 org_id + owner 删净。
 _EVAL_MEM_ORG_PREFIX = "eval-mem-"
 
@@ -350,6 +352,189 @@ def run_memory(k: int = 8) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# code_intelligence suite —— A1/A2 软标签准确率回归 (graph store 直查, 不调 LLM)
+# ---------------------------------------------------------------------------
+# 把 A1 业务域 / A2 架构分层的准确率验收从"人肉核对"(见 roadmap-2026-06-08 那一长串
+# 手动数字, prompt v1->v4 每次都人工重核)固化成可复跑 golden set。labeler 是 LLM,
+# 但本 suite 只读已落库的软节点/软边算准确率, 纯确定性、可回归。
+# 数据由 reindex 时的 analyzer(config gate 开)产, 落 per-project graph store sqlite。
+# 软标签缺失(analyzer 未开 / 该机未 reindex, 如 Windows 本机)-> status="skipped"。
+
+
+def _norm_path(p: str) -> str:
+    """归一文件路径用于匹配: 反斜杠 -> 正斜杠 + 小写。"""
+    return (p or "").replace("\\", "/").lower()
+
+
+def _file_matches(actual: str, golden: str) -> bool:
+    """golden 是相对路径 (如 codev_platform/web/db/tables.py); actual 是 store 里的
+    node.file。精确相等 / actual 以 '/golden' 结尾 (golden 是后缀) 即命中。"""
+    a, gkey = _norm_path(actual), _norm_path(golden)
+    return a == gkey or a.endswith("/" + gkey)
+
+
+def score_label_cases(actual_by_file: dict[str, set[str]], cases: list[dict],
+                      expect_key: str) -> dict:
+    """纯函数: 给 {file -> 已标标签集} + golden cases, 算分类准确率。
+
+    actual_by_file: 从 store 聚合的 file_path -> {role/domain 名}。
+    cases:          [{file, <expect_key>, note?}, ...]。
+    expect_key:     "expect_role" (A2) 或 "expect_domain" (A1)。
+
+    命中判定: golden 文件的实际标签集**包含** expected 标签即 correct。
+    区分 labeled=False(该文件根本没被标, 可能 batch 漏)与 labeled-but-wrong(标错)。
+    无 IO、无 store 依赖 -> 可脱离 live store 单测 (对齐 memory conflict 子集)。
+    """
+    correct = 0
+    details: list[dict] = []
+    for c in cases:
+        expected = c[expect_key]
+        got: set[str] = set()
+        for f, labels in actual_by_file.items():
+            if _file_matches(f, c["file"]):
+                got |= labels
+        ok = expected in got
+        correct += 1 if ok else 0
+        details.append({
+            "file": c["file"],
+            "expect": expected,
+            "got": sorted(got),
+            "ok": ok,
+            "labeled": bool(got),
+            "note": c.get("note", ""),
+        })
+    total = len(cases)
+    return {
+        "accuracy": round(accuracy(correct, total), 3),
+        "correct": correct,
+        "total": total,
+        "unlabeled": sum(1 for d in details if not d["labeled"]),
+        "details": details,
+    }
+
+
+def _build_arch_role_index(g) -> dict[str, set[str]]:
+    """从 graph 的 PLAYS_ROLE 软边聚合 file_path -> {arch_layer 角色名}。"""
+    from codev_platform.graph.schema import EdgeKind
+
+    node_by_id = {n.id: n for n in g.nodes}
+    out: dict[str, set[str]] = {}
+    for e in g.edges:
+        if e.kind != EdgeKind.PLAYS_ROLE.value:
+            continue
+        src = node_by_id.get(e.source)
+        tgt = node_by_id.get(e.target)
+        if src is not None and tgt is not None and src.file:
+            out.setdefault(src.file, set()).add(tgt.name)
+    return out
+
+
+def _build_domain_index(g) -> dict[str, set[str]]:
+    """从 BELONGS_TO_DOMAIN 软边聚合 file_path -> {业务域名} (A1, 数据齐时启用)。"""
+    from codev_platform.graph.schema import EdgeKind
+
+    node_by_id = {n.id: n for n in g.nodes}
+    out: dict[str, set[str]] = {}
+    for e in g.edges:
+        if e.kind != EdgeKind.BELONGS_TO_DOMAIN.value:
+            continue
+        src = node_by_id.get(e.source)
+        tgt = node_by_id.get(e.target)
+        if src is not None and tgt is not None and src.file:
+            out.setdefault(src.file, set()).add(tgt.name)
+    return out
+
+
+def run_code_intelligence(project_id: str) -> dict:
+    rows = _load_jsonl("code_intelligence.jsonl")
+    arch_cases = [r for r in rows if r.get("kind") == "arch_role"]
+    domain_cases = [r for r in rows if r.get("kind") == "business_domain"]
+
+    try:
+        from codev_platform.graph.schema import NodeKind
+        from codev_platform.graph.store import graph_store_path, load_graph, open_store
+    except Exception as e:  # noqa: BLE001
+        return {"suite": "code_intelligence", "status": "skipped",
+                "reason": f"graph 模块不可导入 ({type(e).__name__}: {e})。",
+                "n": len(rows)}
+
+    db_path = graph_store_path(project_id)
+    if not db_path.exists():
+        return {"suite": "code_intelligence", "status": "skipped",
+                "reason": f"graph store 不存在: {db_path}。先在有数据的机器跑 "
+                          f"`codev-platform reindex` (或 graph ingest) 建图谱。",
+                "n": len(rows)}
+
+    conn = open_store(project_id)
+    try:
+        g = load_graph(conn, project_id)
+    finally:
+        conn.close()
+
+    has_arch = any(n.kind == NodeKind.ARCH_LAYER.value for n in g.nodes)
+    has_domain = any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in g.nodes)
+    if not has_arch and not has_domain:
+        return {"suite": "code_intelligence", "status": "skipped",
+                "reason": f"graph store ({db_path}) 无软标签节点 (ARCH_LAYER / "
+                          f"BUSINESS_DOMAIN 均 0) —— analyzer 未在该机跑过。"
+                          f"开 config `analyzers.arch_layer.enabled` / "
+                          f"`business_domain.enabled` 后 reindex (软标签 analyzer "
+                          f"上线在 WSL, 见 roadmap-2026-06-08)。",
+                "n": len(rows)}
+
+    sub: dict = {}
+    metrics: dict = {}
+    if arch_cases and has_arch:
+        arch = score_label_cases(_build_arch_role_index(g), arch_cases, "expect_role")
+        sub["arch_role"] = arch
+        metrics["arch_role_accuracy"] = arch["accuracy"]
+    if domain_cases and has_domain:
+        dom = score_label_cases(_build_domain_index(g), domain_cases, "expect_domain")
+        sub["business_domain"] = dom
+        metrics["business_domain_accuracy"] = dom["accuracy"]
+
+    return {
+        "suite": "code_intelligence",
+        "status": "ok",
+        "n": sum(s["total"] for s in sub.values()),
+        "project_id": project_id,
+        "metrics": metrics,
+        "sub": sub,
+    }
+
+
+# ---------------------------------------------------------------------------
+# planner suite —— 查询分类准确率 (Phase 7, 纯确定性, 无后端, 处处可跑)
+# ---------------------------------------------------------------------------
+# QueryPlanner 按问题类型规划工具/预算, 分类对不对直接决定预算合不合理。本 suite 把
+# {query -> expect_type} 固化成 golden set 算分类准确率 —— 改分类词表/规则后自动回归
+# (改前改后对比, 对齐 plan "先评测再优化")。纯关键词分类, 不调 LLM、不依赖任何后端。
+
+
+def run_planner() -> dict:
+    from codev_platform.agent.planner import classify_query
+
+    rows = _load_jsonl("planner.jsonl")
+    correct = 0
+    details = []
+    for r in rows:
+        got = classify_query(r["query"])
+        ok = got == r["expect_type"]
+        correct += 1 if ok else 0
+        details.append({"query": r["query"], "expect": r["expect_type"],
+                        "got": got, "ok": ok})
+    n = len(rows)
+    return {
+        "suite": "planner",
+        "status": "ok",
+        "n": n,
+        "metrics": {"classification_accuracy": round(accuracy(correct, n), 3)},
+        "correct": correct,
+        "details": details,
+    }
+
+
+# ---------------------------------------------------------------------------
 # 输出
 # ---------------------------------------------------------------------------
 
@@ -374,10 +559,22 @@ def _print_human(results: list[dict]) -> None:
             elif rc.get("status") == "ok":
                 print(f"    recall 子集 ok | seed cleaned_rows = {rc.get('cleaned_rows')} "
                       f"(namespace {rc.get('namespace')})")
-        # 取一个代表性指标进总分 (recall@5 / recall / hit_rate)
+        # code_intelligence: 显式报告每个子 suite 的标注/未标注分布
+        if res["suite"] == "code_intelligence":
+            for name, s in res.get("sub", {}).items():
+                print(f"    [{name}] {s['correct']}/{s['total']} 准 "
+                      f"(未标注 {s['unlabeled']})")
+        # planner: 显式报告分类错的 case(便于补词表)
+        if res["suite"] == "planner":
+            for d in res.get("details", []):
+                if not d["ok"]:
+                    print(f"    [miss] {d['expect']}!={d['got']}: {d['query']}")
+        # 取一个代表性指标进总分 (recall@5 / recall / hit_rate / accuracy)
         m = res["metrics"]
         primary = (m.get("recall@5") or m.get("recall") or m.get("hit_rate")
-                   or m.get("resolution_accuracy") or 0.0)
+                   or m.get("resolution_accuracy") or m.get("arch_role_accuracy")
+                   or m.get("business_domain_accuracy") or m.get("classification_accuracy")
+                   or 0.0)
         total_metric += primary
         total_ok += 1
     print("\n=== 总分 ===")
@@ -389,13 +586,16 @@ def _print_human(results: list[dict]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="codev-platform eval harness")
-    ap.add_argument("--suite", choices=["retrieval", "codegraph", "memory", "all"], default="all")
+    ap.add_argument("--suite",
+                    choices=["retrieval", "codegraph", "memory", "code_intelligence",
+                             "planner", "all"],
+                    default="all")
     ap.add_argument("--project", default=None, help="project_id 覆盖 (默认按 suite 选)")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("-k", type=int, default=5, help="retrieval top-k (默认 5)")
     args = ap.parse_args(argv)
 
-    suites = (["retrieval", "codegraph", "memory"]
+    suites = (["retrieval", "codegraph", "memory", "code_intelligence", "planner"]
               if args.suite == "all" else [args.suite])
     results: list[dict] = []
     for s in suites:
@@ -405,6 +605,10 @@ def main(argv: list[str] | None = None) -> int:
             results.append(run_codegraph(args.project or _DEFAULT_GRAPH_PID))
         elif s == "memory":
             results.append(run_memory())
+        elif s == "code_intelligence":
+            results.append(run_code_intelligence(args.project or _DEFAULT_CODE_INTEL_PID))
+        elif s == "planner":
+            results.append(run_planner())
 
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))

@@ -11,9 +11,11 @@
 .venv/bin/python eval/run_eval.py --suite all
 
 # 单 suite
-.venv/bin/python eval/run_eval.py --suite codegraph     # 无 GPU 即可跑
-.venv/bin/python eval/run_eval.py --suite memory        # conflict 纯逻辑必跑; recall 需 PG
-.venv/bin/python eval/run_eval.py --suite retrieval     # 需 chroma daemon + 模型
+.venv/bin/python eval/run_eval.py --suite codegraph          # 无 GPU 即可跑
+.venv/bin/python eval/run_eval.py --suite memory             # conflict 纯逻辑必跑; recall 需 PG
+.venv/bin/python eval/run_eval.py --suite retrieval          # 需 chroma daemon + 模型
+.venv/bin/python eval/run_eval.py --suite code_intelligence  # A1/A2 软标签准确率; 需 graph store 有软标签(WSL)
+.venv/bin/python eval/run_eval.py --suite planner            # Phase 7 查询分类准确率; 纯确定性, 处处可跑
 
 # 机器可读
 .venv/bin/python eval/run_eval.py --suite all --json
@@ -21,16 +23,26 @@
 
 可选参数:`--project <id>`(覆盖默认 project_id)、`-k <n>`(retrieval top-k,默认 5)。
 
-## 三套 suite + 当前能跑哪些
+## 五套 suite + 当前能跑哪些
 
 | suite | 后端 | GPU? | 数据来源 | 默认 project |
 |---|---|---|---|---|
 | **codegraph** | `codegraph.db` 直查 nodes/FTS | 否,现在即可跑 | 真实符号 ↔ 文件 | `openclaw-stock` |
 | **memory** | conflict=纯逻辑 / recall=PG | conflict 否 / recall 需 PG | 记忆冲突消解 + 跨作用域召回 | — |
 | **retrieval** | chroma daemon (SSE) | 是,需模型 | 平台自身已索引文档 | `codev-platform` |
+| **code_intelligence** | graph store sqlite 直查软边 | 否(读已落库) | A1 业务域 / A2 架构分层软标签 | `codev-platform` |
+| **planner** | 无(纯关键词分类) | 否,处处可跑 | 查询类型 golden(Phase 7) | — |
 
 retrieval 需先 `codev-platform serve-mcp start` 拉起 daemon(预热 embedding + reranker ~30-60s);
 daemon 没起 / 模型缺 → runner 优雅报"需要什么",不抛异常(`status="skipped"`)。
+
+code_intelligence 把 **A1/A2 软标签准确率验收从人肉核对固化成可回归 golden set**(承 roadmap-2026-06-07
+Phase 0 + 06-08 backlog 高 ROI 项):此前 A1 业务域 / A2 架构分层每改一版 prompt(A2 v1→v4)都要人工
+重核一遍准确率;本 suite 只**读已落库的软节点/软边**(`PLAYS_ROLE` / `BELONGS_TO_DOMAIN`)对 golden
+ground-truth 算分类准确率,**不调 LLM**、纯确定性、可复跑。软标签由 reindex 时的 analyzer 产(config gate
+`analyzers.arch_layer.enabled` / `business_domain.enabled`),**上线在 WSL**;本机(如 Windows)没跑过
+analyzer → store 无软标签 → `status="skipped"` 并提示怎么开。labeler 是 LLM,但本 suite 测的是其**沉淀
+到图谱的结果**,因此可脱离 LLM 回归。
 
 ## 指标含义(定义见 `eval/metrics.py`,纯函数全单测)
 
@@ -44,6 +56,8 @@ daemon 没起 / 模型缺 → runner 优雅报"需要什么",不抛异常(`statu
 - codegraph 算 `hit_rate`(期望符号/文件是否被搜到)+ `MRR`(排名)。
 - retrieval 算 `recall@5` / `hit@5` / `MRR`。
 - memory 算 `resolution_accuracy`(冲突消解胜出条 == 期望,纯逻辑始终可跑)+(有 PG 时)`recall@k` / `hit@k`。
+- code_intelligence 算 `arch_role_accuracy` / `business_domain_accuracy`(分类准确率 = golden 文件的实际软标签集**包含**期望标签的比例);detail 区分 `ok`(标对)/ labeled-but-wrong(标错)/ `labeled=False`(漏标),便于定位 prompt 退化是"标错"还是"没标到"。
+- planner 算 `classification_accuracy`(`QueryPlanner.classify_query` 把 query 判成 overview/impact/symbol/doc_rule/general 是否等于期望);miss 的 case 会打印出来,便于补关键词表。改分类词表/规则后跑此 suite 即"改前改后"对比(Phase 7 planner 的预算合不合理取决于分类对不对)。
 
 ## memory suite(两子集)
 
@@ -66,14 +80,20 @@ daemon 没起 / 模型缺 → runner 优雅报"需要什么",不抛异常(`statu
 - `retrieval.jsonl` —— `{query, relevant: [doc 路径]}`,基于平台自己已索引的 rules / docs / plan 主题(可答、有据)。
 - `codegraph.jsonl` —— `{query, expect_symbol_or_file}`,基于 codegraph 已索引的真实符号。
 - `memory.jsonl` —— 两类:`{kind:"conflict", entries, policy, expect_winner}`(纯逻辑)+ `{kind:"recall", seed, query, expect_contains}`(需 PG;seed 里 `__USER__`/`__PROJ__` 占位由 runner 替成隔离命名空间)。
+- `code_intelligence.jsonl` —— `{kind:"arch_role", file, expect_role}`(A2,`expect_role` 取闭集词表 controller/service/repository/domain_model/util/config/adapter/gateway,见 a2 设计 §二)+ `{kind:"business_domain", file, expect_domain}`(A1,数据齐时启用;域名是 LLM 开放命名,需从有数据的 store 取真值后再补 case)。当前 golden 基于 roadmap-2026-06-08 v4 人工验收(`web/routes/*`→controller / `*_pg`→repository / `tables.py`→domain_model / `_checks.py`+`platform_status.py`→service / `codegraph_client.py`+`bridge_codegraph.py`→adapter)。
 
-新增 case 直接往对应 jsonl 追一行即可。
+- `planner.jsonl` —— `{query, expect_type}`(`expect_type` ∈ overview/impact/symbol/doc_rule/general),Phase 7 查询分类 golden。
+
+新增 case 直接往对应 jsonl 追一行即可。`expect_role` 越界词由 `tests/test_eval_code_intelligence.py` 拦。
 
 ## TODO scaffold(未做)
 
-- **agent 端到端 eval**:给 agent 一个需求 → 看它是否用对 MCP(MCP adoption)、改对文件。
-  需 provider(LLM)+ 评判,留作后续。可复用 `codev_platform/agent/loop.py` + `tools/`。
+- **agent 端到端 eval**(roadmap-2026-06-07 Phase 0 完整版 / Phase 7 配套):给 agent 一个需求 →
+  看它是否用对 MCP(MCP adoption)、规划工具、改对文件。需 provider(LLM)+ LLM judge,**移交下一迭代**
+  (06-08 backlog)。可复用 `codev_platform/agent/loop.py` + `tools/`。
 - **retrieval 用 reranker 前后 A/B**:对比纯向量 vs +BM25 +reranker 的 recall 增益。
+- **A1 business_domain golden cases**:`code_intelligence.jsonl` 已支持 `business_domain` kind,但 A1 域名
+  是 LLM 开放命名,需从有数据的 store(WSL)dump 真值后补 case(A2 arch_role 已就绪,闭集词表好固化)。
 
 ## 入口约定
 

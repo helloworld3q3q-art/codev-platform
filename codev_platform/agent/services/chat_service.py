@@ -43,6 +43,7 @@ class ChatService:
         skill_pack_factory: Callable[[str], str | None] | None = None,
         rule_pack_sources_factory: Callable[[str], Any] | None = None,
         skill_pack_sources_factory: Callable[[str], Any] | None = None,
+        planner_enabled_factory: Callable[[str], bool] | None = None,
     ) -> None:
         # provider_factory: 每次调用重解析 config(支持运行中切 provider)。
         # registry_factory(project_id): 按请求 project_id 建工具集(P2 多租户路由)。
@@ -62,6 +63,8 @@ class ChatService:
         self._skill_pack_factory = skill_pack_factory
         self._rule_pack_sources_factory = rule_pack_sources_factory
         self._skill_pack_sources_factory = skill_pack_sources_factory
+        # planner_enabled_factory(provider_name): Phase 7 查询规划开关(默认 None=关, 行为不变)。
+        self._planner_enabled_factory = planner_enabled_factory
 
     def ask(self, question: str, session_id: str | None = None,
             max_steps: int | None = None, user_id: str = "local",
@@ -113,7 +116,11 @@ class ChatService:
             policy = LoopPolicy(max_steps=self._default_max_steps())
         if max_steps:  # 本次请求显式覆盖步数(策略其余字段不变)
             policy = replace(policy, max_steps=max_steps)
-        loop = AgentLoop(provider, registry, policy=policy)
+        planner_enabled = (
+            self._planner_enabled_factory(provider.name)
+            if self._planner_enabled_factory is not None else False
+        )
+        loop = AgentLoop(provider, registry, policy=policy, planner_enabled=planner_enabled)
         trace = Trace(sid, provider.name, provider.model)
         # M1: 设运行上下文(身份/项目/任务), 供 remember 等工具在 run() 内拿来写 memory;
         # 退出即 reset, 不跨请求泄漏。

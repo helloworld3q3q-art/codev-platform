@@ -1,0 +1,15 @@
+{"kind": "arch_role", "file": "codev_platform/web/routes/reports.py", "expect_role": "controller", "note": "web/routes/* HTTP 入口 -> controller (v4 17 全对)"}
+{"kind": "arch_role", "file": "codev_platform/web/routes/agent.py", "expect_role": "controller", "note": "web/routes/* -> controller"}
+{"kind": "arch_role", "file": "codev_platform/web/routes/auth.py", "expect_role": "controller", "note": "web/routes/* -> controller"}
+{"kind": "arch_role", "file": "codev_platform/web/routes/health.py", "expect_role": "controller", "note": "web/routes/* -> controller"}
+{"kind": "arch_role", "file": "codev_platform/web/routes/projects.py", "expect_role": "controller", "note": "web/routes/* -> controller"}
+{"kind": "arch_role", "file": "codev_platform/web/routes/users.py", "expect_role": "controller", "note": "web/routes/* -> controller"}
+{"kind": "arch_role", "file": "codev_platform/web/repositories/account_store_pg.py", "expect_role": "repository", "note": "repositories/ 直接 CRUD/SQL -> repository"}
+{"kind": "arch_role", "file": "codev_platform/agent/memory_store_pg.py", "expect_role": "repository", "note": "*_pg 直查库 -> repository"}
+{"kind": "arch_role", "file": "codev_platform/agent/rbac_store_pg.py", "expect_role": "repository", "note": "*_pg -> repository"}
+{"kind": "arch_role", "file": "codev_platform/agent/session_pg.py", "expect_role": "repository", "note": "*_pg -> repository"}
+{"kind": "arch_role", "file": "codev_platform/web/db/tables.py", "expect_role": "domain_model", "note": "纯数据结构无逻辑 -> domain_model (v4 唯一)"}
+{"kind": "arch_role", "file": "codev_platform/ops/health/_checks.py", "expect_role": "service", "note": "健康检查编排业务 -> service (v2 修对)"}
+{"kind": "arch_role", "file": "codev_platform/platform_status.py", "expect_role": "service", "note": "状态汇总编排 -> service (v4 修回, 非 domain_model)"}
+{"kind": "arch_role", "file": "codev_platform/web/integrations/codegraph_client.py", "expect_role": "adapter", "note": "外部 codegraph 客户端 -> adapter (v2 修对)"}
+{"kind": "arch_role", "file": "codev_platform/graph/bridge_codegraph.py", "expect_role": "adapter", "note": "桥接 codegraph -> adapter"}

@@ -39,6 +39,13 @@ class Trace:
         except Exception:  # noqa: BLE001 — trace 失败静默
             pass
 
+    def plan(self, query_type: str, tool_budget: int, preferred_lanes: list[str]) -> None:
+        """planner(Phase 7)产出的查询计划落 trace,供 debug 面板 + eval 复盘。"""
+        self._write({
+            "event": "plan", "query_type": query_type,
+            "tool_budget": tool_budget, "preferred_lanes": preferred_lanes,
+        })
+
     def step(self, n: int, thought: str | None, tool: str | None, args: Any, result_summary: str | None) -> None:
         self._write({
             "event": "step", "n": n, "thought": thought,

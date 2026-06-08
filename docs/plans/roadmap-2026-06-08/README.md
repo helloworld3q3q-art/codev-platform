@@ -84,8 +84,8 @@ agent 现在通过 `/mcp` graph 可调 A2 架构层(`find_arch_role`/`find_arch_
 | 项 | 性质 | 说明 |
 |---|---|---|
 | **A3 代码导览 tour** | 🟡 会诊降级 | grounding 半成立(路径骨架可 ground、自由叙事 ground 不住)+ 成本 O(路径数)爆。若做只保留"真实 impact 路径 + 逐节点贴已 ground 事实 + on-demand", **不做自由叙事**。当前评估价值有限: agent 自己组合 `find_arch_role`+`find_impact`+`find_node_domain` 即可得全部 ground 事实, 未必需要专门 A3 |
-| **Phase 0 评测基线**(承 roadmap-2026-06-07) | 🟢 高 ROI | A1/A2 验收现为手动 ad-hoc 人工核对;把准确率样本固化成 golden set 接进 `eval/` 框架, 以后 prompt 迭代(如 A2 v1→v4)自动回归, 不再人肉核对 |
-| **Phase 7 Query Planner 最小版**(承 06-07) | 🟢 高 ROI | Web agent 现靠 loop guard 防乱调, 缺按问题类型规划工具+预算+停止条件 |
+| **Phase 0 评测基线**(承 roadmap-2026-06-07) | ✅ 已交付(2026-06-08) | `code_intelligence` suite 把 A1/A2 软标签准确率固化成 golden set(读图谱软边算准确率, 不调 LLM, 缺数据优雅 skip)。见 `../roadmap-2026-06-07/README.md` 落地状态。A1 域名 golden 待从 WSL store dump 真值后补 |
+| **Phase 7 Query Planner 最小版**(承 06-07) | ✅ 已交付(2026-06-08) | `agent/planner.py` 确定性查询分类 → 工具预算 + 优先 lane + 停止条件; loop `planner_enabled` 软预算(默认关, config 门 `agent.planner.enabled`)。planner eval suite 1.0。LLM planner + agent 端到端 eval 移交下一迭代 |
 | 06-07 蓝图其余(统一 IR/社区检测算法/path scoring/多语言 adapter) | ⚪ 重型 | 按真实业务需求触发再做, 不为"完整平台"堆(plan §六纪律) |
 | **D3** endpoint→表 DI 精确版 | ⚪ backlog | 有真盲区案例再投 |
 

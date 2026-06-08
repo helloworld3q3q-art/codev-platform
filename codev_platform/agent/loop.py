@@ -24,6 +24,7 @@ from codev_platform.agent.brain import (
     Message,
     ToolResult,
 )
+from codev_platform.agent.planner import plan_query, render_plan_preamble
 from codev_platform.agent.policy import LoopPolicy
 from codev_platform.agent.prompts import CODE_UNDERSTANDING_SYSTEM
 from codev_platform.agent.tools.base import ToolRegistry
@@ -90,6 +91,8 @@ class _GuardState:
     retrieval_hashes: dict[str, set[str]] = field(default_factory=dict)   # name -> 见过的结果哈希集
     retrieval_no_progress: dict[str, int] = field(default_factory=dict)   # name -> 连续零增量次数
     consecutive_invalid: int = 0                               # 连续无效调用(参数报错/路径不存在)计数
+    executed_tools: int = 0                                    # 实际执行的工具调用数(planner 软预算计数)
+    budget_warned: bool = False                                # 软预算提示已回灌(只灌一次, 不刷屏)
 
 
 def _summarize(text: str, limit: int = 280) -> str:
@@ -137,10 +140,12 @@ def _precheck(policy: LoopPolicy, specs: list[dict], st: _GuardState,
 
 
 def _postprocess(policy: LoopPolicy, st: _GuardState, name: str, fp: str,
-                 args: Any, result: ToolResult, near_limit: bool) -> None:
-    """执行后: 记账(指纹/计数)+ 无效调用追踪 + 检索输出侧零增量 + 倒数步收尾提示。"""
+                 args: Any, result: ToolResult, near_limit: bool,
+                 tool_budget: int = 0) -> None:
+    """执行后: 记账(指纹/计数)+ 无效调用追踪 + 检索输出侧零增量 + 软预算 + 倒数步收尾提示。"""
     klass = _classify(name)
     st.seen_calls.add(fp)
+    st.executed_tools += 1
 
     if klass == "readonly":
         st.readonly_total += 1
@@ -180,6 +185,15 @@ def _postprocess(policy: LoopPolicy, st: _GuardState, name: str, fp: str,
             seen.add(h)
             st.retrieval_no_progress[name] = 0
 
+    # 软预算(planner 前摄式): 达本轮问题类型的工具预算 → 回灌一次"收尾"提示(软, 非硬断)。
+    # tool_budget<=0 表示未启用 planner / general 类不约束。near_limit 已含更强的收尾提示, 不叠。
+    if (tool_budget > 0 and not near_limit and not st.budget_warned
+            and st.executed_tools >= tool_budget):
+        st.budget_warned = True
+        result.content += (
+            f"\n\n[query plan] 本轮已用约 {st.executed_tools} 次工具,达到该问题类型的建议预算"
+            f"({tool_budget})。请基于现有证据收尾;确需继续要有明确理由并说明残余不确定。")
+
     if near_limit:
         result.content += ("\n\n[loop guard] 步数即将用尽,请基于现有证据立即给出最终答案"
                            "(已解决的部分先答,未解决的标注清楚)。不要脑补/编造未读到的文件内容,"
@@ -188,7 +202,8 @@ def _postprocess(policy: LoopPolicy, st: _GuardState, name: str, fp: str,
 
 class AgentLoop:
     def __init__(self, provider: LLMProvider, registry: ToolRegistry,
-                 policy: LoopPolicy | None = None, max_steps: int | None = None) -> None:
+                 policy: LoopPolicy | None = None, max_steps: int | None = None,
+                 planner_enabled: bool = False) -> None:
         self.provider = provider
         self.registry = registry
         # policy 优先(每模型策略,见 agent-provider §1/§4);未给则从 max_steps 兜底建一个
@@ -196,6 +211,8 @@ class AgentLoop:
         if policy is None:
             policy = LoopPolicy(max_steps=max_steps) if max_steps is not None else LoopPolicy()
         self.policy = policy
+        # planner(Phase 7): 默认关 → 行为与重构前逐字节一致。开启则前摄式规划工具 + 软预算。
+        self.planner_enabled = planner_enabled
 
     def run(self, question: str, history: list[Message] | None = None, trace: Trace | None = None,
             system: str | None = None) -> AgentResult:
@@ -208,6 +225,17 @@ class AgentLoop:
         steps: list[Step] = []
         total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         guard = _GuardState()
+
+        # planner(Phase 7, 默认关): 按问题类型规划工具 + 软预算。计划注入 system 作引导,
+        # tool_budget 在 _postprocess 作软停止条件。关闭时 budget=0 → 全程不约束(原行为)。
+        tool_budget = 0
+        if self.planner_enabled:
+            plan = plan_query(question, max_steps=self.policy.max_steps,
+                              available_tools=[s["name"] for s in specs])
+            system_prompt = system_prompt + "\n\n" + render_plan_preamble(plan)
+            tool_budget = plan.tool_budget
+            if trace:
+                trace.plan(plan.query_type, plan.tool_budget, plan.preferred_lanes)
 
         for n in range(1, self.policy.max_steps + 1):
             turn: AssistantTurn = self.provider.chat(system_prompt, messages, specs)
@@ -238,7 +266,8 @@ class AgentLoop:
                     else:
                         result = tool.run(call.args)
                         result.call_id = call.id
-                        _postprocess(self.policy, guard, call.name, fp, call.args, result, near_limit)
+                        _postprocess(self.policy, guard, call.name, fp, call.args, result,
+                                     near_limit, tool_budget=tool_budget)
                 summary = _summarize(result.content)
                 steps.append(Step(n, turn.text, call.name, call.args, summary))
                 if trace:
