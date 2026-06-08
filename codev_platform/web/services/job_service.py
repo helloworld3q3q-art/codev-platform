@@ -80,9 +80,10 @@ class JobService:
         total = len(rows)
         return rows[offset:offset + limit], total
 
-    def get_detail(self, job_id: str) -> Job:
+    def get_detail(self, job_id: str, *, project_id: str | None = None) -> Job:
         job = self._read.get(job_id)
-        if job is None:
+        # 跨项目隔离: job 不属本项目 → 当 not found(不泄露"存在但非本项目")。
+        if job is None or (project_id is not None and job.project_id != project_id):
             raise PlatformError(
                 ErrorCode.PROJECT_UNKNOWN,  # 8 类无 resource_unknown, 就近归 (plan §十)
                 f"Unknown job: {job_id}",
@@ -90,9 +91,9 @@ class JobService:
             )
         return job
 
-    def cancel(self, job_id: str) -> Job:
+    def cancel(self, job_id: str, *, project_id: str | None = None) -> Job:
         """取消活跃 job (Pending/Running)。终态 → 拒绝 (invalid_params)。"""
-        job = self.get_detail(job_id)
+        job = self.get_detail(job_id, project_id=project_id)   # 复用 get_detail 的跨项目校验
         if job.is_terminal:
             raise PlatformError(
                 ErrorCode.INVALID_PARAMS,

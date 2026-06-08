@@ -40,9 +40,10 @@ def _rid(request: Request) -> str | None:
 def get_job_detail(
     request: Request,
     jobId: str = Query(..., min_length=1, description="任务 ID"),
-    _access=Depends(require_project_access),
+    access=Depends(require_project_access),
 ) -> CommonResult[JobDTO]:
-    job = job_service.get_detail(jobId)
+    _identity, project_id = access
+    job = job_service.get_detail(jobId, project_id=project_id)
     return ok(JobDTO.of(job), request_id=_rid(request))
 
 
@@ -56,9 +57,10 @@ def get_job_detail(
 def cancel_job(
     request: Request,
     body: JobCancelRequest,
-    _access=Depends(require_project_access),
+    access=Depends(require_project_access),
 ) -> CommonResult[JobDTO]:
-    job = job_service.cancel(body.jobId)
+    _identity, project_id = access
+    job = job_service.cancel(body.jobId, project_id=project_id)
     return ok(JobDTO.of(job), request_id=_rid(request))
 
 

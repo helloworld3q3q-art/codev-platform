@@ -137,3 +137,21 @@ def test_unknown_job_is_error_envelope():
     assert body["result"] == 1
     assert body["errors"][0]["errorCode"] == "project_unknown"
     assert body["requestId"]
+
+
+def test_job_cross_project_detail_cancel_is_not_found():
+    # P1 修复(codex bug-edge-audit): 对别项目有权(passthrough)+ 知道本项目 jobId, 不能跨项目
+    # detail/cancel。跨项目统一当 not found(不泄露 job 存在但非本项目)。
+    c = _client()
+    job_id = c.post(
+        "/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS
+    ).json()["data"]["jobId"]
+    other = {"X-Project-Id": "other-proj"}
+    # 别项目 header 查同 jobId → 404 not found
+    r = c.get("/api/v1/jobs/detail", params={"jobId": job_id}, headers=other)
+    assert r.status_code == 404 and r.json()["errors"][0]["errorCode"] == "project_unknown"
+    # 别项目 header 取消同 jobId → 404(不能跨项目取消)
+    rc = c.post("/api/v1/jobs/cancel", json={"jobId": job_id}, headers=other)
+    assert rc.status_code == 404 and rc.json()["errors"][0]["errorCode"] == "project_unknown"
+    # 本项目仍能正常 detail
+    assert c.get("/api/v1/jobs/detail", params={"jobId": job_id}, headers=_HEADERS).status_code == 200
