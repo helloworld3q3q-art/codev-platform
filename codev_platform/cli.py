@@ -243,6 +243,19 @@ def cmd_graph(args: argparse.Namespace) -> int:
             conn.close()
         _print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
+    if args.action == "audit":
+        from codev_platform.graph.audit import audit_graph, render_markdown
+        from codev_platform.graph.store import open_store
+        conn = open_store(pid)
+        try:
+            report = audit_graph(conn, pid)
+        finally:
+            conn.close()
+        if getattr(args, "json", False):
+            _print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            _print(render_markdown(report))
+        return 0 if report["clean"] else 1   # 有结构 error → 非零(可作 CI/pre-push gate)
     _eprint(f"unknown action: {args.action}")
     return 1
 
@@ -336,11 +349,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp_plg.add_argument("action", choices=["list"], help="list=列出已注册插件 name/version")
     sp_plg.set_defaults(func=cmd_plugins)
 
-    sp_graph = sub.add_parser("graph", help="统一图谱 store (ingest 跑插件入库 / stats 统计)")
-    sp_graph.add_argument("action", choices=["ingest", "stats"],
-                          help="ingest=跑适用插件灌入 per-project store / stats=打印统计")
+    sp_graph = sub.add_parser("graph", help="统一图谱 store (ingest 入库 / stats 统计 / audit 结构审计)")
+    sp_graph.add_argument("action", choices=["ingest", "stats", "audit"],
+                          help="ingest=跑适用插件灌入 / stats=打印统计 / audit=结构完整性审计(断链/串台/重复/低置信)")
     sp_graph.add_argument("--project", default=None, help="project_id (默认从 cwd 解析)")
     sp_graph.add_argument("--repo", default=None, help="ingest: 被分析的仓库根 (默认 cwd)")
+    sp_graph.add_argument("--json", action="store_true", help="audit: 机器可读 JSON 输出")
     sp_graph.set_defaults(func=cmd_graph)
 
     sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")
