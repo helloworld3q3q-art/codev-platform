@@ -203,7 +203,7 @@ API 合约与后端 runner 真值源不一致；当需要单独重建统一图�
 
 ## 修复状态(2026-06-08)
 
-本报告 7 个核心问题, 已核实 + 修复 6 个(每条先读代码核实再改, 附回归测试):
+本报告 7 个核心问题 + 1 个 P3, **已全部处理**(每条先读代码核实再改, 附回归测试):
 
 | 问题 | 状态 | commit |
 |---|---|---|
@@ -213,7 +213,7 @@ API 合约与后端 runner 真值源不一致；当需要单独重建统一图�
 | P2 Reindex 未知 kind 崩 drain | ✅ 修(complete 不重做 runner 白名单校验, 仍挡路径穿越) | `add339c` |
 | P2 Codegraph SSE 缺 Response | ✅ 修(import Response + finally 后 return) | `10d2b61` |
 | P2 IndexService kind 不一致 | ✅ 修(_allowed_kinds 动态读 runners.kinds()+all) | `d1c0d75` |
-| P2 session vs require_project_access | ⏳ 待(架构层: via=session 需 web membership RBAC; **只 prod token 模式触发**, dev passthrough 不触发; 专门一轮) | — |
-| P3 Project loaded 进程内状态 | ⏳ 待(同 web 控制面 PG 化决策, 见 full-local-mcp 报告) | — |
+| P2 session vs require_project_access | ✅ 修(3 架构 agent 收敛的依赖倒置注入钩子; 复刻 _authorize_project 三步含 org 隔离 + 防越权测试; MCP/agent 未注入恒 deny) | `bae7757` |
+| P3 Project loaded 进程内状态 | ✅ 文档化(纯 UI 标记不建表, 避免过度工程; 顺带登记 ProjectLockRegistry 多实例隐患=上多实例前必做) | `e8f50df` |
 
-3 个 P1 跨项目隔离漏洞全修 + 回归测试; 全套 `1154 passed, 0 failed`。
+3 个 P1 跨项目隔离漏洞全修 + 回归测试; #7 经 3 个高级架构 agent 多视角设计后落地; 全套 `1182 passed, 0 failed`。

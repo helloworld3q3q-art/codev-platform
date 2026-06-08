@@ -552,8 +552,8 @@ Agent 内部：
 |---|---|---|
 | P1 runtime 依赖测试误 fail | ✅ 修(embed 3 + bm25 5 个加 skipif; 全套 1154 passed, 13 skipped, **0 failed**) | `3c701d0` |
 | P1 ruff(报告 5 个, 实为 6) | ✅ 修(F401×2 + F841 + B905×2 + B007; ruff All passed) | `10d2b61` |
-| P2 Web job/project repo PG TODO | ⏳ 待(PG 化决策: 取决于 job/project 状态是否需跨进程/跨重启一致) | — |
-| P2 直读 SQLite vs MCP 双路径 | ⏳ 待(建议补 Graph MCP 与 Agent impact 直读一致性测试) | — |
+| P2 Web job/project repo PG TODO | ✅ jobs PG 化(复刻 account_store_pg: PgJobRepo + bind 回退 + alembic 0002; project loaded 纯 UI 文档化不建表) | `94df345` |
+| P2 直读 SQLite vs MCP 双路径 | ✅ 补 2 个纯函数一致性测试(引擎接缝 + 路径真值单点, 不起 MCP; 架构评估为理论风险故不做端到端矩阵) | `420aa9e` |
 
-bug-edge-audit 的 P1 跨项目隔离 3 漏洞 + P2 reindex/codegraph/IndexService 已修, 见该报告修复状态。
-两份报告合计 9 个核心 actionable 已修 8, 余 1(session vs require_project_access)为架构层 + 只 prod 触发, 专门一轮。
+bug-edge-audit 的 P1 跨项目隔离 3 漏洞 + P2 reindex/codegraph/IndexService + #7 session 已修, 见该报告修复状态。
+两份报告合计 9 个核心 actionable + 4 个决策项**已全部处理**(决策项经 2 个架构 agent 评估精准化: 只 jobs PG 化 + 双路径补测试, _LOADED 文档化, lock 登记 backlog —— 不过度工程)。全套 `1182 passed, 0 failed`。
