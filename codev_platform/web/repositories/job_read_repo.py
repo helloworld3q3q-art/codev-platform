@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from sqlalchemy import select
+
+from codev_platform.web.db import tables
 from codev_platform.web.domain.job import Job
+from codev_platform.web.repositories.account_store_pg import _PgBase
 
 
 @runtime_checkable
@@ -38,4 +42,32 @@ class InMemoryJobReadRepo:
         return jobs
 
 
-# TODO(PG): class PgJobReadRepo —— 走 psycopg 读 jobs 表 (与 memory_store_pg 同库, plan D5)。
+def _row_to_job(row) -> Job:
+    return Job(job_id=row[0], project_id=row[1], job_type=row[2], status=row[3],
+               created_at=row[4], updated_at=row[5], error=row[6])
+
+
+class PgJobReadRepo(_PgBase):
+    """PG 读实现 —— jobs 表 select。PG 基座复用 account_store_pg._PgBase(同库/同 engine 范式,
+    sqlite 单测注入 engine exercise; 未来可抽 _pg_base 共享)。codex P2: job 历史持久 + 多 worker 一致。"""
+
+    def get(self, job_id: str) -> Job | None:
+        self._ensure()
+        j = tables.jobs
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(j.c.job_id, j.c.project_id, j.c.job_type, j.c.status,
+                       j.c.created_at, j.c.updated_at, j.c.error).where(j.c.job_id == job_id)
+            ).first()
+        return _row_to_job(row) if row else None
+
+    def list(self, project_id: str | None = None) -> list[Job]:
+        self._ensure()
+        j = tables.jobs
+        stmt = select(j.c.job_id, j.c.project_id, j.c.job_type, j.c.status,
+                      j.c.created_at, j.c.updated_at, j.c.error)
+        if project_id is not None:
+            stmt = stmt.where(j.c.project_id == project_id)
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [_row_to_job(r) for r in rows]

@@ -11,19 +11,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from codev_platform.core.config import load_config
 from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, page
 from codev_platform.core.httpkit.pagination import PageBody
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.schemas.jobs import JobCancelRequest, JobDTO
 from codev_platform.web.services.index_service import make_reindex_dispatch_trigger
-from codev_platform.web.services.job_service import build_in_memory_job_service
+from codev_platform.web.services.job_service import bind_job_service
 
 router = APIRouter()
 
-# 进程内默认 job service (内存 store + 模块级项目锁)。indexes.router import 同一实例。
-# trigger 派 index_rebuild job 进真实 reindex 队列 (FileSpoolQueue, worker 消费) ——
-# 让 web "重建索引" 真触发重建, 而非空壳 (deep-audit-2026-06-03-review 净新增②)。
-job_service = build_in_memory_job_service(trigger=make_reindex_dispatch_trigger())
+# 默认 job service: bind PG-or-memory —— prod 配 memory.pg_dsn 用 PG(job 历史持久 + 多 worker
+# 一致, codex P2), dev/平台 venv 无 dsn 或缺 psycopg 回退内存(行为同前)。indexes.router import
+# 同一实例。trigger 派 index_rebuild job 进真实 reindex 队列(FileSpoolQueue, worker 消费) ——
+# 让 web "重建索引" 真触发重建, 而非空壳(deep-audit-2026-06-03-review 净新增②)。
+job_service = bind_job_service(load_config(), trigger=make_reindex_dispatch_trigger())
 
 
 def _rid(request: Request) -> str | None:

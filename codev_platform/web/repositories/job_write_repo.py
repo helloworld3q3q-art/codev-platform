@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from sqlalchemy import insert
+
+from codev_platform.web.db import tables
 from codev_platform.web.domain.job import Job
+from codev_platform.web.repositories.account_store_pg import _PgBase, _upsert_stmt
 
 
 @runtime_checkable
@@ -38,7 +42,30 @@ class InMemoryJobWriteRepo:
         return job
 
 
-# TODO(PG): class PgJobWriteRepo —— INSERT/UPDATE jobs 表 (plan D5; 走平台既有 PG 连接)。
+def _job_values(job: Job) -> dict:
+    return {"job_id": job.job_id, "project_id": job.project_id, "job_type": job.job_type,
+            "status": job.status, "created_at": job.created_at, "updated_at": job.updated_at,
+            "error": job.error}
+
+
+class PgJobWriteRepo(_PgBase):
+    """PG 写实现 —— create=insert / save=upsert(状态流转覆盖 status/updated_at/error)。复用基座。"""
+
+    def create(self, job: Job) -> Job:
+        self._ensure()
+        with self._engine.begin() as conn:
+            conn.execute(insert(tables.jobs).values(**_job_values(job)))
+        return job
+
+    def save(self, job: Job) -> Job:
+        self._ensure()
+        stmt = _upsert_stmt(
+            tables.jobs, _job_values(job), index_elements=["job_id"],
+            update_cols=["status", "updated_at", "error"], dialect_name=self._dialect,
+        )
+        with self._engine.begin() as conn:
+            conn.execute(stmt)
+        return job
 
 
 def new_in_memory_store() -> dict[str, Job]:

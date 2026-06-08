@@ -18,6 +18,7 @@ from __future__ import annotations
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     MetaData,
@@ -105,9 +106,25 @@ project_access = Table(
     PrimaryKeyConstraint("project_id", "principal"),
 )
 
+# 长任务 job (plan §十二)。created_at/updated_at = epoch float (对齐 domain.Job 的 time.time(),
+# 非 TIMESTAMPTZ —— job 时间戳全程 float, repo 不做 datetime 转换)。codex P2: job 历史持久化,
+# 重启/多 worker 下查得到 job 状态 (真重活已在独立 FileSpoolQueue/worker, 此表是状态镜像)。
+jobs = Table(
+    "jobs",
+    metadata,
+    Column("job_id", Text, primary_key=True),
+    Column("project_id", Text, nullable=False),
+    Column("job_type", Text, nullable=False),
+    Column("status", Text, nullable=False, server_default=text("'Pending'")),
+    Column("created_at", Float, nullable=False),
+    Column("updated_at", Float, nullable=False),
+    Column("error", Text),
+)
+
 Index("ix_org_members_user", org_members.c.user_id)
 Index("ix_team_members_user", team_members.c.user_id)
 Index("ix_teams_org", teams.c.org_id)
+Index("ix_jobs_project", jobs.c.project_id)
 
 
 __all__ = [
@@ -119,4 +136,5 @@ __all__ = [
     "team_members",
     "projects",
     "project_access",
+    "jobs",
 ]

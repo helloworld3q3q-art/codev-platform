@@ -116,3 +116,37 @@ def build_in_memory_job_service(
         locks=locks,
         trigger=trigger,
     )
+
+
+def build_pg_job_service(
+    dsn: str, *, locks: ProjectLockRegistry | None = None, trigger: JobTrigger | None = None
+) -> JobService:
+    """组装 PG-backed job service (读写仓各持 engine, 同库 jobs 表)。缺 psycopg → 构造抛 ImportError。"""
+    from codev_platform.web.repositories.job_read_repo import PgJobReadRepo
+    from codev_platform.web.repositories.job_write_repo import PgJobWriteRepo
+    return JobService(
+        read_repo=PgJobReadRepo(dsn),
+        write_repo=PgJobWriteRepo(dsn),
+        locks=locks,
+        trigger=trigger,
+    )
+
+
+def bind_job_service(
+    cfg: dict | None = None, *, locks: ProjectLockRegistry | None = None,
+    trigger: JobTrigger | None = None,
+) -> JobService:
+    """按 config 选 job 存储后端 —— memory.pg_dsn + psycopg 可用 → PG, 否则内存 (优雅回退,
+    复刻 bind_account_stores)。prod 配 PG 却缺 psycopg / 初始化失败 → fail-fast, 不静默降级
+    (防运维以为用 PG 实际走内存、重启即丢 job 历史)。codex P2 决策项: job 历史持久 + 多 worker 一致。"""
+    from codev_platform.core.config import get as _cfg_get
+    dsn = _cfg_get(cfg or {}, "memory.pg_dsn", None)
+    if not dsn:
+        return build_in_memory_job_service(locks=locks, trigger=trigger)
+    try:
+        return build_pg_job_service(dsn, locks=locks, trigger=trigger)
+    except Exception:  # noqa: BLE001 — ImportError(缺 psycopg) 或 engine 初始化失败
+        mode = _cfg_get(cfg or {}, "deployment.mode", "dev")
+        if mode == "prod":
+            raise  # prod 配 PG 却失败 → fail-fast(与 bind_account_stores 同策略)
+        return build_in_memory_job_service(locks=locks, trigger=trigger)
