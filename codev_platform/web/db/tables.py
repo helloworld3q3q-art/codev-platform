@@ -121,10 +121,28 @@ jobs = Table(
     Column("error", Text),
 )
 
+# 登录会话 (plan §十五 Auth)。只存 token 的 sha256 hash (明文 token 不落库, 同 sessions.py)。
+# access/refresh 过期时间走 epoch float (对齐 sessions.py 的 time.time())。backend-deep P1-3:
+# 登录态持久化 —— 重启不丢 + 多 worker 共享 + 禁用用户 revoke 跨进程生效。
+sessions = Table(
+    "sessions",
+    metadata,
+    Column("session_id", Text, primary_key=True),
+    Column("username", Text, nullable=False),
+    Column("org_id", Text, nullable=False),
+    Column("access_hash", Text, nullable=False),
+    Column("refresh_hash", Text, nullable=False),
+    Column("access_expires_at", Float, nullable=False),
+    Column("refresh_expires_at", Float, nullable=False),
+)
+
 Index("ix_org_members_user", org_members.c.user_id)
 Index("ix_team_members_user", team_members.c.user_id)
 Index("ix_teams_org", teams.c.org_id)
 Index("ix_jobs_project", jobs.c.project_id)
+Index("ix_sessions_access", sessions.c.access_hash)
+Index("ix_sessions_refresh", sessions.c.refresh_hash)
+Index("ix_sessions_username", sessions.c.username)
 
 
 __all__ = [
@@ -137,4 +155,5 @@ __all__ = [
     "projects",
     "project_access",
     "jobs",
+    "sessions",
 ]

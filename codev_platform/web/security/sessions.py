@@ -12,6 +12,12 @@ import secrets
 import time
 from dataclasses import dataclass
 
+from sqlalchemy import delete, insert, select
+
+from codev_platform.core.config import load_config
+from codev_platform.web.db import tables as _t
+from codev_platform.web.repositories.account_store_pg import _PgBase
+
 _ACCESS_TTL = 3600          # 1h
 _REFRESH_TTL = 7 * 86400    # 7d
 
@@ -117,5 +123,101 @@ class SessionStore:
         return n
 
 
-# 进程内单实例 (重资源单例原则; 多会话经轻量代理共享 —— PG 实现后跨进程共享)。
-session_store = SessionStore()
+class PgSessionStore(_PgBase):
+    """PG 会话存储 —— 登录态落库(重启不丢 / 多 worker 共享 / revoke 跨进程, backend-deep P1-3)。
+    复用 account_store_pg._PgBase; 接口与内存 SessionStore 完全一致(create/resolve/refresh/revoke/
+    clear/revoke_user), 可互换。只存 token 的 sha256 hash(明文不落库)。"""
+
+    def __init__(self, dsn: str | None = None, *, access_ttl: int = _ACCESS_TTL,
+                 refresh_ttl: int = _REFRESH_TTL, engine=None) -> None:
+        super().__init__(dsn, engine=engine)
+        self._access_ttl = access_ttl
+        self._refresh_ttl = refresh_ttl
+
+    @staticmethod
+    def _row_to_session(row) -> Session:
+        return Session(session_id=row[0], username=row[1], org_id=row[2],
+                       access_expires_at=row[3], refresh_expires_at=row[4])
+
+    def create(self, username: str, org_id: str, now: float | None = None) -> IssuedTokens:
+        now = time.time() if now is None else now
+        access, refresh = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        sid = secrets.token_urlsafe(16)
+        sess = Session(session_id=sid, username=username, org_id=org_id,
+                       access_expires_at=now + self._access_ttl,
+                       refresh_expires_at=now + self._refresh_ttl)
+        self._ensure()
+        with self._engine.begin() as conn:
+            conn.execute(insert(_t.sessions).values(
+                session_id=sid, username=username, org_id=org_id,
+                access_hash=_hash(access), refresh_hash=_hash(refresh),
+                access_expires_at=sess.access_expires_at,
+                refresh_expires_at=sess.refresh_expires_at))
+        return IssuedTokens(access_token=access, refresh_token=refresh, session=sess)
+
+    def resolve(self, access_token: str, now: float | None = None) -> Session | None:
+        now = time.time() if now is None else now
+        self._ensure()
+        s = _t.sessions
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(s.c.session_id, s.c.username, s.c.org_id,
+                       s.c.access_expires_at, s.c.refresh_expires_at)
+                .where(s.c.access_hash == _hash(access_token or ""))).first()
+        if row is None or row[3] < now:
+            return None
+        return self._row_to_session(row)
+
+    def refresh(self, refresh_token: str, now: float | None = None) -> IssuedTokens | None:
+        now = time.time() if now is None else now
+        self._ensure()
+        s = _t.sessions
+        rh = _hash(refresh_token or "")
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(s.c.username, s.c.org_id, s.c.refresh_expires_at)
+                .where(s.c.refresh_hash == rh)).first()
+        if row is None or row[2] < now:
+            return None
+        with self._engine.begin() as conn:  # 轮换: 旧 session 整条失效(access + refresh 一并)
+            conn.execute(delete(s).where(s.c.refresh_hash == rh))
+        return self.create(row[0], row[1], now=now)
+
+    def revoke(self, refresh_token: str) -> None:
+        self._ensure()
+        s = _t.sessions
+        with self._engine.begin() as conn:
+            conn.execute(delete(s).where(s.c.refresh_hash == _hash(refresh_token or "")))
+
+    def clear(self) -> None:
+        self._ensure()
+        with self._engine.begin() as conn:
+            conn.execute(delete(_t.sessions))
+
+    def revoke_user(self, username: str) -> int:
+        self._ensure()
+        s = _t.sessions
+        with self._engine.begin() as conn:
+            res = conn.execute(delete(s).where(s.c.username == username))
+        return res.rowcount or 0
+
+
+def bind_session_store(cfg: dict | None = None):
+    """按 config 选会话存储后端 —— memory.pg_dsn + psycopg 可用 → PG, 否则内存(优雅回退, 复刻
+    bind_account_stores)。prod 配 PG 却缺 psycopg / 初始化失败 → fail-fast。backend-deep P1-3。"""
+    from codev_platform.core.config import get as _cfg_get
+    dsn = _cfg_get(cfg or {}, "memory.pg_dsn", None)
+    if not dsn:
+        return SessionStore()
+    try:
+        return PgSessionStore(dsn)
+    except Exception:  # noqa: BLE001 — ImportError(缺 psycopg) 或 engine 初始化失败
+        mode = _cfg_get(cfg or {}, "deployment.mode", "dev")
+        if mode == "prod":
+            raise  # prod 配 PG 却失败 → fail-fast(防登录态静默走内存、重启即丢)
+        return SessionStore()
+
+
+# 活动会话存储: import 时 bind(dev 无 dsn 回退内存 = 行为不变; prod 配 dsn 用 PG —— 重启不丢 /
+# 多 worker 共享 / revoke 跨进程)。各模块仍 import 本单例, 经 bind 无感切后端。
+session_store = bind_session_store(load_config())

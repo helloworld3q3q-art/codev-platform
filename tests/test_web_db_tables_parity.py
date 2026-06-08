@@ -21,8 +21,11 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "team_members": {"team_id", "user_id", "role"},
     "projects": {"project_id", "org_id", "display_name"},
     "project_access": {"project_id", "principal", "principal_kind", "role"},
-    # jobs: 2026-06-08 新增(codex P2 job 历史持久化), 非原 _SCHEMA, 守护扩展到 8 表。
+    # jobs/sessions: 2026-06-08 新增(codex P2 job 历史 + backend-deep P1-3 登录态持久化), 非原
+    # _SCHEMA, 守护扩展到 9 表。
     "jobs": {"job_id", "project_id", "job_type", "status", "created_at", "updated_at", "error"},
+    "sessions": {"session_id", "username", "org_id", "access_hash", "refresh_hash",
+                 "access_expires_at", "refresh_expires_at"},
 }
 
 # 原 _SCHEMA 的主键列(PRIMARY KEY / PRIMARY KEY(...) 复合) + jobs。
@@ -35,6 +38,7 @@ EXPECTED_PK: dict[str, set[str]] = {
     "projects": {"project_id"},
     "project_access": {"project_id", "principal"},
     "jobs": {"job_id"},
+    "sessions": {"session_id"},
 }
 
 # 原 _SCHEMA 的 NOT NULL 列(PK 列在 PG 隐含 NOT NULL,这里只列显式声明 / 业务约束列)。
@@ -47,10 +51,14 @@ EXPECTED_NOT_NULL: dict[str, set[str]] = {
     "projects": {"project_id", "org_id"},
     "project_access": {"project_id", "principal", "principal_kind", "role"},
     "jobs": {"job_id", "project_id", "job_type", "status", "created_at", "updated_at"},
+    "sessions": {"session_id", "username", "org_id", "access_hash", "refresh_hash",
+                 "access_expires_at", "refresh_expires_at"},
 }
 
-# 索引名(原 _SCHEMA 3 个 + jobs 的 ix_jobs_project, 2026-06-08)。
-EXPECTED_INDEXES = {"ix_org_members_user", "ix_team_members_user", "ix_teams_org", "ix_jobs_project"}
+# 索引名(原 _SCHEMA 3 个 + jobs 1 + sessions 3, 2026-06-08)。
+EXPECTED_INDEXES = {"ix_org_members_user", "ix_team_members_user", "ix_teams_org",
+                    "ix_jobs_project", "ix_sessions_access", "ix_sessions_refresh",
+                    "ix_sessions_username"}
 
 
 def test_table_names_match():
