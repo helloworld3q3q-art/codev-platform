@@ -217,6 +217,37 @@ def unified_graph(request: Request, ctx=Depends(require_project_access)) -> Comm
 
 
 @router.post(
+    "/api/v1/graph/audit",
+    tags=[_UNIFIED_TAG],
+    summary="统一图谱-结构审计",
+    operation_id="graphAudit",
+    response_model=CommonResult[S.GraphAuditResponse],
+)
+def graph_audit(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
+    """统一图谱结构审计 (Phase 3, 纯读): 断链/串台/孤儿 plugin/重复/低置信。store 缺/空 → clean。"""
+    _identity, project_id = ctx
+    from codev_platform.graph.audit import audit_graph
+    conn = _open_store_ro(project_id)
+    if conn is None:
+        return ok(S.GraphAuditResponse(), request_id=_rid(request))
+    try:
+        rep = audit_graph(conn, project_id)
+    finally:
+        conn.close()
+    err, warn, tot = rep["errors"], rep["warnings"], rep["totals"]
+    resp = S.GraphAuditResponse(
+        clean=rep["clean"], errorCount=rep["error_count"],
+        danglingEdges=err["dangling_edges"]["count"],
+        crossProjectNodes=err["cross_project_nodes"]["count"],
+        orphanSoftPlugins=err["orphan_soft_plugins"]["count"],
+        duplicateNodes=warn["duplicate_nodes"]["count"],
+        lowConfidenceEdges=warn["low_confidence_edges"]["count"],
+        nodes=tot["nodes"], edges=tot["edges"],
+    )
+    return ok(resp, request_id=_rid(request))
+
+
+@router.post(
     "/api/v1/graph/unified/stats",
     tags=[_UNIFIED_TAG],
     summary="统一图谱-统计",

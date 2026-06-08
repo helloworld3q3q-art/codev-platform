@@ -152,6 +152,20 @@ class UnifiedGraphResponse(BaseModel):
     edgeCount: int = 0
 
 
+class GraphAuditResponse(BaseModel):
+    """统一图谱结构审计结果 (Phase 3): errors 阻断, warnings 待 review。"""
+
+    clean: bool = Field(True, description="无结构 error 即 clean")
+    errorCount: int = Field(0, description="结构 error 总数")
+    danglingEdges: int = Field(0, description="断链边数 (指向不存在节点)")
+    crossProjectNodes: int = Field(0, description="跨租户串台节点数")
+    orphanSoftPlugins: int = Field(0, description="软产物孤儿 plugin 数 (plugin 漂移残留)")
+    duplicateNodes: int = Field(0, description="重复节点组数 (warning)")
+    lowConfidenceEdges: int = Field(0, description="低置信硬边数 (warning, fuzzy 推断)")
+    nodes: int = Field(0, description="节点总数")
+    edges: int = Field(0, description="边总数")
+
+
 class UnifiedGraphStatsResponse(BaseModel):
     nodesByKind: dict[str, int] = Field(default_factory=dict)
     edgesByKind: dict[str, int] = Field(default_factory=dict)
