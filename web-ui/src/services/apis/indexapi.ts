@@ -12,3 +12,11 @@ export async function postRebuild(data: Partial<API.any>): Promise<API.CommonRes
   });
 }
 
+// 索引-各类新鲜度状态
+export async function postStatus(): Promise<API.CommonResult_IndexStatusResponse_> {
+  return await post<API.CommonResult_IndexStatusResponse_>({
+    url: `${commonUrl}/api/v1/indexes/status`,
+    data: {},
+  });
+}
+

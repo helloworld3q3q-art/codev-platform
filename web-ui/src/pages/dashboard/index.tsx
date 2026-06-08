@@ -8,6 +8,7 @@ import { Descriptions, Spin, Tag } from 'antd';
 import PageContainer from '@/components/PageContainer';
 import { isAdminRole } from '@/utils/role';
 
+import IndexFreshnessCard from './components/IndexFreshnessCard';
 import McpUsageCard from './components/McpUsageCard';
 import { DASHBOARD_DEFAULT, loadDashboard, type DashboardData } from './components/utils';
 
@@ -36,7 +37,7 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
-  const { health, codegraph, unified, mcpUsage, projectCount, orgCount } = data;
+  const { health, codegraph, unified, mcpUsage, indexStatus, projectCount, orgCount } = data;
   const healthOk = health?.status === 'ok';
   const depItems = Object.entries(health?.dependencies ?? {});
 
@@ -80,6 +81,8 @@ export default function DashboardPage() {
             </Descriptions.Item>
           </Descriptions>
         </ProCard>
+
+        <IndexFreshnessCard data={indexStatus} />
 
         {isAdmin && <McpUsageCard data={mcpUsage} />}
       </Spin>

@@ -256,6 +256,15 @@ interface CommonResult_ImpactReportResponse_ {
   requestId?: any;
 }
 
+// CommonResult_IndexStatusResponse_ 响应数据
+interface CommonResult_IndexStatusResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_JobDTO_ 数据传输对象
 interface CommonResult_JobDTO_ {
   result?: number;
@@ -523,6 +532,23 @@ interface ImpactRequest {
 // POST /api/v1/indexes/rebuild 请求体。
 interface IndexRebuildRequest {
   indexKind?: any; // 索引类型: all / chroma / codegraph; 不传默认 all
+}
+
+// 单类索引的新鲜度 (来自统一 IndexManifest, Phase 1)。
+interface IndexStatusItem {
+  kind?: any; // 索引类型 chroma/codegraph/graph/docs
+  status?: any; // 上次构建状态 ok/failed
+  gitCommit?: any; // 构建时仓库 HEAD commit
+  fresh?: any; // 是否对齐当前 HEAD: true 对齐/false 落后/null 未知
+  reason?: any; // 新鲜度判定说明
+  finishedAt?: any; // 上次构建完成时间 epoch 秒
+  elapsedSec?: any; // 上次构建耗时秒
+}
+
+// GET 索引状态: 各类索引相对当前 HEAD 的新鲜度 (Phase 1 freshness)。
+interface IndexStatusResponse {
+  headCommit?: any; // 项目仓库当前 HEAD commit
+  items?: IndexStatusItem[]; // 各类索引新鲜度
 }
 
 // POST /api/v1/jobs/cancel 请求体。
