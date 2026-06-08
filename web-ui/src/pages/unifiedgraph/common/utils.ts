@@ -133,3 +133,12 @@ export const EDGE_COLOR: Record<string, string> = {
 export function unifiedEdgeColorOf(kind?: string): string {
   return EDGE_COLOR[kind ?? ''] ?? '#d9d9d9';
 }
+
+// 软边(A1/A2 理解层标注: 角色/业务域),对齐后端 graph/schema.py:SOFT_EDGE_KINDS。
+// 这些边不是功能依赖,只是把节点挂到角色/域 hub 上 —— 图上经它们"连通"≠真跨层链路。
+// 故图谱里用淡色 + 细线区分,避免被误读成硬依赖(见 roadmap-2026-06-07 前端孤岛分析)。
+export const SOFT_EDGE_KINDS = new Set<string>(['plays_role', 'belongs_to_domain']);
+
+export function isSoftEdgeKind(kind?: string): boolean {
+  return SOFT_EDGE_KINDS.has(kind ?? '');
+}

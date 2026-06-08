@@ -20,7 +20,12 @@ import type {
   UnifiedGraphResponse,
   UnifiedGraphStatsResponse,
 } from './common/types';
-import { unifiedKindLabelOf, unifiedNodeColorOf, unifiedNodeSizeOf } from './common/utils';
+import {
+  isSoftEdgeKind,
+  unifiedKindLabelOf,
+  unifiedNodeColorOf,
+  unifiedNodeSizeOf,
+} from './common/utils';
 import KindFilter from './components/KindFilter';
 import NodeDetailPanel from './components/NodeDetailPanel';
 
@@ -199,6 +204,7 @@ const UnifiedGraphPage: React.FC = () => {
         nodeColorFn={unifiedNodeColorOf}
         nodeSizeFn={unifiedNodeSizeOf}
         kindLabelFn={unifiedKindLabelOf}
+        linkIsSoftFn={isSoftEdgeKind}
       />
     </div>
   );

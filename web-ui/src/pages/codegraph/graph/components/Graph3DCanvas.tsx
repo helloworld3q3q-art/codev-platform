@@ -25,12 +25,24 @@ interface Graph3DCanvasProps {
   nodeColorFn?: (kind?: string) => string;
   nodeSizeFn?: (kind?: string) => number;
   kindLabelFn?: (kind?: string) => string;
+  // 软边判定 (按 edge.kind)。返回 true 的边淡色 + 细线画 —— 区分"理解层标注边"(plays_role/
+  // belongs_to_domain)与硬依赖边, 避免经角色/域 hub 的连通被误读成功能链路。统一图谱注入,
+  // 不传则全按硬边 (codegraph 页行为不变)。
+  linkIsSoftFn?: (kind?: string) => boolean;
 }
 
 // 默认按原始 kind 显示 (codegraph 页保持 [class] / [java_endpoint] 原样)。
 function defaultKindLabel(kind?: string): string {
   return kind ?? '';
 }
+
+// 默认无软边 (codegraph 页不区分)。模块级常量避免每次渲染新建。
+function defaultIsSoft(): boolean {
+  return false;
+}
+
+// 软边显示色: 暗蓝灰, 在深底上低对比 —— 视觉退到背景, 与硬依赖边拉开。
+const SOFT_LINK_COLOR = '#34425e';
 
 // react-force-graph 要求 nodes/links 平坦字段；把 NodeDTO/EdgeDTO 透传 + 注入颜色/大小。
 // x/y/z 由 react-force-graph 物理仿真运行时回写到同一对象（声明为可选以便读取）。
@@ -48,6 +60,7 @@ interface FGLink {
   kind?: string;
   color: string;
   particles: number;
+  isSoft: boolean;
 }
 
 // react-force-graph-3d 的 ref / 各 accessor prop 泛型与本地平坦节点形状不严格兼容，
@@ -122,6 +135,7 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
   nodeColorFn = nodeColorOf,
   nodeSizeFn = nodeSizeOf,
   kindLabelFn = defaultKindLabel,
+  linkIsSoftFn = defaultIsSoft,
 }) => {
   // 用 unknown 收口 — react-force-graph-3d 的 ref 类型未导出（forwardRef 实例），
   // 通过 ref.current.controls() 拿 OrbitControls 实例
@@ -180,15 +194,20 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
     // 过滤掉端点不在 nodes 里的边，避免 react-force-graph 抛错
     const links: FGLink[] = (data.edges ?? [])
       .filter((e) => e.source && e.target && seen.has(e.source) && seen.has(e.target))
-      .map((e: EdgeDTO) => ({
-        source: e.source ?? '',
-        target: e.target ?? '',
-        kind: e.kind,
-        color: edgeColorOf(e.kind),
-        particles: e.kind === 'calls' ? 2 : 0,
-      }));
+      .map((e: EdgeDTO) => {
+        const isSoft = linkIsSoftFn(e.kind);
+        return {
+          source: e.source ?? '',
+          target: e.target ?? '',
+          kind: e.kind,
+          // 软边淡色退背景, 硬边按 kind 本色
+          color: isSoft ? SOFT_LINK_COLOR : edgeColorOf(e.kind),
+          particles: e.kind === 'calls' ? 2 : 0,
+          isSoft,
+        };
+      });
     return { nodes, links };
-  }, [data, nodeColorFn, nodeSizeFn]);
+  }, [data, nodeColorFn, nodeSizeFn, linkIsSoftFn]);
 
   // 用户主动锁定（点击节点后 5 秒内不被 hover 重启自动旋转）
   const autoRotateLockedUntilRef = useRef<number>(0);
@@ -318,6 +337,10 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
     (l: { particles?: number }): number => l.particles ?? 0,
     [],
   );
+  // 软边细线 (0.3), 硬边正常 (1) —— 与淡色配合, 软边在图上退到次要。
+  const accessLinkWidth = useCallback((l: { isSoft?: boolean }): number => {
+    return l.isSoft ? 0.3 : 1;
+  }, []);
 
   // 启动自动旋转 + 聚焦 center 节点
   useEffect(() => {
@@ -412,7 +435,7 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
         nodeResolution={16}
         linkColor={accessLinkColor}
         linkOpacity={0.55}
-        linkWidth={1}
+        linkWidth={accessLinkWidth as GraphAccessor}
         linkLabel={handleLinkLabel}
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={1}
