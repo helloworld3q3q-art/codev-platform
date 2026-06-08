@@ -110,17 +110,16 @@ class SessionStore:
         self._by_session.clear()
 
     def revoke_user(self, username: str) -> int:
-        """禁用用户时: 撤销其所有会话。返回撤销数。"""
+        """禁用用户时: 撤销其所有会话。返回撤销的**会话数**(与 PgSessionStore.revoke_user 的
+        rowcount 对齐 —— 非 token entry 数; 两路实现返回契约一致)。"""
         sids = {s.session_id for s in self._by_access.values() if s.username == username}
         sids |= {s.session_id for s in self._by_refresh.values() if s.username == username}
-        n = 0
         for store in (self._by_access, self._by_refresh):
             for k in [k for k, s in store.items() if s.username == username]:
                 store.pop(k, None)
-                n += 1
         for sid in sids:
             self._by_session.pop(sid, None)
-        return n
+        return len(sids)
 
 
 class PgSessionStore(_PgBase):

@@ -59,6 +59,15 @@ def test_pg_session_revoke_user():
     assert st.resolve(tb.access_token) is not None  # bob 不受影响
 
 
+def test_revoke_user_count_parity():
+    # M1(审计 agent): 内存版与 PG 版 revoke_user 返回值必须一致 = 撤销的会话数(非 token entries)。
+    mem = S.SessionStore()
+    mem.create("alice", "acme"); mem.create("alice", "acme"); mem.create("bob", "acme")
+    pg = S.PgSessionStore(engine=_eng())
+    pg.create("alice", "acme"); pg.create("alice", "acme"); pg.create("bob", "acme")
+    assert mem.revoke_user("alice") == 2 == pg.revoke_user("alice")  # 两路返回契约一致
+
+
 def test_pg_session_persists_across_instances():
     # 模拟多 worker: 新 store 实例(同 engine)能 resolve → 落库非进程内, 重启/跨 worker 一致。
     eng = _eng()
