@@ -41,10 +41,15 @@ def write_memory(
     body: MemoryWriteRequest,
     ctx=Depends(require_project_access),
 ) -> CommonResult[MemoryItem]:
-    identity, _project_id = ctx
-    # personal scopeRef 强制 = 本人 (红线); 其它 scope 必须给 ref。
+    identity, project_id = ctx
+    # personal scopeRef 强制 = 本人 (红线); project 强制 = 鉴权 project_id(跨项目隔离: 防 client
+    # 传别项目 scopeRef 越权写, via=internal 在 agent 侧全信任); 其它 scope 必须给 ref。
     if body.scope == "personal":
         scope_ref = identity.user_id
+    elif body.scope == "project":
+        if not project_id:
+            raise PlatformError(ErrorCode.INVALID_PARAMS, "project scope requires X-Project-Id")
+        scope_ref = project_id
     elif body.scopeRef:
         scope_ref = body.scopeRef
     else:
@@ -71,10 +76,14 @@ def list_memory(
     limit: int = Query(100, ge=1, le=500, description="返回上限"),
     ctx=Depends(require_project_access),
 ) -> CommonResult[list[MemoryItem]]:
-    identity, _project_id = ctx
-    # personal 强制本人; 非 personal 未给 ref 则返空 (用户尚未选 ref, 不下发空 ref 到 agent)。
+    identity, project_id = ctx
+    # personal 强制本人; project 强制 = 鉴权 project_id(跨项目隔离); 非 personal 未给 ref 则返空。
     if scope == "personal":
         ref = identity.user_id
+    elif scope == "project":
+        if not project_id:
+            return ok([], request_id=_rid(request))
+        ref = project_id
     elif scopeRef:
         ref = scopeRef
     else:

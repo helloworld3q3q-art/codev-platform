@@ -146,6 +146,24 @@ def test_write_nonpersonal_empty_scope_ref_400(fake):
     assert r.json()["errors"][0]["errorCode"] == "invalid_params"
 
 
+def test_write_project_scope_ref_forced_to_header_project(fake):
+    # P1 修复(codex bug-edge-audit): client 传 scope=project + scopeRef=别项目 → 强制用鉴权
+    # X-Project-Id(demo-proj), 防越权写别项目 memory(agent 侧 via=internal 全信任不复核)。
+    c = _client()
+    r = c.post("/api/v1/memory", headers=_HEADERS, json={
+        "scope": "project", "scopeRef": "other-proj", "content": "x",
+    })
+    assert r.status_code == 200
+    assert fake.last_body["scope_ref"] == "demo-proj"   # 不是 client 传的 other-proj
+
+
+def test_list_project_scope_ref_forced_to_header_project(fake):
+    c = _client()
+    c.get("/api/v1/memory", headers=_HEADERS,
+          params={"scope": "project", "scopeRef": "other-proj", "limit": 5})
+    assert fake.last_params["scope_ref"] == "demo-proj"   # 不是 other-proj
+
+
 def test_agent_unreachable_returns_503(monkeypatch):
     monkeypatch.setattr(memory, "agent_client", FakeClient(raises=True))
     c = _client()
