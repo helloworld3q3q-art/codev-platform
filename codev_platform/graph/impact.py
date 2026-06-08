@@ -314,3 +314,84 @@ def list_domain_members(conn, project_id: str, domain_name: str) -> dict:
                 members.append(_node_brief(m))
     members.sort(key=lambda x: x["name"])
     return {"found": True, "domain": dom.name, "members": members, "count": len(members)}
+
+
+# ---------------------------------------------------------------- 架构分层查询(A2 软节点消费前门)
+
+# 分层偏序(rank 越小越"上层"; 允许上层依赖下层, 下层依赖上层 = 逆向违规)。
+# util/config/domain_model 之外的横切角色不入 rank → 不参与违规判定(谁都能用)。
+_LAYER_RANK: dict[str, int] = {
+    "controller": 0, "gateway": 0, "adapter": 1, "service": 2, "repository": 3,
+}
+# 违规检测遍历的硬边(确定性血缘; calls 是 function→function, imports 是 file→file)。
+_DEP_EDGES = frozenset({EdgeKind.CALLS.value, EdgeKind.IMPORTS.value})
+
+
+def find_arch_role(conn, project_id: str, file_ref: str) -> dict:
+    """查某 file 演哪个架构层角色(A2 软节点)。读已标好的 PLAYS_ROLE 软边, **不调 LLM**。"""
+    g = build_impact_graph(conn, project_id, include_soft=True)
+    node, ambig = _resolve(g, file_ref, NodeKind.FILE.value)
+    if node is None:
+        return _not_found("file", file_ref, ambig)
+    roles = [
+        g.nodes[tgt].name for tgt, kind in g.fwd.get(node.id, [])
+        if kind == EdgeKind.PLAYS_ROLE.value and tgt in g.nodes
+    ]
+    return {"found": True, "file": _node_brief(node), "roles": sorted(set(roles))}
+
+
+def list_layer_members(conn, project_id: str, role: str) -> dict:
+    """查某架构层角色下有哪些 file(反向 PLAYS_ROLE 软边)。读已标好的软节点, **不调 LLM**。"""
+    g = build_impact_graph(conn, project_id, include_soft=True)
+    layers = g.find_nodes_by_name(role, NodeKind.ARCH_LAYER.value)
+    if not layers:
+        return {"found": False, "role": role}
+    layer = layers[0]
+    members = [
+        _node_brief(g.nodes[src]) for src, kind in g.rev.get(layer.id, [])
+        if kind == EdgeKind.PLAYS_ROLE.value and src in g.nodes
+    ]
+    members.sort(key=lambda x: x["name"])
+    return {"found": True, "role": layer.name, "members": members, "count": len(members)}
+
+
+def find_arch_violations(conn, project_id: str, limit: int = 200) -> dict:
+    """跨层违规检测(**确定性**: layer 软标签 × calls/imports 硬边 × 偏序规则, 不调 LLM)。
+
+    逆向依赖 = 下层角色(rank 大)经 calls/imports 依赖上层角色(rank 小), 如 repository→controller。
+    LLM 只提供 layer 标签这一个软输入; 违规判定全确定性(硬边 + rank), 给 agent 重构/PR 自检用。
+    """
+    g = build_impact_graph(conn, project_id, include_soft=True)
+    # file 节点 id → path; path → role(经 PLAYS_ROLE 软边)
+    fid_path = {n.id: n.name for n in g.nodes.values() if n.kind == NodeKind.FILE.value}
+    path_role: dict[str, str] = {}
+    for fid, path in fid_path.items():
+        for tgt, kind in g.fwd.get(fid, []):
+            if kind == EdgeKind.PLAYS_ROLE.value and tgt in g.nodes:
+                path_role[path] = g.nodes[tgt].name
+    # 任意 node id → role(经 node.file → path → role; file 节点自身也映射)
+    node_role: dict[str, str] = {}
+    for n in g.nodes.values():
+        r = path_role.get(n.file or "") or (path_role.get(fid_path[n.id]) if n.id in fid_path else None)
+        if r is not None:
+            node_role[n.id] = r
+
+    violations = []
+    for src, nbrs in g.fwd.items():
+        sr = node_role.get(src)
+        if sr is None or sr not in _LAYER_RANK:
+            continue
+        for tgt, kind in nbrs:
+            if kind not in _DEP_EDGES:
+                continue
+            tr = node_role.get(tgt)
+            if tr is None or tr not in _LAYER_RANK or _LAYER_RANK[sr] <= _LAYER_RANK[tr]:
+                continue  # 同层 / 正向(上→下)依赖合法
+            violations.append({
+                "from": _node_brief(g.nodes[src]), "fromRole": sr,
+                "to": _node_brief(g.nodes[tgt]), "toRole": tr, "via": kind,
+                "detail": f"{sr} 逆向依赖 {tr}: {g.nodes[src].name} --{kind}--> {g.nodes[tgt].name}",
+            })
+    violations.sort(key=lambda v: (v["fromRole"], v["toRole"], v["from"]["name"]))
+    capped = violations[: max(0, int(limit))]
+    return {"project_id": project_id, "violations": capped, "count": len(capped)}

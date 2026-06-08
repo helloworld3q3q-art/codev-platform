@@ -1,9 +1,11 @@
-"""统一图谱 MCP server — 暴露 impact + A1 业务域查询给开发端 agent(Claude Code/Codex)。
+"""统一图谱 MCP server — 暴露 impact + A1 业务域 + A2 架构层查询给开发端 agent(Claude Code/Codex)。
 
-8 个 tools(薄包装 graph/impact 查询函数, 纯读 sqlite, **不调 LLM**):
+11 个 tools(薄包装 graph/impact 查询函数, 纯读 sqlite, **不调 LLM**):
   跨层影响 — find_impact / find_table_usage / find_page_dependencies /
              find_impacted_pages / find_api_callers
   A1 业务域 — find_node_domain(节点→域) / list_domain_members(域→成员)
+  A2 架构层 — find_arch_role(file→角色) / list_layer_members(角色→file) /
+             find_arch_violations(确定性逆向依赖检测)
   搜索 — search_nodes(模糊搜节点, 承接退役的 cross-link)
 
 多租户单端点 + ?project_id= 路由(镜像 cross-link)。读 data/graph_store/<pid>.sqlite。
@@ -151,6 +153,16 @@ async def list_tools() -> list[Tool]:
                           "description": "可选 kind 过滤(backend_endpoint/db_table/... 默认 all)"},
                  "limit": {"type": "integer", "description": "返回上限(默认 50)"}},
                  "required": ["query"]}),
+        Tool(name="find_arch_role",
+             description="查某 file 演哪个架构层角色(A2 软节点: controller/service/repository/...)",
+             inputSchema=_str_schema("file", "file 路径或节点 id")),
+        Tool(name="list_layer_members",
+             description="查某架构层角色下有哪些 file(A2 软节点)",
+             inputSchema=_str_schema("role", "架构层角色, 如 controller/service/repository")),
+        Tool(name="find_arch_violations",
+             description="跨层违规检测(确定性: 逆向依赖如 repository→controller; 重构/PR 自检用)",
+             inputSchema={"type": "object", "properties": {
+                 "limit": {"type": "integer", "description": "返回上限(默认 200)"}}}),
     ]
 
 
@@ -165,6 +177,10 @@ _DISPATCH = {
     "list_domain_members": lambda c, p, a: _impact.list_domain_members(c, p, a["domain"]),
     "search_nodes": lambda c, p, a: _impact.search_nodes(
         c, p, a["query"], a.get("kind", "all"), int(a.get("limit", 50))),
+    "find_arch_role": lambda c, p, a: _impact.find_arch_role(c, p, a["file"]),
+    "list_layer_members": lambda c, p, a: _impact.list_layer_members(c, p, a["role"]),
+    "find_arch_violations": lambda c, p, a: _impact.find_arch_violations(
+        c, p, int(a.get("limit", 200))),
 }
 
 

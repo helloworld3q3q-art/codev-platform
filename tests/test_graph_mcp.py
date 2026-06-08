@@ -18,11 +18,12 @@ from codev_platform.graph.schema import (
 from codev_platform.graph.store import open_store, upsert_result
 
 
-def test_dispatch_table_has_eight_tools():
-    assert len(gm._DISPATCH) == 8
+def test_dispatch_table_has_eleven_tools():
+    assert len(gm._DISPATCH) == 11   # 8 (impact+A1) + 3 (A2 架构层, 2026-06-08)
     assert "find_node_domain" in gm._DISPATCH
     assert "search_nodes" in gm._DISPATCH
     assert "list_domain_members" in gm._DISPATCH
+    assert {"find_arch_role", "list_layer_members", "find_arch_violations"} <= set(gm._DISPATCH)
 
 
 def test_dispatch_unknown_tool_raises():
