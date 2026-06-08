@@ -126,3 +126,57 @@ def test_loop_no_plan_hint_when_planner_off():
     res = _run(planner_enabled=False)
     hints = [s.result_summary or "" for s in res.steps]
     assert not any("[query plan]" in h for h in hints), "关 planner 不应注入软预算提示(行为不变)"
+
+
+class _ReadFileTool(Tool):
+    name = "read_file"
+    description = "read"
+    input_schema = {"type": "object", "properties": {"path": {"type": "string"}}}
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, args):
+        self.calls += 1
+        return ToolResult(call_id="", content=f"content of {args.get('path')}")
+
+
+class _ReadVaryingProvider(LLMProvider):
+    """每步读不同 path(只读类, 模拟 overview 目录/文件 spelunking 失控)。"""
+    name, model = "rv", "m"
+
+    def __init__(self) -> None:
+        self.i = 0
+
+    def chat(self, system, messages, tools):
+        self.i += 1
+        return AssistantTurn(text=None,
+                             tool_calls=[ToolCall(f"c{self.i}", "read_file", {"path": f"f{self.i}.py"})],
+                             stop_reason="tool_use")
+
+
+def test_readonly_hard_capped_at_budget_when_planner_on():
+    # Phase 7 优化: planner 开 + 超预算后只读类硬拦。overview 预算 5 -> 只读最多执行 5 次。
+    tool = _ReadFileTool()
+    reg = ToolRegistry()
+    reg.register(tool)
+    loop = AgentLoop(_ReadVaryingProvider(), reg,
+                     policy=LoopPolicy(max_steps=12, readonly_distinct_cap=20, readonly_total_cap=30),
+                     planner_enabled=True)
+    res = loop.run("这个项目是做什么的?")  # overview, budget 5
+    assert tool.calls == 5, f"只读类应被硬拦在预算 5, 实际执行 {tool.calls}"
+    assert res.stop_reason == "max_steps"
+    hints = [s.result_summary or "" for s in res.steps]
+    assert any("[query plan]" in h and "只读" in h for h in hints), "超预算只读应回灌硬拦提示"
+
+
+def test_readonly_not_capped_when_planner_off():
+    # planner 关: 只读类不受 budget 硬拦, 走原有 readonly cap(distinct 20)-> 执行远超 5。
+    tool = _ReadFileTool()
+    reg = ToolRegistry()
+    reg.register(tool)
+    loop = AgentLoop(_ReadVaryingProvider(), reg,
+                     policy=LoopPolicy(max_steps=12, readonly_distinct_cap=20, readonly_total_cap=30),
+                     planner_enabled=False)
+    res = loop.run("这个项目是做什么的?")
+    assert tool.calls > 5, f"关 planner 时只读不应被 budget 拦(原行为), 实际 {tool.calls}"

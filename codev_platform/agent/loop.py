@@ -101,7 +101,7 @@ def _summarize(text: str, limit: int = 280) -> str:
 
 
 def _precheck(policy: LoopPolicy, specs: list[dict], st: _GuardState,
-              name: str, fp: str, args: Any) -> str | None:
+              name: str, fp: str, args: Any, tool_budget: int = 0) -> str | None:
     """执行前护栏: 返回拦截提示(不执行)或 None(放行)。"""
     klass = _classify(name)
 
@@ -109,6 +109,15 @@ def _precheck(policy: LoopPolicy, specs: list[dict], st: _GuardState,
     if fp in st.seen_calls:
         return (f"[loop guard] 你已用相同参数调用过 {name},结果不会变。"
                 f"请换不同查法,或用已掌握的证据给出(部分)最终答案,不要重复同一调用。")
+
+    # planner 超预算后**只读类硬拦**(Phase 7 优化): 实测软预算对 deepseek 不够 ——
+    # overview 类越界后继续刷 list_dir/read_file(探索型空读)。预算耗尽后, 只读类直接拒
+    # (检索类仍走软提示, 因其有 distinct/零增量上限自限)。精准打 overview/general 的目录
+    # spelunking 失控, 不碰 impact/symbol(走检索类)。tool_budget<=0 = planner 关, 不生效。
+    if tool_budget > 0 and klass == "readonly" and st.executed_tools >= tool_budget:
+        return (f"[query plan] 本轮工具预算({tool_budget})已用尽, 这是探索型只读调用"
+                f"(list_dir/read_file)。请基于已读到的内容直接收尾, 不要继续翻目录/读文件; "
+                f"确需某关键文件请用检索类工具(codegraph/search_docs)精准定位再读。")
 
     if klass == "readonly":
         np = _norm_path_arg(args)
@@ -260,7 +269,8 @@ class AgentLoop:
                 if tool is None:
                     result = ToolResult(call_id=call.id, content=f"未知工具: {call.name}", is_error=True)
                 else:
-                    block = _precheck(self.policy, specs, guard, call.name, fp, call.args)
+                    block = _precheck(self.policy, specs, guard, call.name, fp, call.args,
+                                      tool_budget=tool_budget)
                     if block is not None:
                         result = ToolResult(call_id=call.id, content=block, is_error=True)
                     else:
