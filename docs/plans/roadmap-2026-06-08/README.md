@@ -10,7 +10,7 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [a2-architecture-layer-design-2026-06-08.md](a2-architecture-layer-design-2026-06-08.md) | **子设计(三兄弟会诊: 产品/ROI · 架构复用 · AI 抗幻觉)**: A2 架构分层映射 —— 复用 A1 全套护栏给 file 归架构角色软标签(`ARCH_LAYER`/`PLAYS_ROLE`)+ 确定性违规检测; 用 grounding 判据**证明 plan §六怀疑正确**(A3 降级、A4 砍) | ✅ **代码全落地 + 真 deepseek 验收通过**(后端 v2 ~91% 严格, ≥70%达标; service few-shot 已修) |
+| [a2-architecture-layer-design-2026-06-08.md](a2-architecture-layer-design-2026-06-08.md) | **子设计(三兄弟会诊: 产品/ROI · 架构复用 · AI 抗幻觉)**: A2 架构分层映射 —— 复用 A1 全套护栏给 file 归架构角色软标签(`ARCH_LAYER`/`PLAYS_ROLE`)+ 确定性违规检测; 用 grounding 判据**证明 plan §六怀疑正确**(A3 降级、A4 砍) | ✅ **代码全落地 + 真 deepseek 全栈验收通过**(171 file: 后端 ~91% + 前端分层准, prompt v4) |
 
 ## A2 落地状态(2026-06-08)
 
@@ -27,13 +27,14 @@
 | 项 | 结果 |
 |---|---|
 | **真图谱 bug ①** | graph **不建 FILE kind 节点**(451/455 节点用 `node.file` 属性) → `ArchLayerAnalyzer` 找 FILE 节点恒空 → 整个 A2 no-op。改用 `node.file` 聚合 + 节点级 `PLAYS_ROLE`(`6f09d3a`)。FakeLabeler 单测造 FILE 节点发现不了 |
-| **真图谱 bug ②** | `LAYER_ROLES` 是后端分层词表 → web-ui **133 前端文件全被硬塞 util 噪声**。`_build_facts` 跳过纯 `frontend_*` 文件(前端分层留 backlog)(`87a5ab5`) |
+| **真图谱 bug ②** | `LAYER_ROLES` 是后端分层词表 → web-ui **133 前端文件全被硬塞 util 噪声**。先跳过纯前端(`87a5ab5`), 后做前端词表(见下) |
 | **后端准确率(v1)** | 33 后端文件人工核对: **79% 严格 / 94% 宽松, ≥70% 达标**。`web/routes/*` 17 全对 controller / `repositories/`+`*_pg` 准 repository / `tables.py` domain_model。2 错(`_checks.py`/`platform_status.py` 应 service 被标 repository) |
 | **service few-shot(v2, `093a32e`)** | prompt 加 service vs repository 判据 + 4 角色 few-shot → 准确率 **79%→~91% 严格**。`_checks.py`/`platform_status.py` repository→**service** 修对; `codegraph_client.py`/`bridge_codegraph.py` repository→**adapter** 修对。v2 分布 service 3 / repository 10 / controller 17 / adapter 2 / domain_model 1(service 0→3、adapter 0→2) |
+| **前端分层词表(v3+v4, `d2434dd`/`1baf035`)** | 前后端各用各词表(前端 page/component/api/store/hook), `FileFact.is_frontend`/`is_page`(确定性 is_page 喂 LLM 作 page 强先验), labeler 按 file 选词表校验(跨词表即剔)。**133 前端文件从全 util 噪声 → 有意义分层**: `component 60 / page 17 / api 17 / store 7 / config 3 / util 29`(components/→component、pages→page、services/apis→api 全准)。v4 修 v3 加前端时压缩后端致 `platform_status` 退化(明确 domain_model=纯数据结构无逻辑) |
 | **违规检测** | 102 条 calls 边**全覆盖角色**(controller→repository 正向), 判定 violations=0 是真实(codev-platform 后端架构干净, 无逆向依赖), 非漏检假 0 |
-| **剩余局限** | 前端分层待独立词表(page/component/api); 少量边界 file(org.py/tools 工具封装)角色可辩护。不影响验收达标 |
+| **最终 v4 全栈** | 后端 `service 5 / repository 8 / controller 17 / adapter 2 / domain_model 1`(~91%, domain_model 只 tables.py 精确)+ 前端分层(见上) = **171 文件全栈覆盖**。少量边界 file(tools 工具封装)角色可辩护 |
 
-**结论: A2 后端验收通过(v2 ~91%), 方向证实(不止损)。** 前端分层词表 → backlog;A3 降级版可评估。
+**结论: A2 全栈验收通过(后端 ~91% + 前端分层准), 方向证实。** A3 降级版可评估(余下唯一 backlog)。
 
 ---
 
