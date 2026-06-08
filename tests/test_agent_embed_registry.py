@@ -1,9 +1,20 @@
 """嵌入模型 registry(P2a)—— config 选 backend + device 别名 + 缺依赖降级 + index 经 registry。"""
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
 from codev_platform.agent.embed.registry import build_embedder
 
+# 默认 qwen-local 需 sentence-transformers(runtime extra); 轻量 dev 缺则 skip 而非 fail(codex 审计 #9)。
+_needs_st = pytest.mark.skipif(
+    importlib.util.find_spec("sentence_transformers") is None,
+    reason="需 sentence-transformers(runtime extra), 轻量 dev 跳过",
+)
 
+
+@_needs_st
 def test_default_backend_qwen_local():
     from codev_platform.agent.embed.qwen import QwenLocalEmbedder
     emb = build_embedder({})                       # 默认 qwen-local;WSL venv 有 sentence-transformers
@@ -14,12 +25,14 @@ def test_unknown_backend_returns_none():
     assert build_embedder({"memory": {"embed": {"backend": "bogus-model"}}}) is None
 
 
+@_needs_st
 def test_device_precedence_new_over_alias_over_default():
     assert build_embedder({"memory": {"embed": {"device": "cuda"}}})._device == "cuda"
     assert build_embedder({"memory": {"embed_device": "cuda:1"}})._device == "cuda:1"   # 旧别名
     assert build_embedder({})._device == "cpu"                                          # 默认
 
 
+@_needs_st
 def test_embed_path_from_config():
     emb = build_embedder({"models": {"embed_path": "/custom/model"}})
     assert emb._model_path == "/custom/model"

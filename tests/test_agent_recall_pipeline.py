@@ -1,7 +1,17 @@
 """可插拔召回流水线 —— registry 装配 + 降级 + 别名(P0 新架构覆盖;行为等价由旧测试守)。"""
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
 from codev_platform.agent.recall.registry import build_recall_service
+
+# Bm25Scorer 实跑需 rank_bm25 + jieba(runtime extra); 轻量 dev 缺则 skip 而非 fail(codex 审计 #9)。
+_needs_bm25 = pytest.mark.skipif(
+    importlib.util.find_spec("rank_bm25") is None or importlib.util.find_spec("jieba") is None,
+    reason="需 rank_bm25+jieba(runtime extra), 轻量 dev 跳过",
+)
 
 
 class _Store:
@@ -91,6 +101,7 @@ def _entry(id, content):
     return MemoryEntry(id=id, scope="personal", scope_ref="u", owner_user_id="u", content=content)
 
 
+@_needs_bm25
 def test_bm25_ranks_term_match_first():
     from codev_platform.agent.recall.base import RankCtx
     from codev_platform.agent.recall.scorers import Bm25Scorer
@@ -108,6 +119,7 @@ def test_bm25_empty_entries():
     assert Bm25Scorer().rank([], "x", RankCtx(org_id="o")) == []
 
 
+@_needs_bm25
 def test_bm25_all_zero_score_keeps_pool_order():
     # query 词全不命中 → 全 0 分 → 稳定排序保候选池原序(契约,审计 NIT)
     from codev_platform.agent.recall.base import RankCtx
@@ -117,6 +129,7 @@ def test_bm25_all_zero_score_keeps_pool_order():
     assert ids == ["a", "b", "c"]
 
 
+@_needs_bm25
 def test_bm25_single_doc_corpus_no_crash():
     from codev_platform.agent.recall.base import RankCtx
     from codev_platform.agent.recall.scorers import Bm25Scorer
@@ -190,11 +203,13 @@ def test_registry_rerank_default_none():
     assert isinstance(build_recall_service({}, _Store())._reranker, NoReranker)
 
 
+@_needs_bm25
 def test_registry_bm25_built_when_available():
     svc = build_recall_service({"memory": {"recall": {"scorers": ["bm25"]}}}, _Store())
     assert _names(svc) == ["bm25"]        # WSL venv 有 rank_bm25 + jieba
 
 
+@_needs_bm25
 def test_registry_vector_plus_bm25():
     svc = build_recall_service(
         {"memory": {"recall": {"scorers": ["vector", "bm25"]}}}, _Store(), index=_Idx())
