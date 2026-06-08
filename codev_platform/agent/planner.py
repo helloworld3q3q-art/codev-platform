@@ -53,10 +53,12 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# 类型 → 工具预算(工具调用次数上限; clamp 到 max_steps)。源自 plan §407-411。
+# 类型 → 工具预算(工具调用次数上限; clamp 到 max_steps)。源自 plan §407-411 的**任务复杂度**区间,
+# 是**跨模型共享基线**(按问题类型该花多少工具来定, 不按某一个模型的 A/B 数字 overfit)。
+# 某模型若需更松/更紧, 走 per-model 覆盖(未来可加 LoopPolicy budget scale), 不改这里的基线。
 _BUDGET: dict[str, int] = {
     QueryType.OVERVIEW: 5,
-    QueryType.IMPACT: 12,
+    QueryType.IMPACT: 8,    # plan §409 "修改面分析 8-12 次"取下界基线(原 12 偏松, 链路覆盖到即收尾)
     QueryType.SYMBOL: 6,
     QueryType.DOC_RULE: 4,
     QueryType.GENERAL: 0,   # 0 = 不额外约束(loop 会用 max_steps 兜)

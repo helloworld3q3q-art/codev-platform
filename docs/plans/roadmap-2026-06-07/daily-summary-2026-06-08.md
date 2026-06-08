@@ -61,8 +61,20 @@
 deepseek 的 planner 现由 `_WEAK` 档自带(不依赖那条全局 config)。测试 `test_planner_is_per_model_strategy`
 (claude 关 / deepseek 开+硬封顶 / config 覆盖),60 passed。
 
+## 四 c、impact 预算 12→8(任务复杂度基线,非单模型 overfit)
+
+按 plan §409"修改面分析 8-12 次"取**下界基线**(原 12 偏松)。⚠️ 多模型纪律:基线由**任务复杂度**定,
+不由 deepseek 的 A/B 数字 overfit;某模型需更松走 per-model 覆盖(`agent.providers.<name>.loop.*`,
+未来可加 budget scale),不改这条共享基线。
+
+真机验证(deepseek 单模型样本):同 impact 问题, 工具 **11→9**, 答案 **2945→1657 字**, 但
+**覆盖零损失** —— 写函数(write/supersede/forget/archive/archive_expired/set_task_state + 脚本)、
+读函数(list_scope/build_platform_status/verify)、3 个 HTTP 端点、风险等级**全列出**, 只是更精炼
+(靠 table_usage+codegraph 检索拿到函数清单, 不必读 3 个文件)。即 12 的"更全"是冗余非覆盖。
+
 ## 四、未决 / 取向
 
-- impact 预算 12→8 可再 A/B(当前"多调换更全"未必坏,看取向)。
-- planner 完整版(LLM planner + agent 端到端 eval + tool budget 真机统计入 eval)移交下一迭代。
+- **planner 完整版移交下一迭代**:LLM planner(确定性分类兜底外, 复杂问题用 LLM 规划)+ agent 端到端
+  eval(给需求看是否用对 MCP/改对文件, 需 LLM judge)+ tool budget 真机统计入 eval。
+- 多模型:现仅 deepseek 配置;接入第 2 个模型时, 用其能力档(`_STRONG`/`_MID`)校准, 别套 deepseek 基线。
 - `weblog.txt`(本目录散 txt,用户手工贴的 web-ui run)—— 数据已并入本日报,可删或留自用。
