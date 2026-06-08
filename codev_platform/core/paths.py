@@ -105,3 +105,12 @@ def codegraph_index_dir(project_id: str) -> Path:
     例: data/codegraph_ext/<project_id>/codegraph/ (含 codegraph.db + config.json + wal)。"""
     project_id = _validate_project_id(project_id)  # 防路径穿越 (../outside 等)
     return data_root() / "codegraph_ext" / project_id / "codegraph"
+
+
+def index_manifest_path() -> Path:
+    """统一索引构建 manifest 库 (roadmap-2026-06-07 Phase 1)。
+
+    多租户共享单库 (按 project_id 行隔离), 记录每个 (project_id, index_kind) 最近一次
+    构建的 commit/耗时/状态 —— 把分散的新鲜度 (chroma .last_build / graph ingest_meta /
+    codegraph mtime) 统一成一条可查记录。落 data_root/index_manifest.sqlite。"""
+    return data_root() / "index_manifest.sqlite"

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import sys
+import time
 from pathlib import Path
 
 from codev_platform.core.config import get as _cfg_get
@@ -91,18 +92,22 @@ class ReindexWorker:
         sync = sync_repo_to_remote(repo)
         _log(f"reindex git-sync {job.key}: pulled={sync['pulled']} ({sync['note']})")
         _log(f"reindex 开始 {job.key} (repo={repo})")
+        started = time.time()
         try:
             rc = runner.run(job.project_id, repo, self._cfg)
         except Exception as exc:  # noqa: BLE001 — 单 job 失败不拖垮 worker
             _log(f"reindex 异常 {job.key}: {exc!s} — 丢弃避免死循环")
+            self._record_manifest(job, repo, started, "failed", note=str(exc)[:200])
             self._q.complete(job)
             return None
         # rc==2 = .reindex.lock 被占 / db busy (暂时性, 与 codegraph sync rc=2 同约定):
         # 不 complete, 保留 job 下轮重试 (不丢这次 reindex)。常态下 worker 是唯一写者,
-        # 锁不会被占; 此路径仅兜底"误手动 reindex 撞 worker"的罕见并发。
+        # 锁不会被占; 此路径仅兜底"误手动 reindex 撞 worker"的罕见并发。不记 manifest (非终态)。
         if rc == _RETRY_RC:
             _log(f"reindex {job.key} 锁占用/db busy (rc=2) — 保留重试, 不丢")
             return None
+        # 终态 (rc==0 成功 / 其它 rc 失败): 写统一 manifest (Phase 1, best-effort 不阻断)。
+        self._record_manifest(job, repo, started, "ok" if rc == 0 else "failed")
         # 其它 rc!=0 = 真失败: complete 丢弃避免死循环 (错误已在 reindex 日志, ai-health 可见)
         dirty = not self._q.complete(job)
         if rc != 0:
@@ -110,6 +115,19 @@ class ReindexWorker:
             return None
         _log(f"reindex 完成 {job.key} rc=0" + (" (运行期又有新触发, 已重排)" if dirty else ""))
         return repo
+
+    def _record_manifest(self, job: Job, repo: Path, started: float,
+                         status: str, note: str = "") -> None:
+        """写统一索引 manifest (Phase 1)。best-effort: 任何异常静默, 绝不阻断索引主流程。"""
+        try:
+            from codev_platform.index_manifest import BuildRecord, git_head, record_build
+            record_build(BuildRecord(
+                project_id=job.project_id, kind=job.kind,
+                git_commit=git_head(repo), started_at=started,
+                finished_at=time.time(), status=status, note=note,
+            ))
+        except Exception as exc:  # noqa: BLE001
+            _log(f"manifest 记录失败 {job.key} (不阻断): {exc!s}")
 
     def _refresh_health(self, project_id: str, repo: Path) -> None:
         """best-effort: reindex 后刷该 project 的 ai-health light 快照 (失败静默)。"""

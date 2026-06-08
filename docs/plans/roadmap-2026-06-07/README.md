@@ -17,9 +17,10 @@
 | Phase | 交付 | 落点 | 验证 |
 |---|---|---|---|
 | **Phase 0 评测基线** | A1/A2 软标签准确率从人肉核对固化成可回归 golden set(`code_intelligence` suite, 读图谱软边算准确率, 不调 LLM, 软标签缺失优雅 skip) | `eval/datasets/code_intelligence.jsonl` + `eval/run_eval.py` + `tests/test_eval_code_intelligence.py` | 8 单测; 端到端实证抓出 mislabel(`platform_status` repository≠service) |
-| **Phase 7 Query Planner 最小版** | 确定性查询分类(overview/impact/symbol/doc_rule/general)→ 工具预算 + 优先 lane + 停止条件; loop `planner_enabled` 软预算(默认关, 行为逐字节不变); config 门 `agent.planner.enabled` | `codev_platform/agent/planner.py` + loop/trace/chat_service/deps + `eval` `planner` suite + `tests/test_agent_planner.py` | 11 单测; planner suite classification_accuracy 1.0 |
+| **Phase 7 Query Planner 最小版** | 确定性查询分类(overview/impact/symbol/doc_rule/general)→ 工具预算 + 优先 lane + 停止条件; loop planner 每模型策略(`LoopPolicy.planner_enabled`, 按 `_STRONG/_MID/_WEAK` 档走)+ 超预算只读硬封顶 | `codev_platform/agent/planner.py` + loop/trace/registry/chat_service/deps + `eval` `planner` suite | 单测全绿; planner suite 1.0; 真机 A/B + 上线 deepseek |
+| **Phase 1 IndexManifest(MVP 切片)** | 把分散新鲜度(chroma `.last_build`/graph `ingest_meta`/codegraph mtime)统一成一张表 `index_builds`(每 project×kind 最近构建 commit/耗时/状态); worker 构建完写一行(best-effort 不阻断); CLI `index status` 看每类索引是否对齐 HEAD | `codev_platform/index_manifest.py` + `core/paths.py` + `reindex/worker.py` 钩子 + `ops/index_status.py` + `tests/test_index_manifest.py` | 7 单测(record/replace/filter/freshness 三态/CLI 注册) |
 
-**未做(刻意, plan §六纪律)**: Phase 1 IndexManifest / Phase 2 统一 IR 解析引擎 / Phase 4 社区检测 / Phase 5 path scoring / Phase 6 联合召回 / Phase 8 响应性能 / Phase 9 多语言 adapter / Phase 10 治理。这些是**重型地基, 按真实业务需求触发再做**, 不为"完整平台"堆。Phase 7 完整版(LLM planner + agent 端到端 eval + tool budget 真机统计)移交下一迭代。
+**未做(刻意, plan §六纪律)**: Phase 1 重型部分(构建 DAG 编排 / atomic handoff / dashboard / count 回填)/ Phase 2 统一 IR 解析引擎 / Phase 4 社区检测 / Phase 5 path scoring / Phase 6 联合召回 / Phase 8 响应性能 / Phase 9 多语言 adapter / Phase 10 治理。这些是**重型地基, 按真实业务需求触发再做**, 不为"完整平台"堆。Phase 7 完整版(LLM planner + agent 端到端 eval)移交下一迭代。
 
 ## 背景
 
