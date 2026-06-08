@@ -2,11 +2,18 @@
 
 register: 写 platform_meta/projects/<code>/meta.json (唯一约束 = 目录已存在则视为已注册,
 幂等由 service 先经 read repo 查重把关, 此处再用 exclusive 写兜底)。
-load/unload: 第一版用进程内 _LOADED registry 持有运行态 (单进程互斥, 对齐 plan §十二
-"in-process project lock registry")。PG 实现可按现有 *_store_pg 范式补 (TODO 见下)。
+load/unload: 进程内 _LOADED registry 持有运行态。**这是设计契约不是缺陷** —— loaded 是纯派生
+UI 标记(项目是否已加载), 无业务数据; 重启丢失只需重新 load, 多 worker 各看各的只是显示抖动。
+故**不为它建 PG 表**(为纯 UI 标记建表/迁移/回退 = 过度工程)。
 
-# TODO(PG): register → projects 表 upsert (唯一约束 code); load 状态 → project_runtime 表,
-#   对齐 memory_store_pg / rbac_store_pg 落 PG, 多租户存储不分叉 (plan D5)。第一版文件/内存先行。
+# 决策(codex audit P3 / 2026-06-08):
+# - _LOADED 维持进程内 + 明确"不持久/不跨实例"契约, 不建表(纯 UI 标记, 跨实例显示 loaded
+#   才需要时再补 project_runtime 表)。
+# - ⚠️ 真正的多实例隐患是 web/domain/locks.py 的 ProjectLockRegistry(进程内互斥锁): 多 worker
+#   下互斥失效 → 同项目可被并发提交重建、写坏 codegraph/chroma 索引。**上多实例前必做** ——
+#   换 Redis / 文件锁(对齐 core spawn_lock)。比 _LOADED 优先级高, 在此登记防隐身。
+# - register 已落 meta.json(read repo 也从文件读, 不丢); register → projects 表(PG) 是多租户
+#   存储统一的优化, 可与 jobs PG 化同批做, 非数据丢失修复。
 """
 from __future__ import annotations
 
