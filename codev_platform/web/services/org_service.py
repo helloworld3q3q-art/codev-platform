@@ -12,7 +12,11 @@ from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.project_id import ProjectIdError, validate
 from codev_platform.web.domain.accounts import Org, OrgMember
 from codev_platform.web.domain.enums import MemberRoleEnum, OrgStatusEnum
-from codev_platform.web.repositories.account_store import get_member_store, get_org_store
+from codev_platform.web.repositories.account_store import (
+    get_member_store,
+    get_org_store,
+    get_user_store,
+)
 from codev_platform.web.schemas.orgs import (
     MemberActionResult,
     MemberItem,
@@ -26,10 +30,11 @@ _VALID_ROLE = {e.value for e in MemberRoleEnum}
 
 
 class OrgService:
-    def __init__(self, orgs=None, members=None) -> None:
+    def __init__(self, orgs=None, members=None, users=None) -> None:
         # 经 getter 取活动绑定 (内存或 PG, 见 bind_account_stores); 测试可显式注入。
         self._orgs = orgs if orgs is not None else get_org_store()
         self._members = members if members is not None else get_member_store()
+        self._users = users if users is not None else get_user_store()
 
     # ---- 组织 ----
 
@@ -89,9 +94,13 @@ class OrgService:
         return [self._to_member(m) for m in rows[offset:offset + limit]], total
 
     def add_member(self, *, code: str, username: str, role: str) -> MemberActionResult:
-        """加成员 (幂等 upsert)。role 非法 → INVALID_PARAMS。"""
+        """加成员 (幂等 upsert)。role 非法 → INVALID_PARAMS; user 不存在 → PROJECT_UNKNOWN。"""
         self._require(code)
         role = self._validate_role(role)
+        # P1-2(backend-deep): 校验 user 存在 —— add_member = 加已有用户为成员, 防幽灵成员 / orphan
+        # membership(当前无 invitation 流程; RBAC / 成员列表 / 审计归属都靠真实 user)。
+        if not self._users.exists(username):
+            raise PlatformError(ErrorCode.PROJECT_UNKNOWN, f"user not found: {username}")
         m = self._members.upsert(OrgMember(org_id=code, username=username, role=role))
         return MemberActionResult(orgId=m.org_id, username=m.username, role=m.role)
 

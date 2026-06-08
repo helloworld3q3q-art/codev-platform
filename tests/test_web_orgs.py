@@ -15,11 +15,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import codev_platform.web.security.deps as wdeps  # noqa: E402
 from codev_platform.core.httpkit import build_app  # noqa: E402
-from codev_platform.web.domain.accounts import Org, OrgMember  # noqa: E402
+from codev_platform.web.domain.accounts import Org, OrgMember, User  # noqa: E402
 from codev_platform.web.repositories.account_store import (  # noqa: E402
     member_store,
     org_store,
     reset_account_stores,
+    user_store,
 )
 from codev_platform.web.routes import orgs  # noqa: E402
 from codev_platform.web.security.sessions import session_store  # noqa: E402
@@ -92,6 +93,9 @@ def test_member_add_then_roles(client):
     org_store.create(Org(code="acme", name="Acme"))
     # bob 是 acme 的 org_admin
     member_store.upsert(OrgMember(org_id="acme", username="bob", role="admin"))
+    # P1-2: carol 须是已注册用户(add_member 加已有用户为成员, 防幽灵成员)
+    user_store.create(User(username="carol", password_hash="x", org_id="acme",
+                           status="ACTIVE", display_name="", email=""))
     admin_h = _auth("bob", "acme")
     # 加成员 (默认 member)
     a = client.post("/api/v1/orgs/members/add",
@@ -116,6 +120,18 @@ def test_member_add_invalid_role_rejected(client):
                     json={"code": "acme", "username": "x", "role": "superuser"}, headers=h)
     assert r.status_code == 400
     assert r.json()["errors"][0]["errorCode"] == "invalid_params"
+
+
+def test_member_add_nonexistent_user_rejected(client):
+    # P1-2(backend-deep): 加不存在的 user → 拒绝(防幽灵成员 / orphan membership)。
+    org_store.create(Org(code="acme", name="Acme"))
+    member_store.upsert(OrgMember(org_id="acme", username="bob", role="admin"))
+    h = _auth("bob", "acme")
+    r = client.post("/api/v1/orgs/members/add",
+                    json={"code": "acme", "username": "ghost"}, headers=h)
+    assert r.status_code == 404
+    assert r.json()["errors"][0]["errorCode"] == "project_unknown"
+    assert member_store.get("acme", "ghost") is None  # 未写成员表(无幽灵成员)
 
 
 def test_status_disable_filters_selections(client):
