@@ -111,8 +111,8 @@ def run_retrieval(project_id: str, k: int = 5) -> dict:
         "k": k,
         "project_id": project_id,
         "metrics": {
-            "recall@{}".format(k): round(sum(recall_at_k(rt, rl, k) for rt, rl in per_query) / n, 3),
-            "hit@{}".format(k): round(sum(1 for rt, rl in per_query if hit_at_k(rt, rl, k)) / n, 3),
+            f"recall@{k}": round(sum(recall_at_k(rt, rl, k) for rt, rl in per_query) / n, 3),
+            f"hit@{k}": round(sum(1 for rt, rl in per_query if hit_at_k(rt, rl, k)) / n, 3),
             "mrr": round(aggregate_mrr(per_query), 3),
         },
         "details": details,
@@ -320,8 +320,8 @@ def _run_memory_recall(rows: list[dict], k: int = 8) -> dict:
         "namespace": org_id,
         "cleaned_rows": cleaned,
         "metrics": {
-            "recall@{}".format(k): round(sum(d["recall@k"] for d in details if "recall@k" in d) / n, 3) if n else 0.0,
-            "hit@{}".format(k): round(sum(1 for d in details if d.get("hit")) / n, 3) if n else 0.0,
+            f"recall@{k}": round(sum(d["recall@k"] for d in details if "recall@k" in d) / n, 3) if n else 0.0,
+            f"hit@{k}": round(sum(1 for d in details if d.get("hit")) / n, 3) if n else 0.0,
         },
         "details": details,
     }

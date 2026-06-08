@@ -7,7 +7,6 @@ autodiscovery 就绪 -> 还验证插件被 registry 自动发现 (无需改 regi
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 

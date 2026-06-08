@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from fastapi import APIRouter, Depends, Request  # noqa: E402
+from fastapi import APIRouter, Depends  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import codev_platform.core.httpkit.permissions as perm  # noqa: E402

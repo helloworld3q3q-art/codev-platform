@@ -6,7 +6,6 @@ redact_text / redact_args 一直无单测。这里补齐 —— 守护"生产默
 """
 from __future__ import annotations
 
-import pytest
 
 from codev_platform.core.obslog import logging_mode, redact_args, redact_text
 

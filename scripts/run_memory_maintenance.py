@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""memory 维护 job(M4):TTL 归档 + 可选压缩融合。手动 / cron / Task Scheduler 调。
 
 跑法(需 config.memory.pg_dsn + psycopg):

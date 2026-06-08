@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""e2e: agent-memory MCP 换机同步 + 隐私隔离验证(dev-agent-memory P1 核心验收)。
 
 平台 PG 共享, "换机" = 不同 MCP 客户端连同一后端。本脚本开多个独立 SSE 会话驱动真实

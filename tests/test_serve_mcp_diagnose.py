@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import pytest
 
 from codev_platform.mcp_serve import (
     MCPEndpoint,

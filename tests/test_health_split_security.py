@@ -12,7 +12,6 @@ test_acl_integration_sse 的 token app 搭法验 401。
 """
 from __future__ import annotations
 
-import json
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware

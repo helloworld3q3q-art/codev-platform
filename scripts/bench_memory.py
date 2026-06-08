@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""memory 压测摸底(C2)—— seed N 条 + 测 write / recall 的 P50/P95(local 与 vector 各一遍)。
 
 隔离 bench org(`bench-mem-org`),跑完 **cleanup**(DELETE bench org 行 + 删 chroma bench collection),

@@ -98,7 +98,7 @@ def run_project(pid: str, provider: str, model: str) -> int:
     print("|---|---|---|")
     for eid in sorted(ep_dom, key=lambda x: eps[x]):
         print(f"| {eps[eid]} | {ep_dom[eid]} | |")
-    print(f"\n人工核对上表 Y/N; Y 占比 >= 70% 即 A1-3 验收通过(可放开生产注册)。")
+    print("\n人工核对上表 Y/N; Y 占比 >= 70% 即 A1-3 验收通过(可放开生产注册)。")
     return 0
 
 

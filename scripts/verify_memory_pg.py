@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""memory PG 真机验证脚本(M2 闭环)。
 
 前提(用户先做):
@@ -32,7 +31,7 @@ def _fail(msg: str) -> None:
 
 
 def main() -> int:
-    from codev_platform.core.config import load_config, get
+    from codev_platform.core.config import load_config
     from codev_platform.core.config import env_or_config
     cfg = load_config()
     dsn = env_or_config("CODEV_PLATFORM_MEMORY_DSN", cfg, "memory.pg_dsn")

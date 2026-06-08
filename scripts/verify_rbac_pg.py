@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""RBAC PG 真机验证脚本(M5 ACL 底座闭环)。
 
 前提(用户先做,同 memory M2):

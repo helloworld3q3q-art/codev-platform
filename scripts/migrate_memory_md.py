@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""把 *.md 人肉记忆迁进 PG memory store —— 薄 CLI shim,逻辑在 codev_platform.agent.memory_import。
 
 也可用 `codev-platform memory import-md <path> [--scope ...] [--apply]`(wheel 安装通用)。

@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import json
 
-import pytest
 
 from codev_platform.ops.gateway import cmd_gateway
 
