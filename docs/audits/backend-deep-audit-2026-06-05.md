@@ -502,3 +502,20 @@ codev_platform/chroma/_models.py
 4. 创建用户无默认 membership 导致 PG org 归属丢失。
 
 这些问题都能用小范围改动和定向回归测试落地，不需要大改架构。
+
+## 11. 修复状态(2026-06-08 复核)
+
+本报告是三份 2026-06-05 审计里最早的快照。逐条核实**现状**(先读代码核实再判, 不盲信):
+
+| 问题 | 状态 | 证据 / commit |
+|---|---|---|
+| P0-1 向量召回 jieba 耦合 | ✅ 已解决 | recall 已重构成 `recall/` pipeline, 不再 import bm25; `rrf_fuse` 只 chroma 侧用; `test_agent_vector_recall` 21 passed。报告的 `recall_service.py:160` 是旧文件名 |
+| P0-2 set_roles 跨 org | ✅ 已修 | 代码有 `# P0-2` + `_guard_same_org` + `org_id == user.org_id` 校验 |
+| P0-3 prod PG 静默回退 | ✅ 已修 | `bind_account_stores` prod fail-fast + `test_account_store_pg_failfast` |
+| P0-4 创建用户无 membership | ✅ 已修 | 代码有 `# P0-4`, 不传 role 默认 member 必写 org_members |
+| P1-1 diagnose cross_link | ✅ 已修 | `test_serve_mcp_diagnose` 现在 passed |
+| P1-2 add_member 不校验 user | ✅ 修 | `add_member` 注入 user store + user 不存在→404, 防幽灵成员 — `98d30f4` |
+| P1-3 SessionStore 进程内 | ✅ PG 化 | `PgSessionStore` + bind 回退 + alembic 0003 + 9 测试(同 jobs 范式), 重启不丢/多 worker 共享/revoke 跨进程 — `1559f84` |
+| §6.1 Ruff 54 个 | ✅ 处理 | 生产代码 `codev_platform` 已清(`10d2b61`); tests/scripts/eval 20 个 safe fix(`8b6cf2e`), 剩 28 个 E702 分号等风格惯例(非 bug)保留 |
+
+**全部 8 类已处理**(5 个 P0/P1 在前几轮已闭环, P1-2/P1-3/ruff 本轮做)。全套 `1195 passed, 13 skipped, 0 failed`。
