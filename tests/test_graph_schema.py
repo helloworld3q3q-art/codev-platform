@@ -24,6 +24,7 @@ def test_node_kind_covers_plan_list():
         "frontend_module", "frontend_api_call", "backend_endpoint",
         "backend_function", "db_table", "db_column", "wiki_page", "jira_issue",
         "feishu_doc", "git_commit", "pull_request", "business_domain",
+        "arch_layer",   # A2 软节点: 架构分层角色(2026-06-08)
     }
     assert {k.value for k in NodeKind} == expected
 
@@ -33,6 +34,7 @@ def test_edge_kind_covers_plan_list():
         "contains", "imports", "calls", "renders", "defines_api", "calls_api",
         "implements", "reads_table", "writes_table", "updates_table",
         "mentions", "relates_to", "changed_by", "belongs_to_domain",
+        "plays_role",   # A2 软边: file --plays_role--> arch_layer(2026-06-08)
     }
     assert {k.value for k in EdgeKind} == expected
 

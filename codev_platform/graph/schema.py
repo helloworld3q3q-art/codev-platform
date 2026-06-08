@@ -52,6 +52,9 @@ class NodeKind(str, Enum):
     # 软节点(分析器/LLM 派生, 非确定性血缘): 业务域归类。confidence<1.0, impact 默认过滤,
     # 与硬节点(plugins 确定性产)物理可分辨 —— 保护"查依赖"不被 LLM 噪声污染。
     BUSINESS_DOMAIN = "business_domain"
+    # 软节点(A2 综合理解层): 架构分层角色(controller/service/repository/...)。与 BUSINESS_DOMAIN
+    # 同样软隔离(confidence<1.0 + impact 默认过滤), 但维度正交: 一个 file 既属某域又演某层。
+    ARCH_LAYER = "arch_layer"
 
 
 class EdgeKind(str, Enum):
@@ -72,6 +75,8 @@ class EdgeKind(str, Enum):
     CHANGED_BY = "changed_by"
     # 软边(分析器派生): 硬节点 --belongs_to_domain--> BUSINESS_DOMAIN 软节点。
     BELONGS_TO_DOMAIN = "belongs_to_domain"
+    # 软边(A2): file 硬节点 --plays_role--> ARCH_LAYER 软节点(该文件演哪个架构层角色)。
+    PLAYS_ROLE = "plays_role"
 
 
 def _kind_str(value: Any) -> str:
@@ -83,8 +88,10 @@ def _kind_str(value: Any) -> str:
 # 用途: ① impact 默认过滤软边 (查依赖护城河不被 LLM 噪声污染);
 #       ② ingest referential-integrity 校验 (软边端点必须指向真实硬节点, 悬空即丢)。
 # 软节点判据不止 kind (还有 confidence<1.0 + meta.derived_by), 但 kind 是最直接的物理标记。
-SOFT_NODE_KINDS: frozenset[str] = frozenset({NodeKind.BUSINESS_DOMAIN.value})
-SOFT_EDGE_KINDS: frozenset[str] = frozenset({EdgeKind.BELONGS_TO_DOMAIN.value})
+SOFT_NODE_KINDS: frozenset[str] = frozenset(
+    {NodeKind.BUSINESS_DOMAIN.value, NodeKind.ARCH_LAYER.value})
+SOFT_EDGE_KINDS: frozenset[str] = frozenset(
+    {EdgeKind.BELONGS_TO_DOMAIN.value, EdgeKind.PLAYS_ROLE.value})
 
 
 def is_soft_node_kind(kind: Any) -> bool:
