@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.schema import AnalyzerResult, EdgeKind, GraphEdge, GraphNode, NodeKind
 from codev_platform.graph.store import load_graph, open_store, upsert_result
 from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.registry import run_applicable
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 LINKER_PLUGIN = "builtin.linker"
 CALLS_PLUGIN = "builtin.call_resolvers"  # 调用边(CALLS)统一归属: 多 resolver 去重后合并入此 plugin
 FRONTEND_DEPS_PLUGIN = "builtin.frontend_deps"  # 前端组件依赖图(接 dependency-cruiser)
+FRONTEND_BRIDGE_PLUGIN = "builtin.frontend_bridge"  # 前端内部桥: module(文件) -> 同文件 api_call/route
 ANALYZERS_PLUGIN = "builtin.analyzers"  # 综合分析器(软节点/软边: 业务域等)统一归属
 
 
@@ -85,6 +86,12 @@ def ingest_project(
         # frontend_component 节点 + renders 边, 解锁"改组件→影响哪些页面"(codegraph 盲区)。
         # 框架无关(react .tsx + vue .vue 都吃), 自 detect, fail-soft 无 node/前端则空。
         _frontend_deps_pass(conn, project_id, report, Path(repo_path))
+
+        # 前端内部桥接 post-pass: 两个前端插件(frontend_deps 建 module / react 建 api_call/route)
+        # 为同批文件建节点但 id 不相交、无边相连 → frontend_module 成孤岛(impact 滤软边后到不了
+        # 后端)。按**文件**缝: module --contains--> 同文件 api_call/route(硬边, impact 也走), 打通
+        # 前端页→api→endpoint→表 跨层链。必须在 _frontend_deps_pass(产 module)之后跑。
+        _frontend_bridge_pass(conn, project_id, report)
 
         # 综合分析 second post-pass: 硬骨架全部落库且连通后, analyzer 在其上归纳软节点/软边
         # (业务域等)。软产物 confidence<1.0 + referential-integrity 校验, 与硬骨架物理隔离。
@@ -152,6 +159,45 @@ def _frontend_deps_pass(conn, project_id: str, report: IngestReport, repo_path: 
     report.summaries[FRONTEND_DEPS_PLUGIN] = {
         "components": len(nodes), "imports_edges": len(edges),
     }
+
+
+_FRONTEND_CHILD_KINDS = (NodeKind.FRONTEND_API_CALL.value, NodeKind.FRONTEND_ROUTE.value)
+
+
+def build_frontend_bridge_edges(nodes: list[GraphNode]) -> list[GraphEdge]:
+    """纯函数: frontend_module(文件) --contains--> 同文件的 api_call/route 节点。
+
+    确定性文件匹配(dependency-cruiser 文件级, 一文件一 module 节点), conf=1.0 硬边。
+    同 file 的 module 与 react 子节点缝合, 把 import 岛接进 api_call→endpoint 跨层链。
+    无 IO → 可脱离 store 单测。
+    """
+    mod_by_file: dict[str, str] = {}
+    for n in nodes:
+        if n.kind == NodeKind.FRONTEND_MODULE.value and n.file:
+            mod_by_file.setdefault(n.file, n.id)   # 一文件一 module; 取首个稳定
+    edges: list[GraphEdge] = []
+    seen: set[tuple[str, str]] = set()
+    for n in nodes:
+        if n.kind not in _FRONTEND_CHILD_KINDS or not n.file:
+            continue
+        mid = mod_by_file.get(n.file)
+        if mid is None or mid == n.id or (mid, n.id) in seen:
+            continue
+        seen.add((mid, n.id))
+        edges.append(GraphEdge(source=mid, target=n.id,
+                               kind=EdgeKind.CONTAINS.value, confidence=1.0))
+    return edges
+
+
+def _frontend_bridge_pass(conn, project_id: str, report: IngestReport) -> None:
+    """读全量节点 → 建 frontend_module→api_call/route 的 contains 硬边 → upsert builtin.frontend_bridge。"""
+    merged = load_graph(conn, project_id)
+    edges = build_frontend_bridge_edges(merged.nodes)
+    upsert_result(
+        conn, project_id, AnalyzerResult(edges=edges, plugin=FRONTEND_BRIDGE_PLUGIN)
+    )
+    report.ingested.append(FRONTEND_BRIDGE_PLUGIN)
+    report.summaries[FRONTEND_BRIDGE_PLUGIN] = {"contains_edges": len(edges)}
 
 
 def _link_pass(conn, project_id: str, report: IngestReport) -> None:
