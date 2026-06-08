@@ -15,6 +15,8 @@ A2-1 范围: 框架 + 确定性管线 + FakeLayerLabeler(可不调 LLM 跑通)�
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 
 from codev_platform.graph.analyzers.layer_labeler import (
@@ -44,9 +46,11 @@ class ArchLayerAnalyzer:
 
     name = "arch_layer"
 
-    def __init__(self, labeler: LayerLabeler, *, max_batches: int = _MAX_BATCHES,
+    def __init__(self, labeler: LayerLabeler, *, cache_dir=None,
+                 max_batches: int = _MAX_BATCHES,
                  max_files_per_batch: int = _MAX_FILES_PER_BATCH) -> None:
         self._labeler = labeler
+        self._cache_dir = cache_dir
         self._max_batches = max_batches
         self._max_files = max_files_per_batch
 
@@ -68,7 +72,7 @@ class ArchLayerAnalyzer:
             logger.warning("[arch_layer] %d batches > cap %d, truncating",
                            len(batches), self._max_batches)
             batches = batches[: self._max_batches]
-        labels = self._safe_label(batches)
+        labels = self._labels_with_cache(project_id, batches)
 
         soft_nodes: dict[str, GraphNode] = {}          # 按 layer_id 去重(同角色软节点复用)
         soft_edges: list[GraphEdge] = []
@@ -175,3 +179,68 @@ class ArchLayerAnalyzer:
         except Exception as exc:  # noqa: BLE001 — 标注器抖动不拖垮 analyzer
             logger.warning("[arch_layer] labeler failed: %r", exc)
             return [LayerLabel(req.batch_id) for req in batches]
+
+    # ---- 缓存(per-batch fingerprint, 复用 business_domain 模式; 未来可抽公共 helper) ----
+
+    def _labels_with_cache(self, project_id, batches):
+        cache = self._load_cache(project_id)
+        keyed = [(req, self._cache_key(req)) for req in batches]
+        valid_keys = {k for _, k in keyed}        # 本轮 fingerprint(cache GC 据此清孤儿)
+        bid_to_key = {req.batch_id: k for req, k in keyed}
+        labels, to_label = [], []
+        for req, key in keyed:
+            ent = cache.get(key)
+            if ent is not None:
+                labels.append(LayerLabel(
+                    req.batch_id, tuple((r[0], r[1]) for r in ent.get("roles", ()))))
+            else:
+                to_label.append(req)
+        if to_label:
+            for lab in self._safe_label(to_label):
+                labels.append(lab)
+                key = bid_to_key.get(lab.batch_id)
+                if key is not None:
+                    cache[key] = {"roles": [[f, lr] for f, lr in lab.roles]}
+        pruned = {k: v for k, v in cache.items() if k in valid_keys}   # GC 孤儿(防单调增长)
+        if to_label or len(pruned) != len(cache):
+            self._save_cache(project_id, pruned)
+        return labels
+
+    def _cache_key(self, req):
+        payload = json.dumps(
+            {"f": [[f.ref, f.path, f.has_endpoint, f.reads_tables, f.imports_out,
+                    f.imports_in, f.defines_functions] for f in req.files],
+             "sig": getattr(self._labeler, "signature", "")},
+            sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _cache_path(self, project_id):
+        if self._cache_dir is not None:
+            base = self._cache_dir
+        else:
+            try:
+                from codev_platform.core.paths import data_root
+                base = data_root() / "arch_layer_cache"
+            except Exception:  # noqa: BLE001 — data_root 不可用 → 不缓存, 不报错
+                return None
+        return base / f"{project_id}.json"
+
+    def _load_cache(self, project_id):
+        path = self._cache_path(project_id)
+        if path is None or not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8")).get("entries", {})
+        except (OSError, ValueError):
+            return {}
+
+    def _save_cache(self, project_id, entries):
+        path = self._cache_path(project_id)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"entries": entries}, ensure_ascii=False),
+                            encoding="utf-8")
+        except OSError:
+            pass

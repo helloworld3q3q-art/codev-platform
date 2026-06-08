@@ -276,10 +276,10 @@ def test_business_domain_registered_only_when_config_enabled():
     saved = list(base._ANALYZERS)
     base._ANALYZERS.clear()
     try:
-        assert _register_configured({}) is False
+        assert _register_configured({}) == 0   # 返回注册数(2026-06-08: bool→int, 支持多 analyzer)
         assert base._ANALYZERS == []
         assert _register_configured(
-            {"analyzers": {"business_domain": {"enabled": True}}}) is True
+            {"analyzers": {"business_domain": {"enabled": True}}}) == 1
         assert "business_domain" in [a.name for a in base._ANALYZERS]
     finally:
         base._ANALYZERS.clear()

@@ -20,21 +20,27 @@ from codev_platform.graph.analyzers.base import (
 # (且 provider 有 key, 否则 applies 仍 no-op)。
 
 
-def _register_configured(cfg: dict | None = None) -> bool:
-    """按 config.analyzers.business_domain.enabled 决定是否注册 LLM 业务域 analyzer。
+def _register_configured(cfg: dict | None = None) -> int:
+    """按 config.analyzers.<name>.enabled 决定注册哪些 LLM analyzer。
 
-    默认关; 显式 true 才注册(applies 再查 labeler.available, 无 key 仍 no-op)。返回是否注册。
+    默认全关; 显式 true 才注册(applies 再查 labeler.available, 无 key 仍 no-op)。返回注册数。
+    A1 业务域(实测 ~95%)/ A2 架构分层各自 config gate, 互不依赖。
     """
     from codev_platform.core.config import get, load_config
 
     cfg = cfg if cfg is not None else load_config()
-    if not get(cfg, "analyzers.business_domain.enabled", False):
-        return False
-    from codev_platform.graph.analyzers.brain_labeler import BrainDomainLabeler
-    from codev_platform.graph.analyzers.business_domain import BusinessDomainAnalyzer
-
-    register_analyzer(BusinessDomainAnalyzer(BrainDomainLabeler()))
-    return True
+    n = 0
+    if get(cfg, "analyzers.business_domain.enabled", False):
+        from codev_platform.graph.analyzers.brain_labeler import BrainDomainLabeler
+        from codev_platform.graph.analyzers.business_domain import BusinessDomainAnalyzer
+        register_analyzer(BusinessDomainAnalyzer(BrainDomainLabeler()))
+        n += 1
+    if get(cfg, "analyzers.arch_layer.enabled", False):
+        from codev_platform.graph.analyzers.architecture_layer import ArchLayerAnalyzer
+        from codev_platform.graph.analyzers.brain_layer_labeler import BrainLayerLabeler
+        register_analyzer(ArchLayerAnalyzer(BrainLayerLabeler()))
+        n += 1
+    return n
 
 
 try:

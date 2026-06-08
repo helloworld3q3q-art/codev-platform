@@ -117,3 +117,74 @@ def test_batch_by_directory_o_dirs_not_files():
     assert {b.batch_id for b in batches} == {"svc", "repo"}
     svc = next(b for b in batches if b.batch_id == "svc")
     assert len(svc.files) == 2   # svc/ 两个 file 一批
+
+
+# ---- A2-2: BrainLayerLabeler(mock provider) + 缓存 + config gate 注册 ----
+
+def test_brain_labeler_parses_and_double_rejects():
+    from codev_platform.graph.analyzers.brain_layer_labeler import BrainLayerLabeler
+    from codev_platform.graph.analyzers.layer_labeler import FileFact, LayerRequest
+
+    class _Turn:
+        text = ('[{"batch":"b1","roles":['
+                '{"file":"f1","layer":"controller"},'
+                '{"file":"f2","layer":"wizard"},'    # 越界 layer(枚举外)
+                '{"file":"f9","layer":"service"}]}]')  # 越界 ref(造的假)
+
+    class _Prov:
+        model = "fake-model"
+
+        def chat(self, system, messages, tools):
+            return _Turn()
+
+    lab = BrainLayerLabeler(provider=_Prov())
+    req = LayerRequest("dir1", (FileFact("f1", "a.py"), FileFact("f2", "b.py")))
+    [out] = lab.label([req])
+    assert out.roles == (("f1", "controller"),)   # 越界 layer + 越界 ref 双剔
+    assert "fake-model" in lab.signature          # signature 含 model(缓存键维度)
+
+
+def test_brain_labeler_chat_failure_fail_soft():
+    from codev_platform.graph.analyzers.brain_layer_labeler import BrainLayerLabeler
+    from codev_platform.graph.analyzers.layer_labeler import FileFact, LayerRequest
+
+    class _Prov:
+        model = "m"
+
+        def chat(self, *a, **k):
+            raise RuntimeError("boom")
+
+    out = BrainLayerLabeler(provider=_Prov()).label(
+        [LayerRequest("d", (FileFact("f1", "x.py"),))])
+    assert out[0].roles == ()   # chat 抛 → fail-soft 空(不拖垮 ingest)
+
+
+def test_cache_second_run_skips_labeler(tmp_path):
+    calls = {"n": 0}
+
+    class _Counting(FakeLayerLabeler):
+        def label(self, batch):
+            calls["n"] += 1
+            return super().label(batch)
+
+    a = ArchLayerAnalyzer(_Counting(), cache_dir=tmp_path)
+    nodes = [_file("svc/x.py")]
+    a.analyze("p", nodes, [])
+    assert calls["n"] == 1
+    a.analyze("p", nodes, [])   # 同事实 → 命中 per-batch fingerprint 缓存
+    assert calls["n"] == 1      # labeler 未再调
+
+
+def test_register_arch_layer_config_gate():
+    import codev_platform.graph.analyzers as A
+    from codev_platform.graph.analyzers.base import _ANALYZERS
+    saved = list(_ANALYZERS)
+    try:
+        _ANALYZERS.clear()
+        A._register_configured({"analyzers": {"arch_layer": {"enabled": True}}})
+        assert "arch_layer" in [a.name for a in A.registered_analyzers()]
+        _ANALYZERS.clear()
+        assert A._register_configured({}) == 0   # 默认关
+    finally:
+        _ANALYZERS.clear()
+        _ANALYZERS.extend(saved)
