@@ -72,6 +72,11 @@ class JobService:
         except Exception:
             self._locks.release(project_id, job_type)
             raise
+        # 提交完成即释放锁(审计事实A 修复): 锁只防**同一瞬间**并发提交, 不跨 submit 持有 ——
+        # reindex worker 是独立进程、不回写 job 终态, 跨 submit 持有会让锁永久悬挂(成功路径无终态
+        # 回调 → 同 project 同 job_type 第二次永久 RATE_LIMITED, 须 cancel/重启才解)。不重复跑由
+        # 下游 FileSpoolQueue 同 key 合并 + worker 串行 + runner .reindex.lock 三层保证(不靠本锁)。
+        self._locks.release(project_id, job_type)
         return job
 
     def list_jobs(self, *, project_id: str | None, offset: int, limit: int) -> tuple[list[Job], int]:

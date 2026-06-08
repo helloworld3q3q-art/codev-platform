@@ -78,17 +78,14 @@ def test_rebuild_ingest_kind_allowed():
     assert r.json()["data"]["jobId"]
 
 
-def test_same_project_same_type_is_mutually_exclusive():
+def test_resubmit_same_kind_not_permanently_blocked():
+    # 审计事实A 修复: 锁不跨 submit 悬挂 —— 同 project 同 kind 连续提交各返 jobId(不再像修复前
+    # 第二次永久 RATE_LIMITED)。提交完成即释放锁; 不重复跑由下游 FileSpoolQueue 同 key 合并保证(非本锁)。
     c = _client()
     r1 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
-    assert r1.status_code == 200
-    # 同 project 同 kind 再提交 → 互斥 (锁未释放, job 仍 Pending)
     r2 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
-    assert r2.status_code == 429
-    body = r2.json()
-    assert body["result"] == 1
-    assert body["errors"][0]["errorCode"] == "rate_limited"
-    assert body["requestId"]
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.json()["data"]["jobId"] and r2.json()["data"]["jobId"]
 
 
 def test_different_kind_not_blocked():
