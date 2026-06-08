@@ -30,6 +30,35 @@ def _project_in_org(cfg: dict, row: dict, org_id: str) -> bool:
     return proj_org is None or proj_org == org_id
 
 
+def session_project_decision(identity, project_id, action: str = "read"):
+    """require_project_access 的 via=session 授权(core 注入点; 见 permissions._session_checker)。
+
+    复刻 _authorize_project 三步(单一真值源, 不另造): platform_admin bypass → org 隔离
+    (_project_in_org, 防 org admin 跨 org) → 逐项目 role(can_access_project)。core/httpkit 不 import
+    web, 故由 web 启动把本函数注入 permissions; MCP/agent 进程不注入 → session 身份恒 deny。
+    无显式 project_id / 项目未登记 / 跨 org / 无 role → deny(对齐 token 模式防越权)。
+    """
+    from codev_platform.core.acl import AccessDecision
+    if not project_id:
+        return AccessDecision(False, "session: no explicit project_id")
+    username = getattr(identity, "user_id", None)
+    org_id = getattr(identity, "org_id", None)
+    cfg = load_config()
+    if is_platform_admin(cfg, username):
+        return AccessDecision(True, "session: platform admin (cross-org)", advisory=False)
+    row = ProjectReadRepository().get_project_detail(project_id)
+    if row is None:
+        return AccessDecision(False, f"session: project not registered: {project_id}")
+    if not _project_in_org(cfg, row, org_id):
+        return AccessDecision(False, "session: project not in user's org")
+    # Session 只需 username/org_id 参与授权(时间字段不参与, 填 0)。
+    sess = Session(session_id="", username=username or "", org_id=org_id or "",
+                   access_expires_at=0.0, refresh_expires_at=0.0)
+    if not can_access_project(sess, project_id, action):
+        return AccessDecision(False, f"session: no project {action} access")
+    return AccessDecision(True, "session: web RBAC membership")
+
+
 class ProjectService:
     def __init__(self, read_repo: ProjectReadRepository | None = None,
                  write_repo: ProjectWriteRepository | None = None) -> None:
