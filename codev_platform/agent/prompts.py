@@ -127,7 +127,6 @@ def _read_pack_source(source: str, kind: str) -> tuple[str, str]:
     - 绝对/相对文件系统路径;目录会按 kind 展开 md / SKILL.md
     """
     if source.startswith("builtin:"):
-        name = source.split(":", 1)[1]
         raise ValueError(f"未知 builtin skill source: {source}; Web agent 默认 skill 已迁到 agent-skills:")
 
     if source.startswith("agent-rules:") or source.startswith("agent-skills:"):

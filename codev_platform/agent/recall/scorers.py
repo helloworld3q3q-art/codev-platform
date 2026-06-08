@@ -36,7 +36,7 @@ class Bm25Scorer(Scorer):
         # 稳定降序:同分保候选池原序(recency 兜底)。BM25 在小语料有两种"全 0"退化 —— query 词
         # 全不命中、或命中超半数(IDF≤0 被 BM25Okapi epsilon 钳 0);两者都退化成纯池序,靠 RRF
         # 与 vector/keyword 融合补偿(故 bm25 一般不单用)。
-        ranked = sorted(zip(entries, scores), key=lambda pair: -pair[1])
+        ranked = sorted(zip(entries, scores, strict=True), key=lambda pair: -pair[1])
         return [e.id for e, _ in ranked]
 
 

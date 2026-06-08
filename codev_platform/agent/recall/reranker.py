@@ -39,5 +39,5 @@ class QwenReranker(Reranker):
             return entries
         if not scores or len(scores) != len(head):
             return entries
-        reordered = [e for e, _ in sorted(zip(head, scores), key=lambda pair: -pair[1])]
+        reordered = [e for e, _ in sorted(zip(head, scores, strict=True), key=lambda pair: -pair[1])]
         return reordered + tail

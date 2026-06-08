@@ -21,7 +21,6 @@ import os
 import sqlite3
 import sys
 import traceback
-from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server

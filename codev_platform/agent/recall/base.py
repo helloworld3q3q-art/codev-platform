@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from codev_platform.agent.memory_store import MemoryEntry
-from codev_platform.core.rbac import compute_visible_scopes
 
 
 def visible_scopes(org_id: str, user_id: str | None, project_id: str | None) -> list[tuple[str, str]]:

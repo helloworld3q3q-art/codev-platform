@@ -303,7 +303,7 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, Response
     from starlette.routing import Mount, Route
     import uvicorn
 
@@ -384,6 +384,9 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
         finally:
             _current_project_id.reset(token)
             _flog(f"[sse] session end project_id={pid}")
+        # SDK 强制(mcp/server/sse.py): SSE 结束/客户端断开后必返 Response, 否则 starlette
+        # request_response 走 `await None(...)` → TypeError 噪声(对齐 graph/chroma/memory 三个同类 handler)。
+        return Response()
 
     async def healthz(_request):
         # PUBLIC 存活探针: 仅最小信息, 不泄敏 (审计 #4 — 旧 /health 泄露

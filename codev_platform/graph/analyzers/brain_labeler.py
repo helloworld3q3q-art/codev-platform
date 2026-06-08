@@ -94,7 +94,7 @@ class BrainDomainLabeler:
             domain = item.get("domain")
             out.append(ClusterLabel(real, domain if isinstance(domain, str) else None,
                                     members))
-        for short, real in cid_map.items():  # 模型漏掉的 cluster → None(fail-soft)
+        for _short, real in cid_map.items():  # 模型漏掉的 cluster → None(fail-soft)
             if real not in seen:
                 out.append(ClusterLabel(real, None))
         return out
