@@ -39,5 +39,18 @@ dashboard 现有 **索引新鲜度(Phase 1)+ 图谱结构健康(Phase 3)** 两�
 
 落地 ~30-35%: Phase 0/7 实质推进, Phase 1/3 本轮做成 MVP+Web+dashboard, Phase 4/6/10 轻量覆盖。重型 Phase 2(统一 IR)/5(path scoring)/8(性能)/9(多语言 adapter)按 §六纪律待真实需求触发。
 
+## 八、统一图谱完整重建验证(走 worker, 非手动)
+
+对两仓**经 reindex worker 正经重建 + 审计**, 验证本轮修复经住干净重建:
+
+| 仓 | 重建后关键产物 | 审计 |
+|---|---|---|
+| codev-platform | 498 节点; `contains` 76(bridge)/ arch_layer 11 + plays_role 471(A2)/ business_domain 12 + belongs_to_domain 121(A1) | **clean, 0 error** |
+| **openclaw-stock(量化)** | `contains` **214**(bridge, 前端孤岛已连)/ arch_layer 9 + plays_role 2263(A2)/ **business_domain 27 + belongs_to_domain 219(A1; 之前 0 软层, 本次产出)** | **clean, 0 error** |
+
+两仓均: 断链/串台/孤儿 plugin/重复 **全 0**。三修复(frontend_bridge / arch_layer 孤儿不复发 / A1·A2 软层)全部经住干净重建; **量化仓顺带补齐了之前缺的综合理解层**(A1 业务域 + A2 架构层, deepseek 真跑)。
+
+**教训(已记)**: 手动 `graph ingest` 在裸 shell 跑会撞 **npx dependency-cruiser 冷启动** → fail-soft 返 0 退化 + upsert 覆盖好数据(frontend_deps/calls/analyzers 全 0)。**重建一律走 reindex worker**(`reindex-queue enqueue <pid> --kind ingest`)—— 它在 systemd service 环境有正确的 node/codegraph, 不会冷启动失败。
+
 ## commit 链(本日)
 `6d07da3`(Phase1 manifest)→ `e85d582`/`4928dca`(Phase3 audit+孤儿检测)→ `faacb0b`(前端 bridge)→ `745d3e4`(web 软硬边)→ `1f492d3`(pre-push 门禁)→ `faef6cd`/`e8087aa`(index status web+卡片)→ `01af953`/`0ea0c5b`(graph audit web+卡片)。
