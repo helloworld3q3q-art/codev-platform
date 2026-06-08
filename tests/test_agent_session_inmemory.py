@@ -59,6 +59,22 @@ def test_list_sessions_project_isolation():
     assert len(s.list_sessions("u")) == 2  # 不传 project_id = 不过滤
 
 
+def test_get_messages_project_isolation():
+    # P1 修复(codex bug-edge-audit): get 必须按 project_id 隔离 —— 否则同 org/user 下知道别项目
+    # session_id, 就能在本项目上下文读别项目对话历史(对齐 list_sessions 的项目过滤)。
+    s = InMemorySessionStore()
+    a = s.new("u", project_id="projA")
+    s.append(a, "u", Message(role="user", content="secret-a"))
+    b = s.new("u", project_id="projB")
+    s.append(b, "u", Message(role="user", content="secret-b"))
+    # 带 projA 读 session_b(别项目) → 空(跨项目隔离闸)
+    assert s.get(b, "u", project_id="projA") == []
+    # 带正确 project 能读
+    assert [m.content for m in s.get(b, "u", project_id="projB")] == ["secret-b"]
+    # 不传 project_id(向后兼容, 内部调用) → 照旧能读
+    assert len(s.get(b, "u")) == 1
+
+
 def test_list_sessions_recent_first():
     s = InMemorySessionStore()
     a = s.new("u")

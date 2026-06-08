@@ -93,8 +93,15 @@ class InMemorySessionStore(SessionStore):
         self._meta[(org_id, user_id, sid)] = {"created": now, "updated": now, "project_id": project_id}
         return sid
 
-    def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> list[Message]:
-        return self._store.get((org_id, user_id, session_id), [])
+    def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG,
+            *, project_id: str | None = None) -> list[Message]:
+        key = (org_id, user_id, session_id)
+        if project_id is not None:
+            # 跨项目隔离: session 不属本项目 → 不返回(对齐 list_sessions 的项目过滤)。
+            meta = self._meta.get(key)
+            if meta is None or meta.get("project_id") != project_id:
+                return []
+        return self._store.get(key, [])
 
     def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> bool:
         return (org_id, user_id, session_id) in self._store

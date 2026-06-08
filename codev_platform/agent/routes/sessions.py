@@ -61,9 +61,10 @@ def list_sessions(
 def list_session_messages(
     request: Request,
     session_id: str = Query(..., min_length=1, description="会话 id"),
+    project_id: str | None = Query(None, description="按项目隔离(web 经 X-Project-Id 传入); 会话不属本项目→空"),
 ) -> list[MessageOut]:
     user_id, org_id = _identity_or_400(request)
-    msgs = deps.get_sessions().get(session_id, user_id, org_id=org_id)
+    msgs = deps.get_sessions().get(session_id, user_id, org_id=org_id, project_id=project_id)
     # 只回 UI 要渲染的对话轮:user / assistant 且有正文(中间纯 tool-call 轮 content 为空,过滤)。
     return [
         MessageOut(role=m.role, content=m.content, steps=_steps_of(m))

@@ -94,6 +94,7 @@ def agent_session_messages(
     sessionId: str = Query(..., min_length=1, description="会话 id"),
     ctx=Depends(require_project_access),
 ) -> CommonResult[list[SessionMessageItem]]:
-    identity, _project_id = ctx
-    raw = agent_client.session_messages(identity, {"session_id": sessionId})
+    identity, project_id = ctx
+    # 跨项目隔离: 把鉴权后的 project_id 透给 agent, 会话不属本项目则返回空(对齐 list_sessions)。
+    raw = agent_client.session_messages(identity, {"session_id": sessionId, "project_id": project_id})
     return ok([SessionMessageItem.of(m) for m in _as_list(raw)], request_id=_rid(request))

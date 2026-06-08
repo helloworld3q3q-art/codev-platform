@@ -124,14 +124,26 @@ class SqlSessionStore(SessionStore):
             ).fetchone()
         return row is not None
 
-    def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> list[Message]:
+    def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG,
+            *, project_id: str | None = None) -> list[Message]:
         self._ensure()
         with self._read_pool.connection() as conn:
-            rows = conn.execute(
-                "SELECT role, content, payload FROM agent_messages "
-                "WHERE org_id=%s AND user_id=%s AND session_id=%s ORDER BY id",
-                (org_id, user_id, session_id),
-            ).fetchall()
+            if project_id is not None:
+                # 跨项目隔离: join agent_sessions 校验 project_id(对齐 list_sessions)。
+                rows = conn.execute(
+                    "SELECT m.role, m.content, m.payload FROM agent_messages m "
+                    "JOIN agent_sessions s ON s.org_id=m.org_id AND s.user_id=m.user_id "
+                    "AND s.session_id=m.session_id "
+                    "WHERE m.org_id=%s AND m.user_id=%s AND m.session_id=%s AND s.project_id=%s "
+                    "ORDER BY m.id",
+                    (org_id, user_id, session_id, project_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT role, content, payload FROM agent_messages "
+                    "WHERE org_id=%s AND user_id=%s AND session_id=%s ORDER BY id",
+                    (org_id, user_id, session_id),
+                ).fetchall()
         return [_row_to_msg(r[0], r[1], r[2]) for r in rows]
 
     def list_sessions(self, user_id: str, org_id: str = _DEFAULT_ORG,
