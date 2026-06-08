@@ -52,3 +52,22 @@ class JobCancelRequest(BaseModel):
     """POST /api/v1/jobs/cancel 请求体。"""
 
     jobId: str = Field(..., min_length=1, description="待取消任务 ID")
+
+
+class IndexStatusItem(BaseModel):
+    """单类索引的新鲜度 (来自统一 IndexManifest, Phase 1)。"""
+
+    kind: str | None = Field(None, description="索引类型 chroma/codegraph/graph/docs")
+    status: str | None = Field(None, description="上次构建状态 ok/failed")
+    gitCommit: str | None = Field(None, description="构建时仓库 HEAD commit")
+    fresh: bool | None = Field(None, description="是否对齐当前 HEAD: true 对齐/false 落后/null 未知")
+    reason: str | None = Field(None, description="新鲜度判定说明")
+    finishedAt: float | None = Field(None, description="上次构建完成时间 epoch 秒")
+    elapsedSec: float | None = Field(None, description="上次构建耗时秒")
+
+
+class IndexStatusResponse(BaseModel):
+    """GET 索引状态: 各类索引相对当前 HEAD 的新鲜度 (Phase 1 freshness)。"""
+
+    headCommit: str | None = Field(None, description="项目仓库当前 HEAD commit")
+    items: list[IndexStatusItem] = Field(default_factory=list, description="各类索引新鲜度")

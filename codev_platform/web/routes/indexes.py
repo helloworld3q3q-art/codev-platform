@@ -13,7 +13,12 @@ from fastapi import APIRouter, Depends, Request
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.routes.jobs import job_service
-from codev_platform.web.schemas.jobs import IndexRebuildRequest, JobIdData
+from codev_platform.web.schemas.jobs import (
+    IndexRebuildRequest,
+    IndexStatusItem,
+    IndexStatusResponse,
+    JobIdData,
+)
 from codev_platform.web.services.index_service import IndexService
 
 router = APIRouter()
@@ -38,3 +43,34 @@ def rebuild_index(
     job = index_service.rebuild(project_id, index_kind)
     rid = getattr(request.state, "request_id", None)
     return ok(JobIdData(jobId=job.job_id), request_id=rid)
+
+
+@router.post(
+    "/api/v1/indexes/status",
+    tags=["IndexAPI-索引"],
+    summary="索引-各类新鲜度状态",
+    operation_id="indexStatus",
+    response_model=CommonResult[IndexStatusResponse],
+)
+def index_status(
+    request: Request,
+    access=Depends(require_project_access),
+) -> CommonResult[IndexStatusResponse]:
+    """读统一 IndexManifest, 返回各类索引相对当前 HEAD 的新鲜度 (Phase 1, 纯读不触发构建)。"""
+    _identity, project_id = access
+    from codev_platform.core.config import get, load_config
+    from codev_platform.index_manifest import freshness
+
+    repo = get(load_config(), f"projects.{project_id}.repo_path")
+    rows = freshness(project_id, repo)
+    head = rows[0]["head"] if rows else None
+    items = [
+        IndexStatusItem(
+            kind=r["kind"], status=r["status"], gitCommit=r["git_commit"],
+            fresh=r["fresh"], reason=r["reason"],
+            finishedAt=r["finished_at"], elapsedSec=r["elapsed_sec"],
+        )
+        for r in rows
+    ]
+    rid = getattr(request.state, "request_id", None)
+    return ok(IndexStatusResponse(headCommit=head, items=items), request_id=rid)
