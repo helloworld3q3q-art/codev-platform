@@ -24,24 +24,36 @@ from codev_platform.graph.analyzers.layer_labeler import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"   # v2(2026-06-08): 加 service vs repository 判据 + few-shot, 修真验收发现的"service 被标 repository"
 
 _ROLES_STR = " / ".join(sorted(LAYER_ROLES))
 
 _SYSTEM = (
     "你是代码架构分层标注者, 只归类不发现。规则:\n"
     f"1. 给每个 file 标一个架构层角色, 只能从这个固定词表里选: {_ROLES_STR};\n"
-    "2. 依据给出的确定性事实判断: 有 endpoint→偏 controller/gateway; 读写表→偏 repository; "
-    "被大量 import 且不碰表→偏 util/domain_model; 目录名(services/repositories)是强先验;\n"
-    "3. file 必须是清单里的 ref(如 f1/f2), 禁引入清单外文件; layer 必须在词表内, 禁造词;\n"
-    "4. 严格输出 JSON 数组, 无多余文字。"
+    "2. 角色判据(关键区分 service vs repository):\n"
+    "   - controller/gateway: 有 endpoint, 处理 HTTP 入站(routes/);\n"
+    "   - repository: **直接**封装单一数据源 CRUD(*_repo/*_store/*_pg、直接 SQL/ORM/表 IO);\n"
+    "   - service: **业务逻辑编排**(协调多个 repository/外部、校验、聚合、健康检查、状态汇总), "
+    "即使间接碰数据也算 service 不算 repository;\n"
+    "   - adapter: 封装外部系统/第三方客户端(client/integration/bridge);\n"
+    "   - domain_model: 数据结构/schema/实体定义(tables/models/entities);\n"
+    "   - util/config: 纯工具函数 / 配置, 横切无业务;\n"
+    "3. reads_tables>0 不等于 repository —— 先判它是'直接数据访问'(repository)还是'编排业务'(service);\n"
+    "4. file 必须是清单里的 ref(如 f1/f2), 禁引入清单外文件; layer 必须在词表内, 禁造词;\n"
+    "5. 严格输出 JSON 数组, 无多余文字。"
 )
 
 _PROMPT_TEMPLATE = (
     "给下列每个目录(batch)里的每个 file 标一个架构层角色。\n\n"
-    "示例输入:\nbatch b1 (dir: web/routes):\n  f1: orders.py [endpoint=yes tables=0 imports_out=2 imports_in=0 funcs=3]\n"
-    "示例输出:\n"
-    '[{{"batch":"b1","roles":[{{"file":"f1","layer":"controller"}}]}}]\n\n'
+    "示例输入:\nbatch b1 (dir: web):\n"
+    "  f1: routes/orders.py [endpoint=yes tables=0 imports_out=2 imports_in=0 funcs=3]\n"
+    "  f2: repositories/order_repo.py [endpoint=no tables=2 imports_out=1 imports_in=4 funcs=6]\n"
+    "  f3: services/order_service.py [endpoint=no tables=1 imports_out=5 imports_in=3 funcs=8]\n"
+    "  f4: integrations/pay_client.py [endpoint=no tables=0 imports_out=3 imports_in=2 funcs=4]\n"
+    "示例输出(f3 编排多依赖即使碰表也是 service; f2 直接 CRUD 是 repository; f4 外部客户端是 adapter):\n"
+    '[{{"batch":"b1","roles":[{{"file":"f1","layer":"controller"}},{{"file":"f2","layer":"repository"}},'
+    '{{"file":"f3","layer":"service"}},{{"file":"f4","layer":"adapter"}}]}}]\n\n'
     "实际输入:\n{batches}\n\n输出 JSON 数组:"
 )
 
