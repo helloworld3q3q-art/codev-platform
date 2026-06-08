@@ -74,13 +74,18 @@ def _build_openai_compat(api_key: str, model: str, base_url: str | None, name: s
 
 # ---- 能力档默认矩阵(护栏逻辑模型无关, 参数按模型能力分档; 见 agent-loop-guard-redesign plan §六)----
 # 强模型指令遵从好 / 自控强 → 少管(关 novelty + 宽 cap, 避免误伤探索);弱模型 → 严管防换词空转。
+# planner(Phase 7)同档走: 强模型自控强、默认不开(软预算/lane 引导收益小, 留 config 显式 opt-in);
+# 弱/中模型指令遵从差 → 开 planner 前摄规划 + 超预算只读硬封顶(实测 deepseek overview 防目录 spelunking)。
 # 加模型 = 选一档进 spec(或纯 config 逐字段覆盖), loop.py 一行不动。
 _STRONG = LoopPolicy(retrieval_distinct_cap=12, no_progress_limit=5,
-                     novelty_check=False, readonly_total_cap=30)
+                     novelty_check=False, readonly_total_cap=30,
+                     planner_enabled=False)
 _MID = LoopPolicy(retrieval_distinct_cap=8, no_progress_limit=3,
-                  novelty_check=True, readonly_total_cap=25)
+                  novelty_check=True, readonly_total_cap=25,
+                  planner_enabled=True, planner_hard_cap_readonly=True)
 _WEAK = LoopPolicy(retrieval_distinct_cap=6, no_progress_limit=3,
-                   novelty_check=True, readonly_total_cap=20)
+                   novelty_check=True, readonly_total_cap=20,
+                   planner_enabled=True, planner_hard_cap_readonly=True)
 
 # ---- 内置 provider 声明(加内置厂商在此加一行)----
 register_provider(ProviderSpec("claude", "ANTHROPIC_API_KEY", _build_anthropic,
@@ -180,6 +185,8 @@ def loop_policy(cfg: dict[str, Any] | None = None, name: str | None = None) -> L
         readonly_total_cap=_int("readonly_total_cap"),
         invalid_call_limit=_int("invalid_call_limit"),
         min_read_for_finish=_int("min_read_for_finish"),
+        planner_enabled=_bool("planner_enabled"),
+        planner_hard_cap_readonly=_bool("planner_hard_cap_readonly"),
     )
 
 

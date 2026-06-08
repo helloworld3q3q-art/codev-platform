@@ -110,9 +110,10 @@ def _run(planner_enabled: bool):
     reg = ToolRegistry()
     reg.register(_EchoTool())
     # max_steps=10 给软预算(overview=5)留出先于 max_steps 触发的空间
+    # planner 开关现在是 LoopPolicy 字段(每模型策略), 经 policy 传入。
     loop = AgentLoop(_VaryingProvider(), reg,
-                     policy=LoopPolicy(max_steps=10, retrieval_distinct_cap=20),
-                     planner_enabled=planner_enabled)
+                     policy=LoopPolicy(max_steps=10, retrieval_distinct_cap=20,
+                                       planner_enabled=planner_enabled))
     return loop.run("这个项目是做什么的?")  # -> overview, budget 5
 
 
@@ -161,8 +162,8 @@ def test_readonly_hard_capped_at_budget_when_planner_on():
     reg = ToolRegistry()
     reg.register(tool)
     loop = AgentLoop(_ReadVaryingProvider(), reg,
-                     policy=LoopPolicy(max_steps=12, readonly_distinct_cap=20, readonly_total_cap=30),
-                     planner_enabled=True)
+                     policy=LoopPolicy(max_steps=12, readonly_distinct_cap=20, readonly_total_cap=30,
+                                       planner_enabled=True))  # hard_cap 默认 True
     res = loop.run("这个项目是做什么的?")  # overview, budget 5
     assert tool.calls == 5, f"只读类应被硬拦在预算 5, 实际执行 {tool.calls}"
     assert res.stop_reason == "max_steps"
@@ -176,7 +177,7 @@ def test_readonly_not_capped_when_planner_off():
     reg = ToolRegistry()
     reg.register(tool)
     loop = AgentLoop(_ReadVaryingProvider(), reg,
-                     policy=LoopPolicy(max_steps=12, readonly_distinct_cap=20, readonly_total_cap=30),
-                     planner_enabled=False)
+                     policy=LoopPolicy(max_steps=12, readonly_distinct_cap=20, readonly_total_cap=30,
+                                       planner_enabled=False))
     res = loop.run("这个项目是做什么的?")
     assert tool.calls > 5, f"关 planner 时只读不应被 budget 拦(原行为), 实际 {tool.calls}"

@@ -34,6 +34,12 @@ class LoopPolicy:
     # --- 读取充分性门(收尾合规) ---
     min_read_for_finish: int = 2     # 收尾时 distinct 成功读到的 path < 此值 → 疑似卡无效调用,提示而非"读够了"
 
+    # --- 查询规划(Phase 7, 每模型策略) ---
+    # planner 是模型策略的一部分(强模型自控好可不开 / 软预算即够;弱模型指令遵从差需前摄规划 + 硬封顶)。
+    # 不做全局开关,跟 registry 的 _STRONG/_MID/_WEAK 档走,config 可逐字段 per-provider 覆盖。
+    planner_enabled: bool = False           # 是否按问题类型规划工具 + 预算 + lane(默认关, 强模型档不开)
+    planner_hard_cap_readonly: bool = True   # 超预算后只读类(list_dir/read_file)是否硬拦(弱模型防目录 spelunking)
+
     # --- deprecated 别名: 旧 per_tool_cap → retrieval_distinct_cap(不破存量 config / 测试)---
     per_tool_cap: int | None = None  # deprecated: 构造/读取均映射 retrieval_distinct_cap
 

@@ -52,8 +52,7 @@
     "base_url": "http://127.0.0.1:8848",
     "internal_secret": "",
     "timeout_sec": 30,
-    "_comment_planner": "Phase 7 查询规划 (planner). enabled 默认 false (关, 行为与无 planner 逐字节一致): 开启后 loop 在动手前按问题类型 (overview/impact/symbol/doc_rule/general) 规划工具 + 软预算 (达预算回灌收尾提示, 软非硬断) + 优先工具 lane 注入 system prompt。纯确定性关键词分类, 不调 LLM; 分类准确率可回归 (eval --suite planner)。也可 per-provider 覆盖: agent.providers.<name>.planner.enabled。",
-    "planner": { "enabled": false },
+    "_comment_planner": "Phase 7 查询规划 (planner) 是**每模型循环策略**的一部分 (非全局开关), 跟 registry 的 _STRONG/_MID/_WEAK 能力档走: 强模型 (claude/gpt) 默认关 (自控强, 收益小), 弱/中模型 (deepseek/qwen) 默认开 + 超预算只读硬封顶 (防目录 spelunking)。开启后 loop 按问题类型 (overview/impact/symbol/doc_rule/general) 规划工具 + 预算 + 优先 lane (纯确定性关键词分类, 不调 LLM; 准确率可回归 eval --suite planner)。逐字段覆盖档默认 (与其它 loop 字段同机制): agent.providers.<name>.loop.planner_enabled / .planner_hard_cap_readonly, 或全局 agent.loop.planner_enabled。例: 给 claude 显式开 -> agent.providers.claude.loop.planner_enabled=true。",
     "providers": {
       "claude":   { "api_key": "" },
       "gpt":      { "base_url": "https://api.openai.com/v1",        "model": "gpt-4o",        "api_key": "" },

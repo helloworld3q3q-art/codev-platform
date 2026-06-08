@@ -114,7 +114,8 @@ def _precheck(policy: LoopPolicy, specs: list[dict], st: _GuardState,
     # overview 类越界后继续刷 list_dir/read_file(探索型空读)。预算耗尽后, 只读类直接拒
     # (检索类仍走软提示, 因其有 distinct/零增量上限自限)。精准打 overview/general 的目录
     # spelunking 失控, 不碰 impact/symbol(走检索类)。tool_budget<=0 = planner 关, 不生效。
-    if tool_budget > 0 and klass == "readonly" and st.executed_tools >= tool_budget:
+    if (tool_budget > 0 and policy.planner_hard_cap_readonly and klass == "readonly"
+            and st.executed_tools >= tool_budget):
         return (f"[query plan] 本轮工具预算({tool_budget})已用尽, 这是探索型只读调用"
                 f"(list_dir/read_file)。请基于已读到的内容直接收尾, 不要继续翻目录/读文件; "
                 f"确需某关键文件请用检索类工具(codegraph/search_docs)精准定位再读。")
@@ -211,17 +212,16 @@ def _postprocess(policy: LoopPolicy, st: _GuardState, name: str, fp: str,
 
 class AgentLoop:
     def __init__(self, provider: LLMProvider, registry: ToolRegistry,
-                 policy: LoopPolicy | None = None, max_steps: int | None = None,
-                 planner_enabled: bool = False) -> None:
+                 policy: LoopPolicy | None = None, max_steps: int | None = None) -> None:
         self.provider = provider
         self.registry = registry
         # policy 优先(每模型策略,见 agent-provider §1/§4);未给则从 max_steps 兜底建一个
         # (向后兼容旧 max_steps= 调用 + 测试)。max_steps 既给又给 policy 时以 policy 为准。
+        # planner(Phase 7)也是策略的一部分: policy.planner_enabled / planner_hard_cap_readonly
+        # 由 registry 按 provider 档解析(强模型不开 / 弱模型开+硬封顶), loop 只读不判模型。
         if policy is None:
             policy = LoopPolicy(max_steps=max_steps) if max_steps is not None else LoopPolicy()
         self.policy = policy
-        # planner(Phase 7): 默认关 → 行为与重构前逐字节一致。开启则前摄式规划工具 + 软预算。
-        self.planner_enabled = planner_enabled
 
     def run(self, question: str, history: list[Message] | None = None, trace: Trace | None = None,
             system: str | None = None) -> AgentResult:
@@ -238,7 +238,7 @@ class AgentLoop:
         # planner(Phase 7, 默认关): 按问题类型规划工具 + 软预算。计划注入 system 作引导,
         # tool_budget 在 _postprocess 作软停止条件。关闭时 budget=0 → 全程不约束(原行为)。
         tool_budget = 0
-        if self.planner_enabled:
+        if self.policy.planner_enabled:
             plan = plan_query(question, max_steps=self.policy.max_steps,
                               available_tools=[s["name"] for s in specs])
             system_prompt = system_prompt + "\n\n" + render_plan_preamble(plan)

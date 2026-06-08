@@ -213,10 +213,7 @@ def get_chat_service() -> ChatService:
             skill_pack_factory=lambda name: _skill_pack(acfg.agent_cfg(), name),
             rule_pack_sources_factory=lambda name: _rule_pack_sources(acfg.agent_cfg(), name),
             skill_pack_sources_factory=lambda name: _skill_pack_sources(acfg.agent_cfg(), name),
-            # Phase 7 查询规划:per-provider 优先, 回退全局 agent.planner.enabled(默认关)。
-            planner_enabled_factory=lambda name: bool(
-                acfg.get(acfg.agent_cfg(), f"agent.providers.{name}.planner.enabled",
-                         acfg.get(acfg.agent_cfg(), "agent.planner.enabled", False))
-            ),
+            # 注: planner 开关/硬封顶不再走独立 factory —— 它是 LoopPolicy 字段, 由
+            # loop_policy_factory 按 provider 档(registry _STRONG/_MID/_WEAK)+ config 覆盖解析。
         )
     return _chat_service

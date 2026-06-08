@@ -45,6 +45,22 @@
 测试:`test_readonly_hard_capped_at_budget_when_planner_on`(执行==5)+
 `test_readonly_not_capped_when_planner_off`(原行为不变)。25 passed,现有 loop guard 回归通过。
 
+## 四 b、planner 归位为"每模型策略"(架构对齐)
+
+用户指出:agent 设计是**模型可插拔 + 每模型策略**(因模型特性不同),planner 不该是全局开关。
+原实现把 `planner_enabled` 当独立全局 flag(`agent.planner.enabled` + deps 独立 factory)—— 与
+既有 `LoopPolicy`/`ProviderSpec` 每模型档机制并行,违反 agent-provider §1-3。**重构归位**:
+
+- `LoopPolicy` 加 `planner_enabled` / `planner_hard_cap_readonly` 字段(策略对象本体)。
+- registry 能力档设默认:`_STRONG`(claude/gpt)关 planner;`_WEAK`/`_MID`(deepseek/qwen)开 + 硬封顶。
+- `loop_policy(cfg,name)` 按 provider 解析这两字段(`agent.providers.<name>.loop.planner_*` >
+  `agent.loop.*` > 档默认),与其它 loop 字段同机制。
+- loop 只读 `self.policy.planner_*`(不判模型);删掉 ChatService/deps 的独立 factory + 全局 `agent.planner` 配置块。
+
+效果:**加新模型时 planner 策略随能力档自动给(或 config 逐字段覆盖),不再配全局一个**。
+deepseek 的 planner 现由 `_WEAK` 档自带(不依赖那条全局 config)。测试 `test_planner_is_per_model_strategy`
+(claude 关 / deepseek 开+硬封顶 / config 覆盖),60 passed。
+
 ## 四、未决 / 取向
 
 - impact 预算 12→8 可再 A/B(当前"多调换更全"未必坏,看取向)。

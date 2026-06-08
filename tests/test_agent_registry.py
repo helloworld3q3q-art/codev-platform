@@ -47,6 +47,22 @@ def test_loop_policy_capability_tiers():
     assert pd.max_steps == 12  # 未覆盖字段走全局默认
 
 
+def test_planner_is_per_model_strategy():
+    # planner 是每模型策略(随能力档走), 非全局开关: 强模型默认关, 弱/中模型默认开+硬封顶。
+    pc = reg.loop_policy({"agent": {"provider": "claude"}}, "claude")
+    assert pc.planner_enabled is False, "强模型档默认不开 planner"
+    pd = reg.loop_policy({"agent": {"provider": "deepseek"}}, "deepseek")
+    assert pd.planner_enabled is True and pd.planner_hard_cap_readonly is True, "弱模型档开 planner + 硬封顶"
+    pq = reg.loop_policy({"agent": {"provider": "qwen"}}, "qwen")
+    assert pq.planner_enabled is True
+    # config 可 per-provider 逐字段覆盖档默认(强模型也能显式开 planner)。
+    cfg = {"agent": {"provider": "claude", "providers": {"claude": {"loop": {"planner_enabled": True}}}}}
+    assert reg.loop_policy(cfg, "claude").planner_enabled is True
+    # 全局 agent.loop.* 也认(两级覆盖)。
+    cfg_g = {"agent": {"provider": "deepseek", "loop": {"planner_hard_cap_readonly": False}}}
+    assert reg.loop_policy(cfg_g, "deepseek").planner_hard_cap_readonly is False
+
+
 def test_prompt_profile_defaults_and_overrides():
     # DeepSeek 默认启用显式工具选型 overlay;强模型默认只用通用 prompt。
     assert reg.prompt_profile({"agent": {"provider": "deepseek"}}, "deepseek") == "explicit_tool_selection"
