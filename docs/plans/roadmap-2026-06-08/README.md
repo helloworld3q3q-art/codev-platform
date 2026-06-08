@@ -58,7 +58,38 @@ A2 MVP 验收(对齐 A1): 20 file 角色准确率 ≥70% + 违规精确率 ≥80
 - ⏳ **M 换机同步 e2e 验收** —— 脚本就绪(`scripts/e2e_agent_memory_sync.py`), 待 WSL `serve-mcp start` 后跑(运维动作)。
 - ⏳ **D1/D2** 前端依赖图(is_page Next / vue 仓 scl-www-10 登记)—— **业务仓任务**, 不在 codev-platform 本仓。
 - 📐 **A2** 架构分层映射 —— 本轮主线(设计已收敛, 见上文件清单)。
-- backlog: **A3** 路径旁白 on-demand / **D3** endpoint→表 DI 精确版 —— 有真盲区案例再投, 不预先过度工程。
+- backlog: **A3** 路径旁白 on-demand / **D3** endpoint→表 DI 精确版 —— 见下「下一迭代 backlog」。
+
+---
+
+## 运维上线(2026-06-08, WSL)
+
+A1/A2 综合理解层 analyzer 从"代码验收"推进到"agent 真能用"。4 步运维(用户授权 WSL+sudo):
+
+| 项 | 状态 |
+|---|---|
+| config 开 `analyzers.arch_layer.enabled` + `business_domain.enabled` | ✅ 两个 analyzer 都注册(`registered = ['arch_layer','business_domain']`) |
+| 重启 `codev-mcp-graph.service` | ✅ 暴露 `find_arch_role`/`list_layer_members`/`find_arch_violations` 3 个新 tool |
+| A2 数据落 store(codev-platform) | ✅ 11 层节点 + 451 plays_role 边, 查询全工作 |
+| 重启 `codev-reindex.service` | ✅ active, 未来 reindex 自动产 A1+A2(不再依赖手动 ingest) |
+
+agent 现在通过 `/mcp` graph 可调 A2 架构层(`find_arch_role`/`find_arch_violations`)+ A1 业务域(`find_node_domain`/`list_domain_members`), 数据随 reindex 自动新鲜。
+
+---
+
+## 下一迭代 backlog(移交, 不丢失)
+
+本轮(A1/A2 综合理解层)闭环 + 上线。移交下一迭代的未完结项:
+
+| 项 | 性质 | 说明 |
+|---|---|---|
+| **A3 代码导览 tour** | 🟡 会诊降级 | grounding 半成立(路径骨架可 ground、自由叙事 ground 不住)+ 成本 O(路径数)爆。若做只保留"真实 impact 路径 + 逐节点贴已 ground 事实 + on-demand", **不做自由叙事**。当前评估价值有限: agent 自己组合 `find_arch_role`+`find_impact`+`find_node_domain` 即可得全部 ground 事实, 未必需要专门 A3 |
+| **Phase 0 评测基线**(承 roadmap-2026-06-07) | 🟢 高 ROI | A1/A2 验收现为手动 ad-hoc 人工核对;把准确率样本固化成 golden set 接进 `eval/` 框架, 以后 prompt 迭代(如 A2 v1→v4)自动回归, 不再人肉核对 |
+| **Phase 7 Query Planner 最小版**(承 06-07) | 🟢 高 ROI | Web agent 现靠 loop guard 防乱调, 缺按问题类型规划工具+预算+停止条件 |
+| 06-07 蓝图其余(统一 IR/社区检测算法/path scoring/多语言 adapter) | ⚪ 重型 | 按真实业务需求触发再做, 不为"完整平台"堆(plan §六纪律) |
+| **D3** endpoint→表 DI 精确版 | ⚪ backlog | 有真盲区案例再投 |
+
+> **roadmap-2026-06-07(代码智能平台蓝图)分析**: 11 Phase 超大蓝图(30-50 天), 地基 Phase 0/1/2 基本未做;A1/A2 用更轻范式(LLM labeler 软节点)绕过重型蓝图、已上线可用。**结论: 不整体启动**, 只拎 Phase 0 eval + Phase 7 planner 两个高 ROI 项进下一迭代。
 
 ---
 
