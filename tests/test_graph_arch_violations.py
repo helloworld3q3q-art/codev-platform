@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from codev_platform.graph import impact as I
 from codev_platform.graph import mcp_server as gm
+from codev_platform.graph.analyzers.architecture_layer import ArchLayerAnalyzer
+from codev_platform.graph.analyzers.layer_labeler import FakeLayerLabeler
 from codev_platform.graph.schema import (
     AnalyzerResult,
     EdgeKind,
@@ -14,9 +16,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result
-
-_CONF = 0.7
+from codev_platform.graph.store import load_graph, open_store, upsert_result
 
 
 def _file(path):
@@ -28,27 +28,18 @@ def _func(path, name):
                      name=name, project_id="p", file=path)
 
 
-def _layer(role):
-    return GraphNode(id=f"p:arch_layer:{role}", kind=NodeKind.ARCH_LAYER, name=role,
-                     project_id="p", meta={"confidence": _CONF})
-
-
-def _plays(file_node, layer_node):
-    return GraphEdge(source=file_node.id, target=layer_node.id,
-                     kind=EdgeKind.PLAYS_ROLE, confidence=_CONF)
-
-
 def _seed(conn, *, reverse: bool):
-    """ctrl file + repo file + 各一函数 + PLAYS_ROLE 软边 + 一条 calls 硬边(一次 upsert)。
-    reverse=True: repo.save → ctrl.handle(逆向违规); False: ctrl.handle → repo.save(正向合法)。"""
+    """ctrl/repo file 各一函数 + calls 硬边; 软节点/边经 ArchLayerAnalyzer 真产(节点级 PLAYS_ROLE)。
+    reverse=True: repo.save → ctrl.handle(逆向违规); False: ctrl.handle → repo.save(正向合法)。
+    FakeLayerLabeler 按路径关键词标: web/controller/→controller, web/repository/→repository。"""
     fctrl, frepo = _file("web/controller/order_ctrl.py"), _file("web/repository/order_repo.py")
     fc, fr = _func("web/controller/order_ctrl.py", "handle"), _func("web/repository/order_repo.py", "save")
-    cl, rl = _layer("controller"), _layer("repository")
     src, tgt = (fr.id, fc.id) if reverse else (fc.id, fr.id)
     upsert_result(conn, "p", AnalyzerResult(
-        nodes=[fctrl, frepo, fc, fr, cl, rl],
-        edges=[GraphEdge(source=src, target=tgt, kind=EdgeKind.CALLS),
-               _plays(fctrl, cl), _plays(frepo, rl)]))
+        nodes=[fctrl, frepo, fc, fr],
+        edges=[GraphEdge(source=src, target=tgt, kind=EdgeKind.CALLS)]))
+    m = load_graph(conn, "p")   # 用真 analyzer 产软(对齐生产: 节点级 PLAYS_ROLE 连该 file 每个节点)
+    upsert_result(conn, "p", ArchLayerAnalyzer(FakeLayerLabeler()).analyze("p", m.nodes, m.edges))
     return fctrl, frepo
 
 
@@ -68,7 +59,9 @@ def test_list_layer_members(tmp_path):
     try:
         _seed(conn, reverse=True)
         r = I.list_layer_members(conn, "p", "repository")
-        assert r["found"] and [m["name"] for m in r["members"]] == ["web/repository/order_repo.py"]
+        assert r["found"]
+        names = {m["name"] for m in r["members"]}
+        assert "web/repository/order_repo.py" in names   # repository 层含该 file 节点(节点级: file+function)
         assert I.list_layer_members(conn, "p", "nonexist")["found"] is False
     finally:
         conn.close()

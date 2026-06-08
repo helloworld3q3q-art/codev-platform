@@ -327,17 +327,21 @@ _LAYER_RANK: dict[str, int] = {
 _DEP_EDGES = frozenset({EdgeKind.CALLS.value, EdgeKind.IMPORTS.value})
 
 
-def find_arch_role(conn, project_id: str, file_ref: str) -> dict:
-    """查某 file 演哪个架构层角色(A2 软节点)。读已标好的 PLAYS_ROLE 软边, **不调 LLM**。"""
+def find_arch_role(conn, project_id: str, node_ref: str) -> dict:
+    """查某节点(function/endpoint/module)演哪个架构层角色(A2 软节点)。读 PLAYS_ROLE 软边, **不调 LLM**。
+
+    graph 无 FILE kind 节点, 故角色落到**节点级**(同一 file 的节点共享其 file 的角色); 传 endpoint/
+    function/module 的 name 或 id 均可。
+    """
     g = build_impact_graph(conn, project_id, include_soft=True)
-    node, ambig = _resolve(g, file_ref, NodeKind.FILE.value)
+    node, ambig = _resolve(g, node_ref, None)
     if node is None:
-        return _not_found("file", file_ref, ambig)
+        return _not_found("node", node_ref, ambig)
     roles = [
         g.nodes[tgt].name for tgt, kind in g.fwd.get(node.id, [])
         if kind == EdgeKind.PLAYS_ROLE.value and tgt in g.nodes
     ]
-    return {"found": True, "file": _node_brief(node), "roles": sorted(set(roles))}
+    return {"found": True, "node": _node_brief(node), "roles": sorted(set(roles))}
 
 
 def list_layer_members(conn, project_id: str, role: str) -> dict:
@@ -362,19 +366,12 @@ def find_arch_violations(conn, project_id: str, limit: int = 200) -> dict:
     LLM 只提供 layer 标签这一个软输入; 违规判定全确定性(硬边 + rank), 给 agent 重构/PR 自检用。
     """
     g = build_impact_graph(conn, project_id, include_soft=True)
-    # file 节点 id → path; path → role(经 PLAYS_ROLE 软边)
-    fid_path = {n.id: n.name for n in g.nodes.values() if n.kind == NodeKind.FILE.value}
-    path_role: dict[str, str] = {}
-    for fid, path in fid_path.items():
-        for tgt, kind in g.fwd.get(fid, []):
-            if kind == EdgeKind.PLAYS_ROLE.value and tgt in g.nodes:
-                path_role[path] = g.nodes[tgt].name
-    # 任意 node id → role(经 node.file → path → role; file 节点自身也映射)
+    # node id → role(直接从 PLAYS_ROLE 软边; A2 节点级, 同 file 的每个节点各带一条软边到其 layer)
     node_role: dict[str, str] = {}
-    for n in g.nodes.values():
-        r = path_role.get(n.file or "") or (path_role.get(fid_path[n.id]) if n.id in fid_path else None)
-        if r is not None:
-            node_role[n.id] = r
+    for src, nbrs in g.fwd.items():
+        for tgt, kind in nbrs:
+            if kind == EdgeKind.PLAYS_ROLE.value and tgt in g.nodes:
+                node_role[src] = g.nodes[tgt].name
 
     violations = []
     for src, nbrs in g.fwd.items():

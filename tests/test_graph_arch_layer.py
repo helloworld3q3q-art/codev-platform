@@ -110,10 +110,10 @@ def test_labeler_failure_fail_soft():
 
 
 def test_batch_by_directory_o_dirs_not_files():
-    # 同目录多 file 进同一 batch(O(目录数) 成本); 不同目录分开。
+    # 同目录多 file 进同一 batch(O(目录数) 成本); 不同目录分开。node.file 聚合(graph 无 FILE 节点)。
     a = ArchLayerAnalyzer(FakeLayerLabeler())
-    facts = a._build_facts([_file("svc/a.py"), _file("svc/b.py"), _file("repo/c.py")], [])
-    batches, _ = a._batch_by_dir(facts)
+    by_file, _ = a._build_facts([_file("svc/a.py"), _file("svc/b.py"), _file("repo/c.py")], [])
+    batches, _ = a._batch_by_dir(by_file)
     assert {b.batch_id for b in batches} == {"svc", "repo"}
     svc = next(b for b in batches if b.batch_id == "svc")
     assert len(svc.files) == 2   # svc/ 两个 file 一批
