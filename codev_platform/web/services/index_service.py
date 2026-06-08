@@ -15,10 +15,16 @@ from codev_platform.web.domain.job import Job
 from codev_platform.web.services.job_service import JobService, JobTrigger
 
 _ALL = "all"
-# 允许的索引类型 (对齐 reindex.runners.kinds() + 'all' 聚合)。
-_ALLOWED_KINDS = ("all", "chroma", "codegraph")
 
 _JOB_TYPE_PREFIX = "index_rebuild"
+
+
+def _allowed_kinds() -> tuple[str, ...]:
+    """允许的 index kind = reindex.runners 注册集 + 'all' 聚合 —— 动态读, 避免硬编码漂移。
+    codex P2 #6: 原硬编码 ('all','chroma','codegraph') 漏了 ingest, 但 all 展开却 enqueue ingest,
+    API 合约与 runner 真值源不一致(单独重建统一图谱 ingest 只能走 all, 多余重建 + 锁冲突)。"""
+    from codev_platform.reindex.runners import kinds as _runner_kinds
+    return (_ALL, *sorted(_runner_kinds()))
 
 
 def job_type_for(index_kind: str) -> str:
@@ -32,10 +38,11 @@ class IndexService:
     def rebuild(self, project_id: str, index_kind: str | None = None) -> Job:
         """提交索引重建。返回新建 job (含 jobId)。同 project 同 kind 在跑 → RATE_LIMITED。"""
         kind = (index_kind or _ALL).strip()
-        if kind not in _ALLOWED_KINDS:
+        allowed = _allowed_kinds()
+        if kind not in allowed:
             raise PlatformError(
                 ErrorCode.INVALID_PARAMS,
-                f"unknown index kind: {kind!r} (allowed: {list(_ALLOWED_KINDS)})",
+                f"unknown index kind: {kind!r} (allowed: {list(allowed)})",
                 detail=f"project_id={project_id} index_kind={index_kind!r}",
             )
         return self._jobs.submit(project_id, job_type_for(kind))

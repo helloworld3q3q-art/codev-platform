@@ -69,6 +69,15 @@ def test_rebuild_unknown_kind_is_invalid_params():
     assert r.json()["errors"][0]["errorCode"] == "invalid_params"
 
 
+def test_rebuild_ingest_kind_allowed():
+    # P2 修复(codex #6): ingest 是注册的 runner kind, API 应能单独请求(原硬编码 allowed 漏了,
+    # 只能走 all 触发全量重建 + 锁冲突)。_allowed_kinds 改动态读 runners.kinds() 后对齐。
+    c = _client()
+    r = c.post("/api/v1/indexes/rebuild", json={"indexKind": "ingest"}, headers=_HEADERS)
+    assert r.status_code == 200
+    assert r.json()["data"]["jobId"]
+
+
 def test_same_project_same_type_is_mutually_exclusive():
     c = _client()
     r1 = c.post("/api/v1/indexes/rebuild", json={"indexKind": "chroma"}, headers=_HEADERS)
