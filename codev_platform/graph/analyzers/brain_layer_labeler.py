@@ -25,7 +25,7 @@ from codev_platform.graph.analyzers.layer_labeler import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "3"   # v3(2026-06-08): 加前端分层词表(前后端各用各词表); v2 加 service vs repository 判据
+PROMPT_VERSION = "4"   # v4(2026-06-08): 后端恢复 v2 精度(domain_model=纯数据结构无逻辑, 防 status 误判)+ 保留 v3 前端词表
 
 _BE_ROLES = " / ".join(sorted(LAYER_ROLES))
 _FE_ROLES = " / ".join(sorted(FRONTEND_LAYER_ROLES))
@@ -36,10 +36,14 @@ _SYSTEM = (
     f"  前端词表(frontend file 只选这些): {_FE_ROLES};\n"
     "规则:\n"
     "1. backend file 只能用后端词表、frontend file 只能用前端词表, 不混用;\n"
-    "2. 后端判据: controller(有 endpoint/routes) / repository(直接 CRUD/SQL/*_pg) / "
-    "service(编排业务/健康检查/状态汇总, 即使间接碰表) / adapter(外部客户端 client/bridge) / "
-    "domain_model(schema/实体 tables) / util/config(横切);\n"
-    "3. 前端判据: page(is_page=yes 的页面) / component(可复用组件) / api(services/apis 接口层) / "
+    "2. 后端判据(注意区分 service / repository / domain_model):\n"
+    "   - controller/gateway: 有 endpoint, 处理 HTTP 入站(routes/);\n"
+    "   - repository: **直接**数据访问(*_repo/*_store/*_pg、SQL/ORM/表 CRUD);\n"
+    "   - service: **业务逻辑编排**(健康检查/状态汇总/校验/协调多依赖), 即使间接碰数据也是 service;\n"
+    "   - adapter: 封装外部系统/第三方客户端(client/integration/bridge);\n"
+    "   - domain_model: **纯数据结构定义**(dataclass/schema/表定义/实体), 无业务逻辑(有逻辑→service);\n"
+    "   - util/config: 纯工具函数 / 配置, 横切无业务;\n"
+    "3. 前端判据: page(is_page=yes 页面) / component(可复用组件) / api(services/apis 接口层) / "
     "store(状态管理) / hook(use* 自定义 hook) / util/config;\n"
     "4. file 必须是清单里的 ref, layer 必须在对应词表内, 禁造词;\n"
     "5. 严格输出 JSON 数组, 无多余文字。"
