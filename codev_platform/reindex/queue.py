@@ -110,7 +110,13 @@ class FileSpoolQueue:
         return jobs
 
     def complete(self, job: Job) -> bool:
-        p = self._path(job.project_id, job.kind)
+        # 不重做 runner 白名单校验 —— job 已从 spool 读出, worker 丢弃未知 kind 时也要能删掉它,
+        # 不能因 _path→_validate 的白名单 ValueError 崩 drain(codex P2 #4: 旧 spool / 坏文件)。
+        # 仍挡路径穿越(防坏 kind 删到 spool 外)。
+        pid, kind = str(job.project_id), str(job.kind)
+        if any(sep in pid or sep in kind for sep in ("/", "\\", "..")):
+            return True  # 非法路径片段(不该入 spool): 当已完成, 不删不崩
+        p = self._dir / f"{pid}{_SEP}{kind}"
         if not p.exists():
             return True
         # 运行期被重新 touch (mtime 比认领时新) → 保留, 下轮重跑 (dirty, 不丢尾部提交)
