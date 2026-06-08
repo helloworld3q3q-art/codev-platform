@@ -40,6 +40,14 @@ _CONF = 0.7                   # 软产物置信(< 1.0; validate_soft_result 也�
 _MAX_BATCHES = 500           # 目录数上限(成本护栏)
 _MAX_FILES_PER_BATCH = 60    # 单目录喂 labeler 的 file 上限(防爆 token)
 
+# 纯前端文件的节点 kind: LAYER_ROLES 是后端分层词表(controller/service/repository), 不适用前端 →
+# A2 MVP 跳过纯前端文件, 避免它们被硬塞 util 噪声(真图谱验证发现: web-ui 133 file 全 util)。
+# 前端分层(page/component/api/store/hook)是独立词表, 留 backlog。
+_FRONTEND_KINDS = frozenset({
+    NodeKind.FRONTEND_MODULE.value, NodeKind.FRONTEND_ROUTE.value,
+    NodeKind.FRONTEND_API_CALL.value, NodeKind.FRONTEND_COMPONENT.value,
+})
+
 
 class ArchLayerAnalyzer:
     """架构分层 analyzer。LLM 经 LayerLabeler 注入(不直接依赖 brain)。"""
@@ -88,13 +96,19 @@ class ArchLayerAnalyzer:
     # ---- 确定性事实构建(纯读已落库硬节点/边, 零新扫描) ----
 
     def _build_facts(self, nodes, edges):
-        """按 node.file 聚合文件单位(graph 无 FILE kind 节点, 用 .file 属性)。零新扫描。
+        """按 node.file 聚合后端文件单位(graph 无 FILE kind 节点, 用 .file 属性)。零新扫描。
+        纯前端文件(节点全是 frontend_* kind)跳过 —— 后端分层词表不适用(前端分层留 backlog)。
         返回 (path → fact, path → [该文件的硬节点 id 列表])。"""
+        file_kinds: dict[str, set] = {}
+        for n in nodes:
+            if n.file:
+                file_kinds.setdefault(n.file, set()).add(n.kind)
+        backend_files = {f for f, ks in file_kinds.items() if not ks <= _FRONTEND_KINDS}
         by_file: dict[str, dict] = {}
         file_nodes: dict[str, list[str]] = {}
         node_file: dict[str, str] = {}
         for n in nodes:
-            if not n.file:
+            if not n.file or n.file not in backend_files:
                 continue
             node_file[n.id] = n.file
             file_nodes.setdefault(n.file, []).append(n.id)

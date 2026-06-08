@@ -119,6 +119,16 @@ def test_batch_by_directory_o_dirs_not_files():
     assert len(svc.files) == 2   # svc/ 两个 file 一批
 
 
+def test_skips_pure_frontend_files():
+    # 纯前端 file(只 frontend_* 节点)跳过: 后端分层词表不适用(真图谱验证发现 web-ui 133 全 util 噪声)。
+    a = ArchLayerAnalyzer(FakeLayerLabeler())
+    fe = GraphNode(id="p:frontend_module:x", kind=NodeKind.FRONTEND_MODULE,
+                   name="web-ui/src/x.tsx", project_id="p", file="web-ui/src/x.tsx")
+    by_file, _ = a._build_facts([fe, _func("svc/y.py", "f")], [])
+    assert "web-ui/src/x.tsx" not in by_file   # 纯前端跳过
+    assert "svc/y.py" in by_file                # 后端保留
+
+
 # ---- A2-2: BrainLayerLabeler(mock provider) + 缓存 + config gate 注册 ----
 
 def test_brain_labeler_parses_and_double_rejects():
