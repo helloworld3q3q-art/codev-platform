@@ -22,6 +22,7 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from codev_platform.core.errors import PlatformError  # noqa: E402
 from codev_platform.core.httpkit import build_app  # noqa: E402
 from codev_platform.web.domain.accounts import OrgMember  # noqa: E402
 from codev_platform.web.repositories import project_write_repo  # noqa: E402
@@ -244,3 +245,31 @@ def test_non_admin_cannot_register(tmp_path):
     r = c.post("/api/v1/projects/register",
                json={"code": "x", "name": "X"}, headers=_login("dev", "acme"))
     assert r.status_code == 403
+
+
+def _service_for(meta_dir):
+    return ProjectService(read_repo=ProjectReadRepository(meta_dir=meta_dir),
+                          write_repo=ProjectWriteRepository(meta_dir=meta_dir))
+
+
+def test_register_token_mode_requires_org_id(tmp_path, monkeypatch):
+    # L2(审计根治): token(多租户)模式下 register 无 org_id → 拒绝(防 org-less 公开项目越权根源)。
+    import codev_platform.web.services.project_service as ps
+    monkeypatch.setattr(ps, "load_config", lambda: {"gateway": {"auth_mode": "token"}})
+    meta_dir = tmp_path / "projects"; meta_dir.mkdir()
+    svc = _service_for(meta_dir)
+    with pytest.raises(PlatformError):
+        svc.register_project(code="noorg", name="N", repo_path=None, description=None, org_id=None)
+    # 带 org_id 则放行
+    r = svc.register_project(code="withorg", name="W", repo_path=None, description=None, org_id="acme")
+    assert r.code == "withorg"
+
+
+def test_register_passthrough_allows_orgless(tmp_path, monkeypatch):
+    # dev passthrough 单机仍允许 org-less(公开便利, 不强制 org_id)。
+    import codev_platform.web.services.project_service as ps
+    monkeypatch.setattr(ps, "load_config", lambda: {"gateway": {"auth_mode": "passthrough"}})
+    meta_dir = tmp_path / "projects"; meta_dir.mkdir()
+    r = _service_for(meta_dir).register_project(
+        code="pub", name="P", repo_path=None, description=None, org_id=None)
+    assert r.code == "pub"

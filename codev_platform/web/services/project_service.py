@@ -133,6 +133,14 @@ class ProjectService:
         if self._read.get_project_detail(code) is not None or self._write.exists(code):
             raise PlatformError(ErrorCode.INVALID_PARAMS, f"project already registered: {code}")
         org_id = org_id.strip() if org_id else None
+        # L2(审计根治): token(多租户)模式下 org_id 必填 —— org-less=公开(任意 org admin 可对它
+        # write: reindex/跑 agent/load)是单机便利, 多租户下是越权根源(meta.json 从不写 orgId 是病根)。
+        # 强制项目归属, 让所有项目走标准 org 隔离 + 白名单; dev passthrough 单机仍允许 org-less。
+        if org_id is None and _cfg_get(load_config(), "gateway.auth_mode", "passthrough") == "token":
+            raise PlatformError(
+                ErrorCode.INVALID_PARAMS,
+                "token(多租户)模式下注册项目必须指定 org_id(防 org-less 公开项目被任意 org admin 越权 write)",
+            )
         self._write.register_project(code=code, name=name,
                                      repo_path=repo_path, description=description, org_id=org_id)
         return ProjectActionResult(code=code, loaded=False, status="ACTIVE")
