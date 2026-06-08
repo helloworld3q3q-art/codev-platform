@@ -10,7 +10,7 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [a2-architecture-layer-design-2026-06-08.md](a2-architecture-layer-design-2026-06-08.md) | **子设计(三兄弟会诊: 产品/ROI · 架构复用 · AI 抗幻觉)**: A2 架构分层映射 —— 复用 A1 全套护栏给 file 归架构角色软标签(`ARCH_LAYER`/`PLAYS_ROLE`)+ 确定性违规检测; 用 grounding 判据**证明 plan §六怀疑正确**(A3 降级、A4 砍) | ✅ **代码三阶段全落地**(A2-1/2/3); ⏳ 真 deepseek 准确率验收待 WSL |
+| [a2-architecture-layer-design-2026-06-08.md](a2-architecture-layer-design-2026-06-08.md) | **子设计(三兄弟会诊: 产品/ROI · 架构复用 · AI 抗幻觉)**: A2 架构分层映射 —— 复用 A1 全套护栏给 file 归架构角色软标签(`ARCH_LAYER`/`PLAYS_ROLE`)+ 确定性违规检测; 用 grounding 判据**证明 plan §六怀疑正确**(A3 降级、A4 砍) | ✅ **代码全落地 + 真 deepseek 验收通过**(后端 79%严格/94%宽松, ≥70%达标) |
 
 ## A2 落地状态(2026-06-08)
 
@@ -20,20 +20,19 @@
 | **A2-2** 接 LLM | `BrainLayerLabeler`(双层 grounding + 双越界剔除 + 韧性解析)+ per-batch fingerprint 缓存 + `__init__` config gate 注册 | `8cb7ca5` |
 | **A2-3** 查询 + 违规检测 | `find_arch_role`/`list_layer_members`/`find_arch_violations`(graph mcp 第 9-11 tool); 违规=layer 软标签 × calls/imports 硬边 × 偏序规则(确定性, LLM 只供标签) | `b2b5dde` |
 
-**全套 1215 passed, 0 failed**; 全程复用 A1 护栏(软隔离 / 越界 reject / fail-soft / 缓存)。
+**全套 1216 passed, 0 failed**; 全程复用 A1 护栏(软隔离 / 越界 reject / fail-soft / 缓存)。
 
-⏳ **唯一剩: 真 deepseek 准确率验收(WSL 运维动作)**:
-```bash
-# WSL: /home/helloworld/work/codev-platform
-# 1. config 开 A2 + 指定标注 provider(便宜/本地的 deepseek):
-#    ~/.codev-platform/config.json: analyzers.arch_layer.enabled=true (+ analyzers.arch_layer.provider 可选)
-# 2. 重建统一图谱(触发 ArchLayerAnalyzer + BrainLayerLabeler 标注 + 缓存):
-codev-platform reindex --ingest        # 或 update-local-ai 的 graph 档
-# 3. 人工核对验收(对齐 A1 的 ≥70%):
-#    抽 1 仓 20 file → find_arch_role 角色准确率 ≥70%(低于则方向证伪止损)
-#    抽 arch_violations → 违规精确率 ≥80%(噪声大则 agent 会忽略 = 等于没做)
-```
-达标 A2 才算闭环; 不达标按设计止损(不堆"分层可视化"补救)。
+### ✅ 真 deepseek 验收通过(WSL, 2026-06-08) —— 含 2 个只有真图谱才暴露的 bug 修复
+
+| 项 | 结果 |
+|---|---|
+| **真图谱 bug ①** | graph **不建 FILE kind 节点**(451/455 节点用 `node.file` 属性) → `ArchLayerAnalyzer` 找 FILE 节点恒空 → 整个 A2 no-op。改用 `node.file` 聚合 + 节点级 `PLAYS_ROLE`(`6f09d3a`)。FakeLabeler 单测造 FILE 节点发现不了 |
+| **真图谱 bug ②** | `LAYER_ROLES` 是后端分层词表 → web-ui **133 前端文件全被硬塞 util 噪声**。`_build_facts` 跳过纯 `frontend_*` 文件(前端分层留 backlog)(`87a5ab5`) |
+| **后端准确率** | 33 后端文件人工核对: **79% 严格 / 94% 宽松, ≥70% 达标**。`web/routes/*` 17 全对 controller / `repositories/`+`*_pg` 准 repository / `tables.py` domain_model。仅 2 错(`_checks.py`/`platform_status.py` 应 service 被标 repository) |
+| **违规检测** | 102 条 calls 边**全覆盖角色**(controller→repository 正向), 判定 violations=0 是真实(codev-platform 后端架构干净, 无逆向依赖), 非漏检假 0 |
+| **已知局限** | deepseek 倾向把 service 标 repository(service 0); 前端分层待独立词表。均记入 backlog, 不影响后端验收达标 |
+
+**结论: A2 后端验收通过, 方向证实(不止损)。** 前端分层词表 + service few-shot 改进 → backlog。
 
 ---
 
