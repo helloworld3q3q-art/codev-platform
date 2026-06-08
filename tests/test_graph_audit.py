@@ -73,6 +73,38 @@ def test_audit_cross_project_leak(tmp_path):
     assert rep["clean"] is False   # 串台 = error
 
 
+def test_audit_orphan_soft_plugin(tmp_path):
+    # 软节点应只来自规范 analyzer plugin(builtin.analyzers); 自名 plugin 残留 = 孤儿 error。
+    # 复现 2026-06-08 arch_layer 重复根因。
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    role = GraphNode(id=f"{PID}:arch_layer:service", kind=NodeKind.ARCH_LAYER.value,
+                     name="service", project_id=PID)
+    # 规范来源
+    upsert_result(conn, PID, AnalyzerResult(plugin="builtin.analyzers", nodes=[role],
+                                            edges=[], evidences=[], findings=[]))
+    # 孤儿: 同软节点又被自名 plugin 写一份(plugin 漂移残留)
+    upsert_result(conn, PID, AnalyzerResult(plugin="arch_layer", nodes=[role],
+                                            edges=[], evidences=[], findings=[]))
+    conn.commit()
+    rep = audit_graph(conn, PID)
+    conn.close()
+    osp = rep["errors"]["orphan_soft_plugins"]
+    assert osp["count"] == 1 and "arch_layer" in osp["plugins"]
+    assert rep["clean"] is False   # 孤儿 plugin = error
+
+
+def test_audit_no_orphan_when_only_canonical(tmp_path):
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    role = GraphNode(id=f"{PID}:arch_layer:service", kind=NodeKind.ARCH_LAYER.value,
+                     name="service", project_id=PID)
+    upsert_result(conn, PID, AnalyzerResult(plugin="builtin.analyzers", nodes=[role],
+                                            edges=[], evidences=[], findings=[]))
+    conn.commit()
+    rep = audit_graph(conn, PID)
+    conn.close()
+    assert rep["errors"]["orphan_soft_plugins"]["count"] == 0
+
+
 def test_render_markdown_smoke(tmp_path):
     conn = open_store(PID, path=tmp_path / "g.sqlite")
     _seed(conn, [_node("f1", "foo")], [])

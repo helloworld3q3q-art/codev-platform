@@ -20,7 +20,13 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter, defaultdict
 
-from codev_platform.graph.schema import NodeKind, is_soft_edge_kind, is_soft_node_kind
+from codev_platform.graph.schema import (
+    SOFT_EDGE_KINDS,
+    SOFT_NODE_KINDS,
+    NodeKind,
+    is_soft_edge_kind,
+    is_soft_node_kind,
+)
 from codev_platform.graph.store import load_graph
 
 _LOW_CONF = 0.7
@@ -35,6 +41,36 @@ def _distinct_project_ids(conn: sqlite3.Connection, table: str) -> list[str]:
         return [r[0] for r in conn.execute(f"SELECT DISTINCT project_id FROM {table}")]
     except sqlite3.Error:
         return []
+
+
+def _canonical_soft_plugin() -> str:
+    """软产物(ARCH_LAYER/BUSINESS_DOMAIN...)唯一合法来源 plugin(见 ingest._analyzers_pass)。"""
+    try:
+        from codev_platform.graph.ingest import ANALYZERS_PLUGIN
+        return ANALYZERS_PLUGIN
+    except Exception:  # noqa: BLE001
+        return "builtin.analyzers"
+
+
+def _orphan_soft_plugins(conn: sqlite3.Connection, project_id: str,
+                         kinds: frozenset[str], table: str) -> list[str]:
+    """软 kind 的行里, plugin != 规范 analyzer plugin 的 = 孤儿(plugin 漂移残留, 致重复/陈旧)。
+
+    这正是 2026-06-08 抓到的 arch_layer 重复根因: analyzer 自名 plugin 直 upsert 的残留,
+    reindex 只清规范 plugin 故永不被清。soft 节点/边**只应**来自 _analyzers_pass 的统一 plugin。
+    """
+    if not kinds:
+        return []
+    canonical = _canonical_soft_plugin()
+    ph = ",".join("?" for _ in kinds)
+    try:
+        rows = conn.execute(
+            f"SELECT DISTINCT plugin FROM {table} WHERE project_id = ? AND kind IN ({ph})",
+            (project_id, *kinds),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return sorted({r[0] for r in rows if r[0] != canonical})
 
 
 def audit_graph(conn: sqlite3.Connection, project_id: str, *,
@@ -57,6 +93,10 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
     cross_nodes = [p for p in _distinct_project_ids(conn, "nodes") if p != project_id]
     cross_edges = [p for p in _distinct_project_ids(conn, "edges") if p != project_id]
 
+    # 软产物 plugin 漂移残留(2026-06-08 arch_layer 重复根因): 软节点/边只应来自规范 analyzer plugin。
+    orphan_node_plugins = _orphan_soft_plugins(conn, project_id, SOFT_NODE_KINDS, "nodes")
+    orphan_edge_plugins = _orphan_soft_plugins(conn, project_id, SOFT_EDGE_KINDS, "edges")
+
     # --- warnings ---
     by_key: dict[tuple, list[str]] = defaultdict(list)
     for n in g.nodes:
@@ -70,10 +110,15 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
                  if not is_soft_edge_kind(e.kind) and (e.confidence if e.confidence is not None else 1.0) < low_conf]
     low_by_kind = Counter(e.kind for e in low_edges)
 
+    orphan_plugins = sorted(set(orphan_node_plugins) | set(orphan_edge_plugins))
     errors = {
         "dangling_edges": {"count": len(dangling), "samples": dangling[:_SAMPLE]},
         "cross_project_nodes": {"count": len(cross_nodes), "foreign_project_ids": cross_nodes},
         "cross_project_edges": {"count": len(cross_edges), "foreign_project_ids": cross_edges},
+        "orphan_soft_plugins": {
+            "count": len(orphan_plugins), "plugins": orphan_plugins,
+            "canonical": _canonical_soft_plugin(),
+        },
     }
     warnings = {
         "duplicate_nodes": {"count": len(dups), "samples": dups[:_SAMPLE]},
@@ -87,7 +132,8 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
     }
     n_errors = (errors["dangling_edges"]["count"]
                 + errors["cross_project_nodes"]["count"]
-                + errors["cross_project_edges"]["count"])
+                + errors["cross_project_edges"]["count"]
+                + errors["orphan_soft_plugins"]["count"])
     return {
         "project_id": project_id,
         "totals": {
@@ -122,6 +168,10 @@ def render_markdown(report: dict) -> str:
                  + (f" (外来 pid: {err['cross_project_nodes']['foreign_project_ids']})"
                     if err['cross_project_nodes']['count'] else ""))
     lines.append(f"- cross-project 边泄漏: {err['cross_project_edges']['count']}")
+    osp = err["orphan_soft_plugins"]
+    lines.append(f"- 软产物孤儿 plugin(应只来自 {osp['canonical']}): {osp['count']}"
+                 + (f" → {osp['plugins']} (plugin 漂移残留, 致重复/陈旧, 需 purge)"
+                    if osp["count"] else ""))
 
     warn = report["warnings"]
     lines += ["", "## warnings (待 review)"]
