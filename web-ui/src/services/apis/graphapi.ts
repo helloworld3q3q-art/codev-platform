@@ -60,6 +60,14 @@ export async function postGraph2(): Promise<API.CommonResult_UnifiedGraphRespons
   });
 }
 
+// 统一图谱-结构审计
+export async function postAudit(): Promise<API.CommonResult_GraphAuditResponse_> {
+  return await post<API.CommonResult_GraphAuditResponse_>({
+    url: `${commonUrl}/api/v1/graph/audit`,
+    data: {},
+  });
+}
+
 // 统一图谱-统计
 export async function postStats2(): Promise<API.CommonResult_UnifiedGraphStatsResponse_> {
   return await post<API.CommonResult_UnifiedGraphStatsResponse_>({

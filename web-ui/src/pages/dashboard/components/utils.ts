@@ -1,7 +1,7 @@
 // 仪表盘数据装配 —— 并发拉取平台健康 + 当前项目图谱统计 + 资源计数, 各源独立容错。
 import { postOrgsList } from '@/services/apis/orgapi';
 import { getCheck } from '@/services/apis/healthapi';
-import { postStats, postStats2 } from '@/services/apis/graphapi';
+import { postAudit, postStats, postStats2 } from '@/services/apis/graphapi';
 import { postStatus } from '@/services/apis/indexapi';
 import { postProjectsList } from '@/services/apis/projectapi';
 import { getMcpUsage } from '@/services/apis/reportsapi';
@@ -15,6 +15,8 @@ export interface DashboardData {
   mcpUsage?: API.McpUsageReportResponse;
   // 各类索引相对当前 HEAD 的新鲜度 (统一 IndexManifest, Phase 1)。
   indexStatus?: API.IndexStatusResponse;
+  // 统一图谱结构审计摘要 (Phase 3)。
+  graphAudit?: API.GraphAuditResponse;
   projectCount: number;
   orgCount: number;
 }
@@ -25,6 +27,7 @@ export const DASHBOARD_DEFAULT: DashboardData = {
   unified: undefined,
   mcpUsage: undefined,
   indexStatus: undefined,
+  graphAudit: undefined,
   projectCount: 0,
   orgCount: 0,
 };
@@ -52,7 +55,7 @@ async function loadMcpUsage(enabled: boolean): Promise<API.McpUsageReportRespons
 }
 
 export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
-  const [health, codegraph, unified, projectCount, orgCount, mcpUsage, indexStatus] =
+  const [health, codegraph, unified, projectCount, orgCount, mcpUsage, indexStatus, graphAudit] =
     await Promise.all([
       safe(async (): Promise<API.HealthData | undefined> => {
         const res = await getCheck();
@@ -79,6 +82,19 @@ export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
         const res = await postStatus();
         return res.data;
       }, undefined),
+      safe(async (): Promise<API.GraphAuditResponse | undefined> => {
+        const res = await postAudit();
+        return res.data;
+      }, undefined),
     ]);
-  return { health, codegraph, unified, projectCount, orgCount, mcpUsage, indexStatus };
+  return {
+    health,
+    codegraph,
+    unified,
+    projectCount,
+    orgCount,
+    mcpUsage,
+    indexStatus,
+    graphAudit,
+  };
 }

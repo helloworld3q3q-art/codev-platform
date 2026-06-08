@@ -229,6 +229,15 @@ interface CommonResult_CodegraphStatsResponse_ {
   requestId?: any;
 }
 
+// CommonResult_GraphAuditResponse_ 响应数据
+interface CommonResult_GraphAuditResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_GraphQueryResponse_ 响应数据
 interface CommonResult_GraphQueryResponse_ {
   result?: number;
@@ -492,6 +501,19 @@ interface ErrorItem {
   errorCode: string;
   errorMessage: string;
   field?: any;
+}
+
+// 统一图谱结构审计结果 (Phase 3): errors 阻断, warnings 待 review。
+interface GraphAuditResponse {
+  clean?: boolean; // 无结构 error 即 clean
+  errorCount?: number; // 结构 error 总数
+  danglingEdges?: number; // 断链边数 (指向不存在节点)
+  crossProjectNodes?: number; // 跨租户串台节点数
+  orphanSoftPlugins?: number; // 软产物孤儿 plugin 数 (plugin 漂移残留)
+  duplicateNodes?: number; // 重复节点组数 (warning)
+  lowConfidenceEdges?: number; // 低置信硬边数 (warning, fuzzy 推断)
+  nodes?: number; // 节点总数
+  edges?: number; // 边总数
 }
 
 // table-usage / page-deps / api-callers 通用容器 (结构随查询不同, data 透传)。
