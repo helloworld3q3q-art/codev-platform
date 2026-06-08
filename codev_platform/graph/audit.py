@@ -27,7 +27,7 @@ from codev_platform.graph.schema import (
     is_soft_edge_kind,
     is_soft_node_kind,
 )
-from codev_platform.graph.store import load_graph
+from codev_platform.graph.store import load_graph, open_store
 
 _LOW_CONF = 0.7
 _SAMPLE = 10
@@ -146,6 +146,30 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
         "error_count": n_errors,
         "clean": n_errors == 0,
     }
+
+
+def audit_all_stores(graph_store_dir) -> dict:
+    """门禁聚合: 审计某目录下所有 `<pid>.sqlite` graph store, 汇总结构 error。
+
+    返回 {projects: [pid...], reports: {pid: report}, total_errors: int}。
+    目录不存在 / 无 store → projects 空 + total_errors 0(调用方据此优雅跳过, 不阻断)。
+    pre-push / CI 门禁用: total_errors>0 即应非零退出。
+    """
+    from pathlib import Path
+
+    d = Path(graph_store_dir)
+    pids = sorted(p.stem for p in d.glob("*.sqlite")) if d.exists() else []
+    reports: dict[str, dict] = {}
+    total = 0
+    for pid in pids:
+        conn = open_store(pid, path=d / f"{pid}.sqlite")
+        try:
+            rep = audit_graph(conn, pid)
+        finally:
+            conn.close()
+        reports[pid] = rep
+        total += rep["error_count"]
+    return {"projects": pids, "reports": reports, "total_errors": total}
 
 
 def render_markdown(report: dict) -> str:

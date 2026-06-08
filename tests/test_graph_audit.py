@@ -1,7 +1,7 @@
 """图谱结构审计 (Phase 3 MVP) 单测 —— 临时 store 种已知问题, 不碰真 data。"""
 from __future__ import annotations
 
-from codev_platform.graph.audit import audit_graph, render_markdown
+from codev_platform.graph.audit import audit_all_stores, audit_graph, render_markdown
 from codev_platform.graph.schema import (
     AnalyzerResult,
     EdgeKind,
@@ -103,6 +103,43 @@ def test_audit_no_orphan_when_only_canonical(tmp_path):
     rep = audit_graph(conn, PID)
     conn.close()
     assert rep["errors"]["orphan_soft_plugins"]["count"] == 0
+
+
+def test_audit_all_stores_gate(tmp_path):
+    # 门禁聚合: 多 store 目录, 一个 clean 一个有断链 → total_errors>0。
+    gs = tmp_path / "graph_store"
+    gs.mkdir()
+    # p1: clean
+    c1 = open_store("p1", path=gs / "p1.sqlite")
+    upsert_result(c1, "p1", AnalyzerResult(
+        plugin="t", plugin_version="0",
+        nodes=[GraphNode(id="a", kind=NodeKind.BACKEND_FUNCTION.value, name="a",
+                         project_id="p1", file="a.py")],
+        edges=[], evidences=[], findings=[]))
+    c1.commit()
+    c1.close()
+    # p2: 断链(边指向不存在节点)
+    c2 = open_store("p2", path=gs / "p2.sqlite")
+    upsert_result(c2, "p2", AnalyzerResult(
+        plugin="t", plugin_version="0",
+        nodes=[GraphNode(id="x", kind=NodeKind.BACKEND_FUNCTION.value, name="x",
+                         project_id="p2", file="x.py")],
+        edges=[GraphEdge(source="x", target="ghost", kind=EdgeKind.CALLS.value)],
+        evidences=[], findings=[]))
+    c2.commit()
+    c2.close()
+
+    agg = audit_all_stores(gs)
+    assert agg["projects"] == ["p1", "p2"]
+    assert agg["reports"]["p1"]["clean"] is True
+    assert agg["reports"]["p2"]["clean"] is False
+    assert agg["total_errors"] >= 1   # p2 的断链
+
+
+def test_audit_all_stores_empty_dir_skips(tmp_path):
+    # 无 store 目录 → 空 + 0 error(门禁优雅跳过, 不阻断 push)。
+    agg = audit_all_stores(tmp_path / "nope")
+    assert agg["projects"] == [] and agg["total_errors"] == 0
 
 
 def test_render_markdown_smoke(tmp_path):

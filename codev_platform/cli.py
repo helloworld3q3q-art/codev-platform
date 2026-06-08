@@ -246,6 +246,25 @@ def cmd_graph(args: argparse.Namespace) -> int:
     if args.action == "audit":
         from codev_platform.graph.audit import audit_graph, render_markdown
         from codev_platform.graph.store import open_store
+        if getattr(args, "all", False):
+            # 门禁模式: 审计所有有本地 store 的 project, 任一结构 error → 非零退出。
+            # 无 store(机器没建图谱)→ 优雅跳过(返回 0, 不阻断 push)。
+            from codev_platform.core.paths import data_root
+            from codev_platform.graph.audit import audit_all_stores
+            agg = audit_all_stores(data_root() / "graph_store")
+            if not agg["projects"]:
+                _print("(无 graph store, 跳过 graph audit 门禁)")
+                return 0
+            for ap in agg["projects"]:
+                report = agg["reports"][ap]
+                mark = "OK clean" if report["clean"] else f"{report['error_count']} ERROR"
+                _print(f"[{ap}] {mark} — nodes {report['totals']['nodes']} / "
+                       f"edges {report['totals']['edges']}")
+                if not report["clean"]:
+                    _print(render_markdown(report))
+            if agg["total_errors"]:
+                _print(f"\n✗ graph audit 门禁失败: {agg['total_errors']} 个结构 error, 修复后再 push。")
+            return 0 if agg["total_errors"] == 0 else 1
         conn = open_store(pid)
         try:
             report = audit_graph(conn, pid)
@@ -355,6 +374,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp_graph.add_argument("--project", default=None, help="project_id (默认从 cwd 解析)")
     sp_graph.add_argument("--repo", default=None, help="ingest: 被分析的仓库根 (默认 cwd)")
     sp_graph.add_argument("--json", action="store_true", help="audit: 机器可读 JSON 输出")
+    sp_graph.add_argument("--all", action="store_true",
+                          help="audit: 审计所有有本地 store 的 project(门禁模式, 任一结构 error 非零退出)")
     sp_graph.set_defaults(func=cmd_graph)
 
     sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")
