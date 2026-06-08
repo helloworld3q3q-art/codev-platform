@@ -16,11 +16,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-# 架构层角色固定词表(枚举闭集; labeler 出界即剔)。少量、正交于业务域。
+# 后端架构层角色固定词表(枚举闭集; labeler 出界即剔)。少量、正交于业务域。
 LAYER_ROLES: frozenset[str] = frozenset({
     "controller", "service", "repository", "domain_model",
     "util", "config", "adapter", "gateway",
 })
+# 前端架构层角色词表(前后端分层语义不同, 各用各词表)。page/component 用确定性 is_page 辅助判别。
+FRONTEND_LAYER_ROLES: frozenset[str] = frozenset({
+    "page", "component", "api", "store", "hook", "util", "config",
+})
+# 越界校验全集(analyzer _to_soft 宽松校验 ∈ ALL; labeler 按 file.is_frontend 精确选子词表)。
+ALL_LAYER_ROLES: frozenset[str] = LAYER_ROLES | FRONTEND_LAYER_ROLES
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,8 @@ class FileFact:
     reads_tables: int = 0         # reads/writes 表数(偏 repository)
     defines_classes: int = 0
     defines_functions: int = 0
+    is_frontend: bool = False     # 前端文件(节点全 frontend_*)→ 用 FRONTEND_LAYER_ROLES 词表
+    is_page: bool = False         # 前端: 确定性 is_page(dependency-cruiser 产)→ 强先验 page
 
 
 @dataclass(frozen=True)
@@ -85,6 +93,8 @@ class FakeLayerLabeler:
 
     @staticmethod
     def _role_for(f: FileFact) -> str:
+        if f.is_frontend:
+            return FakeLayerLabeler._frontend_role(f)
         if f.has_endpoint:
             return "controller"
         if f.reads_tables > 0:
@@ -94,3 +104,15 @@ class FakeLayerLabeler:
             if kw in low and kw in LAYER_ROLES:
                 return kw
         return "service"
+
+    @staticmethod
+    def _frontend_role(f: FileFact) -> str:
+        if f.is_page:                              # is_page 确定性强先验
+            return "page"
+        low = f.path.lower()
+        for kw, role in (("/apis/", "api"), ("/services/", "api"), ("hook", "hook"),
+                         ("use", "hook"), ("/store", "store"), ("/model", "store"),
+                         ("config", "config")):
+            if kw in low:
+                return role
+        return "component"

@@ -119,14 +119,22 @@ def test_batch_by_directory_o_dirs_not_files():
     assert len(svc.files) == 2   # svc/ 两个 file 一批
 
 
-def test_skips_pure_frontend_files():
-    # 纯前端 file(只 frontend_* 节点)跳过: 后端分层词表不适用(真图谱验证发现 web-ui 133 全 util 噪声)。
+def test_frontend_files_marked_and_use_frontend_vocab():
+    # 前端 file(只 frontend_* 节点)标 is_frontend + is_page, 用前端词表(page/component/...); 后端用后端词表。
     a = ArchLayerAnalyzer(FakeLayerLabeler())
-    fe = GraphNode(id="p:frontend_module:x", kind=NodeKind.FRONTEND_MODULE,
-                   name="web-ui/src/x.tsx", project_id="p", file="web-ui/src/x.tsx")
-    by_file, _ = a._build_facts([fe, _func("svc/y.py", "f")], [])
-    assert "web-ui/src/x.tsx" not in by_file   # 纯前端跳过
-    assert "svc/y.py" in by_file                # 后端保留
+    comp = GraphNode(id="p:frontend_module:btn", kind=NodeKind.FRONTEND_MODULE,
+                     name="web-ui/src/components/Button.tsx", project_id="p",
+                     file="web-ui/src/components/Button.tsx")
+    page = GraphNode(id="p:frontend_module:home", kind=NodeKind.FRONTEND_MODULE,
+                     name="web-ui/src/pages/Home.tsx", project_id="p",
+                     file="web-ui/src/pages/Home.tsx", meta={"is_page": True})
+    by_file, _ = a._build_facts([comp, page, _func("svc/y.py", "f")], [])
+    assert by_file["web-ui/src/components/Button.tsx"]["is_frontend"] is True
+    assert by_file["web-ui/src/pages/Home.tsx"]["is_page"] is True   # is_page 确定性传入
+    assert by_file["svc/y.py"]["is_frontend"] is False               # 后端不标 frontend
+    # FakeLayerLabeler 前端启发: is_page→page, components/→component(用前端词表, 不再硬塞 util)
+    roles = {n.name for n in a.analyze("p", [comp, page], []).nodes}
+    assert "page" in roles and "component" in roles
 
 
 # ---- A2-2: BrainLayerLabeler(mock provider) + 缓存 + config gate 注册 ----
@@ -198,3 +206,26 @@ def test_register_arch_layer_config_gate():
     finally:
         _ANALYZERS.clear()
         _ANALYZERS.extend(saved)
+
+
+def test_brain_labeler_frontend_backend_vocab_isolation():
+    # 前后端词表隔离: 前端 file 只收前端角色、后端 file 只收后端角色, 跨用即剔(按 file.is_frontend)。
+    from codev_platform.graph.analyzers.brain_layer_labeler import BrainLayerLabeler
+    from codev_platform.graph.analyzers.layer_labeler import FileFact, LayerRequest
+
+    class _Turn:
+        text = ('[{"batch":"b1","roles":['
+                '{"file":"f1","layer":"page"},'          # 前端 file 标前端角色 ✓
+                '{"file":"f2","layer":"page"},'          # 后端 file 标前端角色 ✗(后端词表无 page)
+                '{"file":"f1","layer":"controller"}]}]')  # 前端 file 标后端角色 ✗(前端词表无 controller)
+
+    class _Prov:
+        model = "m"
+
+        def chat(self, *a, **k):
+            return _Turn()
+
+    req = LayerRequest("d", (FileFact("f1", "Home.tsx", is_frontend=True, is_page=True),
+                             FileFact("f2", "svc.py", is_frontend=False)))
+    [out] = BrainLayerLabeler(provider=_Prov()).label([req])
+    assert out.roles == (("f1", "page"),)   # 只前端 file+前端角色保留, 两个跨词表都剔

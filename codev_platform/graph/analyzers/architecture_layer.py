@@ -20,7 +20,7 @@ import json
 import logging
 
 from codev_platform.graph.analyzers.layer_labeler import (
-    LAYER_ROLES,
+    ALL_LAYER_ROLES,
     FileFact,
     LayerLabel,
     LayerLabeler,
@@ -40,9 +40,8 @@ _CONF = 0.7                   # 软产物置信(< 1.0; validate_soft_result 也�
 _MAX_BATCHES = 500           # 目录数上限(成本护栏)
 _MAX_FILES_PER_BATCH = 60    # 单目录喂 labeler 的 file 上限(防爆 token)
 
-# 纯前端文件的节点 kind: LAYER_ROLES 是后端分层词表(controller/service/repository), 不适用前端 →
-# A2 MVP 跳过纯前端文件, 避免它们被硬塞 util 噪声(真图谱验证发现: web-ui 133 file 全 util)。
-# 前端分层(page/component/api/store/hook)是独立词表, 留 backlog。
+# 纯前端文件的节点 kind(文件所有节点都在此集 = 前端文件): 标记 is_frontend → labeler 用前端词表
+# FRONTEND_LAYER_ROLES(page/component/api/store/hook), 后端文件用 LAYER_ROLES。前后端各用各词表。
 _FRONTEND_KINDS = frozenset({
     NodeKind.FRONTEND_MODULE.value, NodeKind.FRONTEND_ROUTE.value,
     NodeKind.FRONTEND_API_CALL.value, NodeKind.FRONTEND_COMPONENT.value,
@@ -96,28 +95,30 @@ class ArchLayerAnalyzer:
     # ---- 确定性事实构建(纯读已落库硬节点/边, 零新扫描) ----
 
     def _build_facts(self, nodes, edges):
-        """按 node.file 聚合后端文件单位(graph 无 FILE kind 节点, 用 .file 属性)。零新扫描。
-        纯前端文件(节点全是 frontend_* kind)跳过 —— 后端分层词表不适用(前端分层留 backlog)。
+        """按 node.file 聚合文件单位(graph 无 FILE kind 节点, 用 .file 属性)。零新扫描。
+        前后端都聚合, 各用各词表: 标记 is_frontend(节点全 frontend_*)+ is_page(dependency-cruiser 确定性)。
         返回 (path → fact, path → [该文件的硬节点 id 列表])。"""
         file_kinds: dict[str, set] = {}
         for n in nodes:
             if n.file:
                 file_kinds.setdefault(n.file, set()).add(n.kind)
-        backend_files = {f for f, ks in file_kinds.items() if not ks <= _FRONTEND_KINDS}
         by_file: dict[str, dict] = {}
         file_nodes: dict[str, list[str]] = {}
         node_file: dict[str, str] = {}
         for n in nodes:
-            if not n.file or n.file not in backend_files:
+            if not n.file:
                 continue
             node_file[n.id] = n.file
             file_nodes.setdefault(n.file, []).append(n.id)
-            fc = by_file.setdefault(n.file, {"endpoint": False, "tables": set(),
-                                             "functions": 0, "imp_out": 0, "imp_in": 0})
+            fc = by_file.setdefault(n.file, {
+                "endpoint": False, "tables": set(), "functions": 0, "imp_out": 0, "imp_in": 0,
+                "is_frontend": file_kinds[n.file] <= _FRONTEND_KINDS, "is_page": False})
             if n.kind == NodeKind.BACKEND_ENDPOINT.value:
                 fc["endpoint"] = True
             elif n.kind == NodeKind.BACKEND_FUNCTION.value:
                 fc["functions"] += 1
+            if (n.meta or {}).get("is_page"):
+                fc["is_page"] = True
         for e in edges:
             sf = node_file.get(e.source)
             if e.kind == EdgeKind.IMPORTS.value:
@@ -149,7 +150,8 @@ class ArchLayerAnalyzer:
                 ff.append(FileFact(
                     ref=ref, path=path, has_endpoint=fc["endpoint"],
                     reads_tables=len(fc["tables"]), defines_functions=fc["functions"],
-                    imports_out=fc["imp_out"], imports_in=fc["imp_in"]))
+                    imports_out=fc["imp_out"], imports_in=fc["imp_in"],
+                    is_frontend=fc["is_frontend"], is_page=fc["is_page"]))
                 ref_to_path[ref] = path
             batches.append(LayerRequest(batch_id=d, files=tuple(ff)))
             ref_maps[d] = ref_to_path
@@ -162,7 +164,7 @@ class ArchLayerAnalyzer:
         soft_edges: list[GraphEdge] = []
         seen_layers: set[str] = set()
         for fref, role in label.roles:
-            if role not in LAYER_ROLES:          # 越界 layer(枚举外)→ 剔除
+            if role not in ALL_LAYER_ROLES:      # 越界 layer(前后端词表全集外)→ 剔除
                 continue
             path = ref_to_path.get(fref)         # 越界 ref(造的假)→ 剔除
             if path is None:
