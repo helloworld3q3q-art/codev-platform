@@ -58,7 +58,10 @@ def _assess_axis(nodes: list[GraphNode], edges: list[GraphEdge], *,
          for sid, m in members_by_soft.items()),
         key=lambda d: (-d["members"], d["name"]),
     )
-    giant = [d for d in dist if d["members"] > 1 and d["share"] > giant_share]
+    # giant 是**相对**信号(一个 cluster 压倒其他)→ 至少 2 个 cluster 才有意义。
+    # 单个域天然占 100% 是正常(没别的可比), 不算退化。
+    giant = ([d for d in dist if d["members"] > 1 and d["share"] > giant_share]
+             if len(dist) >= 2 else [])
     singletons = [d["name"] for d in dist if d["members"] <= 1]
 
     eligible_ids = {n.id for n in nodes if n.kind in eligible_kinds}
