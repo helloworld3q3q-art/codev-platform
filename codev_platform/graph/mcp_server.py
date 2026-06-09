@@ -130,6 +130,20 @@ def _err(msg: str) -> list[TextContent]:
     return _ok({"error": msg})
 
 
+def _recall_code_tool(pid: str, args: dict) -> dict:
+    """跨 lane 融合代码召回工具: recall_code 自开 graph+codegraph store(不用传入的 graph conn),
+    序列化为 {hits, count, lanes}。query 缺失 → KeyError(call_tool 映射为'缺必填参数')。"""
+    from dataclasses import asdict
+
+    from codev_platform.recall import recall_code
+    hits = recall_code(args["query"], pid, limit=int(args.get("limit", 20)))
+    return {
+        "hits": [asdict(h) for h in hits],
+        "count": len(hits),
+        "lanes": sorted({lane for h in hits for lane in h.lanes}),  # 实际有贡献的 lane(可观测)
+    }
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     return [
@@ -172,6 +186,12 @@ async def list_tools() -> list[Tool]:
              description="跨层违规检测(确定性: 逆向依赖如 repository→controller; 重构/PR 自检用)",
              inputSchema={"type": "object", "properties": {
                  "limit": {"type": "integer", "description": "返回上限(默认 200)"}}}),
+        Tool(name="recall_code",
+             description="跨 lane 代码召回: 融合 graph(架构/跨层节点)+ codegraph(符号 FTS)→ 统一可解释排名; 按 query 类型自动调权。一次拿最相关代码实体, 不必分调两工具",
+             inputSchema={"type": "object", "properties": {
+                 "query": {"type": "string", "description": "检索词"},
+                 "limit": {"type": "integer", "description": "返回上限(默认 20)"}},
+                 "required": ["query"]}),
     ]
 
 
@@ -193,6 +213,8 @@ _DISPATCH = {
     "list_layer_members": lambda c, p, a: _impact.list_layer_members(c, p, a["role"]),
     "find_arch_violations": lambda c, p, a: _impact.find_arch_violations(
         c, p, int(a.get("limit", 200))),
+    # recall_code 自开 graph+codegraph store(融合), 忽略传入的 graph conn。
+    "recall_code": lambda c, p, a: _recall_code_tool(p, a),
 }
 
 

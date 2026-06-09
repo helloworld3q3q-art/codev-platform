@@ -18,12 +18,30 @@ from codev_platform.graph.schema import (
 from codev_platform.graph.store import open_store, upsert_result
 
 
-def test_dispatch_table_has_eleven_tools():
-    assert len(gm._DISPATCH) == 11   # 8 (impact+A1) + 3 (A2 架构层, 2026-06-08)
+def test_dispatch_table_has_twelve_tools():
+    assert len(gm._DISPATCH) == 12   # 8 (impact+A1) + 3 (A2 架构层) + 1 (recall_code, Phase 6)
     assert "find_node_domain" in gm._DISPATCH
     assert "search_nodes" in gm._DISPATCH
     assert "list_domain_members" in gm._DISPATCH
     assert {"find_arch_role", "list_layer_members", "find_arch_violations"} <= set(gm._DISPATCH)
+    assert "recall_code" in gm._DISPATCH
+
+
+def test_dispatch_recall_code_serializes(monkeypatch):
+    # recall_code 工具: 自开 store(忽略传入 conn=None), 序列化 CodeRecallHit → {hits,count,lanes}。
+    from codev_platform.recall.service import CodeRecallHit
+    monkeypatch.setattr(
+        "codev_platform.recall.recall_code",
+        lambda q, pid, **kw: [CodeRecallHit(ref="r1", score=0.5, name="foo", kind="fn",
+                                            file="a.py", lanes=["graph"])])
+    r = gm.dispatch("recall_code", {"query": "foo"}, None, "p")
+    assert r["count"] == 1 and r["lanes"] == ["graph"]
+    assert r["hits"][0]["name"] == "foo" and r["hits"][0]["ref"] == "r1"
+
+
+def test_dispatch_recall_code_missing_query_raises():
+    with pytest.raises(KeyError):
+        gm.dispatch("recall_code", {}, None, "p")   # 缺 query
 
 
 def test_dispatch_unknown_tool_raises():
