@@ -12,7 +12,7 @@ import pytest
 
 from codev_platform.agent.memory_recall import resolve_conflicts
 from eval.metrics import accuracy
-from eval.run_eval import _entry_from_dict, _run_memory_conflict
+from eval.suites.memory import _entry_from_dict, _run_memory_conflict
 
 _DATASET = Path(__file__).resolve().parents[1] / "eval" / "datasets" / "memory.jsonl"
 

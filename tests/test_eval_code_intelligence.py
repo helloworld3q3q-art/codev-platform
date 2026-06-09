@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from eval.run_eval import (
+from eval.suites.code_intelligence import (
     _build_arch_role_index,
     _file_matches,
     _norm_path,

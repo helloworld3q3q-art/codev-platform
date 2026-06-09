@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from codev_platform.recall.service import CodeRecallHit
-from eval.run_eval import _recall_per_query
+from eval.suites.recall import _recall_per_query
 
 _DATASET = Path(__file__).resolve().parents[1] / "eval" / "datasets" / "recall.jsonl"
 
