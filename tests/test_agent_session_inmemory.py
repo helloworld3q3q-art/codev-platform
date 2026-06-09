@@ -82,3 +82,16 @@ def test_list_sessions_recent_first():
     s.append(a, "u", Message(role="user", content="a"))  # a 后活跃 → 排前
     rows = s.list_sessions("u")
     assert [r.session_id for r in rows][0] == a
+
+
+def test_project_isolation_has_and_get():
+    # P1#1(安全审计): 会话绑 project A, 用 project B 校验 → has 拒绝复用 + get 返空,
+    # 防项目 A 的 session_id 在项目 B 请求里被复用导致历史跨项目泄漏/污染。
+    s = InMemorySessionStore()
+    sid = s.new("alice", project_id="A")
+    s.append(sid, "alice", Message(role="user", content="secret-A"))
+    assert s.has(sid, "alice", project_id="A") is True
+    assert s.has(sid, "alice", project_id="B") is False        # 不属 B → 拒绝复用
+    assert s.has(sid, "alice") is True                          # 不传 project_id → 不过滤(兼容)
+    assert s.get(sid, "alice", project_id="A")                  # A 能读自己历史
+    assert s.get(sid, "alice", project_id="B") == []            # B 读不到 A 的历史

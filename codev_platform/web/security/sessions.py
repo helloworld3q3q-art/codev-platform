@@ -172,14 +172,16 @@ class PgSessionStore(_PgBase):
         self._ensure()
         s = _t.sessions
         rh = _hash(refresh_token or "")
-        with self._engine.connect() as conn:
+        # 原子消费(安全审计 P1#2): 单事务 DELETE ... RETURNING 只删**未过期**的该 refresh。
+        # 并发下只有一个请求删到行(RETURNING 拿身份), 其余得空 → None, 杜绝 refresh 重放/双签。
+        # 原先 SELECT(连接 A)+ 另起事务 DELETE 非原子, 两 worker 可同时读到旧 refresh 各自签发。
+        with self._engine.begin() as conn:
             row = conn.execute(
-                select(s.c.username, s.c.org_id, s.c.refresh_expires_at)
-                .where(s.c.refresh_hash == rh)).first()
-        if row is None or row[2] < now:
+                delete(s)
+                .where(s.c.refresh_hash == rh, s.c.refresh_expires_at >= now)
+                .returning(s.c.username, s.c.org_id)).first()
+        if row is None:   # 没删到(已被消费 / 过期 / 不存在)→ 拒绝轮换
             return None
-        with self._engine.begin() as conn:  # 轮换: 旧 session 整条失效(access + refresh 一并)
-            conn.execute(delete(s).where(s.c.refresh_hash == rh))
         return self.create(row[0], row[1], now=now)
 
     def revoke(self, refresh_token: str) -> None:

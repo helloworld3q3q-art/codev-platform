@@ -115,13 +115,16 @@ class SqlSessionStore(SessionStore):
 
     # ---- 读路径(副本,若配置;否则同主库)----
 
-    def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> bool:
+    def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG,
+            *, project_id: str | None = None) -> bool:
         self._ensure()
+        sql = "SELECT 1 FROM agent_sessions WHERE org_id=%s AND user_id=%s AND session_id=%s"
+        params: list = [org_id, user_id, session_id]
+        if project_id is not None:  # 跨项目隔离: 校验会话归属本项目(对齐 get / list_sessions)
+            sql += " AND project_id=%s"
+            params.append(project_id)
         with self._read_pool.connection() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM agent_sessions WHERE org_id=%s AND user_id=%s AND session_id=%s",
-                (org_id, user_id, session_id),
-            ).fetchone()
+            row = conn.execute(sql, tuple(params)).fetchone()
         return row is not None
 
     def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG,

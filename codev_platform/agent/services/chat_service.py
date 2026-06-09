@@ -69,11 +69,13 @@ class ChatService:
             task_id: str | None = None, identity: object | None = None) -> ChatOutcome:
         provider = self._provider_factory()  # 缺 key 抛 RuntimeError,由调用层(route)映射
 
-        if session_id and self._sessions.has(session_id, user_id, org_id=org_id):
+        # 复用会话必须校验 project_id: 否则项目 A 的 session_id 在项目 B 请求里被复用 → 历史
+        # 跨项目泄漏 + 污染(安全审计 P1#1)。不属本项目 → has 返 False → 落新建分支建本项目会话。
+        if session_id and self._sessions.has(session_id, user_id, org_id=org_id, project_id=project_id):
             sid = session_id
         else:  # 新会话创建时绑当前 project_id(按项目隔离历史的真值源)
             sid = self._sessions.new(user_id, org_id=org_id, project_id=project_id)
-        history = self._sessions.get(sid, user_id, org_id=org_id)
+        history = self._sessions.get(sid, user_id, org_id=org_id, project_id=project_id)
 
         registry = self._registry_factory(project_id)  # 工具按 project_id 路由
         memories = self._recall_memories(org_id, user_id, project_id, question, task_id)

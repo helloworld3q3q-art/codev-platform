@@ -55,10 +55,16 @@ class SessionStore(ABC):
         ...
 
     @abstractmethod
-    def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> list[Message]: ...
+    def get(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG,
+            *, project_id: str | None = None) -> list[Message]:
+        """读会话历史。project_id 给定 → 会话不属该项目则返回 [](跨项目隔离, 防复用泄漏)。"""
+        ...
 
     @abstractmethod
-    def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> bool: ...
+    def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG,
+            *, project_id: str | None = None) -> bool:
+        """会话是否存在。project_id 给定 → 必须属该项目才算存在(否则拒绝复用, 强制新建)。"""
+        ...
 
     @abstractmethod
     def append(self, session_id: str, user_id: str, *messages: Message,
@@ -103,8 +109,15 @@ class InMemorySessionStore(SessionStore):
                 return []
         return self._store.get(key, [])
 
-    def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG) -> bool:
-        return (org_id, user_id, session_id) in self._store
+    def has(self, session_id: str, user_id: str, org_id: str = _DEFAULT_ORG,
+            *, project_id: str | None = None) -> bool:
+        key = (org_id, user_id, session_id)
+        if key not in self._store:
+            return False
+        if project_id is not None:  # 跨项目隔离: 会话不属本项目 → 视作不存在(拒复用, 强制新建)
+            meta = self._meta.get(key)
+            return meta is not None and meta.get("project_id") == project_id
+        return True
 
     def append(self, session_id: str, user_id: str, *messages: Message,
                org_id: str = _DEFAULT_ORG) -> None:
