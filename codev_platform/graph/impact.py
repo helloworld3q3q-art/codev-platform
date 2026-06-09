@@ -18,12 +18,24 @@ from codev_platform.graph.schema import (
     EdgeKind,
     GraphNode,
     NodeKind,
+    edge_provenance,
     is_soft_edge_kind,
     is_soft_node_kind,
 )
 from codev_platform.graph.store import load_graph
 
 _MAX_DEPTH = 10
+
+# 影响分析"确定依赖 vs 候选"的置信阈值(对齐 audit._LOW_CONF): confidence < 此值的边
+# 视作候选(低置信 / 名称启发式推断), 默认不进高风险改动的确定结论, 只作候选提示。
+# provenance src(ast/framework/bridge/regex)随 brief 一并返回, 作来源解释。
+_CERTAIN_CONF = 0.7
+
+
+def _is_certain(confidence: float | None) -> bool:
+    """边是否"确定依赖": 置信 ≥ 阈值。低置信(fuzzy/regex 推断)= 候选。"""
+    c = 1.0 if confidence is None else confidence
+    return c >= _CERTAIN_CONF
 
 # 节点 kind → 层。未知 kind 归 "other"。
 _LAYER: dict[str, str] = {
@@ -49,6 +61,10 @@ class ImpactGraph:
     nodes: dict[str, GraphNode] = field(default_factory=dict)
     fwd: dict[str, list[tuple[str, str]]] = field(default_factory=dict)   # id -> [(target, kind)]
     rev: dict[str, list[tuple[str, str]]] = field(default_factory=dict)   # id -> [(source, kind)]
+    # 边属性旁路表(confidence + provenance src), 键 (source,target,kind)。与 fwd/rev 的
+    # (id,kind) 邻接分开存 —— 不改邻接元组 arity, 既有遍历(find_node_domain/arch 等)零改;
+    # 只在出影响 brief 时按方向算键回查, 给路径标来源 + 置信。
+    edge_attr: dict[tuple[str, str, str], dict] = field(default_factory=dict)
 
     def find_nodes_by_name(self, name: str, kind: str | None = None) -> list[GraphNode]:
         """按 name (可选 kind) 找**全部**同名节点 (大小写不敏感)。供歧义检测。"""
@@ -76,15 +92,22 @@ def build_impact_graph(conn, project_id: str, *, include_soft: bool = False) -> 
     for e in edges:
         g.fwd.setdefault(e.source, []).append((e.target, e.kind))
         g.rev.setdefault(e.target, []).append((e.source, e.kind))
+        prov = edge_provenance(e.meta)
+        g.edge_attr[(e.source, e.target, e.kind)] = {
+            "confidence": e.confidence, "src": prov.get("src"),
+        }
     return g
 
 
 def _traverse(g: ImpactGraph, start_id: str, *, reverse: bool,
-              max_depth: int = _MAX_DEPTH) -> list[tuple[GraphNode, int, str]]:
-    """从 start_id 做方向感知 BFS, 返回 [(node, depth, 到达它的边 kind), ...] (不含起点)。"""
+              max_depth: int = _MAX_DEPTH) -> list[tuple[GraphNode, int, str, dict]]:
+    """从 start_id 做方向感知 BFS, 返回 [(node, depth, 到达它的边 kind, 边属性), ...] (不含起点)。
+
+    边属性 = {confidence, src}, 从 g.edge_attr 按方向算键回查(reverse 时边方向 nbr→nid)。
+    """
     adj = g.rev if reverse else g.fwd
     visited = {start_id}
-    out: list[tuple[GraphNode, int, str]] = []
+    out: list[tuple[GraphNode, int, str, dict]] = []
     queue: list[tuple[str, int]] = [(start_id, 0)]
     while queue:
         nid, depth = queue.pop(0)
@@ -96,12 +119,14 @@ def _traverse(g: ImpactGraph, start_id: str, *, reverse: bool,
             visited.add(nbr)
             node = g.nodes.get(nbr)
             if node is not None:
-                out.append((node, depth + 1, kind))
+                key = (nbr, nid, kind) if reverse else (nid, nbr, kind)  # 边永远 source→target
+                out.append((node, depth + 1, kind, g.edge_attr.get(key, {})))
             queue.append((nbr, depth + 1))
     return out
 
 
-def _node_brief(n: GraphNode, depth: int | None = None, via: str | None = None) -> dict:
+def _node_brief(n: GraphNode, depth: int | None = None, via: str | None = None,
+                attr: dict | None = None) -> dict:
     d = {
         "id": n.id, "kind": n.kind, "name": n.name, "layer": layer_of(n.kind),
         "file": n.file, "line": n.line,
@@ -112,17 +137,29 @@ def _node_brief(n: GraphNode, depth: int | None = None, via: str | None = None) 
         d["depth"] = depth
     if via is not None:
         d["via_edge"] = via
+    if attr:  # 到达该节点那条边的来源 + 置信(Phase 3 provenance): 让影响路径可审计
+        conf = attr.get("confidence")
+        d["confidence"] = conf
+        if attr.get("src") is not None:
+            d["src"] = attr["src"]
+        d["certain"] = _is_certain(conf)
     return d
 
 
-def _grouped(reached: list[tuple[GraphNode, int, str]]) -> dict:
-    """把 BFS 结果按层分组 + 计数。"""
+def _grouped(reached: list[tuple[GraphNode, int, str, dict]]) -> dict:
+    """把 BFS 结果按层分组 + 计数(含确定/候选拆分)。"""
     by_layer: dict[str, list[dict]] = {"frontend": [], "backend": [], "database": [], "other": []}
-    for node, depth, via in reached:
-        by_layer[layer_of(node.kind)].append(_node_brief(node, depth, via))
+    certain = 0
+    for node, depth, via, attr in reached:
+        brief = _node_brief(node, depth, via, attr)
+        if brief.get("certain"):
+            certain += 1
+        by_layer[layer_of(node.kind)].append(brief)
     counts = {k: len(v) for k, v in by_layer.items() if v}
     return {"byLayer": {k: v for k, v in by_layer.items() if v},
-            "counts": counts, "total": len(reached)}
+            "counts": counts, "total": len(reached),
+            # 确定依赖(高置信结构边) vs 候选(低置信 / 名称启发式): 高风险结论只采信确定部分。
+            "certainCount": certain, "candidateCount": len(reached) - certain}
 
 
 def _resolve(g: ImpactGraph, ref: str, kind: str | None) -> tuple[GraphNode | None, list[GraphNode]]:
@@ -193,7 +230,7 @@ def find_impacted_pages(conn, project_id: str, component_ref: str) -> dict:
         return _not_found("component", component_ref, ambig)
     reached = _traverse(g, node.id, reverse=True)
     pages = [
-        _node_brief(n, d, v) for (n, d, v) in reached
+        _node_brief(n, d, v, a) for (n, d, v, a) in reached
         if (n.meta or {}).get("is_page")
     ]
     pages.sort(key=lambda p: (p.get("depth", 0), p["file"] or ""))
@@ -208,9 +245,9 @@ def find_api_callers(conn, project_id: str, endpoint_ref: str) -> dict:
     if node is None:
         return _not_found("endpoint", endpoint_ref, ambig)
     reached = _traverse(g, node.id, reverse=True)
-    callers = [(n, d, v) for (n, d, v) in reached if layer_of(n.kind) == "frontend"]
+    callers = [(n, d, v, a) for (n, d, v, a) in reached if layer_of(n.kind) == "frontend"]
     return {"found": True, "endpoint": _node_brief(node),
-            "callers": [_node_brief(n, d, v) for (n, d, v) in callers],
+            "callers": [_node_brief(n, d, v, a) for (n, d, v, a) in callers],
             "count": len(callers)}
 
 
@@ -230,6 +267,8 @@ def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
         return {"found": False, "ref": node_ref, "summary": summary, "ambiguous": ambig}
     target, impact = r["target"], r["impact"]
     counts, total = impact["counts"], impact["total"]
+    certain_n = impact.get("certainCount", total)
+    candidate_n = impact.get("candidateCount", 0)
     layers_hit = [lyr for lyr in ("frontend", "backend", "database") if counts.get(lyr)]
 
     lines = [f"改动 **{target['name']}** ({target['kind']} / {target['layer']} 层) 的跨层影响:"]
@@ -242,6 +281,9 @@ def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
                 names = sorted({i["name"] for i in items})
                 preview = ", ".join(names[:10]) + (" ..." if len(names) > 10 else "")
                 lines.append(f"- {lyr} 层 {len(items)} 个受影响: {preview}")
+        # provenance 拆分: 高风险结论只采信确定依赖, 候选边(低置信 / 名称启发式)仅作提示。
+        lines.append(f"- 其中 确定依赖 {certain_n}(高置信结构边) / 候选 {candidate_n}"
+                     "(低置信或名称启发式推断, 需人工确认)")
 
     if "frontend" in layers_hit and len(layers_hit) >= 2:
         risk = "high"
@@ -254,6 +296,7 @@ def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
     return {
         "found": True, "target": target, "impact": impact,
         "risk": risk, "layersAffected": layers_hit, "total": total,
+        "certainCount": certain_n, "candidateCount": candidate_n,
         "summary": "\n".join(lines),
     }
 
