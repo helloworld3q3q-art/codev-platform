@@ -101,14 +101,16 @@ def _parse_score(text: str | None) -> int | None:
     return None
 
 
-def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=None) -> dict:
+def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=None,
+                  dataset: str = "agent_e2e.jsonl") -> dict:
     """跑 agent loop 答每个 case + 确定性打分(+ 可选 LLM-judge)。
 
     provider=None → skip。policy=None → 用配置档(loop_policy()); 传入自定义 policy 支持 planner
     变体对比(E4 A/B)。judge_provider!=None → 每 case 额外 LLM-judge 1-5(E3)。
+    dataset: 数据集文件名(默认易集; agent_e2e_hard.jsonl = 口语化硬集, keyword 多误路由)。
     需 WSL 后端(工具调 codegraph/graph/chroma); 缺后端 loop 仍跑但 grounding 低(真实信号, 不额外 skip)。
     """
-    rows = [r for r in load_jsonl("agent_e2e.jsonl")
+    rows = [r for r in load_jsonl(dataset)
             if r.get("project_id", project_id) == project_id]
     if not rows:
         return _skip(rows, f"无 project={project_id} 的 agent_e2e 用例")
@@ -136,11 +138,13 @@ def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=No
             "project_id": project_id, "metrics": aggregate(details), "details": details}
 
 
-def run_planner_e2e_ab(project_id: str, provider=None) -> dict:
-    """E4: 同种子集跑 3 个 planner 变体, 比答案质量 —— 验"分类更准→答案更好"。
+def run_planner_e2e_ab(project_id: str, provider=None,
+                       dataset: str = "agent_e2e.jsonl") -> dict:
+    """E4: 同数据集跑 3 个 planner 变体, 比答案质量 —— 验"分类更准→答案更好"。
 
     变体: off(planner 关) / keyword(planner 开, 关键词分类) / llm(planner 开, LLM 分类)。
-    ⚠️ 种子集小且 grounding 易饱和 → 是**趋势**非定论([[recall-weight-ab-finding]] 纪律)。
+    dataset=agent_e2e_hard.jsonl(口语化硬集, keyword 多误判 general)才能拉开 keyword vs llm 差;
+    易集上三变体趋同(分类一致 + grounding 饱和)。⚠️ 小集是**趋势**非定论([[recall-weight-ab-finding]])。
     """
     from codev_platform.agent.policy import LoopPolicy
 
@@ -149,7 +153,7 @@ def run_planner_e2e_ab(project_id: str, provider=None) -> dict:
         "keyword": LoopPolicy(planner_enabled=True, planner_llm_enabled=False),
         "llm": LoopPolicy(planner_enabled=True, planner_llm_enabled=True),
     }
-    reps = {name: run_agent_e2e(project_id, provider=provider, policy=pol)
+    reps = {name: run_agent_e2e(project_id, provider=provider, policy=pol, dataset=dataset)
             for name, pol in variants.items()}
     any_ok = any(r["status"] == "ok" for r in reps.values())
     n = next((r["n"] for r in reps.values() if "n" in r), 0)

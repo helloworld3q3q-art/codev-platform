@@ -1,0 +1,6 @@
+{"query": "顺着 recall_code 这条线摸下去,它最后落到哪些模块", "project_id": "codev-platform", "expect_type": "impact", "must_mention": ["fusion", "service"], "expect_tools": ["code_recall", "impact_analysis"], "note": "数据流/依赖, 口语化无关键词 → keyword 易判 general"}
+{"query": "帮我理一理这个项目从索引到查询大概怎么转起来的", "project_id": "codev-platform", "expect_type": "overview", "must_mention": ["MCP"], "expect_tools": ["code_recall", "search_docs", "list_dir"], "note": "整体如何运作, 无 overview 触发词"}
+{"query": "parse 那些 SQL 的活儿到底是哪段代码在干", "project_id": "codev-platform", "expect_type": "symbol", "must_mention": ["sql"], "expect_tools": ["code_recall", "codegraph_search"], "note": "符号定位, 哪段代码非关键词"}
+{"query": "改 recall 的融合权重会不会把别的地方带崩", "project_id": "codev-platform", "expect_type": "impact", "must_mention": ["weights", "fusion"], "expect_tools": ["code_recall", "impact_analysis"], "note": "改动影响面, 带崩非关键词"}
+{"query": "想知道 classify_query 这块代码具体长什么样子", "project_id": "codev-platform", "expect_type": "symbol", "must_mention": ["planner", "classify_query"], "expect_tools": ["code_recall", "codegraph_search"], "note": "符号源码, 长什么样非关键词"}
+{"query": "serve-mcp 起来之后那几个端口分别归谁管", "project_id": "codev-platform", "expect_type": "overview", "must_mention": ["serve-mcp"], "expect_tools": ["search_docs", "code_recall"], "note": "组件/端口概览, 归谁管非关键词"}

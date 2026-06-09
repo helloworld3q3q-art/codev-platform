@@ -107,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="agent_e2e: 额外 LLM-judge 给答案 1-5 主观质量分 (E3, 多一次 LLM 调用)")
     ap.add_argument("--planner-ab", action="store_true",
                     help="agent_e2e: 跑 planner off/keyword/llm 三变体比答案质量 (E4)")
+    ap.add_argument("--hard-e2e", action="store_true",
+                    help="agent_e2e: 用口语化硬集 agent_e2e_hard.jsonl (keyword 多误路由, 拉开 keyword vs llm)")
     args = ap.parse_args(argv)
 
     suites = list(_RUNNERS) if args.suite == "all" else [args.suite]
@@ -125,13 +127,14 @@ def main(argv: list[str] | None = None) -> int:
     runners = dict(_RUNNERS)
     if args.llm:
         runners["planner"] = lambda project, k: run_planner(provider=provider)
+    e2e_ds = "agent_e2e_hard.jsonl" if args.hard_e2e else "agent_e2e.jsonl"
     if args.planner_ab:
         runners["agent_e2e"] = lambda project, k: run_planner_e2e_ab(
-            project or DEFAULT_RECALL_PID, provider=provider)
+            project or DEFAULT_RECALL_PID, provider=provider, dataset=e2e_ds)
     else:
         runners["agent_e2e"] = lambda project, k: run_agent_e2e(
             project or DEFAULT_RECALL_PID, provider=provider,
-            judge_provider=(provider if args.judge else None))
+            judge_provider=(provider if args.judge else None), dataset=e2e_ds)
 
     results = [runners[s](args.project, args.k) for s in suites]
 

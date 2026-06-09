@@ -135,3 +135,11 @@ def test_planner_ab_three_variants_skip_without_provider():
     assert rep["status"] == "skipped"
     assert set(rep["variants"]) == {"off", "keyword", "llm"}   # 3 变体都在
     assert rep["n"] >= 1 and "reason" in rep                   # _print_human 安全
+
+
+def test_dataset_param_loads_hard_set():
+    # dataset 参数应切到硬集(6 case); 无 provider → skip 但 n 反映硬集规模。
+    rep = run_agent_e2e("codev-platform", provider=None, dataset="agent_e2e_hard.jsonl")
+    assert rep["status"] == "skipped" and rep["n"] == 6
+    ab = run_planner_e2e_ab("codev-platform", provider=None, dataset="agent_e2e_hard.jsonl")
+    assert ab["n"] == 6
