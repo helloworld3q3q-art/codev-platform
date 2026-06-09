@@ -67,6 +67,25 @@ def test_analyze_produces_soft_layer_nodes_and_edges():
     assert layer_of["p:file:web/repositories/order_repo.py"].endswith("repository")
 
 
+def test_db_nodes_excluded_from_plays_role():
+    # Fix-B(2026-06-09 四轮取证): db_table/db_column 是数据层, 不演**代码**架构层角色 →
+    # 不获 plays_role 边(否则一张宽表 N 列 / schema.sql 全被 fan-out 成 repository, 图谱膨胀
+    # ~4x + find_arch_role(列) 误返 repository)。代码节点仍正常获角色。
+    a = ArchLayerAnalyzer(FakeLayerLabeler())
+    fn = _func("repo/order_repo.py", "save")              # 代码节点(碰表 → repository)
+    col = GraphNode(id="p:db_column:orders.id", kind=NodeKind.DB_COLUMN, name="id",
+                    project_id="p", file="db/schema.sql")  # 数据层, 有 file
+    tbl = GraphNode(id="p:db_table:orders", kind=NodeKind.DB_TABLE, name="orders",
+                    project_id="p", file="db/schema.sql")
+    edges = [GraphEdge(source="p:backend_function:save", target="p:db_table:orders",
+                       kind=EdgeKind.READS_TABLE)]
+    res = a.analyze("p", [fn, col, tbl], edges)
+    sources = {e.source for e in res.edges}
+    assert "p:backend_function:save" in sources            # 代码节点获 plays_role
+    assert "p:db_column:orders.id" not in sources           # db 列不获
+    assert "p:db_table:orders" not in sources               # db 表不获
+
+
 def test_soft_isolation_kinds():
     # ARCH_LAYER / PLAYS_ROLE 被 schema 认作软(impact 默认过滤 + referential-integrity 的依据)。
     assert is_soft_node_kind(NodeKind.ARCH_LAYER.value)

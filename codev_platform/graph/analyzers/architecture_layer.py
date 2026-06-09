@@ -47,6 +47,12 @@ _FRONTEND_KINDS = frozenset({
     NodeKind.FRONTEND_API_CALL.value, NodeKind.FRONTEND_COMPONENT.value,
 })
 
+# 数据层 schema 节点(db_table/db_column)不演**代码**架构层角色 —— arch_layer 是代码结构维度,
+# 一个列/表不 plays_role controller/service/repository(它们靠 reads/writes_table 边与代码相连)。
+# 不排除会让一张宽表的 N 列、一个 schema.sql 全被 fan-out 成 plays_role:repository, 把图谱膨胀
+# ~4x 且 find_arch_role(列)误返 repository(2026-06-09 四轮取证根因)。
+_NON_CODE_KINDS = frozenset({NodeKind.DB_TABLE.value, NodeKind.DB_COLUMN.value})
+
 
 class ArchLayerAnalyzer:
     """架构分层 analyzer。LLM 经 LayerLabeler 注入(不直接依赖 brain)。"""
@@ -109,7 +115,10 @@ class ArchLayerAnalyzer:
             if not n.file:
                 continue
             node_file[n.id] = n.file
-            file_nodes.setdefault(n.file, []).append(n.id)
+            # plays_role 只对**代码节点**fan-out(排除 db_table/db_column 数据层节点);
+            # by_file 事实仍见全量节点(labeler 据完整上下文分类), 只是数据节点不获代码角色边。
+            if n.kind not in _NON_CODE_KINDS:
+                file_nodes.setdefault(n.file, []).append(n.id)
             fc = by_file.setdefault(n.file, {
                 "endpoint": False, "tables": set(), "functions": 0, "imp_out": 0, "imp_in": 0,
                 "is_frontend": file_kinds[n.file] <= _FRONTEND_KINDS, "is_page": False})
