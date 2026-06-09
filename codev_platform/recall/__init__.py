@@ -11,5 +11,6 @@ from codev_platform.recall.fusion import (
     LaneResult,
     weighted_rrf,
 )
+from codev_platform.recall.service import CodeRecallHit, recall_code
 
-__all__ = ["FusedHit", "LaneResult", "weighted_rrf"]
+__all__ = ["CodeRecallHit", "FusedHit", "LaneResult", "recall_code", "weighted_rrf"]
