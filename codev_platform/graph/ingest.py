@@ -15,7 +15,15 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from codev_platform.graph.schema import AnalyzerResult, EdgeKind, GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.schema import (
+    AnalyzerResult,
+    EdgeKind,
+    GraphEdge,
+    GraphNode,
+    NodeKind,
+    ProvSource,
+    stamp_provenance,
+)
 from codev_platform.graph.store import load_graph, open_store, upsert_result
 from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.registry import run_applicable
@@ -114,28 +122,33 @@ def _calls_pass(conn, project_id: str, report: IngestReport, repo_path: Path) ->
 
     merged = load_graph(conn, project_id)
     nodes = merged.nodes
-    # 先收集所有 resolver 产的边(带来源名), 再按 key 选 winner —— 避免"先到先得"误丢高置信边。
-    collected: list[tuple[str, GraphEdge]] = []
+    # 先收集所有 resolver 产的边(带来源名 + provenance 来源类), 再按 key 选 winner ——
+    # 避免"先到先得"误丢高置信边。prov_source 由各 resolver 声明(codegraph=ast 精确解析,
+    # fastapi=regex 名称 BFS); 未声明者保守视作 regex(候选), 让影响分析默认不当确定依赖。
+    collected: list[tuple[str, str, GraphEdge]] = []
     by_resolver: dict[str, int] = {}
     for r in applicable_resolvers(repo_path, nodes):
         by_resolver.setdefault(r.name, 0)  # 跑过即登记(哪怕 0 边 / 抛错), 审计可见
+        prov_src = getattr(r, "prov_source", ProvSource.REGEX.value)
         try:
             edges = r.resolve(repo_path, project_id, nodes)
         except Exception as exc:  # noqa: BLE001 — 单 resolver 失败不拖垮其余 + 整个 pass
             logger.warning("[calls] resolver %s failed: %r", r.name, exc)
             continue
         for e in edges:
-            collected.append((r.name, e))
+            collected.append((r.name, prov_src, e))
     # winner 选取: 同 (source,target,kind) 保留 confidence 最高者;并列不取代(严格 >),
     # 故 collected 的注册先后成为并列 tiebreak(codegraph 兜底先注册, 并列时兜底赢)。
-    best: dict[tuple[str, str, str], tuple[str, GraphEdge]] = {}
-    for name, e in collected:
+    best: dict[tuple[str, str, str], tuple[str, str, GraphEdge]] = {}
+    for name, prov_src, e in collected:
         key = (e.source, e.target, e.kind)
         cur = best.get(key)
-        if cur is None or e.confidence > cur[1].confidence:
-            best[key] = (name, e)
-    all_edges: list[GraphEdge] = [e for _, e in best.values()]
-    for name, _ in best.values():
+        if cur is None or e.confidence > cur[2].confidence:
+            best[key] = (name, prov_src, e)
+    all_edges: list[GraphEdge] = []
+    for name, prov_src, e in best.values():
+        stamp_provenance(e, prov_src, parser=name)  # 盖来源戳(src=ast/regex, parser=resolver 名)
+        all_edges.append(e)
         by_resolver[name] += 1  # 计数 = 该 resolver 最终赢下的边数(被盖过的不计)
     upsert_result(conn, project_id, AnalyzerResult(edges=all_edges, plugin=CALLS_PLUGIN))
     report.ingested.append(CALLS_PLUGIN)
@@ -184,8 +197,10 @@ def build_frontend_bridge_edges(nodes: list[GraphNode]) -> list[GraphEdge]:
         if mid is None or mid == n.id or (mid, n.id) in seen:
             continue
         seen.add((mid, n.id))
-        edges.append(GraphEdge(source=mid, target=n.id,
-                               kind=EdgeKind.CONTAINS.value, confidence=1.0))
+        e = GraphEdge(source=mid, target=n.id,
+                      kind=EdgeKind.CONTAINS.value, confidence=1.0)
+        stamp_provenance(e, ProvSource.BRIDGE, parser=FRONTEND_BRIDGE_PLUGIN)
+        edges.append(e)
     return edges
 
 
@@ -210,6 +225,8 @@ def _link_pass(conn, project_id: str, report: IngestReport) -> None:
         n for n in merged.nodes if n.kind == NodeKind.BACKEND_ENDPOINT.value
     ]
     edges = _stack_scan.link_api_calls(frontend, backend)
+    for e in edges:  # 框架语义适配: frontend_api_call→endpoint, src=framework
+        stamp_provenance(e, ProvSource.FRAMEWORK, parser=LINKER_PLUGIN)
     upsert_result(
         conn, project_id, AnalyzerResult(edges=edges, plugin=LINKER_PLUGIN)
     )

@@ -8,11 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codev_platform.graph.schema import GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.schema import GraphEdge, GraphNode, NodeKind, ProvSource
 
 
 class CodegraphCallResolver:
     name = "codegraph"
+    prov_source = ProvSource.AST.value  # 结构化精确解析(codegraph 调用图), 影响分析可采信
 
     def applies(self, repo: Path, nodes: list[GraphNode]) -> bool:
         # 有 endpoint + function 节点才有可连的调用边(跨语言兜底, 不挑栈)。

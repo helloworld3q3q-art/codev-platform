@@ -17,9 +17,10 @@ import ast
 from pathlib import Path
 
 from codev_platform.graph.call_resolvers._bfs import build_call_edges
-from codev_platform.graph.schema import GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.schema import GraphEdge, GraphNode, NodeKind, ProvSource
 
 _NAME = "fastapi"
+_PROV_SOURCE = ProvSource.REGEX.value  # 名称启发式 BFS(DI 盲区): 候选边, 非确定依赖
 _CONF = 0.65  # < codegraph 0.7: 精确解析优先, 本 resolver 只补 codegraph 的 DI 盲区空白
 _MAX_DEPTH = 3      # 真实 DI 链 handler→service.method→self._store.upsert(碰表) 仅 2-3 跳;
                     # 全局名字合并下深度越大越易跨模块串台(假阳性), 故收紧到 3。
@@ -54,6 +55,7 @@ class FastApiCallResolver:
     """Python endpoint handler --calls--> 碰表 backend_function(穿透 DI, 方法名 BFS)。"""
 
     name = _NAME
+    prov_source = _PROV_SOURCE
 
     def applies(self, repo: Path, nodes: list[GraphNode]) -> bool:
         kinds = {n.kind for n in nodes}
