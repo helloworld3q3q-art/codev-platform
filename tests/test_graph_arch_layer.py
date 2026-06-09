@@ -248,3 +248,15 @@ def test_brain_labeler_frontend_backend_vocab_isolation():
                              FileFact("f2", "svc.py", is_frontend=False)))
     [out] = BrainLayerLabeler(provider=_Prov()).label([req])
     assert out.roles == (("f1", "page"),)   # 只前端 file+前端角色保留, 两个跨词表都剔
+
+
+def test_arch_cache_key_includes_is_page_and_is_frontend():
+    # P2#3: is_page / is_frontend 变化(普通模块→前端页)必须使缓存键变 → labeler 重跑,
+    # 否则文件变前端页时旧角色标签被陈旧复用。
+    from codev_platform.graph.analyzers.layer_labeler import FileFact, FakeLayerLabeler, LayerRequest
+    a = ArchLayerAnalyzer(FakeLayerLabeler())
+    base = LayerRequest("d", (FileFact("f1", "x.tsx", is_page=False, is_frontend=False),))
+    page = LayerRequest("d", (FileFact("f1", "x.tsx", is_page=True, is_frontend=False),))
+    front = LayerRequest("d", (FileFact("f1", "x.tsx", is_page=False, is_frontend=True),))
+    assert a._cache_key(base) != a._cache_key(page)       # is_page 变 → key 变
+    assert a._cache_key(base) != a._cache_key(front)      # is_frontend 变 → key 变

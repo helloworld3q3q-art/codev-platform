@@ -236,9 +236,12 @@ class ArchLayerAnalyzer:
         return labels
 
     def _cache_key(self, req):
+        # is_frontend / is_page 影响 labeler 词表与角色判定(前端 page/component vs 后端层),
+        # 必须纳入缓存键 —— 否则文件从普通模块变前端页时, 旧角色标签被陈旧复用(安全审计 P2#3)。
         payload = json.dumps(
             {"f": [[f.ref, f.path, f.has_endpoint, f.reads_tables, f.imports_out,
-                    f.imports_in, f.defines_functions] for f in req.files],
+                    f.imports_in, f.defines_functions, f.is_frontend, f.is_page]
+                   for f in req.files],
              "sig": getattr(self._labeler, "signature", "")},
             sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()

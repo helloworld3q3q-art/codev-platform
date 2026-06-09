@@ -30,3 +30,13 @@ def test_complete_known_kind_still_works(tmp_path):
     job = Job("demo-proj", "chroma", f.stat().st_mtime)
     assert q.complete(job) is True
     assert not f.exists()
+
+
+def test_complete_literal_dotdot_file_is_deleted(tmp_path):
+    # 残留坏文件(安全审计 P2#4): spool 里 literal '..' 片段名的文件(pending 读得到, 原逻辑
+    # 只 return True 不删 → 永久重处理)。resolved 仍在 spool 内 → 现在应被删。
+    q = FileSpoolQueue(tmp_path)
+    f = tmp_path / "..__chroma"            # pid='..' 的坏 spool 文件(literal 名, 非路径穿越)
+    f.write_text("")
+    assert q.complete(Job("..", "chroma", f.stat().st_mtime)) is True
+    assert not f.exists()                   # 已删, 不再无限重处理
