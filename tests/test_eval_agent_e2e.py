@@ -5,7 +5,32 @@
 """
 from __future__ import annotations
 
-from eval.suites.agent_e2e import aggregate, run_agent_e2e, score_case
+from codev_platform.agent.brain import AssistantTurn, LLMProvider
+from eval.suites.agent_e2e import (
+    _parse_score,
+    aggregate,
+    judge_answer,
+    run_agent_e2e,
+    run_planner_e2e_ab,
+    score_case,
+)
+
+
+class _TextProvider(LLMProvider):
+    name, model = "fake", "m"
+
+    def __init__(self, text):
+        self._text = text
+
+    def chat(self, system, messages, tools):
+        return AssistantTurn(text=self._text, tool_calls=[], stop_reason="end")
+
+
+class _BoomProvider(LLMProvider):
+    name, model = "boom", "m"
+
+    def chat(self, system, messages, tools):
+        raise RuntimeError("down")
 
 
 def test_score_full_coverage_clean():
@@ -66,3 +91,47 @@ def test_run_skips_without_provider():
 def test_run_skips_unknown_project():
     rep = run_agent_e2e("no-such-project", provider=None)
     assert rep["status"] == "skipped"
+
+
+# ---- E3 judge ----
+
+def test_parse_score():
+    assert _parse_score("4") == 4
+    assert _parse_score("评分: 5 分") == 5
+    assert _parse_score("无法判断") is None
+    assert _parse_score(None) is None
+    assert _parse_score("9") is None          # 超 1-5 范围(只认 1-5 字符)
+
+
+def test_judge_answer_valid_and_fallback():
+    case = {"query": "q", "rubric": "r"}
+    assert judge_answer(case, "ans", _TextProvider("4")) == 4
+    assert judge_answer(case, "ans", _TextProvider("garbage")) is None
+    assert judge_answer(case, "ans", _BoomProvider()) is None   # provider 故障 → None
+    assert judge_answer(case, "ans", None) is None
+
+
+def test_aggregate_includes_judge_when_present():
+    details = [
+        {"grounding_coverage": 1.0, "hallucinated": [], "tool_appropriate": True,
+         "within_budget": True, "judge_score": 5},
+        {"grounding_coverage": 1.0, "hallucinated": [], "tool_appropriate": True,
+         "within_budget": True, "judge_score": 3},
+    ]
+    agg = aggregate(details)
+    assert agg["judge_score_avg"] == 4.0 and agg["judged_n"] == 2
+
+
+def test_aggregate_no_judge_key_when_absent():
+    details = [{"grounding_coverage": 1.0, "hallucinated": [], "tool_appropriate": True,
+                "within_budget": True}]
+    assert "judge_score_avg" not in aggregate(details)
+
+
+# ---- E4 planner A/B ----
+
+def test_planner_ab_three_variants_skip_without_provider():
+    rep = run_planner_e2e_ab("codev-platform", provider=None)
+    assert rep["status"] == "skipped"
+    assert set(rep["variants"]) == {"off", "keyword", "llm"}   # 3 变体都在
+    assert rep["n"] >= 1 and "reason" in rep                   # _print_human 安全

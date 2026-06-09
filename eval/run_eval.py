@@ -28,7 +28,7 @@ from eval.suites._common import (  # noqa: E402
     DEFAULT_RECALL_PID,
     DEFAULT_RETRIEVAL_PID,
 )
-from eval.suites.agent_e2e import run_agent_e2e  # noqa: E402
+from eval.suites.agent_e2e import run_agent_e2e, run_planner_e2e_ab  # noqa: E402
 from eval.suites.code_intelligence import run_code_intelligence  # noqa: E402
 from eval.suites.codegraph import run_codegraph  # noqa: E402
 from eval.suites.memory import run_memory  # noqa: E402
@@ -103,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-k", type=int, default=5, help="retrieval/recall top-k (默认 5)")
     ap.add_argument("--llm", action="store_true",
                     help="planner suite: 额外用配置的 LLM provider 跑 keyword vs LLM A/B (需 WSL + key)")
+    ap.add_argument("--judge", action="store_true",
+                    help="agent_e2e: 额外 LLM-judge 给答案 1-5 主观质量分 (E3, 多一次 LLM 调用)")
+    ap.add_argument("--planner-ab", action="store_true",
+                    help="agent_e2e: 跑 planner off/keyword/llm 三变体比答案质量 (E4)")
     args = ap.parse_args(argv)
 
     suites = list(_RUNNERS) if args.suite == "all" else [args.suite]
@@ -121,8 +125,13 @@ def main(argv: list[str] | None = None) -> int:
     runners = dict(_RUNNERS)
     if args.llm:
         runners["planner"] = lambda project, k: run_planner(provider=provider)
-    runners["agent_e2e"] = lambda project, k: run_agent_e2e(project or DEFAULT_RECALL_PID,
-                                                            provider=provider)
+    if args.planner_ab:
+        runners["agent_e2e"] = lambda project, k: run_planner_e2e_ab(
+            project or DEFAULT_RECALL_PID, provider=provider)
+    else:
+        runners["agent_e2e"] = lambda project, k: run_agent_e2e(
+            project or DEFAULT_RECALL_PID, provider=provider,
+            judge_provider=(provider if args.judge else None))
 
     results = [runners[s](args.project, args.k) for s in suites]
 
