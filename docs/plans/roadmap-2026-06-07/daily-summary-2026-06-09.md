@@ -177,3 +177,18 @@ WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 fa
 - **策略门**: `LoopPolicy.planner_llm_enabled`(**默认全档关**, registry 解析 + config 逐 provider 开); loop 按 policy 把同一 provider 注入 `plan_query`。determinism-first: 多一次分类 LLM 调用的取舍未经 A/B 不默认开。
 - 测: +10(fake provider 测分类解析/兜底/precedence/plan_query 集成, 不连真模型)。WSL 全量 **1381 passed / 0 failed**。commit `39b7f3b`。
 - **待 WSL A/B**(后续): enable `planner_llm_enabled` 后跑硬集 keyword vs LLM, 量 LLM 实际提升 → 决定是否某档默认开;**agent 端到端 eval**(完整回答质量, 非仅分类准确率)是 Phase 7 完整版剩余大块。
+
+## 二十三、planner LLM A/B 实测(deepseek 真跑)—— LLM planner 验证有效
+
+加 A/B 管线(`run_planner(provider=)` + `run_eval --llm`, oracle 单测验管线), WSL 真 deepseek 跑 `--suite planner --llm`:
+
+| 数据集 | 关键词 | LLM(smart) | delta |
+|---|---|---|---|
+| 标准集(关键词调过) | 1.0 | 0.938 | −0.062(1 例) |
+| **硬集(口语化/无关键词)** | **0.267** | **1.0** | **+0.733** |
+
+**结论**: LLM planner 在真实口语化问法上 **+0.733**(0.267→1.0), 正是关键词盲区被补上; 代价是标准合成集偶有 LLM-first 覆盖关键词已对的 1 例。**净判定: LLM planner 实证有效。**
+
+**不做(纪律)**: 不据这 31 例 overfit "关键词置信优先 + LLM 兜底" 混合策略 —— 标准 −0.062 是单例/合成集噪声, 不足以推翻 LLM-first 的简单设计([[recall-weight-ab-finding]]: 小集别上窄杠杆)。LLM planner 保持**默认关 + config 逐 provider 可开**, 收益已实证。要默认开某档需更大评测集 + 权衡每查询多一次 LLM 调用的延迟/成本。commit `7a76bfb`。
+
+**Phase 7 完整版剩余**: ① 是否给某档默认开 `planner_llm_enabled`(需更大集 + 延迟权衡)② **agent 端到端 eval**(完整回答质量, 最后大块)。
