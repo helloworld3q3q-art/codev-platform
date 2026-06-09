@@ -15,12 +15,12 @@
 | 5 | `graph audit --all --json` 忽略 JSON | P2 | ✅ 已修 | `--all` 加 JSON 分支，退出码不变 |
 | 6 | pre-push 注释 vs duplicate nodes 是 warning | P2 | ✅ 已修 | 注释修正：duplicate nodes/edges 是 warning |
 | 7 | `create_app(cfg)` 与全局服务绑定可能不同配置 | P2 | ⏸️ 延后 | 单实例生产 config 一致（同一 load_config），影响主要在测试注入/多实例；正确修是 DI 重构，改动大、回退风险，按真实需求触发再做 |
-| 8 | 多 org membership 但登录取第一个 org | P2 | ⏸️ 待决策 | 需**产品决策**（单 org 用户 vs 多 org 会话模型），非工程可代拍 |
+| 8 | 多 org membership 但登录取第一个 org | P2 | ✅ 已决策(现状符合) | 产品定**多 org 模型**:登录默认第一个 org(intended)、切换走前端 + 请求级 `X-Org-Id`。验证 `resolve_org_from_request`(core/identity.py)按 X-Org-Id 解析当前 org(非登录默认)→ 选定 org 能正常访问/操作,现状即符合模型,**无需改**。残留 follow-up:`set_roles` 的 `org_id==user.org_id` 单一归属假设(admin 给用户在非首 org 设角色被挡)—— admin RBAC 边界 + 安全敏感,多 org 角色管理真要时单独做 |
 | 9 | `find_arch_violations` count 是截断后数量 | P3 | ✅ 已修 | 加 `returnedCount/totalCount/truncated` |
 | 10 | graph audit 聚合扫描非只读 | P3 | ⏸️ 延后 | open_store 仅 WAL + 幂等迁移（稳态无副作用）；改 read-only 有旧 schema 迁移失败风险，需谨慎兜底，P3 暂缓 |
 | 11 | 生产代码 ruff 2 条 | P3 | ✅ 已修 | `zip(strict=True)`；删未用 `repo` |
 
-**净结果**: P1 两条(安全)全修+验证；P2/P3 清单里 6 条已修(#3/#4/#5/#6/#9/#11)，3 条带理由延后(#7 重构、#8 产品决策、#10 P3 迁移风险)。
+**净结果**: P1 两条(安全)全修+验证；P2/P3 清单 6 条已修(#3/#4/#5/#6/#9/#11)+ #8 产品决策确认(多 org 模型,现状即符合,无需改);仅 2 条带理由延后(#7 config DI 重构、#10 P3 只读迁移风险)。
 
 ## 覆盖范围
 
