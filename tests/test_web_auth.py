@@ -25,7 +25,12 @@ _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
 
 
 @pytest.fixture(autouse=True)
-def _isolate():
+def _isolate(monkeypatch):
+    # 本套是 dev/passthrough 内存路径测试 (角色写进内存 member_store)。但在配了 memory.pg_dsn
+    # 的环境 (如 WSL) get_rbac_store 会返回真 PG store, resolve_membership 优先查它 (空) 而越过
+    # 内存 store → 角色空/403。强制 _pg_rbac_store→None, 让本套确定走内存路径 (PG RBAC 路径由
+    # test_web_db_stores_sqlite / test_rbac_wire 等专测)。
+    monkeypatch.setattr("codev_platform.web.security.membership._pg_rbac_store", lambda: None)
     reset_account_stores()
     session_store.clear()
     yield

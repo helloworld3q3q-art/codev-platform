@@ -73,7 +73,10 @@ def _app(meta_dir) -> TestClient:
 
 
 @pytest.fixture(autouse=True)
-def _reset_state():
+def _reset_state(monkeypatch):
+    # dev/passthrough 内存路径测试: 配了 memory.pg_dsn 的环境 (WSL) 下 get_rbac_store 返真 PG
+    # store, resolve_membership 优先查它 (空) 越过内存 member_store → 鉴权全 403。强制走内存路径。
+    monkeypatch.setattr("codev_platform.web.security.membership._pg_rbac_store", lambda: None)
     project_write_repo._LOADED.clear()
     session_store.clear()
     reset_account_stores()

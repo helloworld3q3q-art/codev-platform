@@ -73,6 +73,9 @@ def test_projects_list_filters_by_org(monkeypatch):
     # platform admin 仅 "super"; 其余按 org 角色判。
     monkeypatch.setattr(ps, "is_platform_admin", lambda c, u: u == "super")
     monkeypatch.setattr(mem, "is_platform_admin", lambda c, u: u == "super")
+    # 配了 memory.pg_dsn 的环境 (WSL) 下 _pg_rbac_store 返真 PG store (空) 越过内存 member_store
+    # → org admin 看不到本 org 项目。本测试走内存路径, 强制 None。
+    monkeypatch.setattr(mem, "_pg_rbac_store", lambda: None)
 
     reset_account_stores()
     get_member_store().upsert(OrgMember(org_id="orgA", username="a", role="admin"))
