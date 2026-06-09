@@ -125,6 +125,31 @@ def test_arch_layer_axis_assessed(tmp_path):
     assert any("架构层" in f and "巨型" in f for f in rep["flags"])
 
 
+def test_giant_not_triggered_by_method_density(tmp_path):
+    # 回归(2026-06-09 四轮取证): 方法/列密集文件(Mapper 多方法 / 宽表多列)在**节点口径**下
+    # 会把一个角色占比虚高误报 giant; **文件口径**不虚高。
+    # repository: 20 方法挤在 4 个 Mapper 文件(5/文件); service/controller: 各 4 方法/4 文件。
+    # 文件均衡(各 4/12=33%)→ 不报 giant; 但节点口径 repository 20/28=71% 会误报。
+    nodes: list[GraphNode] = [_layer("repository"), _layer("service"), _layer("controller")]
+    edges = []
+    for role, files, per in (("repository", 4, 5), ("service", 4, 1), ("controller", 4, 1)):
+        for fi in range(files):
+            for mi in range(per):
+                nid = f"{role}_{fi}_{mi}"
+                nodes.append(GraphNode(id=nid, kind=NodeKind.BACKEND_FUNCTION.value,
+                                       name=nid, project_id=PID, file=f"{role}{fi}.java"))
+                edges.append(_plays(nid, role))
+    conn = _seed(tmp_path, nodes, edges)
+    rep = assess_soft_labels(conn, PID)
+    conn.close()
+    repo = next(d for d in rep["layers"]["distribution"] if d["name"] == "repository")
+    assert repo["members"] == 20 and repo["files"] == 4   # 20 节点但仅 4 文件
+    assert repo["share"] < 0.5                              # 文件口径 33%(节点口径会 71% 误报)
+    assert "repository" not in [g["name"] for g in rep["layers"]["giant"]]
+    assert rep["layers"]["giant"] == []                    # 文件均衡 → 全不报
+    assert rep["healthy"] is True
+
+
 def test_render_markdown_smoke(tmp_path):
     nodes = [_ep(1), _ep(2), _domain("订单")]
     edges = [_belongs("e1", "订单"), _belongs("e2", "订单")]
