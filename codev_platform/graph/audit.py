@@ -28,7 +28,7 @@ from codev_platform.graph.schema import (
     is_soft_edge_kind,
     is_soft_node_kind,
 )
-from codev_platform.graph.store import load_graph, open_store
+from codev_platform.graph.store import load_graph
 
 _LOW_CONF = 0.7
 _SAMPLE = 10
@@ -175,8 +175,42 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
     }
 
 
+def _unreadable_report(project_id: str, reason: str) -> dict:
+    """读不动的 store 的占位报告: 全零结构 + audit_error 原因, 计 1 error(不崩门禁但可见)。
+
+    形状与 audit_graph 返回完全一致(CLI 汇总行 / render_markdown 依赖这些键), 额外带
+    audit_error 字段标注无法审计的原因。
+    """
+    return {
+        "project_id": project_id,
+        "totals": {"nodes": 0, "edges": 0, "soft_nodes": 0, "soft_edges": 0},
+        "errors": {
+            "dangling_edges": {"count": 0, "samples": []},
+            "cross_project_nodes": {"count": 0, "foreign_project_ids": []},
+            "cross_project_edges": {"count": 0, "foreign_project_ids": []},
+            "orphan_soft_plugins": {"count": 0, "plugins": [],
+                                    "canonical": _canonical_soft_plugin()},
+        },
+        "warnings": {
+            "duplicate_nodes": {"count": 0, "samples": []},
+            "low_confidence_edges": {"count": 0, "threshold": _LOW_CONF,
+                                     "by_kind": {}, "samples": []},
+            "no_provenance_edges": {"count": 0, "by_kind": {}, "samples": []},
+            "duplicate_edges": {"count": 0, "by_kind": {}, "samples": []},
+        },
+        "audit_error": reason,
+        "error_count": 1,
+        "clean": False,
+    }
+
+
 def audit_all_stores(graph_store_dir) -> dict:
     """门禁聚合: 审计某目录下所有 `<pid>.sqlite` graph store, 汇总结构 error。
+
+    **只读门禁**(2026-06-09 audit #10): 用 read-only 连接(`mode=ro`)打开每个 store, 绝不
+    建目录 / 设 WAL / 跑迁移 / 建表 —— audit 是纯读门禁, 不该顺手改本地 sqlite(schema 迁移
+    / 建表是写侧 ingest 的职责)。旧 schema(edges 缺 project_id 列)read-only 读不动 → 该
+    store 记一条 audit_error(不崩门禁, 但计 1 error 让操作者知道需 reindex 迁移到当前 schema)。
 
     返回 {projects: [pid...], reports: {pid: report}, total_errors: int}。
     目录不存在 / 无 store → projects 空 + total_errors 0(调用方据此优雅跳过, 不阻断)。
@@ -189,11 +223,18 @@ def audit_all_stores(graph_store_dir) -> dict:
     reports: dict[str, dict] = {}
     total = 0
     for pid in pids:
-        conn = open_store(pid, path=d / f"{pid}.sqlite")
+        db = d / f"{pid}.sqlite"
         try:
-            rep = audit_graph(conn, pid)
-        finally:
-            conn.close()
+            # file: URI + mode=ro = 纯只读(不创建/不写 schema)。as_uri 处理路径转义(空格/反斜杠)。
+            conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True)
+            try:
+                rep = audit_graph(conn, pid)
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            # 旧 schema / 坏库 read-only 读不动: 记 error, 不崩门禁(迁移留给写侧 ingest)。
+            rep = _unreadable_report(
+                pid, f"只读审计失败({exc}); 该 store 可能需 reindex 迁移到当前 schema")
         reports[pid] = rep
         total += rep["error_count"]
     return {"projects": pids, "reports": reports, "total_errors": total}
@@ -201,6 +242,10 @@ def audit_all_stores(graph_store_dir) -> dict:
 
 def render_markdown(report: dict) -> str:
     """把审计报告渲染成可读 markdown。"""
+    if report.get("audit_error"):
+        # 读不动的 store: 全零结构无意义, 只报无法审计的原因(避免误读成 "0 问题 clean")。
+        return (f"# graph audit — {report['project_id']}\n\n"
+                f"- ❌ 无法审计: {report['audit_error']}")
     t = report["totals"]
     verdict = "✅ clean (无结构 error)" if report["clean"] else f"❌ {report['error_count']} 个 error"
     lines = [

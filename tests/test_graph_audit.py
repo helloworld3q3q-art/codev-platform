@@ -137,9 +137,64 @@ def test_audit_all_stores_gate(tmp_path):
 
 
 def test_audit_all_stores_empty_dir_skips(tmp_path):
-    # 无 store 目录 → 空 + 0 error(门禁优雅跳过, 不阻断 push)。
-    agg = audit_all_stores(tmp_path / "nope")
+    # 无 store 目录 → 空 + 0 error(门禁优雅跳过, 不阻断 push)。审计不该建目录(纯只读)。
+    nope = tmp_path / "nope"
+    agg = audit_all_stores(nope)
     assert agg["projects"] == [] and agg["total_errors"] == 0
+    assert not nope.exists()   # #10: 只读门禁不创建目录
+
+
+def test_audit_all_stores_readonly_no_mutation(tmp_path):
+    # #10: audit_all_stores 用 read-only 连接, 不跑迁移/DDL → store 文件字节不变。
+    import hashlib
+
+    gs = tmp_path / "graph_store"
+    gs.mkdir()
+    c = open_store("p1", path=gs / "p1.sqlite")
+    upsert_result(c, "p1", AnalyzerResult(
+        plugin="t", plugin_version="0",
+        nodes=[GraphNode(id="a", kind=NodeKind.BACKEND_FUNCTION.value, name="a",
+                         project_id="p1", file="a.py")],
+        edges=[], evidences=[], findings=[]))
+    c.commit()
+    c.close()
+    db = gs / "p1.sqlite"
+    before = hashlib.sha256(db.read_bytes()).hexdigest()
+    agg = audit_all_stores(gs)
+    after = hashlib.sha256(db.read_bytes()).hexdigest()
+    assert agg["reports"]["p1"]["clean"] is True
+    assert before == after   # 只读审计不改 db 内容(无迁移 / 无 DDL)
+
+
+def test_audit_all_stores_old_schema_records_error(tmp_path):
+    # #10: 旧 schema(edges 缺 project_id 列)read-only 读不动 → 记 audit_error, 不崩门禁。
+    import sqlite3
+
+    gs = tmp_path / "graph_store"
+    gs.mkdir()
+    conn = sqlite3.connect(gs / "old.sqlite")
+    conn.executescript(
+        "CREATE TABLE nodes (id TEXT, plugin TEXT, kind TEXT, name TEXT, "
+        "project_id TEXT, file TEXT, line INTEGER, language TEXT, meta_json TEXT, "
+        "PRIMARY KEY (id, plugin));"
+        # 旧 edges: 无 project_id 列 → load_graph 的 WHERE project_id 会抛
+        "CREATE TABLE edges (plugin TEXT, source TEXT, target TEXT, kind TEXT, "
+        "confidence REAL, meta_json TEXT, PRIMARY KEY (plugin, source, target, kind));"
+    )
+    conn.execute(
+        "INSERT INTO nodes VALUES ('a','t','backend_function','a','old','a.py',NULL,NULL,NULL)")
+    conn.commit()
+    conn.close()
+
+    agg = audit_all_stores(gs)   # 不抛
+    rep = agg["reports"]["old"]
+    assert rep.get("audit_error")          # 记了原因
+    assert rep["clean"] is False
+    assert rep["error_count"] == 1
+    assert agg["total_errors"] >= 1
+    # render_markdown 能渲染 audit_error 报告(不 KeyError)
+    md = render_markdown(rep)
+    assert "无法审计" in md
 
 
 def test_render_markdown_smoke(tmp_path):

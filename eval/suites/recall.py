@@ -17,11 +17,19 @@ def _recall_per_query(hits: list, expect: str) -> tuple[list[str], set[str], int
 
     相关性按**模式匹配**(hit 的 name/file 含 expect 子串)—— 与 codegraph suite 同法,
     bootstrap golden 不必枚举具体 node id(store-agnostic)。
+
+    **只标真实现 ref**(2026-06-09 audit #1): 测试代码(test_ 函数 / tests 目录 / *_test.py /
+    *.spec.ts)即使 name/file 含 expect 子串也**不算相关** —— golden 要的是实现 ref, 同名测试
+    (如 test_weighted_rrf 之于 weighted_rrf)只是噪声, 计进相关会虚高 nDCG。判据复用 service
+    的 `_is_test_hit`(单一真值源, 与 lane 内降权用的同一定义), 不在 eval 侧重写启发式。
     """
+    from codev_platform.recall.service import _is_test_hit
+
     retrieved = [str(i) for i in range(len(hits))]
     relevant = {
         str(i) for i, h in enumerate(hits)
         if any(expect in (getattr(h, f, None) or "") for f in _RECALL_RELEVANT_FIELDS)
+        and not _is_test_hit(getattr(h, "name", None), getattr(h, "file", None))
     }
     rank = next((i + 1 for i in range(len(hits)) if str(i) in relevant), -1)
     return retrieved, relevant, rank
