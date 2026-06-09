@@ -135,3 +135,19 @@ def test_ambiguous_name_returns_candidates(tmp_path):
     assert {a["file"] for a in r["ambiguous"]} == {"a.py", "b.py"}
     # 精确 id 仍可解析
     assert find_api_callers(c, "p2", n1.id)["found"] is True
+
+
+def test_search_nodes_multiword_ranks_by_term_hits(conn):
+    # 多词 query: 整串"save user"匹配不到任何 name(旧行为 0 命中); 分词后 save_user 命中
+    # save+user 两词排第一, 修复 graph lane 多词检索弱点(直接提升融合召回质量)。
+    from codev_platform.graph.impact import search_nodes
+    r = search_nodes(conn, _PID, "save user")
+    assert r["count"] >= 1
+    assert r["hits"][0]["name"] == "save_user"   # 命中 2 词, 排第一
+
+
+def test_search_nodes_single_word_unchanged(conn):
+    # 单词行为不变: 所有 name 含该词的节点都入选。
+    from codev_platform.graph.impact import search_nodes
+    names = {h["name"] for h in search_nodes(conn, _PID, "user")["hits"]}
+    assert {"save_user", "create_user", "users"} <= names

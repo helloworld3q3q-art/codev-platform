@@ -348,22 +348,28 @@ def find_node_domain(conn, project_id: str, node_ref: str) -> dict:
 
 def search_nodes(conn, project_id: str, query: str, kind: str = "all",
                  limit: int = 50) -> dict:
-    """模糊搜节点(name 含 query, 可选 kind 过滤)。读已落库, 不调 LLM。
+    """模糊搜节点(name 命中 query 词, 可选 kind 过滤)。读已落库, 不调 LLM。
 
-    含软节点(include_soft=True), 业务域名也能搜到。对齐 cross-link `search_nodes` 语义
-    (退役 cross-link 后由本工具承接)。
+    含软节点(include_soft=True), 业务域名也能搜到。对齐 cross-link `search_nodes` 语义。
+    **多词 query 按逐词命中数排序**(命中越多越相关, 至少 1 词即入选): 单词时 = 原"子串命中
+    name"行为不变; 多词时不再要求整串连续子串(原"impact analysis"整串匹配不到任何 name → 0
+    命中的弱点), 让跨 lane 融合召回的 graph lane 对多词 query 也出有序结果。
     """
     g = build_impact_graph(conn, project_id, include_soft=True)
-    low = (query or "").strip().lower()
-    if not low:
+    terms = [t for t in (query or "").strip().lower().split() if t]
+    if not terms:
         return {"query": query, "kind": kind, "hits": [], "count": 0}
-    hits = [
-        _node_brief(n) for n in g.nodes.values()
-        if low in (n.name or "").lower() and (kind in ("all", "") or n.kind == kind)
-    ]
-    hits.sort(key=lambda h: (h["kind"], h["name"]))
-    capped = hits[: max(0, int(limit))]
-    return {"query": query, "kind": kind, "hits": capped, "count": len(capped)}
+    scored: list[tuple[int, GraphNode]] = []
+    for n in g.nodes.values():
+        if kind not in ("all", "") and n.kind != kind:
+            continue
+        name = (n.name or "").lower()
+        score = sum(1 for t in terms if t in name)   # 命中词数(0 = 不入选)
+        if score:
+            scored.append((score, n))
+    scored.sort(key=lambda x: (-x[0], x[1].kind, x[1].name or ""))   # 命中多者优先, 稳定次序
+    hits = [_node_brief(n) for _, n in scored[: max(0, int(limit))]]
+    return {"query": query, "kind": kind, "hits": hits, "count": len(hits)}
 
 
 def list_domain_members(conn, project_id: str, domain_name: str) -> dict:
