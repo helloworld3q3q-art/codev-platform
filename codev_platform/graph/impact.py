@@ -346,28 +346,53 @@ def find_node_domain(conn, project_id: str, node_ref: str) -> dict:
     return {"found": True, "node": _node_brief(node), "domains": sorted(set(domains))}
 
 
+def _name_relevance(name: str, terms: list[str], full: str) -> tuple | None:
+    """search_nodes 相关性排序键(可比较 tuple, **越小越相关**); 命中 0 词返回 None。
+
+    分级(对齐 codegraph suite `name=? DESC, length ASC` 思路, 提升相关项 lane 内 rank):
+    每词 精确名==词(3) > 前缀(2) > 子串(1); 命中词多优先; 整串(name 恰好/前缀是整个 query)
+    额外强加权; 同档**短名优先**(匹配更聚焦, 不被长名稀释)。name 已小写。
+    """
+    matched = 0
+    quality = 0
+    for t in terms:
+        if name == t:
+            quality += 3
+            matched += 1
+        elif name.startswith(t):
+            quality += 2
+            matched += 1
+        elif t in name:
+            quality += 1
+            matched += 1
+    if not matched:
+        return None
+    whole = 2 if name == full else (1 if name.startswith(full) else 0)
+    return (-matched, -whole, -quality, len(name))   # 升序排 → 越相关越靠前
+
+
 def search_nodes(conn, project_id: str, query: str, kind: str = "all",
                  limit: int = 50) -> dict:
     """模糊搜节点(name 命中 query 词, 可选 kind 过滤)。读已落库, 不调 LLM。
 
     含软节点(include_soft=True), 业务域名也能搜到。对齐 cross-link `search_nodes` 语义。
-    **多词 query 按逐词命中数排序**(命中越多越相关, 至少 1 词即入选): 单词时 = 原"子串命中
-    name"行为不变; 多词时不再要求整串连续子串(原"impact analysis"整串匹配不到任何 name → 0
-    命中的弱点), 让跨 lane 融合召回的 graph lane 对多词 query 也出有序结果。
+    **分词 + 相关性分级排序**(_name_relevance): 命中词多 > 精确/前缀 > 子串 > 短名。单词子串
+    命中行为兼容原版; 多词不再要求整串连续子串(原"impact analysis"整串匹配不到任何 name → 0
+    命中的弱点), 让跨 lane 融合召回的 graph lane 出**有序**结果(相关项排前 → 融合质量↑)。
     """
     g = build_impact_graph(conn, project_id, include_soft=True)
     terms = [t for t in (query or "").strip().lower().split() if t]
     if not terms:
         return {"query": query, "kind": kind, "hits": [], "count": 0}
-    scored: list[tuple[int, GraphNode]] = []
+    full = " ".join(terms)
+    scored: list[tuple[tuple, GraphNode]] = []
     for n in g.nodes.values():
         if kind not in ("all", "") and n.kind != kind:
             continue
-        name = (n.name or "").lower()
-        score = sum(1 for t in terms if t in name)   # 命中词数(0 = 不入选)
-        if score:
-            scored.append((score, n))
-    scored.sort(key=lambda x: (-x[0], x[1].kind, x[1].name or ""))   # 命中多者优先, 稳定次序
+        key = _name_relevance((n.name or "").lower(), terms, full)
+        if key is not None:
+            scored.append((key, n))
+    scored.sort(key=lambda x: (x[0], x[1].kind, x[1].name or ""))   # 相关性键 + 稳定次序
     hits = [_node_brief(n) for _, n in scored[: max(0, int(limit))]]
     return {"query": query, "kind": kind, "hits": hits, "count": len(hits)}
 

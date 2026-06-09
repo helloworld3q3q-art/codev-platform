@@ -151,3 +151,35 @@ def test_search_nodes_single_word_unchanged(conn):
     from codev_platform.graph.impact import search_nodes
     names = {h["name"] for h in search_nodes(conn, _PID, "user")["hits"]}
     assert {"save_user", "create_user", "users"} <= names
+
+
+def test_name_relevance_tiers_exact_prefix_substring():
+    from codev_platform.graph.impact import _name_relevance
+    # 越相关键越小: 精确 < 前缀 < 子串(同一词 save)
+    exact = _name_relevance("save", ["save"], "save")
+    prefix = _name_relevance("save_user", ["save"], "save")
+    substr = _name_relevance("unsaved", ["save"], "save")
+    assert exact < prefix < substr
+    assert _name_relevance("foo", ["bar"], "bar") is None        # 0 命中 → None
+    # 同档短名优先
+    assert _name_relevance("ab_save", ["save"], "save") < _name_relevance("ab_save_xyz", ["save"], "save")
+    # 多词: 命中词多优先
+    assert _name_relevance("save_user", ["save", "user"], "save user") < \
+        _name_relevance("save_x", ["save", "user"], "save user")
+
+
+def test_search_nodes_ranks_exact_prefix_substring(tmp_path):
+    from codev_platform.graph.impact import search_nodes
+    c = open_store("p3", path=tmp_path / "g3.sqlite")
+    nodes = [
+        GraphNode(id="p3:backend_function:save", kind=NodeKind.BACKEND_FUNCTION.value,
+                  name="save", project_id="p3", file="a.py"),               # 精确
+        GraphNode(id="p3:backend_function:save_user", kind=NodeKind.BACKEND_FUNCTION.value,
+                  name="save_user", project_id="p3", file="b.py"),          # 前缀
+        GraphNode(id="p3:backend_function:unsaved", kind=NodeKind.BACKEND_FUNCTION.value,
+                  name="unsaved", project_id="p3", file="c.py"),            # 子串
+    ]
+    upsert_result(c, "p3", AnalyzerResult(nodes=nodes, plugin="test"))
+    names = [h["name"] for h in search_nodes(c, "p3", "save")["hits"]]
+    c.close()
+    assert names == ["save", "save_user", "unsaved"]   # 精确 > 前缀 > 子串
