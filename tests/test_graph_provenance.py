@@ -226,6 +226,41 @@ def test_impact_report_summary_mentions_split(tmp_path):
     assert "候选 1" in rep["summary"]
 
 
+def test_certain_only_filters_candidate_path(tmp_path):
+    # certain_only 滤掉 EP→FN 的候选 calls 边(0.65<0.7) → EP 经候选边不可达, 只剩 FN。
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    _seed_chain(conn)
+    full = find_impact(conn, PID, _TB)
+    certain = find_impact(conn, PID, _TB, certain_only=True)
+    conn.close()
+    assert full["impact"]["total"] == 3 and full["certainOnly"] is False
+    assert certain["impact"]["total"] == 1   # 仅 FN(经 writes_table 1.0 确定边)
+    assert certain["certainOnly"] is True
+    ids = {b["id"] for layer in certain["impact"]["byLayer"].values() for b in layer}
+    assert ids == {_FN} and _EP not in ids
+
+
+def test_certain_only_report_drops_candidates(tmp_path):
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    _seed_chain(conn)
+    rep = generate_impact_report(conn, PID, _TB, certain_only=True)
+    conn.close()
+    assert rep["certainOnly"] is True
+    assert rep["candidateCount"] == 0   # 候选边已在构图层滤除
+
+
+def test_mcp_dispatch_passes_certain_only(tmp_path):
+    # MCP dispatch 透传 certain_only 到 impact 查询。
+    from codev_platform.graph.mcp_server import dispatch
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    _seed_chain(conn)
+    r = dispatch("find_table_usage", {"table": "users", "certain_only": True}, conn, PID)
+    conn.close()
+    assert r["certainOnly"] is True
+    ids = {b["id"] for layer in r["usage"]["byLayer"].values() for b in layer}
+    assert ids == {_FN}   # 候选 calls 边滤除后 EP 不可达
+
+
 # ---------------------------------------------------------------- 4. audit no-provenance 计数
 
 def test_audit_counts_no_provenance_hard_edges(tmp_path):
