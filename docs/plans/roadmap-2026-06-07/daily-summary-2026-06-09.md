@@ -252,3 +252,17 @@ WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 fa
 **#3 决策更新**: 证据更强(LLM planner 硬集改善路由 + 预算), 但 **grounding(答案质量主代理)未提升**(都近满)+ 6 例小集非确定。→ `planner_llm_enabled` **仍默认关**, 但**口语化重的工作负载可按 config 开**(已有路由/预算实证收益)。默认开某档待更大集证出 grounding/质量的稳定提升。
 
 **Phase 7 完整版 = 完成**(主体 + 最后精修 + keyword-vs-LLM 端到端差实证)。剩纯按真实需求触发。
+
+## 二十七、对抗式审计今日全会话(6/9-6/10)+ follow-up
+
+派 general-purpose 对抗式审计兄弟审 `b2c03a1..a41ac07`(17 commit, 跨 6/9-6/10), 默认怀疑 + 自跑测试 + 写攻击用例([[post-change-adversarial-audit]] SOP):
+
+- **🔴 真 bug = 0**。6 高风险点全证伪未中: audit 只读(**hostile live-WAL 场景实证纯读、不破坏 committed 数据、不崩门禁**)、edge_resolve 无损拆分、LLM planner 任何故障退关键词且 `provider=None` 字节等价、planner_llm 默认全档关不破 8 处构造、eval harness 接线正确。
+- **web RBAC 测试隔离经 WSL 实证 = 修测试环境泄漏**(WSL 配 pg_dsn, 空 PG 遮蔽内存 fixture), **非掩盖生产 bug** —— 生产 resolve_membership PG-优先→空回退→deny 逻辑正确。
+- 21 攻击用例全过 + Windows 100 / WSL 62 回归。
+
+**收两个 🟡 follow-up**(`00c9f0f`, 均非今日回归):
+- #2 `_parse_score` 取**首个完整数字 token** + 1-5 范围校验("10"/"2024" 不再被截成 1/2; judge 诊断鲁棒)。
+- #1 `test_web_membership`(新): 直接钉 `resolve_membership` 三路径(PG-优先注入 fake store / 内存回退 / 无身份空)—— **PG 分支此前无直接单测**(被 web 测试的 `_pg_rbac_store→None` monkeypatch 遮蔽)的盲区补上。WSL 3 passed。
+
+WSL 全量 **1401 passed / 0 failed**。**今日全会话改动经对抗式审计 + follow-up, 可放心。**
