@@ -144,12 +144,16 @@ class CodegraphClient:
     # ----------------------------- search ----------------------------
 
     def search(self, keyword: str | None, languages: list[str] | None,
-               kinds: list[str] | None, limit: int | None) -> list[dict]:
+               kinds: list[str] | None, limit: int | None,
+               *, match_mode: str = "and") -> list[dict]:
+        """FTS 前缀搜。match_mode='and'(默认, 所有词都中, 精确)/ 'or'(任一词中, 宽松召回,
+        bm25 仍把多词命中排前)。融合召回的 lane 走 'or' —— verbose 多词 query(混入描述词
+        如 'function definition')AND 会全灭, OR 才能让目标符号被 bm25 顶上来。"""
         kw = (keyword or "").strip()
         if not kw:
             raise PlatformError(ErrorCode.INVALID_PARAMS, "keyword 不能为空")
         lim = _clamp(limit, _DEFAULT_SEARCH_LIMIT, _MAX_SEARCH_LIMIT)
-        fts_query = self._build_fts_prefix(kw)
+        fts_query = self._build_fts_prefix(kw, match_mode=match_mode)
         # nodes_fts join nodes: 列加 n. 前缀避免歧义, camelCase 别名对齐 Java mapper。
         sql = (
             "select n.id, n.kind, n.name, n.qualified_name as \"qualifiedName\", "
@@ -175,14 +179,17 @@ class CodegraphClient:
         return [_node_dict(r) for r in rows]
 
     @staticmethod
-    def _build_fts_prefix(kw: str) -> str:
+    def _build_fts_prefix(kw: str, *, match_mode: str = "and") -> str:
         parts = []
         for t in kw.split():
             if not t:
                 continue
             escaped = t.replace('"', '""')
             parts.append(f'"{escaped}"*')
-        return " ".join(parts) if parts else '""'
+        if not parts:
+            return '""'
+        joiner = " OR " if match_mode == "or" else " "   # FTS5: 空格=隐式 AND
+        return joiner.join(parts)
 
     # ----------------------------- node ------------------------------
 

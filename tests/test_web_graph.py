@@ -115,6 +115,24 @@ def test_codegraph_search_empty_keyword_is_invalid_params(client):
     assert r.json()["errors"][0]["errorCode"] == "invalid_params"
 
 
+def test_build_fts_prefix_and_vs_or():
+    from codev_platform.web.integrations.codegraph_client import CodegraphClient
+    assert CodegraphClient._build_fts_prefix("weighted rrf") == '"weighted"* "rrf"*'       # 默认 AND(空格)
+    assert CodegraphClient._build_fts_prefix("weighted rrf", match_mode="or") == '"weighted"* OR "rrf"*'
+    assert CodegraphClient._build_fts_prefix("") == '""'
+
+
+def test_codegraph_search_or_mode_finds_partial(tmp_path):
+    # OR 模式: verbose 多词 query 混入不存在的描述词时, AND 全灭、OR 仍由 bm25 顶出目标。
+    from codev_platform.web.integrations.codegraph_client import CodegraphClient
+    cg_db = tmp_path / "cg.db"
+    _seed_codegraph(cg_db)
+    with CodegraphClient(db_path=cg_db) as cg:
+        assert cg.search("run missing", None, None, 10, match_mode="and") == []   # 'missing' 不存在 → AND 灭
+        names = {r["name"] for r in cg.search("run missing", None, None, 10, match_mode="or")}
+        assert "runDaily" in names                                                # OR: 'run'* 仍命中
+
+
 # ----------------------------------------------------------------------
 # 统一图谱 store (全量节点/边, 所有插件)
 # ----------------------------------------------------------------------

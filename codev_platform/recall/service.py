@@ -80,7 +80,9 @@ def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneRes
     try:
         from codev_platform.web.integrations.codegraph_client import CodegraphClient
         with CodegraphClient(project_id) as cg:
-            rows = cg.search(query, None, None, per_lane)
+            # match_mode='or': verbose 多词 query(混入 function/definition 等描述词)AND 会
+            # 全灭, OR 让目标符号被 bm25 顶上来(与 graph lane 分词宽松召回同理)。
+            rows = cg.search(query, None, None, per_lane, match_mode="or")
     except Exception as exc:  # noqa: BLE001 — codegraph db 未建等 → 跳过该 lane
         logger.warning("[recall] codegraph lane failed: %r", exc)
         return None, {}
