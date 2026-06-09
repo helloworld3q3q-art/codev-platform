@@ -113,6 +113,15 @@ def _str_schema(field: str, desc: str) -> dict:
             "required": [field]}
 
 
+def _impact_schema(field: str, desc: str) -> dict:
+    """反向影响查询 schema: 必填 ref 字段 + 可选 certain_only(只看确定依赖, 滤候选边)。"""
+    return {"type": "object", "properties": {
+        field: {"type": "string", "description": desc},
+        "certain_only": {"type": "boolean",
+                         "description": "只返回确定依赖(高置信结构边), 滤掉低置信/名称启发式候选边; 高风险改动结论用。默认 false"}},
+        "required": [field]}
+
+
 def _ok(obj: object) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(obj, ensure_ascii=False))]
 
@@ -125,11 +134,11 @@ def _err(msg: str) -> list[TextContent]:
 async def list_tools() -> list[Tool]:
     return [
         Tool(name="find_impact",
-             description="改某节点(endpoint/表/函数/组件)→ 跨层被波及集合(反向 BFS, 谁依赖它)",
-             inputSchema=_REF_SCHEMA),
+             description="改某节点(endpoint/表/函数/组件)→ 跨层被波及集合(反向 BFS, 谁依赖它); certain_only=true 只看确定依赖",
+             inputSchema=_impact_schema("ref", "节点 id 或 name")),
         Tool(name="find_table_usage",
-             description="给表名 → 哪些函数/端点/前端用它(反向 BFS)",
-             inputSchema=_str_schema("table", "数据库表名")),
+             description="给表名 → 哪些函数/端点/前端用它(反向 BFS); certain_only=true 只看确定依赖",
+             inputSchema=_impact_schema("table", "数据库表名")),
         Tool(name="find_page_dependencies",
              description="给前端页/组件 → 它依赖的端点/函数/表(正向 BFS)",
              inputSchema=_str_schema("page", "前端页面/组件 id 或 name")),
@@ -137,8 +146,8 @@ async def list_tools() -> list[Tool]:
              description="改前端公共组件 → 哪些页面受影响(传递依赖)",
              inputSchema=_str_schema("component", "前端组件 id 或 name")),
         Tool(name="find_api_callers",
-             description="给后端端点 → 哪些前端调它",
-             inputSchema=_str_schema("endpoint", "后端端点 id 或 name")),
+             description="给后端端点 → 哪些前端调它; certain_only=true 只看确定依赖",
+             inputSchema=_impact_schema("endpoint", "后端端点 id 或 name")),
         Tool(name="find_node_domain",
              description="查 endpoint/表属于哪个业务域(A1 LLM 语义标注, 不调 LLM 读已标)",
              inputSchema=_REF_SCHEMA),
@@ -168,11 +177,14 @@ async def list_tools() -> list[Tool]:
 
 # name → 调用适配器(conn, pid, args) → impact 查询结果。改工具集只动这一处(list_tools 对齐)。
 _DISPATCH = {
-    "find_impact": lambda c, p, a: _impact.find_impact(c, p, a["ref"]),
-    "find_table_usage": lambda c, p, a: _impact.find_table_usage(c, p, a["table"]),
+    "find_impact": lambda c, p, a: _impact.find_impact(
+        c, p, a["ref"], certain_only=bool(a.get("certain_only", False))),
+    "find_table_usage": lambda c, p, a: _impact.find_table_usage(
+        c, p, a["table"], certain_only=bool(a.get("certain_only", False))),
     "find_page_dependencies": lambda c, p, a: _impact.find_page_dependencies(c, p, a["page"]),
     "find_impacted_pages": lambda c, p, a: _impact.find_impacted_pages(c, p, a["component"]),
-    "find_api_callers": lambda c, p, a: _impact.find_api_callers(c, p, a["endpoint"]),
+    "find_api_callers": lambda c, p, a: _impact.find_api_callers(
+        c, p, a["endpoint"], certain_only=bool(a.get("certain_only", False))),
     "find_node_domain": lambda c, p, a: _impact.find_node_domain(c, p, a["ref"]),
     "list_domain_members": lambda c, p, a: _impact.list_domain_members(c, p, a["domain"]),
     "search_nodes": lambda c, p, a: _impact.search_nodes(

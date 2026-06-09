@@ -75,12 +75,17 @@ class ImpactGraph:
         ]
 
 
-def build_impact_graph(conn, project_id: str, *, include_soft: bool = False) -> ImpactGraph:
+def build_impact_graph(conn, project_id: str, *, include_soft: bool = False,
+                       certain_only: bool = False) -> ImpactGraph:
     """构建内存影响图。
 
     include_soft=False(默认): 过滤软节点(BUSINESS_DOMAIN)+ 软边(BELONGS_TO_DOMAIN)——
     "查依赖 / 影响面"走确定性硬骨架, 不被分析器/LLM 软产物污染(护城河保护)。
     include_soft=True: 含软产物, 供"查理解"(业务域归属)类查询放开。
+
+    certain_only=True: 进一步**滤掉低置信硬边**(confidence < _CERTAIN_CONF, 即名称启发式
+    等候选边)—— 高风险改动结论(Phase 3 Gate)只走确定依赖, 候选不参与遍历。单一过滤点,
+    所有 BFS 自动尊重(与 include_soft 同处, 决定"哪些边在图里")。
     """
     merged = load_graph(conn, project_id)
     if include_soft:
@@ -88,6 +93,8 @@ def build_impact_graph(conn, project_id: str, *, include_soft: bool = False) -> 
     else:
         nodes = [n for n in merged.nodes if not is_soft_node_kind(n.kind)]
         edges = [e for e in merged.edges if not is_soft_edge_kind(e.kind)]
+    if certain_only:
+        edges = [e for e in edges if _is_certain(e.confidence)]
     g = ImpactGraph(nodes={n.id: n for n in nodes})
     for e in edges:
         g.fwd.setdefault(e.source, []).append((e.target, e.kind))
@@ -188,24 +195,34 @@ def _not_found(ref_key: str, ref: str, ambiguous: list[GraphNode]) -> dict:
 
 # ---------------------------------------------------------------- 4 个查询入口
 
-def find_impact(conn, project_id: str, node_ref: str) -> dict:
-    """改 node_ref (id 或 name) → 跨层**被波及**集合 (反向 BFS, 谁依赖它)。"""
-    g = build_impact_graph(conn, project_id)
+def find_impact(conn, project_id: str, node_ref: str, *,
+                certain_only: bool = False) -> dict:
+    """改 node_ref (id 或 name) → 跨层**被波及**集合 (反向 BFS, 谁依赖它)。
+
+    certain_only=True: 只走确定依赖(滤低置信候选边), 供高风险改动结论用(Phase 3 Gate)。
+    """
+    g = build_impact_graph(conn, project_id, certain_only=certain_only)
     node, ambig = _resolve(g, node_ref, None)
     if node is None:
         return _not_found("ref", node_ref, ambig)
     reached = _traverse(g, node.id, reverse=True)
-    return {"found": True, "target": _node_brief(node), "impact": _grouped(reached)}
+    return {"found": True, "target": _node_brief(node), "impact": _grouped(reached),
+            "certainOnly": certain_only}
 
 
-def find_table_usage(conn, project_id: str, table: str) -> dict:
-    """给表名 → 哪些函数/端点/前端用它 (反向 BFS, 从 db_table 出发)。"""
-    g = build_impact_graph(conn, project_id)
+def find_table_usage(conn, project_id: str, table: str, *,
+                     certain_only: bool = False) -> dict:
+    """给表名 → 哪些函数/端点/前端用它 (反向 BFS, 从 db_table 出发)。
+
+    certain_only=True: 只走确定依赖(滤低置信候选边)。
+    """
+    g = build_impact_graph(conn, project_id, certain_only=certain_only)
     node, ambig = _resolve(g, table, NodeKind.DB_TABLE.value)
     if node is None:
         return _not_found("table", table, ambig)
     reached = _traverse(g, node.id, reverse=True)
-    return {"found": True, "table": _node_brief(node), "usage": _grouped(reached)}
+    return {"found": True, "table": _node_brief(node), "usage": _grouped(reached),
+            "certainOnly": certain_only}
 
 
 def find_page_dependencies(conn, project_id: str, page_ref: str) -> dict:
@@ -238,9 +255,13 @@ def find_impacted_pages(conn, project_id: str, component_ref: str) -> dict:
             "pages": pages, "count": len(pages)}
 
 
-def find_api_callers(conn, project_id: str, endpoint_ref: str) -> dict:
-    """给端点 → 哪些前端调它 (反向 BFS, 仅取 frontend 层)。"""
-    g = build_impact_graph(conn, project_id)
+def find_api_callers(conn, project_id: str, endpoint_ref: str, *,
+                     certain_only: bool = False) -> dict:
+    """给端点 → 哪些前端调它 (反向 BFS, 仅取 frontend 层)。
+
+    certain_only=True: 只走确定依赖(滤低置信候选边)。
+    """
+    g = build_impact_graph(conn, project_id, certain_only=certain_only)
     node, ambig = _resolve(g, endpoint_ref, NodeKind.BACKEND_ENDPOINT.value)
     if node is None:
         return _not_found("endpoint", endpoint_ref, ambig)
@@ -248,16 +269,18 @@ def find_api_callers(conn, project_id: str, endpoint_ref: str) -> dict:
     callers = [(n, d, v, a) for (n, d, v, a) in reached if layer_of(n.kind) == "frontend"]
     return {"found": True, "endpoint": _node_brief(node),
             "callers": [_node_brief(n, d, v, a) for (n, d, v, a) in callers],
-            "count": len(callers)}
+            "count": len(callers), "certainOnly": certain_only}
 
 
-def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
+def generate_impact_report(conn, project_id: str, node_ref: str, *,
+                           certain_only: bool = False) -> dict:
     """改 node_ref → 一份可读跨层影响报告 (A5)。
 
     含: 目标节点 + 按层受影响清单 + 风险等级 + 人类可读 summary (markdown)。
     风险口径: 触及前端且跨 ≥2 层 = high;有下游 = medium;无下游 = low。
+    certain_only=True: 只走确定依赖(滤低置信候选边), 给高风险结论更保守的影响面。
     """
-    r = find_impact(conn, project_id, node_ref)
+    r = find_impact(conn, project_id, node_ref, certain_only=certain_only)
     if not r["found"]:
         ambig = r.get("ambiguous", [])
         if ambig:
@@ -297,6 +320,7 @@ def generate_impact_report(conn, project_id: str, node_ref: str) -> dict:
         "found": True, "target": target, "impact": impact,
         "risk": risk, "layersAffected": layers_hit, "total": total,
         "certainCount": certain_n, "candidateCount": candidate_n,
+        "certainOnly": certain_only,
         "summary": "\n".join(lines),
     }
 
