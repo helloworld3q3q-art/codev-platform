@@ -27,8 +27,16 @@ def _score(rows: list, classify) -> tuple[int, list]:
     return correct, details
 
 
-def run_planner() -> dict:
-    from codev_platform.agent.planner import classify_query
+def run_planner(provider=None) -> dict:
+    """关键词分类准确率(标准 + 硬集)。
+
+    provider!=None(由 run_eval --llm 注入配置的 LLMProvider, 需 WSL + key)→ **额外**用
+    classify_query_smart(LLM 优先 + 关键词兜底)在标准+硬集打分, 报 LLM 准确率 + 硬集 delta ——
+    即 LLM planner 相对纯关键词的真实增益(A/B)。不给 provider = 纯关键词(默认, 处处可跑)。
+    """
+    from functools import partial
+
+    from codev_platform.agent.planner import classify_query, classify_query_smart
 
     rows = load_jsonl("planner.jsonl")
     correct, details = _score(rows, classify_query)
@@ -52,4 +60,18 @@ def run_planner() -> dict:
         out["metrics"]["classification_accuracy_hard"] = round(accuracy(hc, len(hard)), 3)
         out["correct_hard"] = hc
         out["details_hard"] = hd
+
+    # LLM A/B: smart 分类器(LLM 优先 + 关键词兜底) vs 纯关键词。重点看硬集 delta。
+    if provider is not None:
+        smart = partial(classify_query_smart, provider=provider)
+        sc, sd = _score(rows, smart)
+        m = out["metrics"]
+        m["classification_accuracy_llm"] = round(accuracy(sc, n), 3)
+        out["details_llm"] = sd
+        if hard:
+            shc, shd = _score(hard, smart)
+            m["classification_accuracy_hard_llm"] = round(accuracy(shc, len(hard)), 3)
+            m["classification_accuracy_hard_delta"] = round(
+                m["classification_accuracy_hard_llm"] - m["classification_accuracy_hard"], 3)
+            out["details_hard_llm"] = shd
     return out

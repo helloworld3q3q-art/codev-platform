@@ -98,10 +98,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--project", default=None, help="project_id 覆盖 (默认按 suite 选)")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("-k", type=int, default=5, help="retrieval/recall top-k (默认 5)")
+    ap.add_argument("--llm", action="store_true",
+                    help="planner suite: 额外用配置的 LLM provider 跑 keyword vs LLM A/B (需 WSL + key)")
     args = ap.parse_args(argv)
 
-    suites = list(_RUNNERS) if args.suite == "all" else [args.suite]
-    results = [_RUNNERS[s](args.project, args.k) for s in suites]
+    # --llm: 为 planner suite 构造配置的 provider(失败 = 缺 key/依赖 → 提示后退回纯关键词)。
+    planner_provider = None
+    if args.llm:
+        try:
+            from codev_platform.agent.brain.registry import get_provider
+            planner_provider = get_provider()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[--llm] 构造 provider 失败, 退回纯关键词: {exc}", file=sys.stderr)
+
+    runners = dict(_RUNNERS)
+    runners["planner"] = lambda project, k: run_planner(provider=planner_provider)
+
+    suites = list(runners) if args.suite == "all" else [args.suite]
+    results = [runners[s](args.project, args.k) for s in suites]
 
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
