@@ -73,3 +73,24 @@ def test_recall_code_graph_integration(monkeypatch, tmp_path):
     hits = recall_code("user", PID)
     assert len(hits) == 1                      # 只 save_user 含 "user"
     assert hits[0].name == "save_user" and hits[0].lanes == ["graph"]
+
+
+# ---- 测试文件降权 ----
+
+def test_is_test_hit_detects_tests_and_impls():
+    from codev_platform.recall.service import _is_test_hit
+    assert _is_test_hit("test_stamp_provenance", "tests/test_graph_provenance.py") is True
+    assert _is_test_hit("foo", "web-ui/src/x.spec.ts") is True
+    assert _is_test_hit("foo", "a/b_test.py") is True
+    assert _is_test_hit("stamp_provenance", "codev_platform/graph/schema.py") is False
+    assert _is_test_hit("save_user", "repo.py") is False
+
+
+def test_deprioritize_tests_keeps_impl_first():
+    from codev_platform.recall.service import _deprioritize_tests
+    items = [
+        ("t1", "test_stamp_provenance_a", "tests/test_p.py"),   # 测试(原序靠前)
+        ("impl", "stamp_provenance", "codev_platform/graph/schema.py"),  # 真实现
+        ("t2", "test_stamp_provenance_b", "tests/test_p.py"),
+    ]
+    assert _deprioritize_tests(items) == ["impl", "t1", "t2"]   # 实现顶到最前, 测试组内保原序

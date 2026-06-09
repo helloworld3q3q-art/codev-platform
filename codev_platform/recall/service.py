@@ -56,6 +56,29 @@ def _fuse_and_enrich(lanes: list[LaneResult], details: dict[str, dict], *,
     return out
 
 
+_TEST_FILE_HINTS = ("/tests/", "/test/")
+
+
+def _is_test_hit(name: str | None, file: str | None) -> bool:
+    """该 hit 是测试代码(test_ 函数 / tests 目录 / *_test.py / *.spec.ts)?
+
+    recall 默认要**实现**, 同名测试函数(如 test_stamp_provenance_xxx)不该压过真符号
+    (stamp_provenance)。bm25/相关性排序不区分这点, 故 lane 内显式降权。
+    """
+    n = (name or "").lower()
+    f = (file or "").lower()
+    return (n.startswith("test_") or f.startswith("tests/")
+            or any(h in f for h in _TEST_FILE_HINTS)
+            or f.endswith("_test.py") or f.endswith(".test.ts") or f.endswith(".spec.ts"))
+
+
+def _deprioritize_tests(refs_meta: list[tuple[str, str | None, str | None]]) -> list[str]:
+    """[(ref, name, file)] 原序(bm25/相关性)→ **非测试在前、测试靠后**, 组内保原序 → ref 序。"""
+    impl = [ref for ref, n, f in refs_meta if not _is_test_hit(n, f)]
+    tests = [ref for ref, n, f in refs_meta if _is_test_hit(n, f)]
+    return impl + tests
+
+
 def _graph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult | None, dict]:
     """graph 邻域 lane: search_nodes 直读 graph store(免 daemon)。失败/空 → (None, {})。"""
     try:
@@ -72,7 +95,8 @@ def _graph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult 
     hits = res.get("hits", [])
     details = {h["id"]: {"name": h.get("name"), "kind": h.get("kind"), "file": h.get("file")}
                for h in hits}
-    return LaneResult(GRAPH_LANE, [h["id"] for h in hits]), details
+    ranked = _deprioritize_tests([(h["id"], h.get("name"), h.get("file")) for h in hits])
+    return LaneResult(GRAPH_LANE, ranked), details
 
 
 def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult | None, dict]:
@@ -88,7 +112,8 @@ def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneRes
         return None, {}
     details = {r["id"]: {"name": r.get("name"), "kind": r.get("kind"), "file": r.get("filePath")}
                for r in rows}
-    return LaneResult(CODEGRAPH_LANE, [r["id"] for r in rows]), details
+    ranked = _deprioritize_tests([(r["id"], r.get("name"), r.get("filePath")) for r in rows])
+    return LaneResult(CODEGRAPH_LANE, ranked), details
 
 
 def recall_code(query: str, project_id: str, *,
