@@ -167,3 +167,13 @@ WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 fa
 **结果**: WSL 全量 **1371 passed / 0 failed**(`7a89bb3`)。
 
 **本窗口 commit 链**: `4cdf204`(#10 只读 audit + #1 eval golden)→ `3219c24`(日志续三)→ `b1fc1f7`(#1 WSL 复跑回填)→ `7a89bb3`(全量修两类既有失败)。
+
+## 二十二、Phase 7 完整版起步 —— LLM planner(数据驱动 + 多模型 + determinism-first)
+
+"继续开发": 给 Query Planner 加 LLM 分类增强(完整版第一块), 全程**先量再建**:
+
+- **先量 headroom**(关键): 新增 eval planner **硬集** `planner_hard.jsonl`(对抗/口语化/无关键词命中问法)。关键词分类标准集 **1.0**, 硬集**仅 0.267** —— 口语化问法易掉 `general`(丢 preferred_lanes + 预算引导), 证明 LLM 增强有真实空间(非凭感觉上)。`test_eval_planner` 把这条 headroom 钉成回归。
+- **LLM planner**: `classify_query_llm(question, provider)` —— 只依赖中性 `LLMProvider`(brain/base, 不耦合厂商 = 多模型) + `classify_query_smart`(LLM 优先 + **关键词永久兜底**)。provider 任何故障/输出非法 → 吞成兜底, planner 不可靠也绝不拖垮 loop。
+- **策略门**: `LoopPolicy.planner_llm_enabled`(**默认全档关**, registry 解析 + config 逐 provider 开); loop 按 policy 把同一 provider 注入 `plan_query`。determinism-first: 多一次分类 LLM 调用的取舍未经 A/B 不默认开。
+- 测: +10(fake provider 测分类解析/兜底/precedence/plan_query 集成, 不连真模型)。WSL 全量 **1381 passed / 0 failed**。commit `39b7f3b`。
+- **待 WSL A/B**(后续): enable `planner_llm_enabled` 后跑硬集 keyword vs LLM, 量 LLM 实际提升 → 决定是否某档默认开;**agent 端到端 eval**(完整回答质量, 非仅分类准确率)是 Phase 7 完整版剩余大块。
