@@ -92,13 +92,20 @@ def judge_answer(case: dict, answer: str, provider) -> int | None:
 
 
 def _parse_score(text: str | None) -> int | None:
-    """从 judge 文本抽 1-5 整数。无合法分 → None。"""
+    """从 judge 文本抽 1-5 整数。取**首个完整数字 token**再校验范围 —— "10"/"2024" 不该被截成
+    1/2(审计 #2), 范围外 → None。无数字 → None。"""
     if not text:
         return None
+    digits = ""
     for ch in text.strip():
-        if ch in "12345":
-            return int(ch)
-    return None
+        if ch.isdigit():
+            digits += ch
+        elif digits:
+            break          # 首个数字 token 结束
+    if not digits:
+        return None
+    v = int(digits)
+    return v if 1 <= v <= 5 else None
 
 
 def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=None,

@@ -100,7 +100,11 @@ def test_parse_score():
     assert _parse_score("评分: 5 分") == 5
     assert _parse_score("无法判断") is None
     assert _parse_score(None) is None
-    assert _parse_score("9") is None          # 超 1-5 范围(只认 1-5 字符)
+    assert _parse_score("9") is None          # 超 1-5 范围
+    # 审计 #2: 多位数字 token 不该被截成首位
+    assert _parse_score("10") is None         # 不是 1
+    assert _parse_score("2024") is None       # 不是 2
+    assert _parse_score("4/5") == 4           # 首个 token 4
 
 
 def test_judge_answer_valid_and_fallback():
