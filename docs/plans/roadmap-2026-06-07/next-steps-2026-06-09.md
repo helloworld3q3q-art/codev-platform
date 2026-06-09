@@ -16,18 +16,11 @@ ai-health --all
 
 ---
 
-## 一、审计剩余 3 项(已处理 9/11,剩这 3)
+## 一、审计剩余 2 项(已处理 10/11,剩这 2)
 
-### ✅ #10 只读 audit(P3,~15 分钟,推荐先收 → 审计到 10/11)
+### ✅✅ #10 只读 audit —— 已完成(`4cdf204`,审计 → 10/11)
 
-**问题**:`graph/audit.py:audit_all_stores` 用 `open_store()` → 会建目录 + WAL + 跑迁移 + DDL(名义只读的门禁却改本地 sqlite)。
-
-**做法**:
-- `audit_all_stores` 里把 `open_store(pid, path=...)` 换成只读连接:`sqlite3.connect(f"file:{path}?mode=ro", uri=True)`。
-- 包 `try/except sqlite3.Error`:旧 schema 没迁移 → 该 store 标 `error`(或 skip + 记原因),不崩门禁。
-- 迁移/建表留给 ingest(写侧),audit 纯读。
-
-**注意**:`audit_graph(conn, pid)` 内 `_distinct_project_ids` 已 try/except 兜 `sqlite.Error`,但 `load_graph` 在旧 schema(edges 缺 `project_id` 列)会抛 → 必须 try 包住。
+`audit_all_stores` 改 read-only 连接(`file:?mode=ro`),不再 mkdir/WAL/迁移/DDL;旧 schema 读不动记 `audit_error`(计 1 error 不崩门禁);`render_markdown` 渲染原因;删 `open_store` 导入。测:`test_graph_audit` 11/11(只读不改字节 + 旧 schema 优雅记错 + 空目录不建录);真机 `graph audit --all` 跑通 codev-platform 457 节点/607 边 read-only exit 0。
 
 **测**:`tests/test_graph_audit.py` 加"只读连接审计不产 WAL / 不改文件";现有 audit 测试回归。
 
@@ -55,8 +48,8 @@ ai-health --all
 
 | # | 任务 | 估时 | 价值 | 起点 |
 |---|---|---|---|---|
-| 1 | 精准化 recall eval golden | 0.5天 | 中 | `eval/datasets/recall.jsonl` 的 expect 改成"只标真实现 ref"(现模式匹配把 `test_xxx` 也算相关),让 MRR/nDCG 更准 → 复跑 `--suite recall` 看真实提升 |
-| 2 | #10 只读 audit | 0.3天 | 低(清爽收尾) | 见 §一 #10 |
+| 1 | ✅ 精准化 recall eval golden(`4cdf204`)| 0.5天 | 中 | 已做代码侧:`_recall_per_query` 排除测试 ref(复用 `_is_test_hit`)。**剩**:真实 MRR/nDCG 复跑需 push + WSL pull 后 `--suite recall`(Windows skip, 需 codegraph.db) |
+| 2 | ✅ #10 只读 audit(`4cdf204`)| 0.3天 | 低(清爽收尾) | 已完成, 见 §一 #10 |
 | 3 | Phase 7 完整版 | 2-3天 | 中-高 | LLM planner(可选增强,现为关键词)+ agent 端到端 eval(测完整回答质量,非只分类准确率)。复用 `agent/planner.py` + eval planner suite |
 
 ### 🟡 第二梯队:需 WSL daemon(在 WSL 窗口做)
@@ -86,4 +79,5 @@ ai-health --all
 
 ## 三、推荐顺序
 
-先重启上线 → 第一梯队 #1(eval golden,让尺子准)→ #2(#10 收尾审计,到 10/11)→ 再挑 Phase 7 完整版或第二梯队。
+~~先重启上线 → #1(eval golden)→ #2(#10 收尾审计)~~ **已完成(`4cdf204` + 上线验证)**。
+下一步:**Phase 7 完整版**(第一梯队最后大项)或 **push + WSL 复跑 #1 拿真实 MRR/nDCG**,或第二梯队 WSL 任务。

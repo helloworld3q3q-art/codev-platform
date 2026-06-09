@@ -119,3 +119,39 @@ provenance(`2359ffe`→`866ecc8`)→ CLI UTF-8(`ef04670`)→ soft-quality(`2c73c
 - **Phase 5 多跳路径评分**(`d0ffa7f`): `find_impact_paths` —— Dijkstra 最大乘积每节点保最优单路径(有界 O(节点)+ max_depth/fanout 封顶), 评分 `Π(confidence × src 权重)`(ast/framework/bridge 满权, regex 0.7/llm 0.5), 每跳给 file+src+confidence 证据 + 确定/候选, 降序稳定。暴露成 graph MCP 第 13 工具。IDE-agent 实调 `find_impact_paths(graphAudit)` → 14 可达 top 10 路径, 完整跨层依赖链 + 每跳证据。**社区/新鲜度加成依赖未做的 Phase 4 待后续**。
 
 **完成度更新**: Phase 3 ~85%→**完成**(冲突消解补齐); Phase 5 未启动→**MVP 落地**。**纯未启动重型 Phase 只剩 2(统一 IR)和 8(性能)**。本会话累计 **36 commit**。三服务(codev-mcp-graph 13 工具 / codev-web / codev-agent)已重启上线。
+
+---
+
+# 续三(同日第三窗口)—— 审计收尾 #10 只读 audit + #1 recall eval golden + 运维上线
+
+> 承 §十六。本窗口做综合审计剩余项的收尾 + 把前两窗口已提交的改动重启上线。单 commit `4cdf204`(6 文件 +216/-7, 无 AI 痕迹), Windows 89 tests 绿。
+
+## 十七、#10 graph audit 只读化(审计 9/11 → 10/11)
+
+`audit_all_stores` 之前用 `open_store()` 打开每个 store → 会 mkdir + 设 WAL + 跑迁移 + 建表 DDL(**名义只读的 pre-push 门禁却在改本地 sqlite**)。
+
+- 改 **read-only 连接** `sqlite3.connect(file:?mode=ro)`: 不建目录 / 不设 WAL / 不迁移 / 不建表 —— 审计纯读, schema 迁移是写侧 ingest 的职责。
+- 旧 schema(edges 缺 `project_id` 列)read-only 读不动 → `_unreadable_report` 记一条 `audit_error`(计 1 error 不崩门禁, 让操作者知道需 reindex 迁移); `render_markdown` 渲染该原因; 删去不再用的 `open_store` 导入。
+- 测: `test_graph_audit` **11/11**(新增"只读审计不改 db 字节 hash" + "旧 schema 优雅记错" + "空目录不创建")。真机 CLI `graph audit --all` 跑通 codev-platform store(**457 节点 / 607 边, read-only, exit 0 clean**)。
+
+## 十八、#1 recall eval golden 精准化(只标真实现 ref)
+
+eval `_recall_per_query` 之前按 name/file 子串判相关 → `test_weighted_rrf` 这类**同名测试也算相关**, 虚高 nDCG。
+
+- 现**排除测试代码**(`test_` 函数 / `tests/` 目录 / `*_test.py` / `*.spec.ts`)出相关集, 判据**复用 service `_is_test_hit`**(单一真值源, 不在 eval 侧重写启发式 —— 与 lane 内降权用的同一定义)。
+- 测: `test_eval_recall` 新增 test-hit 排除用例; recall/eval/graph 合并回归 **89 passed**。
+- ⚠️ **真实 MRR/nDCG 复跑是 WSL 步**: recall suite 在 Windows **skip**(需 codegraph.db, 在平台/WSL 侧 junction)。要拿排除测试 ref 后的真实数字, 需 push `4cdf204` + WSL pull 后跑 `python -m eval.run_eval --suite recall --project codev-platform`。
+
+## 十九、运维上线 + 全栈验证
+
+1. **重启 `codev-agent` + `codev-web`**(WSL systemd)→ 让**前两窗口已提交**(≤`b2c03a1`, WSL clone 已有)的 #1/#2 安全修复 + code_recall agent 工具 + planner 主检索 **live**(代码已 pull、服务持旧内存码)。
+2. **`wsl --shutdown` 全栈干净重起**(顺带清前述内存危机残留): systemd `running`, 6 服务自启 `active`; 4 MCP 端点全 **OK**(platform-docs 19083 冷启动模型加载完成 / codegraph 19091 / agent-memory 19087 / graph 19092); `codev-web` :18088 `/docs` HTTP 200。
+3. **Claude 重启后端到端绿**: codegraph MCP(653 文件 / 8528 节点)+ graph MCP 均正常响应。
+
+## 二十、审计状态 + 文档
+
+- 综合审计(`docs/audits/codev-platform-consolidated-audit-2026-06-09.md`): **9/11 → 10/11**(#10 收掉)。
+- 延后 2 项(真实需求触发再做): **#7** config DI `rebind_web_services`(改动大、单实例价值低)/ **#8 残留** `set_roles` 多 org 角色管理(RBAC 安全敏感, 改错会跨 org 越权, 要先补越权测试)。
+- 新增 [`next-steps-2026-06-09.md`](next-steps-2026-06-09.md): 审计剩余 3 项细节 + 三梯队整体剩余计划 + 新窗口开局动作(供下个窗口直接 Read)。
+
+**纯未启动重型 Phase 仍只剩 2(统一 IR)和 8(性能)**。本窗口 1 commit(`4cdf204`)。

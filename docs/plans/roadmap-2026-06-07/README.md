@@ -9,7 +9,7 @@
 | 文件 | 内容 | 状态 |
 |---|---|---|
 | [code-intelligence-platform-plan-2026-06-07.md](code-intelligence-platform-plan-2026-06-07.md) | 主计划: 评测基线、索引 DAG、跨语言解析引擎、统一图谱、社区检测、Graph+Vector 联合检索、查询规划、响应性能与治理 | 计划(11 Phase 蓝图, 不整体启动) |
-| [next-steps-2026-06-09.md](next-steps-2026-06-09.md) | 接下来做什么: 审计剩余 3 项(#10 只读 audit / #7 config DI / #8 set_roles 多 org)+ 三梯队整体剩余计划 + 新窗口开局动作 | 待办(审计 9/11 已处理) |
+| [next-steps-2026-06-09.md](next-steps-2026-06-09.md) | 接下来做什么: 审计剩余项(#10 ✅ 已修 / #7 config DI / #8 set_roles 多 org 延后)+ 三梯队整体剩余计划 + 新窗口开局动作 | 进行中(审计 10/11) |
 
 ## 落地状态(2026-06-08, 只拎 2 高 ROI 项)
 
