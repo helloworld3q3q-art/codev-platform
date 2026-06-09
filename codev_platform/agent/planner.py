@@ -65,13 +65,17 @@ _BUDGET: dict[str, int] = {
 }
 
 # 类型 → 优先工具(lane 提示; 注入前会按实际可用工具过滤)。
+# `code_recall`(跨 lane 融合: graph + codegraph, eval 验 MRR 0.917)是"找相关代码/符号定位"
+# 的首选入口 —— 一次拿可解释排名, 省去分调 codegraph + 图谱再合并。故放 symbol/overview/general
+# 首位、impact 末位(定位起点后交 impact_analysis 算链路);doc_rule 是文档不加。
 _LANES: dict[str, tuple[str, ...]] = {
-    QueryType.OVERVIEW: ("list_dir", "search_docs", "read_file"),
+    QueryType.OVERVIEW: ("code_recall", "list_dir", "search_docs", "read_file"),
     QueryType.IMPACT: ("impact_analysis", "table_usage", "api_callers",
-                       "page_dependencies", "codegraph_callers"),
-    QueryType.SYMBOL: ("codegraph_search", "codegraph_callers", "codegraph_callees", "read_file"),
+                       "page_dependencies", "codegraph_callers", "code_recall"),
+    QueryType.SYMBOL: ("code_recall", "codegraph_search", "codegraph_callers",
+                       "codegraph_callees", "read_file"),
     QueryType.DOC_RULE: ("search_docs", "read_file"),
-    QueryType.GENERAL: (),
+    QueryType.GENERAL: ("code_recall",),
 }
 
 # 类型 → 停止条件文案(满足即收尾, 防为单点查到耗尽预算)。

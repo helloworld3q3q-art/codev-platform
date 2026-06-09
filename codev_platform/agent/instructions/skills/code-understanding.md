@@ -14,10 +14,9 @@
 
 1. 先判断问题类型:项目概览、修改面、影响面、符号定位、规则查询。
 2. 按类型选择第一个工具:
-   - 项目概览:`search_docs`;如果已知道具体文件,再 `read_file`。
-   - 修改面:`codegraph_search` 或图谱工具定位后,再 `read_file`。
-   - 影响面:优先图谱工具。
-   - 符号定位:优先 `codegraph_search`。
+   - 找相关代码 / 符号定位:**优先 `code_recall`**(一次融合 graph + codegraph 给最相关代码实体, 带来源),再按需 `read_file` 读实现 / `codegraph_callers` 看调用方。比分别调 codegraph 搜 + 查图谱再合并更省。
+   - 项目概览:先 `code_recall` 或 `search_docs` 拿相关代码/文档;已知具体文件再 `read_file`。
+   - 影响面:`code_recall` 定位起点节点后,用 `impact_analysis` / `table_usage` 算跨层链路。
    - 规则查询:优先 `search_docs`。
 3. 工具数量要和问题规模匹配:
    - 概览:1-3 个工具。

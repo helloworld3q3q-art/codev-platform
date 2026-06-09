@@ -48,11 +48,11 @@ def test_classify_general_on_no_keyword():
 # ------------------------------------------------------------------ 计划
 
 def test_plan_budget_and_lanes_filtered_to_available():
-    avail = ["search_docs", "read_file", "codegraph_search"]  # 缺 list_dir
+    avail = ["search_docs", "read_file", "codegraph_search"]  # 缺 list_dir / code_recall
     plan = plan_query("这个项目干啥的", max_steps=12, available_tools=avail)
     assert plan.query_type == QueryType.OVERVIEW
     assert plan.tool_budget == 5
-    # overview lanes = list_dir/search_docs/read_file; list_dir 不可用被过滤掉
+    # overview lanes = code_recall/list_dir/search_docs/read_file; code_recall+list_dir 不可用被过滤
     assert plan.preferred_lanes == ["search_docs", "read_file"]
 
 
@@ -68,7 +68,18 @@ def test_plan_general_budget_equals_max_steps():
     plan = plan_query("你好", max_steps=9)
     assert plan.query_type == QueryType.GENERAL
     assert plan.tool_budget == 9
-    assert plan.preferred_lanes == []
+    assert plan.preferred_lanes == ["code_recall"]   # general 兜底: 找代码先用融合召回
+
+
+def test_code_recall_is_primary_lane_for_find_code_types():
+    # code_recall 进 symbol/overview/general 首位、impact 末位(locate 兜底), doc_rule 不进。
+    p_sym = plan_query("save_user 这个函数在哪", max_steps=12, available_tools=None)
+    assert p_sym.query_type == QueryType.SYMBOL
+    assert p_sym.preferred_lanes[0] == "code_recall"
+    p_imp = plan_query("改这个表影响谁", max_steps=12, available_tools=None)
+    assert "code_recall" in p_imp.preferred_lanes and p_imp.preferred_lanes[0] != "code_recall"
+    p_doc = plan_query("为什么这么设计", max_steps=12, available_tools=None)
+    assert "code_recall" not in p_doc.preferred_lanes
 
 
 def test_render_preamble_mentions_type_and_budget():
