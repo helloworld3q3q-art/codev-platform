@@ -28,6 +28,7 @@ from eval.suites._common import (  # noqa: E402
     DEFAULT_RECALL_PID,
     DEFAULT_RETRIEVAL_PID,
 )
+from eval.suites.agent_e2e import run_agent_e2e  # noqa: E402
 from eval.suites.code_intelligence import run_code_intelligence  # noqa: E402
 from eval.suites.codegraph import run_codegraph  # noqa: E402
 from eval.suites.memory import run_memory  # noqa: E402
@@ -43,6 +44,7 @@ _RUNNERS: dict[str, callable] = {
     "code_intelligence": lambda project, k: run_code_intelligence(project or DEFAULT_CODE_INTEL_PID),
     "planner": lambda project, k: run_planner(),
     "recall": lambda project, k: run_recall(project or DEFAULT_RECALL_PID, k=k),
+    "agent_e2e": lambda project, k: run_agent_e2e(project or DEFAULT_RECALL_PID),
 }
 
 
@@ -82,6 +84,7 @@ def _print_human(results: list[dict]) -> None:
         primary = (m.get("recall@5") or m.get("recall") or m.get("hit_rate")
                    or m.get("resolution_accuracy") or m.get("arch_role_accuracy")
                    or m.get("business_domain_accuracy") or m.get("classification_accuracy")
+                   or m.get("grounding_coverage")
                    or 0.0)
         total_metric += primary
         total_ok += 1
@@ -102,19 +105,25 @@ def main(argv: list[str] | None = None) -> int:
                     help="planner suite: 额外用配置的 LLM provider 跑 keyword vs LLM A/B (需 WSL + key)")
     args = ap.parse_args(argv)
 
-    # --llm: 为 planner suite 构造配置的 provider(失败 = 缺 key/依赖 → 提示后退回纯关键词)。
-    planner_provider = None
-    if args.llm:
+    suites = list(_RUNNERS) if args.suite == "all" else [args.suite]
+
+    # 构造配置的 LLM provider: agent_e2e 必需(跑真 loop); planner 仅 --llm 时需要(A/B)。
+    # 失败(缺 key/依赖)→ None → planner 退纯关键词, agent_e2e skip。
+    provider = None
+    if args.llm or "agent_e2e" in suites:
         try:
             from codev_platform.agent.brain.registry import get_provider
-            planner_provider = get_provider()
+            provider = get_provider()
         except Exception as exc:  # noqa: BLE001
-            print(f"[--llm] 构造 provider 失败, 退回纯关键词: {exc}", file=sys.stderr)
+            print(f"[eval] 构造 LLM provider 失败 (planner 退关键词 / agent_e2e 将 skip): {exc}",
+                  file=sys.stderr)
 
     runners = dict(_RUNNERS)
-    runners["planner"] = lambda project, k: run_planner(provider=planner_provider)
+    if args.llm:
+        runners["planner"] = lambda project, k: run_planner(provider=provider)
+    runners["agent_e2e"] = lambda project, k: run_agent_e2e(project or DEFAULT_RECALL_PID,
+                                                            provider=provider)
 
-    suites = list(runners) if args.suite == "all" else [args.suite]
     results = [runners[s](args.project, args.k) for s in suites]
 
     if args.json:
