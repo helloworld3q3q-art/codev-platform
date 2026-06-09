@@ -67,6 +67,32 @@ def _local_graph(pid: str) -> Any:
     return {"nodes": c.get("nodes", 0), "edges": c.get("edges", 0), "source": "local"}
 
 
+def _soft_quality_summary(gdb: Path, pid: str) -> Any:
+    """A1/A2 软标签健康摘要 (只读, 状态接口**永不抛**)。未建='not_built' / 读失败='unknown'。"""
+    if not gdb.is_file():
+        return "not_built"
+    import sqlite3
+
+    from codev_platform.graph.soft_quality import assess_soft_labels
+    try:
+        conn = sqlite3.connect(f"file:{gdb}?mode=ro", uri=True)
+        try:
+            rep = assess_soft_labels(conn, pid)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — 单项目读失败(旧 schema 等)不拖垮整个平台状态
+        return "unknown"
+    return {"healthy": rep["healthy"], "flags": len(rep["flags"]),
+            "domains": rep["domains"]["soft_nodes"], "layers": rep["layers"]["soft_nodes"],
+            "source": "local"}
+
+
+def _local_soft_quality(pid: str) -> Any:
+    """解析 store 路径后算软标签健康摘要(供平台状态 per-project 聚合)。"""
+    from codev_platform.graph.store import graph_store_path
+    return _soft_quality_summary(graph_store_path(pid), pid)
+
+
 def _self_project_id(repo_root: Path) -> str | None:
     pj = repo_root / ".claude" / "project.json"
     if pj.is_file():
@@ -272,6 +298,7 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
             "chroma_chunks": chroma_pid.get(pid, 0),
             "codegraph": codegraph,
             "graph": _local_graph(pid),
+            "softLabels": _local_soft_quality(pid),
             "memory_project": mem_proj.get(pid, 0),
             "usage_7d": usage.get(pid, {"search_docs": 0}),
             "registered": pid in registered,

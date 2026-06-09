@@ -286,12 +286,23 @@ def cmd_health_all(args: argparse.Namespace) -> int:
             gr_s = f"nodes={gr.get('nodes', 0)} edges={gr.get('edges', 0)}"
         else:
             gr_s = "未建(跑 reindex --ingest)"
+        sl = p.get("softLabels")
+        if isinstance(sl, dict):
+            if sl.get("domains", 0) == 0 and sl.get("layers", 0) == 0:
+                sl_s = "无软层(未跑 analyzer)"
+            elif sl.get("healthy"):
+                sl_s = f"healthy (域 {sl.get('domains', 0)} / 层 {sl.get('layers', 0)})"
+            else:
+                sl_s = f"{sl.get('flags', 0)} 退化信号 (域 {sl.get('domains', 0)} / 层 {sl.get('layers', 0)})"
+        else:
+            sl_s = "未建"
         u = p.get("usage_7d", {})
         reg_tag = "" if p.get("registered") else "  (未注册 platform_meta)"
         out(f"[{pid}]{reg_tag}")
         out(f"    chroma 文档 = {ch} chunks")
         out(f"    codegraph 代码 = {cg_s}")
         out(f"    graph 图谱 = {gr_s}")
+        out(f"    软标签 A1/A2 = {sl_s}")
         out(f"    memory 项目专属 = {p.get('memory_project', 0)} 条  (+ org 共享 {mem_org})")
         out(f"    使用率(7d) = search_docs {u.get('search_docs', 0)} / codegraph {u.get('codegraph', 0)}")
         out("")
