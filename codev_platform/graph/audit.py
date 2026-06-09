@@ -118,6 +118,13 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
                if not is_soft_edge_kind(e.kind) and not edge_provenance(e.meta)]
     no_prov_by_kind = Counter(e.kind for e in no_prov)
 
+    # duplicate_edges: 同 (source,target,kind) 多行 = 多 plugin/parser 给同一关系(或退役 plugin
+    # 残留, 如 builtin.codegraph_bridge vs call_resolvers), provenance/置信可能打架。impact 查询
+    # 会**冲突消解**(保 provenance 更全者), audit 在此 surface 残留(提示该 purge 退役 plugin)。
+    edge_copies = Counter((e.source, e.target, e.kind) for e in g.edges)
+    dup_edges = [(k, c) for k, c in edge_copies.items() if c > 1]
+    dup_edge_by_kind = Counter(k[2] for k, _ in dup_edges)
+
     orphan_plugins = sorted(set(orphan_node_plugins) | set(orphan_edge_plugins))
     errors = {
         "dangling_edges": {"count": len(dangling), "samples": dangling[:_SAMPLE]},
@@ -142,6 +149,12 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
             "by_kind": dict(no_prov_by_kind),
             "samples": [{"source": e.source, "target": e.target, "kind": e.kind}
                         for e in no_prov[:_SAMPLE]],
+        },
+        "duplicate_edges": {
+            "count": len(dup_edges),
+            "by_kind": dict(dup_edge_by_kind),
+            "samples": [{"source": k[0], "target": k[1], "kind": k[2], "copies": c}
+                        for k, c in dup_edges[:_SAMPLE]],
         },
     }
     n_errors = (errors["dangling_edges"]["count"]
@@ -220,4 +233,7 @@ def render_markdown(report: dict) -> str:
     lines.append(f"- low-confidence 硬边 (<{lc['threshold']}): {lc['count']} {dict(lc['by_kind'])}")
     npv = warn["no_provenance_edges"]
     lines.append(f"- no-provenance 硬边 (来源未盖戳, 逐步补全): {npv['count']} {dict(npv['by_kind'])}")
+    dup = warn["duplicate_edges"]
+    lines.append(f"- duplicate edges (同边多 plugin 重复/退役残留, impact 已消解): "
+                 f"{dup['count']} {dict(dup['by_kind'])}")
     return "\n".join(lines)

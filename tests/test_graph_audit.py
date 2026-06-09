@@ -149,3 +149,18 @@ def test_render_markdown_smoke(tmp_path):
     conn.close()
     md = render_markdown(rep)
     assert "graph audit" in md and "clean" in md
+
+
+def test_audit_detects_duplicate_edges(tmp_path):
+    # 同 (source,target,kind) 被两 plugin 各产一份(退役 codegraph_bridge 残留 vs call_resolvers)
+    # → duplicate_edges 冲突 warning。
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    e = GraphEdge(source="f1", target="f2", kind=EdgeKind.CALLS.value, confidence=0.7)
+    upsert_result(conn, PID, AnalyzerResult(nodes=[_node("f1", "a"), _node("f2", "b")],
+                                            edges=[e], plugin="builtin.call_resolvers"))
+    upsert_result(conn, PID, AnalyzerResult(edges=[e], plugin="builtin.codegraph_bridge"))
+    rep = audit_graph(conn, PID)
+    conn.close()
+    dup = rep["warnings"]["duplicate_edges"]
+    assert dup["count"] == 1 and dup["by_kind"] == {"calls": 1}
+    assert dup["samples"][0]["copies"] == 2

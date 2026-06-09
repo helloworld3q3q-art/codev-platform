@@ -183,3 +183,29 @@ def test_search_nodes_ranks_exact_prefix_substring(tmp_path):
     names = [h["name"] for h in search_nodes(c, "p3", "save")["hits"]]
     c.close()
     assert names == ["save", "save_user", "unsaved"]   # 精确 > 前缀 > 子串
+
+
+def test_resolve_duplicate_edges_keeps_stamped(tmp_path):
+    # 冲突消解: 同 (s,t,kind) 一个盖戳一个没盖 → 保盖戳者(provenance 更全)。
+    from codev_platform.graph.impact import _resolve_duplicate_edges
+    from codev_platform.graph.schema import ProvSource, edge_provenance, stamp_provenance
+    stamped = stamp_provenance(GraphEdge(source="a", target="b", kind="calls", confidence=0.7),
+                               ProvSource.AST)
+    unstamped = GraphEdge(source="a", target="b", kind="calls", confidence=0.7)
+    out = _resolve_duplicate_edges([unstamped, stamped])
+    assert len(out) == 1 and edge_provenance(out[0].meta)["src"] == "ast"
+
+
+def test_resolve_duplicate_edges_higher_confidence_wins():
+    from codev_platform.graph.impact import _resolve_duplicate_edges
+    e1 = GraphEdge(source="a", target="b", kind="calls", confidence=0.5)
+    e2 = GraphEdge(source="a", target="b", kind="calls", confidence=0.9)
+    out = _resolve_duplicate_edges([e1, e2])
+    assert len(out) == 1 and out[0].confidence == 0.9
+
+
+def test_resolve_duplicate_edges_distinct_targets_untouched():
+    from codev_platform.graph.impact import _resolve_duplicate_edges
+    edges = [GraphEdge(source="a", target="b", kind="calls"),
+             GraphEdge(source="a", target="c", kind="calls")]   # 不同 target 非冲突
+    assert _resolve_duplicate_edges(edges) == edges
