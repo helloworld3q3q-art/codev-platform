@@ -248,6 +248,33 @@ def graph_audit(request: Request, ctx=Depends(require_project_access)) -> Common
 
 
 @router.post(
+    "/api/v1/graph/soft-quality",
+    tags=[_UNIFIED_TAG],
+    summary="统一图谱-软标签健康度",
+    operation_id="graphSoftQuality",
+    response_model=CommonResult[S.GraphSoftQualityResponse],
+)
+def graph_soft_quality(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
+    """A1/A2 软标签健康度诊断 (纯读): 分布/覆盖/巨型 cluster 退化。store 缺/无软层 → healthy。"""
+    _identity, project_id = ctx
+    from codev_platform.graph.soft_quality import assess_soft_labels
+    conn = _open_store_ro(project_id)
+    if conn is None:
+        return ok(S.GraphSoftQualityResponse(), request_id=_rid(request))
+    try:
+        rep = assess_soft_labels(conn, project_id)
+    finally:
+        conn.close()
+    dom, lay = rep["domains"], rep["layers"]
+    resp = S.GraphSoftQualityResponse(
+        healthy=rep["healthy"], flagCount=len(rep["flags"]), flags=rep["flags"],
+        domainCount=dom["soft_nodes"], domainCoverage=dom["coverage"], domainGiant=len(dom["giant"]),
+        layerCount=lay["soft_nodes"], layerCoverage=lay["coverage"], layerGiant=len(lay["giant"]),
+    )
+    return ok(resp, request_id=_rid(request))
+
+
+@router.post(
     "/api/v1/graph/unified/stats",
     tags=[_UNIFIED_TAG],
     summary="统一图谱-统计",

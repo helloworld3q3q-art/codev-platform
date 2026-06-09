@@ -166,6 +166,20 @@ class GraphAuditResponse(BaseModel):
     edges: int = Field(0, description="边总数")
 
 
+class GraphSoftQualityResponse(BaseModel):
+    """A1/A2 软标签健康度诊断结果: 分布/覆盖/退化信号。空软层(未跑 analyzer) = healthy。"""
+
+    healthy: bool = Field(True, description="无退化信号即 healthy")
+    flagCount: int = Field(0, description="退化信号总数")
+    flags: list[str] = Field(default_factory=list, description="人类可读退化信号清单")
+    domainCount: int = Field(0, description="业务域(A1)软节点数")
+    domainCoverage: float | None = Field(None, description="业务域标注覆盖率 (labeled/eligible)")
+    domainGiant: int = Field(0, description="业务域巨型 cluster 数 (成员占比超阈值, 疑似退化)")
+    layerCount: int = Field(0, description="架构层(A2)软节点数")
+    layerCoverage: float | None = Field(None, description="架构层标注覆盖率")
+    layerGiant: int = Field(0, description="架构层巨型 cluster 数")
+
+
 class UnifiedGraphStatsResponse(BaseModel):
     nodesByKind: dict[str, int] = Field(default_factory=dict)
     edgesByKind: dict[str, int] = Field(default_factory=dict)
