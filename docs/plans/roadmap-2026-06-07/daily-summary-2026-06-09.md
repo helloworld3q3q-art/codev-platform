@@ -140,7 +140,7 @@ eval `_recall_per_query` 之前按 name/file 子串判相关 → `test_weighted_
 
 - 现**排除测试代码**(`test_` 函数 / `tests/` 目录 / `*_test.py` / `*.spec.ts`)出相关集, 判据**复用 service `_is_test_hit`**(单一真值源, 不在 eval 侧重写启发式 —— 与 lane 内降权用的同一定义)。
 - 测: `test_eval_recall` 新增 test-hit 排除用例; recall/eval/graph 合并回归 **89 passed**。
-- ⚠️ **真实 MRR/nDCG 复跑是 WSL 步**: recall suite 在 Windows **skip**(需 codegraph.db, 在平台/WSL 侧 junction)。要拿排除测试 ref 后的真实数字, 需 push `4cdf204` + WSL pull 后跑 `python -m eval.run_eval --suite recall --project codev-platform`。
+- **WSL 真实复跑(push `3219c24` + WSL pull 后)**: recall suite 在 Windows skip(需 codegraph.db, 在平台/WSL 侧 junction), 故在 WSL 跑 `--suite recall --project codev-platform` → **weighted MRR 0.917 / nDCG@5 0.858, uniform 0.750 / 0.724, planner delta +0.167 / +0.134**。排除测试 ref 后数字**稳定保持**(与日志记录一致), 说明 golden 现只认真实现、且这些查询本就未被测试文件虚高 —— 修正生效且无回退。
 
 ## 十九、运维上线 + 全栈验证
 
