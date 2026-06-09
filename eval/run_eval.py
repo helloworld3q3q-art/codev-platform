@@ -30,13 +30,20 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from eval.metrics import accuracy, aggregate_mrr, hit_at_k, recall_at_k  # noqa: E402
+from eval.metrics import (  # noqa: E402
+    accuracy,
+    aggregate_mrr,
+    aggregate_ndcg,
+    hit_at_k,
+    recall_at_k,
+)
 
 _DATASETS = Path(__file__).resolve().parent / "datasets"
 _DEFAULT_RETRIEVAL_PID = "codev-platform"
 _DEFAULT_GRAPH_PID = "openclaw-stock"
 # A1/A2 软标签准确率回归默认测平台自身 (analyzer 上线在 codev-platform 项目)。
 _DEFAULT_CODE_INTEL_PID = "codev-platform"
+_DEFAULT_RECALL_PID = "codev-platform"
 # memory recall 子集用的隔离命名空间前缀 —— 只碰 eval 自己写的数据,清理按此 org_id + owner 删净。
 _EVAL_MEM_ORG_PREFIX = "eval-mem-"
 
@@ -584,18 +591,87 @@ def _print_human(results: list[dict]) -> None:
         print("  无 suite 跑通 (全部 skipped) —— 见上方 reason 准备后端。")
 
 
+_RECALL_RELEVANT_FIELDS = ("name", "file")
+
+
+def _recall_per_query(hits: list, expect: str) -> tuple[list[str], set[str], int]:
+    """recall_code 结果 → (位置 id 列表, 相关位置集合, 首个相关 1-based rank)。
+
+    相关性按**模式匹配**(hit 的 name/file 含 expect 子串)—— 与 codegraph suite 同法,
+    bootstrap golden 不必枚举具体 node id(store-agnostic)。
+    """
+    retrieved = [str(i) for i in range(len(hits))]
+    relevant = {
+        str(i) for i, h in enumerate(hits)
+        if any(expect in (getattr(h, f, None) or "") for f in _RECALL_RELEVANT_FIELDS)
+    }
+    rank = next((i + 1 for i in range(len(hits)) if str(i) in relevant), -1)
+    return retrieved, relevant, rank
+
+
+def run_recall(project_id: str, k: int = 5) -> dict:
+    """跨 lane 融合召回 suite —— **A/B 验证 planner 权重**: 加权(planner 自动)vs 等权,
+    比 MRR / nDCG@k。落地 Phase 6 Gate「相比 baseline 可量化提升」+ 验 `_PREFER` 是否真有效。
+
+    两 lane(graph + codegraph)都直读本地 sqlite(免 daemon)。任一 store 缺 → skip
+    (单 lane 下加权无意义, 比较不成立)。
+    """
+    from codev_platform.core.paths import codegraph_db_path
+    from codev_platform.graph.store import graph_store_path
+    from codev_platform.recall import recall_code
+    from codev_platform.recall.service import CODEGRAPH_LANE, GRAPH_LANE
+
+    rows = _load_jsonl("recall.jsonl")
+    if not graph_store_path(project_id).exists() or not codegraph_db_path(project_id).exists():
+        return {
+            "suite": "recall", "status": "skipped", "n": len(rows),
+            "reason": f"需 graph store + codegraph.db 双 lane (project={project_id}); "
+                      f"缺一则单 lane, 加权 vs 等权比较不成立。",
+        }
+    uniform = {GRAPH_LANE: 1.0, CODEGRAPH_LANE: 1.0}
+    weighted_pq: list[tuple[list[str], set[str]]] = []
+    uniform_pq: list[tuple[list[str], set[str]]] = []
+    details = []
+    for r in rows:
+        expect = r["expect"]
+        w_hits = recall_code(r["query"], project_id, weights=None, limit=max(k, 10))   # planner 自动
+        u_hits = recall_code(r["query"], project_id, weights=uniform, limit=max(k, 10))
+        wr, wrel, w_rank = _recall_per_query(w_hits, expect)
+        ur, urel, u_rank = _recall_per_query(u_hits, expect)
+        weighted_pq.append((wr, wrel))
+        uniform_pq.append((ur, urel))
+        details.append({
+            "query": r["query"], "type": r.get("query_type", ""), "expect": expect,
+            "weighted_rank": w_rank, "uniform_rank": u_rank, "n_hits": len(w_hits),
+        })
+
+    def _agg(pq):
+        return {"mrr": round(aggregate_mrr(pq), 3), f"ndcg@{k}": round(aggregate_ndcg(pq, k), 3)}
+
+    w_m, u_m = _agg(weighted_pq), _agg(uniform_pq)
+    return {
+        "suite": "recall", "status": "ok", "n": len(rows), "project_id": project_id,
+        "metrics": {
+            "weighted": w_m, "uniform": u_m,
+            "mrr_delta": round(w_m["mrr"] - u_m["mrr"], 3),
+            f"ndcg@{k}_delta": round(w_m[f"ndcg@{k}"] - u_m[f"ndcg@{k}"], 3),
+        },
+        "details": details,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="codev-platform eval harness")
     ap.add_argument("--suite",
                     choices=["retrieval", "codegraph", "memory", "code_intelligence",
-                             "planner", "all"],
+                             "planner", "recall", "all"],
                     default="all")
     ap.add_argument("--project", default=None, help="project_id 覆盖 (默认按 suite 选)")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("-k", type=int, default=5, help="retrieval top-k (默认 5)")
     args = ap.parse_args(argv)
 
-    suites = (["retrieval", "codegraph", "memory", "code_intelligence", "planner"]
+    suites = (["retrieval", "codegraph", "memory", "code_intelligence", "planner", "recall"]
               if args.suite == "all" else [args.suite])
     results: list[dict] = []
     for s in suites:
@@ -609,6 +685,8 @@ def main(argv: list[str] | None = None) -> int:
             results.append(run_code_intelligence(args.project or _DEFAULT_CODE_INTEL_PID))
         elif s == "planner":
             results.append(run_planner())
+        elif s == "recall":
+            results.append(run_recall(args.project or _DEFAULT_RECALL_PID, k=args.k))
 
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))

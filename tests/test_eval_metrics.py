@@ -4,10 +4,14 @@
 """
 from __future__ import annotations
 
+import pytest
+
 from eval.metrics import (
     aggregate_mrr,
+    aggregate_ndcg,
     hit_at_k,
     mrr,
+    ndcg_at_k,
     precision_at_k,
     recall_at_k,
 )
@@ -82,3 +86,31 @@ def test_precision_at_k_full_and_truncation():
 def test_precision_at_k_zero_k_and_no_hit():
     assert precision_at_k(["a"], {"a"}, 0) == 0.0
     assert precision_at_k(["x", "y"], {"a"}, 2) == 0.0
+
+
+# ---- ndcg_at_k ------------------------------------------------------------
+
+def test_ndcg_perfect_when_relevant_on_top():
+    assert ndcg_at_k(["a", "b"], {"a"}, 2) == 1.0            # 相关项 rank1 → 满分
+
+
+def test_ndcg_penalizes_lower_rank():
+    # a 在 rank2 → DCG=1/log2(3); IDCG=1/log2(2)=1 → 0.6309
+    assert ndcg_at_k(["x", "a"], {"a"}, 2) == pytest.approx(0.63093, abs=1e-4)
+
+
+def test_ndcg_two_relevant_mixed_ranks():
+    # [a,x,b] rel {a,b}: DCG=1/log2(2)+1/log2(4)=1.5; IDCG=1/log2(2)+1/log2(3)=1.6309
+    assert ndcg_at_k(["a", "x", "b"], {"a", "b"}, 3) == pytest.approx(0.91972, abs=1e-4)
+
+
+def test_ndcg_k_truncation_and_empty():
+    assert ndcg_at_k(["x", "y", "a"], {"a"}, 2) == 0.0      # 相关项被 k=2 截掉
+    assert ndcg_at_k(["a"], set(), 3) == 0.0                # 空相关集
+    assert ndcg_at_k([], {"a"}, 3) == 0.0                   # 空召回
+
+
+def test_aggregate_ndcg_average():
+    pq = [(["a"], {"a"}), (["x", "b"], {"b"})]              # 1.0 + 0.6309 → 平均 0.8155
+    assert aggregate_ndcg(pq, 2) == pytest.approx(0.81546, abs=1e-4)
+    assert aggregate_ndcg([], 2) == 0.0

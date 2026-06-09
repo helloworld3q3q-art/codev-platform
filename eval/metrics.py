@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Sequence
 
 
@@ -74,6 +75,30 @@ def aggregate_mrr(per_query: Sequence[tuple[Sequence[str], Iterable[str]]]) -> f
     if not per_query:
         return 0.0
     return sum(mrr(r, rel) for r, rel in per_query) / len(per_query)
+
+
+def ndcg_at_k(retrieved: Sequence[str], relevant: Iterable[str], k: int) -> float:
+    """nDCG@k (二元相关性): DCG@k / IDCG@k。
+
+    DCG = Σ rel_i / log2(rank + 1) (rank 1-based, 故位置 i → log2(i+2));
+    IDCG = 理想排序(相关项全排最前)的 DCG。nDCG ∈ [0,1]。
+    比 recall@k **更惩罚"相关项排得靠后"** —— 比较两套排序(如加权 vs 等权融合)时更敏感。
+    相关集合为空 / k<=0 返回 0.0。
+    """
+    rel = set(relevant)
+    if not rel or k <= 0:
+        return 0.0
+    topk = _top_k(retrieved, k)
+    dcg = sum(1.0 / math.log2(i + 2) for i, rid in enumerate(topk) if rid in rel)
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(min(len(rel), k)))
+    return dcg / idcg if idcg else 0.0
+
+
+def aggregate_ndcg(per_query: Sequence[tuple[Sequence[str], Iterable[str]]], k: int) -> float:
+    """多 query 平均 nDCG@k。per_query: [(retrieved, relevant), ...]。空列表返回 0.0。"""
+    if not per_query:
+        return 0.0
+    return sum(ndcg_at_k(r, rel, k) for r, rel in per_query) / len(per_query)
 
 
 def accuracy(correct: int, total: int) -> float:

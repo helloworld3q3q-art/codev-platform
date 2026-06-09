@@ -1,0 +1,6 @@
+{"query": "impact analysis report", "query_type": "impact", "expect": "impact", "note": "IMPACT→graph 偏好; relevant=graph 影响端点/页(reportImpact/impact page)"}
+{"query": "impact of audit access changes", "query_type": "impact", "expect": "audit", "note": "IMPACT→graph; relevant=graph audit 端点(graphAudit/listAuditAccess)"}
+{"query": "who uses recall code endpoint", "query_type": "impact", "expect": "recall", "note": "IMPACT(who uses)→graph; relevant=graph recall 端点"}
+{"query": "weighted rrf function definition", "query_type": "symbol", "expect": "weighted_rrf", "note": "SYMBOL→codegraph 偏好; relevant=codegraph 符号 weighted_rrf"}
+{"query": "where is assess soft labels", "query_type": "symbol", "expect": "assess_soft", "note": "SYMBOL(where is)→codegraph; relevant=codegraph assess_soft_labels"}
+{"query": "stamp provenance signature", "query_type": "symbol", "expect": "stamp_provenance", "note": "SYMBOL(signature)→codegraph; relevant=codegraph stamp_provenance"}
