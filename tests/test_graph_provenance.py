@@ -16,7 +16,6 @@ from codev_platform.graph.ingest import (
     build_frontend_bridge_edges,
 )
 from codev_platform.graph.schema import (
-    CERTAIN_PROV_SOURCES,
     PROV_KEY,
     AnalyzerResult,
     EdgeKind,
@@ -26,6 +25,7 @@ from codev_platform.graph.schema import (
     ProvSource,
     edge_provenance,
     stamp_provenance,
+    stamp_unprovenanced,
 )
 from codev_platform.graph.store import open_store, upsert_result
 
@@ -66,8 +66,13 @@ def test_edge_provenance_empty_when_unstamped():
     assert edge_provenance({"resolver": "x"}) == {}  # 无 prov 子袋
 
 
-def test_certain_sources_set():
-    assert CERTAIN_PROV_SOURCES == frozenset({"ast", "framework", "bridge"})
+def test_stamp_unprovenanced_skips_already_stamped():
+    a = GraphEdge(source="a", target="b", kind=EdgeKind.CALLS.value)  # 未盖
+    b = stamp_provenance(
+        GraphEdge(source="c", target="d", kind=EdgeKind.CALLS.value), ProvSource.AST)  # 已盖
+    stamp_unprovenanced([a, b], ProvSource.REGEX, parser="p")
+    assert edge_provenance(a.meta) == {"src": "regex", "parser": "p"}  # 补默认戳
+    assert edge_provenance(b.meta)["src"] == "ast"  # 既有精确戳保留(局部覆盖优先)
 
 
 # ---------------------------------------------------------------- 2. ingest 盖戳
@@ -87,11 +92,67 @@ def test_frontend_bridge_edges_stamped_bridge():
 
 
 def test_call_resolvers_declare_prov_source():
-    # codegraph = ast 精确解析; fastapi = regex 名称 BFS(候选)。
+    # codegraph = ast 精确解析; fastapi = regex 名称 BFS。
     from codev_platform.graph.call_resolvers.codegraph import CodegraphCallResolver
     from codev_platform.graph.call_resolvers.fastapi import FastApiCallResolver
     assert CodegraphCallResolver.prov_source == ProvSource.AST.value
     assert FastApiCallResolver.prov_source == ProvSource.REGEX.value
+
+
+def test_edge_producing_plugins_declare_prov_source():
+    # 产边插件须声明 prov_source(否则边无来源)。三者均正则解析 → regex。
+    from codev_platform.plugins.builtin.frontend_react import FrontendReactPlugin
+    from codev_platform.plugins.builtin.sql import SqlPlugin
+    from codev_platform.plugins.builtin.vue import VuePlugin
+    assert SqlPlugin.prov_source == ProvSource.REGEX.value
+    assert FrontendReactPlugin.prov_source == ProvSource.REGEX.value
+    assert VuePlugin.prov_source == ProvSource.REGEX.value
+
+
+# ---- executor 边界统一盖戳(plugin 实例 ↔ result 唯一交汇点)----
+
+class _FakePlugin:
+    """最小插件: 声明 prov_source, analyze 返回带边的 result(测 executor 归因)。"""
+    name = "fake.plugin"
+    version = "1.0.0"
+    prov_source = ProvSource.AST.value
+
+    def __init__(self, edges):
+        self._edges = edges
+
+    def detect(self, repo):
+        return True
+
+    def analyze(self, repo, project_id):
+        return AnalyzerResult(edges=self._edges)
+
+
+def test_executor_stamps_plugin_edges_from_prov_source(tmp_path):
+    from codev_platform.plugins.executor import run_plugin
+    e = GraphEdge(source="a", target="b", kind=EdgeKind.READS_TABLE.value)
+    res = run_plugin(_FakePlugin([e]), tmp_path, PID)
+    assert res.ok
+    prov = edge_provenance(res.result.edges[0].meta)
+    assert prov == {"src": "ast", "parser": "fake.plugin"}  # parser = 插件名
+
+
+def test_executor_preserves_pre_stamped_plugin_edge(tmp_path):
+    # 插件自盖更精确的戳 → executor 不覆盖(局部覆盖优先)。
+    from codev_platform.plugins.executor import run_plugin
+    e = stamp_provenance(
+        GraphEdge(source="a", target="b", kind=EdgeKind.CALLS.value),
+        ProvSource.FRAMEWORK, parser="self")
+    res = run_plugin(_FakePlugin([e]), tmp_path, PID)
+    assert edge_provenance(res.result.edges[0].meta)["src"] == "framework"
+
+
+def test_executor_skips_stamping_when_no_prov_source(tmp_path):
+    # 未声明 prov_source 的插件 → 边不盖戳(不臆测来源, 留 audit no-provenance 标出)。
+    from codev_platform.plugins.executor import run_plugin
+    plugin = _FakePlugin([GraphEdge(source="a", target="b", kind=EdgeKind.CALLS.value)])
+    plugin.prov_source = None
+    res = run_plugin(plugin, tmp_path, PID)
+    assert edge_provenance(res.result.edges[0].meta) == {}
 
 
 # ---------------------------------------------------------------- 3. impact 展示 src/conf/certain
