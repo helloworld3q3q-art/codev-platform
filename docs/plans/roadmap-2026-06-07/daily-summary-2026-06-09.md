@@ -108,3 +108,14 @@ provenance(`2359ffe`→`866ecc8`)→ CLI UTF-8(`ef04670`)→ soft-quality(`2c73c
 ## 十五、本会话沉淀的记忆
 
 `code-quality-principles`(写码准则)/ `soft-quality-first-run-findings`(A2 双 bug 定论)/ `recall-weight-ab-finding`(权重 A/B 翻转 + lane 内是杠杆)/ `locate-via-codegraph-not-grep` 等。
+
+## 十六、续二 —— code_recall 成主检索 + Phase 3 冲突消解 + Phase 5 路径评分
+
+> 日志后 4 commit(`9d30694`→`d0ffa7f`), 全 pushed + WSL 真实验证 + 三服务重启上线 + IDE-agent 实调。
+
+- **code_recall 接进 agent 工具集**(`9d30694`): 把 Phase 6 融合召回封成 agent 工具 `code_recall`(注册进 build_default_registry), agent 一次拿融合 graph+codegraph 可解释排名。
+- **code_recall 成主检索**(`dba963c`): planner `_LANES` 把 code_recall 放进 symbol/overview/general 首位、impact 末位; `code-understanding` skill 同步"找代码优先 code_recall"。Phase 6↔7 真正咬合 —— 不再是旁路工具而是默认首选。
+- **Phase 3 冲突消解完成**(`910ea21`): 实测 openclaw 155 组同 (source,target,kind) 重复(退役 `builtin.codegraph_bridge` 残留 vs call_resolvers, 一盖戳一没盖)。`build_impact_graph` 查询时 `_resolve_duplicate_edges` 保 provenance 更全/高置信者(非破坏); audit 加 `duplicate_edges` warning; **purge openclaw 155 条残留(独有 0 纯冗余)→ audit clean**。
+- **Phase 5 多跳路径评分**(`d0ffa7f`): `find_impact_paths` —— Dijkstra 最大乘积每节点保最优单路径(有界 O(节点)+ max_depth/fanout 封顶), 评分 `Π(confidence × src 权重)`(ast/framework/bridge 满权, regex 0.7/llm 0.5), 每跳给 file+src+confidence 证据 + 确定/候选, 降序稳定。暴露成 graph MCP 第 13 工具。IDE-agent 实调 `find_impact_paths(graphAudit)` → 14 可达 top 10 路径, 完整跨层依赖链 + 每跳证据。**社区/新鲜度加成依赖未做的 Phase 4 待后续**。
+
+**完成度更新**: Phase 3 ~85%→**完成**(冲突消解补齐); Phase 5 未启动→**MVP 落地**。**纯未启动重型 Phase 只剩 2(统一 IR)和 8(性能)**。本会话累计 **36 commit**。三服务(codev-mcp-graph 13 工具 / codev-web / codev-agent)已重启上线。
