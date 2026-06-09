@@ -45,10 +45,16 @@ class AnalyzerPlugin(ABC):
     """内置插件基类:子类必须声明 name/version + 实现 detect/analyze。
 
     name / version 用类属性声明 (子类覆盖);也可在 __init__ 设实例属性。
+
+    prov_source (Phase 3 provenance):本插件所产边的默认来源类 (graph.schema.ProvSource
+    值,如 "ast")。executor 据此给插件边盖来源戳 (边界统一归因);插件若已自盖更精确的戳
+    则保留。None = 不声明 (executor 不臆测来源, 留 audit no-provenance 标出)。只产节点不产边
+    的插件无需声明。这是声明式扩展点 (同 call_resolver.prov_source), 加插件零改 executor。
     """
 
     name: str = ""
     version: str = "0.0.0"
+    prov_source: str | None = None
 
     @abstractmethod
     def detect(self, repo_path: Path) -> bool:

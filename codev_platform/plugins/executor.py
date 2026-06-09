@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from codev_platform.graph.schema import AnalyzerResult
+from codev_platform.graph.schema import AnalyzerResult, stamp_unprovenanced
 
 
 # 错误码 (decision doc §插件错误码) —— 稳定标识,便于审计统计 + 告警归类。
@@ -121,6 +121,13 @@ def run_plugin(
         result.plugin = name
     if result.plugin_version is None:
         result.plugin_version = version
+
+    # 边来源归因 (Phase 3 provenance): 用插件声明的 prov_source 给其产的边盖默认来源戳
+    # (插件已自盖更精确的戳则保留)。executor 是 plugin 实例 ↔ result 的唯一交汇点, 在此
+    # 统一归因 → ingest 零改、加插件零改。未声明 prov_source (只产节点的插件) 则不盖。
+    prov_source = getattr(plugin, "prov_source", None)
+    if prov_source:
+        stamp_unprovenanced(result.edges, prov_source, parser=name)
 
     elapsed = (time.perf_counter() - t0) * 1000.0
     return ExecutionResult(

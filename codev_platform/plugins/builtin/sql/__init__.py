@@ -43,6 +43,7 @@ from codev_platform.graph.schema import (
     GraphEdge,
     GraphNode,
     NodeKind,
+    ProvSource,
 )
 from codev_platform.plugins.base import AnalyzerPlugin
 from codev_platform.plugins.builtin import _stack_scan
@@ -140,6 +141,7 @@ class SqlPlugin(AnalyzerPlugin):
 
     name = PLUGIN_NAME
     version = "0.1.0"
+    prov_source = ProvSource.REGEX.value  # SQL DDL/DML 正则解析(精度由边 confidence 承载)
 
     def detect(self, repo_path: Path) -> bool:
         repo = Path(repo_path)

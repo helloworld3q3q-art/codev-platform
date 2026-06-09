@@ -110,27 +110,30 @@ def is_soft_edge_kind(kind: Any) -> bool:
 
 
 class ProvSource(str, Enum):
-    """边来源类(provenance source_kind 的精简集, 对齐 plan §Phase 3)。
+    """边来源类 —— 描述边的**派生方法**(plan §Phase 3 source_kind 精简集)。
 
-    确定来源(结构性确定血缘):ast / framework / bridge —— 影响分析可直接采信。
-    启发来源(降级推断,作候选):regex(名称 BFS)/ llm(分析器软边)。
+    与置信**正交**: "确定依赖 vs 候选"由 confidence 定(见 impact._CERTAIN_CONF), 不由 src 定。
+    同一 src 可有不同置信(如 regex: SQL DDL 解析 conf=1.0 确定 / DI 名称 BFS conf<1.0 候选)。
+
+    ast       结构化 AST / 工具解析 (codegraph 调用图 / dependency-cruiser 依赖图)
+    framework 框架语义适配 (linker: frontend_api_call→endpoint 按路由匹配)
+    bridge    结构桥接 (frontend module→同文件 api_call/route)
+    regex     正则 / 模式解析 (SQL DDL / 前端 import-call / DI 名称 BFS; 精度由 confidence 承载)
+    llm       分析器 / LLM 软边 (belongs_to_domain / plays_role)
+    manual    人工标注
     """
 
-    AST = "ast"            # 结构化精确解析 (codegraph 调用图)
-    FRAMEWORK = "framework"  # 框架语义适配 (linker: frontend_api_call→endpoint)
-    BRIDGE = "bridge"      # 结构桥接 (frontend module→同文件 api_call/route)
-    REGEX = "regex"        # 名称启发式 BFS (fastapi DI 盲区等, conf<1.0)
-    LLM = "llm"            # 分析器/LLM 软边 (belongs_to_domain / plays_role)
-    MANUAL = "manual"      # 人工标注
+    AST = "ast"
+    FRAMEWORK = "framework"
+    BRIDGE = "bridge"
+    REGEX = "regex"
+    LLM = "llm"
+    MANUAL = "manual"
 
 
 # edge.meta 里 provenance 子袋的标准 key(嵌套一层避免与插件已用 meta key 撞:
 # fastapi 的 resolver/via_handler、前端的 is_page 等)。
 PROV_KEY: str = "prov"
-
-# 确定来源集合: 影响分析"确定依赖"判定的来源侧条件(另叠加 confidence 阈值, 见 impact.py)。
-CERTAIN_PROV_SOURCES: frozenset[str] = frozenset(
-    {ProvSource.AST.value, ProvSource.FRAMEWORK.value, ProvSource.BRIDGE.value})
 
 
 def stamp_provenance(edge: GraphEdge, src: Any, *,
@@ -155,6 +158,18 @@ def stamp_provenance(edge: GraphEdge, src: Any, *,
 def edge_provenance(meta: dict[str, Any] | None) -> dict[str, Any]:
     """从 edge.meta 取 provenance 子袋(无则 {})。读侧(impact/audit)统一入口。"""
     return dict((meta or {}).get(PROV_KEY) or {})
+
+
+def stamp_unprovenanced(edges: list[GraphEdge], src: Any, *,
+                        parser: str | None = None, pv: str | None = None) -> None:
+    """给一批边里**尚未盖 provenance** 的逐条盖默认来源戳(原地)。
+
+    已盖戳的保留 —— 支持 producer 局部覆盖默认值(分层: producer 精确盖优先, 边界统一兜底)。
+    用于在执行/聚合边界按 producer 声明的来源批量归因(executor / ingest pass)。
+    """
+    for e in edges:
+        if not edge_provenance(e.meta):
+            stamp_provenance(e, src, parser=parser, pv=pv)
 
 
 @dataclass

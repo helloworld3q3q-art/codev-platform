@@ -23,6 +23,7 @@ from codev_platform.graph.schema import (
     NodeKind,
     ProvSource,
     stamp_provenance,
+    stamp_unprovenanced,
 )
 from codev_platform.graph.store import load_graph, open_store, upsert_result
 from codev_platform.plugins.builtin import _stack_scan
@@ -164,6 +165,8 @@ def _frontend_deps_pass(conn, project_id: str, report: IngestReport, repo_path: 
     from codev_platform.plugins.builtin._stack_scan import scan_frontend_deps
 
     nodes, edges = scan_frontend_deps(repo_path, project_id)
+    # dependency-cruiser 真依赖图(AST 工具): src=ast
+    stamp_unprovenanced(edges, ProvSource.AST, parser=FRONTEND_DEPS_PLUGIN)
     upsert_result(
         conn, project_id,
         AnalyzerResult(nodes=nodes, edges=edges, plugin=FRONTEND_DEPS_PLUGIN),
