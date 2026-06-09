@@ -94,11 +94,15 @@ def recall_code(query: str, project_id: str, *,
                 limit: int = _LIMIT, per_lane: int = _PER_LANE) -> list[CodeRecallHit]:
     """跨 lane 代码召回: 融合 graph + codegraph → 统一可解释排名。
 
-    weights: lane → 权重(symbol 类 query 偏 codegraph / 架构类偏 graph; 由 planner / 调用侧给)。
+    weights: lane → 权重。**缺省(None)按 query 类型自动调权**(planner 分类 → symbol 偏
+             codegraph / 架构类偏 graph), 见 recall.weights; 显式传入则覆盖自动值。
     每 lane fail-soft: 一条挂了另一条仍出结果。两 lane 全空 → []。
     """
     if not (query or "").strip():
         return []
+    if weights is None:   # 自动按 query 类型调权(planner 耦合隔离在 recall.weights)
+        from codev_platform.recall.weights import lane_weights_for
+        weights = lane_weights_for(query)
     lanes: list[LaneResult] = []
     details: dict[str, dict] = {}
     for lane, lane_details in (_graph_lane(project_id, query, per_lane),
