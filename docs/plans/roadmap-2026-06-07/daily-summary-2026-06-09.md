@@ -210,3 +210,26 @@ WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 fa
 **结论**: agent 在种子集上**全程有据、零幻觉、不超预算**, 回答质量基线优。`expect_tools` 是"至少一类"非强制, 故 0.8 不算缺陷。
 
 **剩余**: E3 LLM-judge(主观质量, 默认关)/ **E4 planner 端到端 A/B**(planner 开关 + keyword vs LLM planner 下答案质量差 —— 验 §二的"分类更准→答案更好"独立假设)。种子集小 = 趋势工具非绝对分([[recall-weight-ab-finding]] 纪律)。WSL 全量 pytest **1392 passed / 0 failed**。commit `1f437bb`。
+
+## 二十五、Phase 7 完整版收尾 —— E3 judge + E4 A/B + `planner_llm_enabled` 默认决策
+
+用户"1、2、3 挨着做"。harness 全建成 + 14 单测(judge 解析/兜底 + A/B 三变体), WSL 真跑(`8d8d8d5`):
+
+**E4 planner 端到端 A/B**(3 变体 × 种子集):
+
+| 变体 | grounding | tool_appropriate | within_budget |
+|---|---|---|---|
+| planner off | 0.9 | **0.6** | 1.0 |
+| planner keyword | 0.9 | **1.0** | 1.0 |
+| planner llm | 0.9 | **1.0** | 1.0 |
+
+- **planner ON(任一分类器)把 tool_appropriate 0.6→1.0(+0.4)** —— planner 的 lane 引导让 agent 用对工具类, 端到端真有价值(planner 这个 Phase 7 特性被实证)。
+- grounding 三者同 0.9(种子集易 → **天花板效应**, 测不出差); **keyword vs llm 此集无差**(5 例分类够清晰, 两分类器路由一致)—— LLM planner 的优势在口语化问法(分类 A/B +0.733), 本易集不触发。
+
+**E3 LLM-judge**: deepseek 自评 5 例 **judge_score_avg = 5.0**(满分)。judge 层通了, 但自评偏宽 + 易集饱和 → 此集不 differentiate。基础设施就位, **默认关**(噪声 + 成本)。
+
+**#3 决策 → `planner_llm_enabled` 保持默认关(config 逐 provider 可开)**:
+- LLM planner 分类增益已证(硬集 +0.733), 但**端到端答案质量相对 keyword 的优势尚未在 eval 证出**(种子集太易, 不触发 keyword 弱点)+ 每查询多一次 LLM 调用(延迟/成本)。
+- 守纪律不据小易集翻默认([[recall-weight-ab-finding]])。**翻默认的条件**: 补口语化硬 e2e 集, 证出 keyword vs LLM 端到端答案质量差, 再考虑某档默认开。
+
+**Phase 7 完整版 = 主体完成**: 最小版 + LLM planner(验证有效)+ e2e eval(设计→E1→E2→E3→E4 全落地)。剩纯精修(硬 e2e 集 / judge 取舍 / 默认开条件), 按真实需求触发。commit `8d8d8d5`。
