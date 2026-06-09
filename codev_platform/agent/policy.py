@@ -39,6 +39,10 @@ class LoopPolicy:
     # 不做全局开关,跟 registry 的 _STRONG/_MID/_WEAK 档走,config 可逐字段 per-provider 覆盖。
     planner_enabled: bool = False           # 是否按问题类型规划工具 + 预算 + lane(默认关, 强模型档不开)
     planner_hard_cap_readonly: bool = True   # 超预算后只读类(list_dir/read_file)是否硬拦(弱模型防目录 spelunking)
+    # LLM planner(Phase 7 完整版): 用 LLM 分类替关键词(对口语化/无关键词问法关键词只 ~0.27,
+    # eval 硬集实测)。**默认全档关**: determinism-first, 多一次 LLM 调用换分类精度的取舍未经 A/B
+    # 定论前不默认开; 经 config 逐 provider 开(planner_enabled 为前提, 关时本字段无效)。关键词永远兜底。
+    planner_llm_enabled: bool = False
 
     # --- deprecated 别名: 旧 per_tool_cap → retrieval_distinct_cap(不破存量 config / 测试)---
     per_tool_cap: int | None = None  # deprecated: 构造/读取均映射 retrieval_distinct_cap

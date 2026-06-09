@@ -239,8 +239,12 @@ class AgentLoop:
         # tool_budget 在 _postprocess 作软停止条件。关闭时 budget=0 → 全程不约束(原行为)。
         tool_budget = 0
         if self.policy.planner_enabled:
+            # planner_llm_enabled(默认关)→ 把同一 provider 喂给 planner 做 LLM 分类(关键词兜底);
+            # 关 → provider=None 走纯关键词(存量行为)。多一次分类 LLM 调用, 故默认关待 A/B。
+            planner_provider = self.provider if self.policy.planner_llm_enabled else None
             plan = plan_query(question, max_steps=self.policy.max_steps,
-                              available_tools=[s["name"] for s in specs])
+                              available_tools=[s["name"] for s in specs],
+                              provider=planner_provider)
             system_prompt = system_prompt + "\n\n" + render_plan_preamble(plan)
             tool_budget = plan.tool_budget
             if trace:

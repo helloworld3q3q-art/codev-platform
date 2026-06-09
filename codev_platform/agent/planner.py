@@ -124,12 +124,77 @@ def _query_scores(question: str) -> dict[str, int]:
     return {qt: sum(1 for kw in kws if kw.lower() in q) for qt, kws in _KEYWORDS.items()}
 
 
-def plan_query(question: str, *, max_steps: int, available_tools: list[str] | None = None) -> QueryPlan:
+# ---- LLM planner (Phase 7 完整版可选增强) ----
+# determinism-first 仍是底座: 关键词分类对标准问法满分但对口语化/无关键词问法掉到 ~0.27
+# (eval planner 硬集实测)。LLM 分类补这块, 但**始终以关键词兜底**(classify_query_smart):
+# LLM 不可用/出错/输出非法 → 回退关键词, 绝不让 planner 拖垮 loop。多模型: 只依赖中性
+# LLMProvider(brain/base.py), 不耦合任何厂商 —— 强弱模型都能用, 选不选由 LoopPolicy 决定。
+_VALID_TYPES = frozenset({
+    QueryType.OVERVIEW, QueryType.IMPACT, QueryType.SYMBOL,
+    QueryType.DOC_RULE, QueryType.GENERAL,
+})
+
+_LLM_CLASSIFY_SYS = (
+    "你是查询分类器。把用户问题归入且仅归入以下 5 类之一, **只输出类别英文标识本身**, 不要解释:\n"
+    "- overview: 项目/模块整体是做什么的、整体架构、技术栈、高层概览。\n"
+    "- impact: 改动影响面 / 跨层链路 / 谁依赖谁 / 谁用了某表或端点 / 数据流贯穿前后端。\n"
+    "- symbol: 某个具体函数/类/符号在哪定义、长什么样、它的调用图(谁调它/它调谁)。\n"
+    "- doc_rule: 该遵守什么规则、为什么这么设计的原因/考量、操作手册/最佳实践。\n"
+    "- general: 不属于以上任何一类(闲聊、写新代码等)。\n"
+    "只输出一个词: overview / impact / symbol / doc_rule / general"
+)
+
+
+def _parse_label(text: str | None) -> str | None:
+    """从 LLM 文本提取合法类别。容忍空白/标点/大小写; 整串即标签, 或串中**恰好**出现一个合法
+    标签时接受(防模型多说一句); 零命中或多义 → None(交调用方回退关键词)。"""
+    if not text:
+        return None
+    t = text.strip().lower()
+    if t in _VALID_TYPES:
+        return t
+    hits = [v for v in _VALID_TYPES if v in t]
+    return hits[0] if len(hits) == 1 else None
+
+
+def classify_query_llm(question: str, provider) -> str | None:
+    """用 LLM 把问题分到 5 类之一。合法类别 → 返回; 无 provider/空问题/出错/输出非法 → None。
+
+    provider 是中性 `brain.base.LLMProvider`(任意厂商)。**不抛**: 任何 provider 故障都吞成
+    None, 让 classify_query_smart 回退关键词 —— planner 不可靠也不能拖垮 agent loop。
+    """
+    if provider is None or not (question or "").strip():
+        return None
+    from codev_platform.agent.brain.types import Message
+    try:
+        turn = provider.chat(_LLM_CLASSIFY_SYS, [Message(role="user", content=question)], [])
+    except Exception:  # noqa: BLE001 — provider 任何故障 → 回退关键词
+        return None
+    return _parse_label(turn.text if turn else None)
+
+
+def classify_query_smart(question: str, provider=None) -> str:
+    """LLM 优先(给了 provider 且能分类)+ 关键词永远兜底。
+
+    provider=None(默认)→ 纯关键词(存量行为不变)。给 provider 但 LLM 出错/非法 → 关键词。
+    """
+    if provider is not None:
+        label = classify_query_llm(question, provider)
+        if label is not None:
+            return label
+    return classify_query(question)
+
+
+def plan_query(question: str, *, max_steps: int, available_tools: list[str] | None = None,
+               provider=None) -> QueryPlan:
     """生成 QueryPlan。budget clamp 到 max_steps; lanes 过滤到实际可用工具。
+
+    provider!=None(由 loop 按 LoopPolicy.planner_llm_enabled 注入)→ LLM 分类优先 + 关键词兜底;
+    None(默认)→ 纯关键词(存量行为不变)。
 
     general / budget 0 → tool_budget = max_steps(等价不额外约束, 软停止不会先于 max_steps 触发)。
     """
-    qt = classify_query(question)
+    qt = classify_query_smart(question, provider)
     avail = set(available_tools or [])
     raw_budget = _BUDGET.get(qt, 0)
     budget = max_steps if raw_budget <= 0 else min(raw_budget, max_steps)

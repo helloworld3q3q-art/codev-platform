@@ -187,6 +187,7 @@ def loop_policy(cfg: dict[str, Any] | None = None, name: str | None = None) -> L
         min_read_for_finish=_int("min_read_for_finish"),
         planner_enabled=_bool("planner_enabled"),
         planner_hard_cap_readonly=_bool("planner_hard_cap_readonly"),
+        planner_llm_enabled=_bool("planner_llm_enabled"),
     )
 
 

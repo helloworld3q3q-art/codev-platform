@@ -10,6 +10,8 @@ from codev_platform.agent.loop import AgentLoop
 from codev_platform.agent.planner import (
     QueryType,
     classify_query,
+    classify_query_llm,
+    classify_query_smart,
     plan_query,
     render_plan_preamble,
 )
@@ -192,3 +194,71 @@ def test_readonly_not_capped_when_planner_off():
                                        planner_enabled=False))
     res = loop.run("这个项目是做什么的?")
     assert tool.calls > 5, f"关 planner 时只读不应被 budget 拦(原行为), 实际 {tool.calls}"
+
+
+# ------------------------------------------------------------------ LLM planner (Phase 7 完整版)
+
+class _LabelProvider(LLMProvider):
+    """返回固定文本的 fake provider —— 测 LLM 分类解析 + 兜底, 不连真模型。"""
+    name, model = "fake", "m"
+
+    def __init__(self, text: str | None) -> None:
+        self._text = text
+        self.calls = 0
+
+    def chat(self, system, messages, tools):
+        self.calls += 1
+        return AssistantTurn(text=self._text, tool_calls=[], stop_reason="end")
+
+
+class _BoomProvider(LLMProvider):
+    """chat 抛异常 —— 测 provider 故障必须被吞成兜底, 不拖垮 planner。"""
+    name, model = "boom", "m"
+
+    def chat(self, system, messages, tools):
+        raise RuntimeError("upstream down")
+
+
+def test_llm_classify_valid_label():
+    assert classify_query_llm("随便问问", _LabelProvider("impact")) == QueryType.IMPACT
+    assert classify_query_llm("x", _LabelProvider("  Symbol\n")) == QueryType.SYMBOL  # 容忍空白/大小写
+
+
+def test_llm_classify_label_embedded_in_text():
+    # 模型多说一句, 但只出现一个合法标签 → 提取它。
+    assert classify_query_llm("x", _LabelProvider("这是一个 doc_rule 类问题")) == QueryType.DOC_RULE
+
+
+def test_llm_classify_invalid_or_ambiguous_returns_none():
+    assert classify_query_llm("x", _LabelProvider("不知道")) is None          # 零合法标签
+    assert classify_query_llm("x", _LabelProvider("impact 或 symbol")) is None  # 多义 → None
+    assert classify_query_llm("x", _LabelProvider(None)) is None             # 空文本
+    assert classify_query_llm("", _LabelProvider("impact")) is None          # 空问题, 不调
+
+
+def test_llm_classify_provider_error_swallowed():
+    # provider 故障必须吞成 None(不抛), 让上层回退关键词。
+    assert classify_query_llm("随便", _BoomProvider()) is None
+
+
+def test_smart_no_provider_is_keyword():
+    # 不给 provider → 纯关键词(存量行为)。
+    assert classify_query_smart("这个项目是做什么的?") == QueryType.OVERVIEW
+    assert classify_query_smart("这个项目是做什么的?", None) == QueryType.OVERVIEW
+
+
+def test_smart_llm_takes_precedence_then_falls_back():
+    # 给有效 LLM 标签 → 用 LLM(即使与关键词不同, 这里关键词会判 overview, LLM 强制 impact)。
+    assert classify_query_smart("这个项目是做什么的?", _LabelProvider("impact")) == QueryType.IMPACT
+    # LLM 出错/非法 → 回退关键词(overview)。
+    assert classify_query_smart("这个项目是做什么的?", _BoomProvider()) == QueryType.OVERVIEW
+    assert classify_query_smart("这个项目是做什么的?", _LabelProvider("garbage")) == QueryType.OVERVIEW
+
+
+def test_plan_query_uses_llm_when_provider_given():
+    # 关键词会判 overview(整体/做什么), 但 LLM 强制 symbol → plan.query_type 跟 LLM 走。
+    plan = plan_query("这个项目整体是做什么的", max_steps=12, provider=_LabelProvider("symbol"))
+    assert plan.query_type == QueryType.SYMBOL
+    # 不给 provider → 关键词 overview。
+    plan2 = plan_query("这个项目整体是做什么的", max_steps=12)
+    assert plan2.query_type == QueryType.OVERVIEW
