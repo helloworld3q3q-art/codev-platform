@@ -54,7 +54,6 @@ def cmd_index_status(args: argparse.Namespace) -> int:
     now = time.time()
     stale = 0
     for pid in pids:
-        repo = _repo_path(projects, pid)
         head = report[pid][0]["head"] if report[pid] else None
         head_s = f"HEAD@{head[:8]}" if head else "HEAD 未知(无 repo_path 或非 git)"
         print(f"\n=== {pid} === ({head_s})")

@@ -252,6 +252,9 @@ def cmd_graph(args: argparse.Namespace) -> int:
             from codev_platform.core.paths import data_root
             from codev_platform.graph.audit import audit_all_stores
             agg = audit_all_stores(data_root() / "graph_store")
+            if getattr(args, "json", False):   # CI/脚本机器可读: 聚合 JSON + 退出码不变
+                _print(json.dumps(agg, ensure_ascii=False, indent=2))
+                return 0 if agg["total_errors"] == 0 else 1
             if not agg["projects"]:
                 _print("(无 graph store, 跳过 graph audit 门禁)")
                 return 0

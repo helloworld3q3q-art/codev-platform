@@ -1,8 +1,9 @@
 # --------------------------------------------------------------------
 # pre-push-audit.ps1 -- codev-platform pre-push gate.
 # Runs `graph audit --all`: blocks the push if ANY project's unified graph has
-# structural ERRORS (dangling edges / cross-tenant leak / orphan soft plugin /
-# duplicate nodes). Warnings (low-confidence edges) do NOT block.
+# structural ERRORS (dangling edges / cross-tenant leak / orphan soft plugin).
+# Warnings (duplicate nodes / low-confidence edges / no-provenance / duplicate
+# edges) do NOT block.
 # Skips gracefully (exit 0) when no local graph store exists -- so machines
 # without graph data are never blocked.
 #

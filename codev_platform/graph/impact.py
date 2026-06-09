@@ -602,4 +602,7 @@ def find_arch_violations(conn, project_id: str, limit: int = 200) -> dict:
             })
     violations.sort(key=lambda v: (v["fromRole"], v["toRole"], v["from"]["name"]))
     capped = violations[: max(0, int(limit))]
-    return {"project_id": project_id, "violations": capped, "count": len(capped)}
+    return {"project_id": project_id, "violations": capped,
+            "count": len(capped),                    # 兼容旧字段(=返回数)
+            "returnedCount": len(capped), "totalCount": len(violations),
+            "truncated": len(violations) > len(capped)}

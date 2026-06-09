@@ -114,7 +114,7 @@ def read_manifest(project_id: str | None = None, *, path: Path | None = None) ->
                 "SELECT * FROM index_builds WHERE project_id = ? ORDER BY kind", (project_id,)
             )
         cols = [c[0] for c in cur.description]
-        return [BuildRecord(**dict(zip(cols, row))) for row in cur.fetchall()]
+        return [BuildRecord(**dict(zip(cols, row, strict=True))) for row in cur.fetchall()]
     finally:
         conn.close()
 
