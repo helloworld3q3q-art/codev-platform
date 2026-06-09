@@ -233,3 +233,22 @@ WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 fa
 - 守纪律不据小易集翻默认([[recall-weight-ab-finding]])。**翻默认的条件**: 补口语化硬 e2e 集, 证出 keyword vs LLM 端到端答案质量差, 再考虑某档默认开。
 
 **Phase 7 完整版 = 主体完成**: 最小版 + LLM planner(验证有效)+ e2e eval(设计→E1→E2→E3→E4 全落地)。剩纯精修(硬 e2e 集 / judge 取舍 / 默认开条件), 按真实需求触发。commit `8d8d8d5`。
+
+## 二十六、Phase 7 最后精修 —— 口语化硬 e2e 集拉开 keyword vs LLM(端到端差证出)
+
+补口语化硬 e2e 集 `agent_e2e_hard.jsonl`(6 例真实锚点; 实测 keyword 分类 **5/6 误判 general**)→ E4 A/B(`79406df`):
+
+| 变体 | grounding | tool_appropriate | within_budget |
+|---|---|---|---|
+| off | 1.0 | 0.833 | 0.5 |
+| keyword | 1.0 | 0.833 | 0.5 |
+| **llm** | 0.833 | **1.0** | **0.667** |
+
+**关键发现**:
+- **keyword == off**(逐项相同)—— 硬集上 keyword 误判 5/6 为 general → 无 lane 引导 → **planner 形同未开**。坐实 keyword 脆性会传导到端到端(分类失败 = planner 不给力)。
+- **LLM planner: tool_appropriate 0.833→1.0(+0.167) + within_budget 0.5→0.667(+0.167)** —— 正确分类 → 正确 lane 引导 → 用对工具 + 更守预算。**keyword vs LLM 的端到端差: 易集测不到(三变体趋同), 硬集证出。**
+- grounding 三者近天花板(0.83-1.0; llm -0.167 = 1 例噪声, 非确定)—— agent 取证够鲁棒, 不论路由对错都能 ground; LLM planner 改善的是**过程**(工具选择/预算), 非 grounding。
+
+**#3 决策更新**: 证据更强(LLM planner 硬集改善路由 + 预算), 但 **grounding(答案质量主代理)未提升**(都近满)+ 6 例小集非确定。→ `planner_llm_enabled` **仍默认关**, 但**口语化重的工作负载可按 config 开**(已有路由/预算实证收益)。默认开某档待更大集证出 grounding/质量的稳定提升。
+
+**Phase 7 完整版 = 完成**(主体 + 最后精修 + keyword-vs-LLM 端到端差实证)。剩纯按真实需求触发。
