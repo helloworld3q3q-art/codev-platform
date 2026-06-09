@@ -8,6 +8,23 @@ from __future__ import annotations
 import sys
 
 
+def _ensure_utf8(stream) -> None:
+    """尽力把输出流切 UTF-8 + errors=replace —— 让 CLI 的 emoji / 中文 markdown
+    (graph audit / soft-quality 等)在 **Windows 默认 GBK 控制台**也不崩(高可用)。
+
+    reconfigure 不可用(流已重定向 / capsys 替换 / 旧 Py)→ 静默跳过, 由 replace 兜底
+    退化为 '?' 而非抛 UnicodeEncodeError。一次性 best-effort, 无全局其它副作用。
+    """
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
+_ensure_utf8(sys.stdout)
+_ensure_utf8(sys.stderr)
+
+
 def _print(msg: str = "") -> None:
     print(msg, flush=True)
 
