@@ -192,3 +192,21 @@ WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 fa
 **不做(纪律)**: 不据这 31 例 overfit "关键词置信优先 + LLM 兜底" 混合策略 —— 标准 −0.062 是单例/合成集噪声, 不足以推翻 LLM-first 的简单设计([[recall-weight-ab-finding]]: 小集别上窄杠杆)。LLM planner 保持**默认关 + config 逐 provider 可开**, 收益已实证。要默认开某档需更大评测集 + 权衡每查询多一次 LLM 调用的延迟/成本。commit `7a76bfb`。
 
 **Phase 7 完整版剩余**: ① 是否给某档默认开 `planner_llm_enabled`(需更大集 + 延迟权衡)② **agent 端到端 eval**(完整回答质量, 最后大块)。
+
+## 二十四、agent 端到端 eval E1+E2 落地 + 首个基线
+
+承 ② —— 先写[设计](agent-e2e-eval-design-2026-06-09.md)(grounding 优先打分 + 数据集格式 + harness + 分期 E1-E4), 再按期落地:
+
+- **E1(Windows 可验)**: `score_case` 纯打分器(grounding_coverage / hallucination / tool_appropriate / within_budget, 脱 AgentLoop 可单测)+ aggregate + 种子集 `agent_e2e.jsonl`(codev-platform 5 case 真实锚点)+ suite(provider 缺则优雅 skip)+ run_eval 注册。**9 单测**。确定性 grounding 为主, LLM-judge 留 E3。
+- **E2(WSL 真跑)**: deepseek + 真 AgentLoop + MCP 后端, **首个基线**:
+
+| 指标 | 值 | 读法 |
+|---|---|---|
+| grounding_coverage | **1.0** | 5/5 答案都落到真实文件/符号锚点 |
+| hallucination_rate | 0.0 | 无 must_not 违规 |
+| tool_appropriate_rate | 0.8 | 4/5 用到期望工具类(1 例走别的路径但仍 grounding 满分)|
+| within_budget_rate | 1.0 | 全在 planner/max_steps 预算内 |
+
+**结论**: agent 在种子集上**全程有据、零幻觉、不超预算**, 回答质量基线优。`expect_tools` 是"至少一类"非强制, 故 0.8 不算缺陷。
+
+**剩余**: E3 LLM-judge(主观质量, 默认关)/ **E4 planner 端到端 A/B**(planner 开关 + keyword vs LLM planner 下答案质量差 —— 验 §二的"分类更准→答案更好"独立假设)。种子集小 = 趋势工具非绝对分([[recall-weight-ab-finding]] 纪律)。WSL 全量 pytest **1392 passed / 0 failed**。commit `1f437bb`。
