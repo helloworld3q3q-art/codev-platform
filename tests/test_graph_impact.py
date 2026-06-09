@@ -209,3 +209,38 @@ def test_resolve_duplicate_edges_distinct_targets_untouched():
     edges = [GraphEdge(source="a", target="b", kind="calls"),
              GraphEdge(source="a", target="c", kind="calls")]   # 不同 target 非冲突
     assert _resolve_duplicate_edges(edges) == edges
+
+
+def test_find_impact_paths_ranks_by_edge_quality(tmp_path):
+    # Phase 5: 两条入边到表 t —— B 经 ast/1.0, C 经 regex/0.65 → B 路径分更高排前。
+    from codev_platform.graph.impact import find_impact_paths
+    from codev_platform.graph.schema import ProvSource, stamp_provenance
+    c = open_store("pp", path=tmp_path / "pp.sqlite")
+    TB, B, C = "pp:db_table:t", "pp:backend_function:b", "pp:backend_function:c"
+    nodes = [
+        GraphNode(id=TB, kind=NodeKind.DB_TABLE.value, name="t", project_id="pp"),
+        GraphNode(id=B, kind=NodeKind.BACKEND_FUNCTION.value, name="bfn", project_id="pp", file="b.py"),
+        GraphNode(id=C, kind=NodeKind.BACKEND_FUNCTION.value, name="cfn", project_id="pp", file="c.py"),
+    ]
+    e_ast = stamp_provenance(
+        GraphEdge(source=B, target=TB, kind=EdgeKind.READS_TABLE.value, confidence=1.0), ProvSource.AST)
+    e_rgx = stamp_provenance(
+        GraphEdge(source=C, target=TB, kind=EdgeKind.READS_TABLE.value, confidence=0.65), ProvSource.REGEX)
+    upsert_result(c, "pp", AnalyzerResult(nodes=nodes, edges=[e_ast, e_rgx], plugin="test"))
+    r = find_impact_paths(c, "pp", "t")
+    c.close()
+    assert r["found"] and r["count"] == 2
+    assert r["paths"][0]["endpoint"]["id"] == B                  # ast/1.0 路径最强
+    assert r["paths"][0]["score"] > r["paths"][1]["score"]
+    assert r["paths"][0]["certain"] is True and r["paths"][1]["certain"] is False
+    hop = r["paths"][0]["hops"][0]                                # 每跳有证据
+    assert hop["via_edge"] == "reads_table" and hop["src"] == "ast" and hop["confidence"] == 1.0
+
+
+def test_find_impact_paths_top_n_and_depth(conn):
+    from codev_platform.graph.impact import find_impact_paths
+    r = find_impact_paths(conn, _PID, _TB, top_n=2)
+    assert r["count"] == 2 and r["totalReached"] == 3            # FN/EP/FE 可达, 取 top 2
+    assert r["paths"][0]["endpoint"]["id"] == _FN                 # 最浅(d1)分最高
+    assert r["paths"][0]["depth"] == 1
+    assert r["paths"][0]["score"] >= r["paths"][1]["score"]      # 降序稳定

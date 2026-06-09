@@ -12,6 +12,7 @@ A1 桥接后 store 连通 (边向 = 消费方→提供方):
 """
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass, field
 
 from codev_platform.graph.schema import (
@@ -350,6 +351,91 @@ def generate_impact_report(conn, project_id: str, node_ref: str, *,
         "certainOnly": certain_only,
         "summary": "\n".join(lines),
     }
+
+
+# ---------------------------------------------------------------- 多跳路径评分(Phase 5)
+
+# 边来源权重: 结构化精确(ast/framework/bridge)= 满权; 名称启发式(regex)/ LLM 软边降权;
+# 未盖戳居中。路径评分按 confidence × src 权重的**乘积** —— 数据驱动, 不内置 kind 偏好。
+_SRC_WEIGHT: dict[str, float] = {
+    "ast": 1.0, "framework": 1.0, "bridge": 1.0, "regex": 0.7, "llm": 0.5, "manual": 1.0,
+}
+_SRC_DEFAULT_WEIGHT = 0.85   # 未盖 provenance 的硬边(插件直产 reads_table 等)
+_PATH_MAX_FANOUT = 60        # 单节点出边上限(防高出度爆炸)
+
+
+def _edge_quality(attr: dict) -> float:
+    """单边质量 ∈ (0,1]: confidence × src 权重。结构边×高置信≈1, regex/llm/低置信拉低。"""
+    conf = attr.get("confidence")
+    conf = 1.0 if conf is None else conf
+    src = attr.get("src")
+    return conf * _SRC_WEIGHT.get(src, _SRC_DEFAULT_WEIGHT)
+
+
+def _best_paths(g: ImpactGraph, start_id: str, *, reverse: bool,
+                max_depth: int = _MAX_DEPTH) -> dict[str, tuple[float, list]]:
+    """Dijkstra 最大乘积: 每个可达节点保**最优单路径**(score=Π 边质量, 越大越强依赖)。
+
+    每节点只留一条最优路径(非枚举全路径)→ 有界 O(节点数), 不指数爆炸。边质量 ≤1 故 score
+    沿路单调降, 标准 Dijkstra(出堆即终态)。返回 {node_id: (score, [(node_id, kind, attr)...])}。
+    """
+    adj = g.rev if reverse else g.fwd
+    best: dict[str, tuple[float, list]] = {start_id: (1.0, [])}
+    heap: list[tuple[float, int, str]] = [(-1.0, 0, start_id)]   # (-score, depth, node)
+    done: set[str] = set()
+    while heap:
+        neg, depth, nid = heapq.heappop(heap)
+        if nid in done:
+            continue
+        done.add(nid)
+        if depth >= max_depth:
+            continue
+        score = -neg
+        for nbr, kind in adj.get(nid, ())[:_PATH_MAX_FANOUT]:
+            if nbr in done or nbr not in g.nodes:
+                continue
+            key = (nbr, nid, kind) if reverse else (nid, nbr, kind)   # 边永远 source→target
+            attr = g.edge_attr.get(key, {})
+            nscore = score * _edge_quality(attr)
+            if nbr not in best or nscore > best[nbr][0]:
+                best[nbr] = (nscore, best[nid][1] + [(nbr, kind, attr)])
+                heapq.heappush(heap, (-nscore, depth + 1, nbr))
+    return best
+
+
+def find_impact_paths(conn, project_id: str, node_ref: str, *,
+                      top_n: int = 10, certain_only: bool = False) -> dict:
+    """改 node_ref → **top-N 最强依赖路径**(评分 + 每跳证据 + 确定/候选)(Phase 5)。
+
+    反向 BFS(谁依赖它)每节点取最优路径, 按 score=Π(confidence×src权重)降序取 top-N。
+    每跳给 node + via_edge + src + confidence(可解释); 全跳确定边则 path certain。
+    """
+    g = build_impact_graph(conn, project_id, certain_only=certain_only)
+    node, ambig = _resolve(g, node_ref, None)
+    if node is None:
+        return _not_found("ref", node_ref, ambig)
+    best = _best_paths(g, node.id, reverse=True)
+    scored = []
+    for nid, (score, hops) in best.items():
+        if nid == node.id or not hops:
+            continue
+        path_hops = [{
+            "node": _node_brief(g.nodes[h_nid]), "via_edge": kind,
+            "src": attr.get("src"), "confidence": attr.get("confidence"),
+            "certain": _is_certain(attr.get("confidence")),
+        } for (h_nid, kind, attr) in hops]
+        scored.append({
+            "endpoint": _node_brief(g.nodes[nid]),
+            "score": round(score, 4),
+            "depth": len(hops),
+            "certain": all(h["certain"] for h in path_hops),
+            "hops": path_hops,
+        })
+    # 排序: 分高优先 → 浅路优先 → 稳定(endpoint id)。可测可复现。
+    scored.sort(key=lambda p: (-p["score"], p["depth"], p["endpoint"]["id"]))
+    top = scored[: max(0, int(top_n))]
+    return {"found": True, "target": _node_brief(node), "paths": top,
+            "count": len(top), "totalReached": len(scored)}
 
 
 # ---------------------------------------------------------------- 业务域查询(A1 软节点消费前门)

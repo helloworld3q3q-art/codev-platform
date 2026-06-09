@@ -150,6 +150,9 @@ async def list_tools() -> list[Tool]:
         Tool(name="find_impact",
              description="改某节点(endpoint/表/函数/组件)→ 跨层被波及集合(反向 BFS, 谁依赖它); certain_only=true 只看确定依赖",
              inputSchema=_impact_schema("ref", "节点 id 或 name")),
+        Tool(name="find_impact_paths",
+             description="改某节点 → **top-N 最强依赖路径**(每节点最优路径, 评分=Π(置信×来源权重)+ 每跳来源/置信证据 + 确定/候选)。要'谁怎样依赖它、按强度排'用它; certain_only 可选",
+             inputSchema=_impact_schema("ref", "节点 id 或 name")),
         Tool(name="find_table_usage",
              description="给表名 → 哪些函数/端点/前端用它(反向 BFS); certain_only=true 只看确定依赖",
              inputSchema=_impact_schema("table", "数据库表名")),
@@ -198,6 +201,8 @@ async def list_tools() -> list[Tool]:
 # name → 调用适配器(conn, pid, args) → impact 查询结果。改工具集只动这一处(list_tools 对齐)。
 _DISPATCH = {
     "find_impact": lambda c, p, a: _impact.find_impact(
+        c, p, a["ref"], certain_only=bool(a.get("certain_only", False))),
+    "find_impact_paths": lambda c, p, a: _impact.find_impact_paths(
         c, p, a["ref"], certain_only=bool(a.get("certain_only", False))),
     "find_table_usage": lambda c, p, a: _impact.find_table_usage(
         c, p, a["table"], certain_only=bool(a.get("certain_only", False))),
