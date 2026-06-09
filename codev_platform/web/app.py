@@ -20,6 +20,7 @@ from codev_platform.web.routes import (
     memory,
     orgs,
     projects,
+    recall,
     reports,
     users,
 )
@@ -67,6 +68,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             jobs.router,
             indexes.router,
             reports.router,
+            recall.router,
             agent.router,
             memory.router,
             audit.router,
