@@ -102,6 +102,61 @@ def is_soft_edge_kind(kind: Any) -> bool:
     return _kind_str(kind) in SOFT_EDGE_KINDS
 
 
+# ---------------------------------------------------------------- provenance (Phase 3)
+# 让影响分析的每条边**可追溯到来源**: 是 AST 精确解析来的, 还是框架语义/结构桥接/名称
+# 启发式/LLM 推断来的。高风险影响结论应只采信确定来源 + 高置信边, 低置信/启发式边作候选提示。
+# 落点: edge.meta[PROV_KEY](走 meta_json 往返, **零 sqlite 迁移**)。confidence 仍是
+# GraphEdge.confidence 一等字段; provenance 解释"这条边的置信为何如此"。
+
+
+class ProvSource(str, Enum):
+    """边来源类(provenance source_kind 的精简集, 对齐 plan §Phase 3)。
+
+    确定来源(结构性确定血缘):ast / framework / bridge —— 影响分析可直接采信。
+    启发来源(降级推断,作候选):regex(名称 BFS)/ llm(分析器软边)。
+    """
+
+    AST = "ast"            # 结构化精确解析 (codegraph 调用图)
+    FRAMEWORK = "framework"  # 框架语义适配 (linker: frontend_api_call→endpoint)
+    BRIDGE = "bridge"      # 结构桥接 (frontend module→同文件 api_call/route)
+    REGEX = "regex"        # 名称启发式 BFS (fastapi DI 盲区等, conf<1.0)
+    LLM = "llm"            # 分析器/LLM 软边 (belongs_to_domain / plays_role)
+    MANUAL = "manual"      # 人工标注
+
+
+# edge.meta 里 provenance 子袋的标准 key(嵌套一层避免与插件已用 meta key 撞:
+# fastapi 的 resolver/via_handler、前端的 is_page 等)。
+PROV_KEY: str = "prov"
+
+# 确定来源集合: 影响分析"确定依赖"判定的来源侧条件(另叠加 confidence 阈值, 见 impact.py)。
+CERTAIN_PROV_SOURCES: frozenset[str] = frozenset(
+    {ProvSource.AST.value, ProvSource.FRAMEWORK.value, ProvSource.BRIDGE.value})
+
+
+def stamp_provenance(edge: GraphEdge, src: Any, *,
+                     parser: str | None = None, pv: str | None = None) -> GraphEdge:
+    """给一条边盖 provenance 戳(原地写 edge.meta[PROV_KEY], 返回同一 edge 便于链式)。
+
+    src:    ProvSource 枚举或裸字符串(来源类)。
+    parser: 产这条边的解析器/插件名(如 "codegraph" / "fastapi" / "builtin.linker")。
+    pv:     解析器版本(可空; 暂多数无版本概念)。
+    既有 meta 字段保留; 重复盖戳幂等覆盖 PROV_KEY 子袋。
+    """
+    prov: dict[str, Any] = {"src": _kind_str(src)}
+    if parser:
+        prov["parser"] = parser
+    if pv:
+        prov["pv"] = pv
+    edge.meta = dict(edge.meta or {})
+    edge.meta[PROV_KEY] = prov
+    return edge
+
+
+def edge_provenance(meta: dict[str, Any] | None) -> dict[str, Any]:
+    """从 edge.meta 取 provenance 子袋(无则 {})。读侧(impact/audit)统一入口。"""
+    return dict((meta or {}).get(PROV_KEY) or {})
+
+
 @dataclass
 class GraphNode:
     """统一节点:平台图谱里的一个对象。

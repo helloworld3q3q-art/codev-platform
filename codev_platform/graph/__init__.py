@@ -9,6 +9,8 @@ AnalyzerResult)。后续:统一图谱 sqlite 存储 + 查询、graph/codegraph �
 from __future__ import annotations
 
 from codev_platform.graph.schema import (
+    CERTAIN_PROV_SOURCES,
+    PROV_KEY,
     AnalyzerResult,
     EdgeKind,
     Evidence,
@@ -16,14 +18,22 @@ from codev_platform.graph.schema import (
     GraphEdge,
     GraphNode,
     NodeKind,
+    ProvSource,
+    edge_provenance,
+    stamp_provenance,
 )
 
 __all__ = [
     "AnalyzerResult",
+    "CERTAIN_PROV_SOURCES",
     "EdgeKind",
     "Evidence",
     "Finding",
     "GraphEdge",
     "GraphNode",
     "NodeKind",
+    "PROV_KEY",
+    "ProvSource",
+    "edge_provenance",
+    "stamp_provenance",
 ]
