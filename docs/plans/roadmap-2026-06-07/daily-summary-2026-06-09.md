@@ -52,5 +52,59 @@ dashboard 现有 **索引新鲜度(Phase 1)+ 图谱结构健康(Phase 3)** 两�
 
 **教训(已记)**: 手动 `graph ingest` 在裸 shell 跑会撞 **npx dependency-cruiser 冷启动** → fail-soft 返 0 退化 + upsert 覆盖好数据(frontend_deps/calls/analyzers 全 0)。**重建一律走 reindex worker**(`reindex-queue enqueue <pid> --kind ingest`)—— 它在 systemd service 环境有正确的 node/codegraph, 不会冷启动失败。
 
-## commit 链(本日)
+## commit 链(本日上午)
 `6d07da3`(Phase1 manifest)→ `e85d582`/`4928dca`(Phase3 audit+孤儿检测)→ `faacb0b`(前端 bridge)→ `745d3e4`(web 软硬边)→ `1f492d3`(pre-push 门禁)→ `faef6cd`/`e8087aa`(index status web+卡片)→ `01af953`/`0ea0c5b`(graph audit web+卡片)。
+
+---
+
+# 续(同日新窗口会话)—— Phase 3 provenance + soft-quality 双 bug + Phase 6 联合召回 + eval
+
+> 32 commit, 全 pushed(`2359ffe`…`9d30694`, 与远端 0/0), 几乎都带单测, 关键节点 WSL 真实数据验证。
+
+## 九、Phase 3 Provenance(影响分析可追溯)— 三件套
+
+让统一图谱每条边可追溯来源, 高风险结论只采信确定依赖。
+- **盖戳**: `schema.stamp_provenance` 约定走 `edge.meta`(零迁移)→ ingest 三 pass(bridge/framework/calls 按 resolver 声明)+ **插件直产边经 executor 按 plugin `prov_source` 统一盖**(声明式扩展点, 加插件零改核心)→ **全硬边覆盖**。
+- **展示**: impact 路径 brief 带 `src + confidence`, report 出**确定依赖 vs 候选**拆分(由 confidence 判, 与 src 正交)。
+- **操作**: impact 查询加 `certain_only`(滤候选边, 落地 Gate)+ MCP 透传; audit 加 `no-provenance` 硬边计数。
+- 发现 sql/react/vue 实为**正则解析**→ 修正 `ProvSource.regex` 语义(与置信解耦)+ 删未用 `CERTAIN_PROV_SOURCES`。
+
+## 十、soft-quality 软标签健康诊断 + 抓修双 bug(真实重建验证)
+
+建 A1/A2 软标签健康体检(`graph soft-quality` CLI + `/api/v1/graph/soft-quality` web + 平台 `health --all`)。**首跑就抓到真问题**: openclaw A2 `repository` 占 64%。
+- **4 轮取证 + 3 专家兄弟面板**(架构师/诊断/怀疑论者)→ 定论: **非标注质量**, 是**双 bug**叠加。
+- **Fix-A**(soft-quality): giant 按 **distinct 文件**口径(原 membership 口径被 Mapper 方法密度 + db_column/db_table 撑大成假阳性)。
+- **Fix-B**(analyzer): `architecture_layer` 只对**代码节点**产 plays_role, 排除 db_table/db_column(数据层不演代码架构角色)。
+- **真实验证**(worker `--kind ingest` 重建): `find_arch_role(列)` 从误返 repository → 正确空; plays_role 2263→1111; soft-quality ✅ healthy。
+- 顺带 `fix(cli)`: CLI 输出切 UTF-8, 防 Windows GBK 控制台 emoji 崩(audit/soft-quality 同受益)。
+
+## 十一、Phase 6 联合召回(大头, 数据驱动)
+
+从零建跨 lane 代码融合召回子系统, 三类消费者全打通:
+```
+fusion 核心(加权 RRF + 可解释) → service(graph + codegraph, 免 daemon, 每 lane fail-soft)
+  → planner 自动调权(symbol 偏 codegraph / impact 偏 graph) → 多词分词 → 相关性分级(精确>前缀>子串)
+  → codegraph OR 模式(verbose 多词不再 AND 全灭) → 测试文件降权
+消费: MCP 工具 recall_code(IDE agent) + web 端点 /api/v1/recall/code + agent 工具 code_recall(chat)
+```
+**eval 量化验证**: weighted **MRR 0.357→0.917(+157%) / nDCG 0.269→0.858(+219%)**; planner 权重 A/B 从"看似 0 delta"(被 symbol 检索全废污染)→ 排除混淆(重建 codegraph + OR 模式)后验证 **+0.167 真有用**。教训: 测出意外结果先查混淆因子(陈旧索引/检索太严), 别急下"X 没用"结论。
+
+## 十二、eval 框架打磨
+
+- `metrics` 加 `nDCG@k` / `aggregate_ndcg`(比 recall@k 更惩罚相关项排靠后)。
+- 新增 **recall A/B suite**(加权 vs 等权, 防 overfit 的真值尺)。
+- `run_eval.py` **拆成 `eval/suites/` 包**(一 suite 一模块, 699→114 行 CLI), 新增 suite = 加一模块 + dispatch 一行。
+
+## 十三、commit 链(本会话, 32 个)
+
+provenance(`2359ffe`→`866ecc8`)→ CLI UTF-8(`ef04670`)→ soft-quality(`2c73c1c`/`3ca92bb`/`a4e4817`)+ web/health(`fe8a704`/`765dec3`)→ Phase 6 recall(`e83bac8`→`aa623a1`)+ web/MCP(`40cf3fe`/`87d7ab6`)→ A2 双 bug(`bcabe4c`/`36b8a39`)→ recall 多词/相关性/OR/测试降权(`8bbfbc0`/`c019e77`/`40537a3`/`e915fb4`)→ eval suite+拆分(`15fe71e`/`cdcd59a`)→ agent 工具(`9d30694`)。
+
+## 十四、待上线 + 下一步
+
+- **待重启 live**: 最后 2 改(测试降权 / code_recall agent 工具)需 `codev-mcp-graph`+`codev-web`+`codev-agent` 重启(攒批, 免 churn MCP 连接)。其余已 live 验证。
+- **roadmap 位置**: Phase 0/3/6/7 实质推进; Phase 6 从"未启动"做到端到端可用 + 三消费者 + eval 验证。
+- **下一步候选**: ① 让 code_recall 成 agent 主检索(planner 接 `preferred_lanes` + instructions)② 精准化 recall eval golden(只标真实现为 relevant)③ 换方向。
+
+## 十五、本会话沉淀的记忆
+
+`code-quality-principles`(写码准则)/ `soft-quality-first-run-findings`(A2 双 bug 定论)/ `recall-weight-ab-finding`(权重 A/B 翻转 + lane 内是杠杆)/ `locate-via-codegraph-not-grep` 等。
