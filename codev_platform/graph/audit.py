@@ -24,6 +24,7 @@ from codev_platform.graph.schema import (
     SOFT_EDGE_KINDS,
     SOFT_NODE_KINDS,
     NodeKind,
+    edge_provenance,
     is_soft_edge_kind,
     is_soft_node_kind,
 )
@@ -110,6 +111,13 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
                  if not is_soft_edge_kind(e.kind) and (e.confidence if e.confidence is not None else 1.0) < low_conf]
     low_by_kind = Counter(e.kind for e in low_edges)
 
+    # no-provenance: 硬边未盖 provenance 戳(src 来源不可追溯)。Phase 3 起按 pass 逐步补全
+    # (calls/calls_api/contains-bridge 已盖; 插件直产的 reads_table/defines_api 等待后续),
+    # 计数让补全进度可见。软边(LLM 派生)不计 —— 它们本就不进影响分析的确定结论。
+    no_prov = [e for e in g.edges
+               if not is_soft_edge_kind(e.kind) and not edge_provenance(e.meta)]
+    no_prov_by_kind = Counter(e.kind for e in no_prov)
+
     orphan_plugins = sorted(set(orphan_node_plugins) | set(orphan_edge_plugins))
     errors = {
         "dangling_edges": {"count": len(dangling), "samples": dangling[:_SAMPLE]},
@@ -128,6 +136,12 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
             "by_kind": dict(low_by_kind),
             "samples": [{"source": e.source, "target": e.target, "kind": e.kind,
                          "confidence": e.confidence} for e in low_edges[:_SAMPLE]],
+        },
+        "no_provenance_edges": {
+            "count": len(no_prov),
+            "by_kind": dict(no_prov_by_kind),
+            "samples": [{"source": e.source, "target": e.target, "kind": e.kind}
+                        for e in no_prov[:_SAMPLE]],
         },
     }
     n_errors = (errors["dangling_edges"]["count"]
@@ -204,4 +218,6 @@ def render_markdown(report: dict) -> str:
         lines.append(f"    - [{s['kind']}] {s['name']} @ {s['file']} → {len(s['ids'])} 个 id")
     lc = warn["low_confidence_edges"]
     lines.append(f"- low-confidence 硬边 (<{lc['threshold']}): {lc['count']} {dict(lc['by_kind'])}")
+    npv = warn["no_provenance_edges"]
+    lines.append(f"- no-provenance 硬边 (来源未盖戳, 逐步补全): {npv['count']} {dict(npv['by_kind'])}")
     return "\n".join(lines)
