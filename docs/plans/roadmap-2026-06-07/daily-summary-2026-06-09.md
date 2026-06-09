@@ -154,4 +154,16 @@ eval `_recall_per_query` 之前按 name/file 子串判相关 → `test_weighted_
 - 延后 2 项(真实需求触发再做): **#7** config DI `rebind_web_services`(改动大、单实例价值低)/ **#8 残留** `set_roles` 多 org 角色管理(RBAC 安全敏感, 改错会跨 org 越权, 要先补越权测试)。
 - 新增 [`next-steps-2026-06-09.md`](next-steps-2026-06-09.md): 审计剩余 3 项细节 + 三梯队整体剩余计划 + 新窗口开局动作(供下个窗口直接 Read)。
 
-**纯未启动重型 Phase 仍只剩 2(统一 IR)和 8(性能)**。本窗口 1 commit(`4cdf204`)。
+**纯未启动重型 Phase 仍只剩 2(统一 IR)和 8(性能)**。
+
+## 二十一、全量回归 + 修两类既有失败(用户"多测试下")
+
+WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 failed** —— 10 个**全不在本会话 #10/#1 改动区**(那几块 100% 绿), 是既有债, 一并修掉:
+
+**① impact.py 超行预算**(1 个): `graph/impact.py` 608>600(上一会话 Phase 3 冲突消解 + Phase 5 path-scoring 加进去的)。修: 抽 `_resolve_duplicate_edges` → 新模块 `graph/edge_resolve.py`(public `resolve_duplicate_edges`), impact 导入复用; `test_graph_impact` 3 处导入改指新模块。impact.py 回 ≤600(budget 测试绿)。
+
+**② web RBAC 9 测试环境耦合失败**: `test_web_auth`/`test_web_projects`/`test_web_filtering` 在配了 `memory.pg_dsn` 的环境(WSL)报 403 / roles 空。根因: `web/security/membership.resolve_membership` **优先**查真 PG RBAC store(`_pg_rbac_store()→get_rbac_store()`), 而这些 dev/passthrough 测试把角色写进**内存 member_store** → PG 空 → 越过内存路径 → deny。修: autouse fixture 强制 `_pg_rbac_store→None` 走内存路径(PG RBAC 路径由 `test_web_db_stores_sqlite`/`test_rbac_wire` 专测)。**纯测试隔离, 不动生产 RBAC**; 与 audit #7(import 期单例/DI 绑定)同源。
+
+**结果**: WSL 全量 **1371 passed / 0 failed**(`7a89bb3`)。
+
+**本窗口 commit 链**: `4cdf204`(#10 只读 audit + #1 eval golden)→ `3219c24`(日志续三)→ `b1fc1f7`(#1 WSL 复跑回填)→ `7a89bb3`(全量修两类既有失败)。
