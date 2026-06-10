@@ -59,6 +59,7 @@ class UserItem(BaseModel):
     email: str | None = None
     status: str = "ACTIVE"
     role: str | None = None    # 该用户在 orgId 的成员角色 (viewer|member|admin); 无成员记录=None
+    orgs: list[str] = Field(default_factory=list, description="该用户所属全部组织 code (成员关系, 多对多)")
 
 
 class UserActionResult(BaseModel):
