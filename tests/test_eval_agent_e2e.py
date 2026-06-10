@@ -170,12 +170,39 @@ def test_planner_ab_three_variants_skip_without_provider():
     assert rep["n"] >= 1 and "reason" in rep                   # _print_human 安全
 
 
+def _load_hard():
+    import json
+    from pathlib import Path
+    return [json.loads(l) for l in
+            Path("eval/datasets/agent_e2e_hard.jsonl").read_text(encoding="utf-8").splitlines()
+            if l.strip()]
+
+
 def test_dataset_param_loads_hard_set():
-    # dataset 参数应切到硬集(6 case); 无 provider → skip 但 n 反映硬集规模。
+    # dataset 参数切到硬集; 无 provider → skip, n 反映该 project 过滤后的硬集规模(动态算, 抗扩集)。
+    rows = _load_hard()
+    codev = [r for r in rows if r.get("project_id", "codev-platform") == "codev-platform"]
     rep = run_agent_e2e("codev-platform", provider=None, dataset="agent_e2e_hard.jsonl")
-    assert rep["status"] == "skipped" and rep["n"] == 6
+    assert rep["status"] == "skipped" and rep["n"] == len(codev)
     ab = run_planner_e2e_ab("codev-platform", provider=None, dataset="agent_e2e_hard.jsonl")
-    assert ab["n"] == 6
+    assert ab["n"] == len(codev)
+
+
+def test_agent_e2e_hard_set_well_formed_and_actually_hard():
+    """硬集守卫: ① must_mention 非空 + expect_type 合法 ② 跨 ≥2 项目 ③ 多数 query 确实被 keyword
+    误分(classify_query != expect_type)。第③条锁住"硬"属性 —— 这正是 keyword-vs-llm planner
+    A/B(run_planner_e2e_ab)能拉开差的前提; 扩集混入易例会让 A/B 失去区分度(易集上三变体趋同)。"""
+    from codev_platform.agent.planner import classify_query
+
+    rows = _load_hard()
+    assert len(rows) >= 12
+    for r in rows:
+        assert r["must_mention"] and r["query"]
+        assert r["expect_type"] in ("impact", "symbol", "overview", "doc_rule", "general")
+    pids = {r.get("project_id", "codev-platform") for r in rows}
+    assert {"codev-platform", "openclaw-stock"} <= pids
+    hard = sum(1 for r in rows if classify_query(r["query"]) != r["expect_type"])
+    assert hard >= len(rows) * 0.7, f"硬集应多数被 keyword 误分, 实际仅 {hard}/{len(rows)}"
 
 
 def test_summarize_runs_mean_and_spread():
