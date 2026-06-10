@@ -40,5 +40,11 @@
 ## 六、flash 迁移收尾验证(无回归)
 今天 chat→flash 后,验当前 codev 图谱标签(53min 前 @4a28f03 重建,flash 重标):**A2 arch_role 0.933**(14/15)+ A1 域名两仓干净(代码召回/审计/智能体… ‖ 选股推荐/回测持仓/龙虎榜…)。**flash 标注无质量回归。**
 
+## 七、agent loop token 实测 + prompt 缓存可观测(真省钱入口,commit `e959630`)
+面板共识"钱在 loop 不在标注",今天去量证实:
+- **gap**:`OpenAICompatProvider` 只抓 prompt/completion tokens,**没抓 deepseek 的 prompt_cache_hit/miss** → 对缓存率瞎。修:抽 `_extract_usage`(deepseek 直给 / OpenAI 走 prompt_tokens_details.cached_tokens 两种都接)+ loop 汇总 cache_hit/miss + 4 单测。
+- **真查询实测**(flash,多跳题,12 步):input **104,602** tokens / output 3,122 / **缓存命中 80.2%**(hit 83,840)→ 本次 $0.004,无缓存会 $0.0155,**缓存已省 74%**。
+- **结论**:① loop 的稳定前缀结构让 deepseek 自动缓存吃满(80%),**无需"修缓存"**;② 真成本驱动是**单查询 10 万 input(12 步 × 重发增长上下文)**,下一杠杆=收紧 recall top-N(现 8)/按档限 max_steps/裁历史,但是**成本↔质量权衡,须 eval 量后再砍**;③ 一个 chat 查询($0.004)≈/> 整个 A1 标注重建 → **实证"钱在 loop 不在标注"**,标注分档优化是小头(印证 §五搁置)。
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
