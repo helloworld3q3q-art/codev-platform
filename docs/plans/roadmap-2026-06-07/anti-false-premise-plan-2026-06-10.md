@@ -1,5 +1,13 @@
 # Plan — agent 抗错误前提幻觉(2026-06-10)
 
+> **🔚 结案(2026-06-10): Phase A 证伪 → 停轮, 不进 Phase B/C。** 见 [`daily-summary-2026-06-10.md`](daily-summary-2026-06-10.md)。
+> Gate A 实跑(false 11 例 + control 11 例, 跨 2 项目, repeat 3, deepseek + 全工具):
+> **false grounding 0.970 [CI 0.909, 1.0] vs control 1.000 [CI 1.0, 1.0], CI 重叠, hallucination 两组皆 0。**
+> 抽查答案原文: agent 每例都**明确反驳错误前提**(planner/audit/Neo4j/cross_link...);唯一 0.67 例是多跳题
+> **耗尽 max_steps**, 非顺前提幻觉。→ §二十九 的 2 例苗头放大到可信尺子后**不成立为普遍问题**, 诚实证伪
+> (同 [[recall-weight-ab-finding]] 纪律)。**未建任何机制故无需回退**;数据集 + harness CI/cross_project 保留作回归资产
+> (22 例验证金标顺带补 Phase 0 "≥20 真实金标" gate)。
+>
 > **本文件是 plan, 不是实现。** 承 [`daily-summary-2026-06-09.md`](daily-summary-2026-06-09.md) §二十九~三十二
 > (诊断难集发现 agent 顺错误前提幻觉 + 专家面板锁定为下一真课题)。
 > **核心节奏: 先验证后建造。** 不重蹈 §三十一 rule9 "改善全来自修金标、机制零净效" 的混淆。
