@@ -282,3 +282,21 @@ WSL 全量 **1401 passed / 0 failed**。**今日全会话改动经对抗式审�
 - **标定结果(WSL 真跑)**: grounding **1.0 → 0.9** —— 证实旧 1.0 含 ~0.1 子串假阳虚高, 现更诚实; `hallucination_rate 0.0` 现**有意义**(诱饵在场未误触)。WSL 全量 **1404 passed**。
 
 **下一步(面板共识路线, 留新一轮)**: 尺子准了 → 扩集才有意义。扩法(质量 + 检索专家): 覆盖矩阵(4 类 × 3 风格 × ≥2 项目, 30-40 例)+ 多跳/易错/**负样本**难题(让 grounding 脱天花板)+ judge 换**非自评**模型 + 多次取均值 + 报置信区间。这是把 Phase 7 "趋势"变"定论"、并暴露下一个真杠杆(召不全?读码不深?)的路 —— 属认真一轮, 不在本窗口仓促铺开。
+
+## 二十九、诊断难集首跑 —— eval 开始"问倒" agent(找到真缺口)
+
+建诊断难集 `agent_e2e_quality.jsonl`(6 例: 多跳 / 近义误导 / 负样本陷阱)+ `--e2e-set {default,hard,quality}`。WSL 真跑(`dcee8a5`):
+
+| 指标 | 易集 | **诊断难集** |
+|---|---|---|
+| grounding_coverage | 0.9-1.0 | **0.833**(脱天花板)|
+| hallucination_rate | 0.0(无诱饵)| **0.33~0.5**(诱饵触发)|
+| judge_score_avg(自评)| 5.0 | **5.0**(给幻觉答案也打满分!)|
+
+**逐 case 暴露的真缺口**:
+- **🔴 case 6 向量库陷阱(grounding 0.0 + 全幻觉)**: 问"recall 用哪个向量数据库", agent 确信地答 **chroma / embedding / 向量数据库** —— 但 `code_recall` **只融 graph+codegraph、无向量 lane**。**agent 顺着错误前提编造, 而非纠正前提。** 最干净的真 bug 类。
+- case 2/3 部分幻觉: 答案 grounding 1.0(答对了)但**夹带过时/错误项**(audit 还提 `open_store` 旧法 / planner fallback 说"抛异常")—— 新旧混淆 + 加错细节。
+- **self-judge 彻底失效**: deepseek 自评给上述幻觉答案**全 5.0** → 坐实"judge 必须换非自评模型, grounding 才是真信号"(面板预言命中)。
+- 多跳题(case 1/4: recall 融合链 / config 链)agent 答得好(grounding 1.0)→ 多跳综合**不是**瓶颈。
+
+**意义**: 易集 saturated 测不出东西; 难集**一跑就找到 agent 真弱点(顺错误前提幻觉)+ 证伪 self-judge** —— 正是面板说的"扩集价值在暴露下一个真杠杆"。**下一个真活**: ① agent 抗错误前提(system prompt / loop 加"先验证问题前提, 假则纠正而非顺答")② judge 换非自评 + 多跳取均值压方差(本次 halluc 0.33↔0.5 抖动印证小集非确定)。
