@@ -1,15 +1,14 @@
-# roadmap-2026-06-10 迭代规划目录(独立轨)
+# roadmap-2026-06-10 独立课题目录
 
-> **主题**: 多仓项目跨层链路 —— 前后端分离 + 一逻辑项目 N 前端 M 后端微服务时,平台跨层图谱怎么连。
->
-> **独立于** `roadmap-2026-06-07`(代码智能平台主线):本目录是 2026-06-10 专家面板触发的独立课题,
-> 不继承上轮累积期纪律,自成一轨。
+> **定位**: 2026-06-10 专家面板触发的**独立课题集**(各自成轨),**独立于** `roadmap-2026-06-07`(代码智能平台主线),
+> 不继承上轮累积期纪律。共同节奏:专家面板收敛 + validate-first/ROI 分段(立即做的最小切片 + Gate 冻结重型)。
 
 ## 文件清单
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [multi-repo-contract-bridge-plan-2026-06-10.md](multi-repo-contract-bridge-plan-2026-06-10.md) | 多仓跨层链路 plan:4 专家面板(图谱/IR · 平台多租户 · 微服务契约 · ROI)收敛 = **Phase 1 operationId 契约桥 + 契约漂移立即做**(不分仓也受益,顺修当前多服务 URL 串台 bug);**Phase 2 多根索引 A 变体冻结**到 Gate(≥2 真实多仓项目被卡)触发。 | 计划(待起 Phase 1) |
+| [multi-repo-contract-bridge-plan-2026-06-10.md](multi-repo-contract-bridge-plan-2026-06-10.md) | **多仓跨层链路**:4 专家面板收敛 = Phase 1 operationId 契约桥 + 契约漂移立即做(不分仓也受益,顺修多服务 URL 串台 bug);Phase 2 多根索引冻结到 Gate(≥2 真实多仓项目被卡)。 | 计划(待起 Phase 1) |
+| [multi-org-server-identity-plan-2026-06-10.md](multi-org-server-identity-plan-2026-06-10.md) | **多组织 server IDE agent 身份/认证**:4 高级开发面板收敛 = 选 A(IDE 带 token 直连,否决 web 前置 B);认证用 token、授权用共享 PG RBAC 实时查;Phase 1 最小(bind_host+护栏+config token runbook)立即做,Phase 2 PG token 子系统冻结到 Gate(≥2 org / ≥3 dev)。含数据模型对齐(org/项目/token/memory 同一 PG 真值源)。 | 计划(待起 Phase 1) |
 
 ## 背景一句话
 
