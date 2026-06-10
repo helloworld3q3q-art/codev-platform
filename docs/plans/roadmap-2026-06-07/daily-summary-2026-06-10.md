@@ -159,5 +159,19 @@ Phase A 证伪后,本日继续推进多块,均 test-first + WSL 真跑 + push。
 - **判断:默认上 `deepseek-v4-flash`** —— 我们负载正是 RAG+工具调用(flash 甜区);§十九 已证 **grounding 饱和**(0.909),pro 推理红利无发挥空间;flash 便宜 ~3×、agent 多步 loop 省 token。
 - **pro 只留给**那个唯一掉 0.67 的**多跳耗尽 max_steps** 题(pro agentic 占优),按难度路由,不全局上 pro([[agent-design-multi-model-first]])。
 
+## 二十二、flash 迁移 + within_budget CI 真跑(commit `3c89b10` + WSL config 迁移)
+`within_budget_ci95` 小改后,把 deepseek 从 `deepseek-chat` 迁到 **`deepseek-v4-flash`**(备份 `config.json.bak.predeepseekv4`),同套硬集重跑 A/B:
+
+| 变体 | grounding [CI95] | within_budget [CI95] | tool_ok |
+|---|---|---|---|
+| off | 1.0 [1.0, 1.0] | 0.364 [0.091, 0.636] | 0.909 |
+| keyword | 1.0 [1.0, 1.0] | 0.545 [0.273, 0.818] | 1.0 |
+| llm | 1.0 [1.0, 1.0] | **0.818 [0.545, 1.0]** | 0.909 |
+
+**结论**:
+1. **flash 迁移验证通过且更优**:grounding 三变体全 **1.0**(chat 0.909、含一个 0.67 多跳掉分)→ flash 在本负载守住且到顶,便宜 ~3×。迁对了。
+2. **planner 翻默认仍不成立,这次 CI 实证**:grounding 零 delta 再确认;within_budget 趋势对(off 0.364 < keyword 0.545 < llm 0.818)但 **CI 重叠**(llm [0.545,1.0] 下界压在 keyword 点估)→ **n=11 不足判显著**(正如 §二十预测)。`within_budget_ci95` 把"5/11 vs 9/11 像赢"诚实变成"尚不能翻默认",挡住过度解读。
+3. **翻 planner 默认的唯一缺口 = 扩硬集**(11→~25-30)收窄 within_budget CI;若 llm vs keyword CI 不再重叠 → 才据**效率**翻默认。留下一轮。
+
 ## 续3-commit 链
-`4294de8`(agent_e2e 硬集 6→16 + 守卫)→ 后续 within_budget CI 小改 + deepseek 配置迁 flash。
+`4294de8`(agent_e2e 硬集 6→16 + 守卫)→ `3c89b10`(within_budget_ci95 + 沉淀反转)→ WSL config 迁 `deepseek-v4-flash`(用户级配置, 不进 git)→ flash A/B 重跑确认(grounding 1.0 / within_budget CI 重叠)。
