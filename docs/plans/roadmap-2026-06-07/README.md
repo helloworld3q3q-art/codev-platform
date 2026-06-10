@@ -13,6 +13,7 @@
 | [agent-e2e-eval-design-2026-06-09.md](agent-e2e-eval-design-2026-06-09.md) | Phase 7 完整版剩余: agent 端到端 eval 设计(grounding 优先打分 + 数据集格式 + harness + 分期 E1-E4)| 设计(E1-E4 已落地) |
 | [anti-false-premise-plan-2026-06-10.md](anti-false-premise-plan-2026-06-10.md) | 下一轮: agent 抗错误前提幻觉(validate-first 分期 A 验证→B 机制→C measure; 不重蹈 rule9)| 🔚 Phase A 证伪结案(停轮) |
 | [tiered-domain-labeler-plan-2026-06-11.md](tiered-domain-labeler-plan-2026-06-11.md) | 按客户分档业务域标注(规则/hybrid/llm); 8 视角面板 + 真图谱实测 + 设计 + 触发条件 | 🧊 搁置待做(触发: 免费/离线档需无 LLM 域名) |
+| [loop-cost-optimization-plan-2026-06-11.md](loop-cost-optimization-plan-2026-06-11.md) | agent loop 成本优化(云账单大头); 实测成本结构(miss 67%+out 25%, 随步数超线性)+ 符号级多跳工具(省 60-70% 且修多跳质量弱点)+ per-档 max_steps + A/B CI 验证 | 📋 可做(下一轮主线候选) |
 
 > 多仓 operationId 契约桥课题独立成轨, 见 [`../roadmap-2026-06-10/`](../roadmap-2026-06-10/)。
 
