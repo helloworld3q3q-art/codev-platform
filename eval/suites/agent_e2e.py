@@ -120,13 +120,40 @@ def _parse_score(text: str | None) -> int | None:
     return v if 1 <= v <= 5 else None
 
 
+def _summarize_runs(case: dict, run_scores: list[dict], reps: int) -> dict:
+    """把同 case 的 N 次跑分汇总成一条 detail: grounding 取均值 + 报 min/max 跨度(暴露方差);
+    hallucinated 取并集(任一次幻觉即记); missing/tools/tool_calls 取最后一次代表。"""
+    gc = [s["grounding_coverage"] for s in run_scores]
+    mean_gc = round(sum(gc) / len(gc), 3)
+    last = run_scores[-1]
+    bad = sorted(set().union(*[set(s["hallucinated"]) for s in run_scores]))
+    d = {
+        "grounding_coverage": mean_gc,
+        "grounding_min": round(min(gc), 3),
+        "grounding_max": round(max(gc), 3),
+        "missing_mentions": last["missing_mentions"],
+        "hallucinated": bad,
+        "hallucination_runs": sum(1 for s in run_scores if s["hallucinated"]),
+        # 多数票(>50% 跑达标即记 True), reps=1 时即单次结果。
+        "tool_appropriate": sum(1 for s in run_scores if s["tool_appropriate"]) * 2 >= reps,
+        "within_budget": sum(1 for s in run_scores if s["within_budget"]) * 2 >= reps,
+        "tools_used": last["tools_used"],
+        "tool_calls": last["tool_calls"],
+        "runs": reps,
+    }
+    return d
+
+
 def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=None,
-                  dataset: str = "agent_e2e.jsonl") -> dict:
+                  dataset: str = "agent_e2e.jsonl", repeat: int = 1) -> dict:
     """跑 agent loop 答每个 case + 确定性打分(+ 可选 LLM-judge)。
 
     provider=None → skip。policy=None → 用配置档(loop_policy()); 传入自定义 policy 支持 planner
-    变体对比(E4 A/B)。judge_provider!=None → 每 case 额外 LLM-judge 1-5(E3)。
-    dataset: 数据集文件名(默认易集; agent_e2e_hard.jsonl = 口语化硬集, keyword 多误路由)。
+    变体对比(E4 A/B)。judge_provider!=None → 每 case 额外 LLM-judge 1-5(E3); 可传**异于被测**的
+    provider 做非自评(self-judge 偏宽实测给幻觉答案也 5.0)。
+    repeat>1: 每 case 跑 N 次, grounding 取均值 + 报 min/max 跨度 —— 压小集非确定方差(质量面板:
+    n=5/6 时 1 case 翻转 = ±0.17, 无均值无 CI 不可信)。
+    dataset: 数据集文件名(default 易集 / hard 口语化 / quality 诊断难集)。
     需 WSL 后端(工具调 codegraph/graph/chroma); 缺后端 loop 仍跑但 grounding 低(真实信号, 不额外 skip)。
     """
     rows = [r for r in load_jsonl(dataset)
@@ -141,19 +168,24 @@ def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=No
     from codev_platform.agent.tools import build_default_registry
 
     policy = policy or loop_policy()
+    reps = max(1, repeat)
     details = []
     for r in rows:
         pid = r.get("project_id", project_id)
-        loop = AgentLoop(provider, build_default_registry(pid), policy=policy)
-        res = loop.run(r["query"])
-        tools = [s.tool for s in res.steps if s.tool]
-        sc = score_case(r, res.answer, tools, len(tools), budget=policy.max_steps)
+        run_scores = []
+        last_answer = ""
+        for _ in range(reps):
+            loop = AgentLoop(provider, build_default_registry(pid), policy=policy)
+            res = loop.run(r["query"])
+            last_answer = res.answer
+            tools = [s.tool for s in res.steps if s.tool]
+            run_scores.append(score_case(r, res.answer, tools, len(tools), budget=policy.max_steps))
         d = {"query": r["query"], "expect_type": r.get("expect_type", ""),
-             "stop_reason": res.stop_reason, **sc}
+             **_summarize_runs(r, run_scores, reps)}
         if judge_provider is not None:
-            d["judge_score"] = judge_answer(r, res.answer, judge_provider)
+            d["judge_score"] = judge_answer(r, last_answer, judge_provider)
         details.append(d)
-    return {"suite": "agent_e2e", "status": "ok", "n": len(details),
+    return {"suite": "agent_e2e", "status": "ok", "n": len(details), "repeat": reps,
             "project_id": project_id, "metrics": aggregate(details), "details": details}
 
 

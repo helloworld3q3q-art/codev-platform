@@ -9,6 +9,7 @@ from codev_platform.agent.brain import AssistantTurn, LLMProvider
 from eval.suites.agent_e2e import (
     _mentions,
     _parse_score,
+    _summarize_runs,
     aggregate,
     judge_answer,
     run_agent_e2e,
@@ -175,6 +176,29 @@ def test_dataset_param_loads_hard_set():
     assert rep["status"] == "skipped" and rep["n"] == 6
     ab = run_planner_e2e_ab("codev-platform", provider=None, dataset="agent_e2e_hard.jsonl")
     assert ab["n"] == 6
+
+
+def test_summarize_runs_mean_and_spread():
+    # 3 次跑: grounding [1.0, 0.5, 0.0] → 均值 0.5 + min/max 跨度暴露方差。
+    def _sc(g, halluc, tool, budget):
+        return {"grounding_coverage": g, "missing_mentions": [], "hallucinated": halluc,
+                "tool_appropriate": tool, "within_budget": budget, "tools_used": [], "tool_calls": 1}
+    runs = [_sc(1.0, [], True, True), _sc(0.5, ["x"], True, False), _sc(0.0, [], False, True)]
+    d = _summarize_runs({"query": "q"}, runs, 3)
+    assert d["grounding_coverage"] == 0.5
+    assert d["grounding_min"] == 0.0 and d["grounding_max"] == 1.0
+    assert d["hallucinated"] == ["x"] and d["hallucination_runs"] == 1   # 任一次幻觉即记
+    assert d["tool_appropriate"] is True       # 2/3 多数票
+    assert d["within_budget"] is True          # 2/3 多数票
+    assert d["runs"] == 3
+
+
+def test_summarize_runs_single_equals_score():
+    sc = {"grounding_coverage": 0.8, "missing_mentions": ["a"], "hallucinated": [],
+          "tool_appropriate": True, "within_budget": True, "tools_used": ["t"], "tool_calls": 2}
+    d = _summarize_runs({"query": "q"}, [sc], 1)
+    assert d["grounding_coverage"] == 0.8 and d["grounding_min"] == d["grounding_max"] == 0.8
+    assert d["tool_appropriate"] is True and d["runs"] == 1
 
 
 def test_quality_set_loads_and_has_negatives():

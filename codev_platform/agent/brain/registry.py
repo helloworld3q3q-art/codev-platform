@@ -128,9 +128,9 @@ def _spec_for(name: str, cfg: dict[str, Any]) -> ProviderSpec:
     )
 
 
-def get_provider(cfg: dict[str, Any] | None = None) -> LLMProvider:
+def get_provider(cfg: dict[str, Any] | None = None, name: str | None = None) -> LLMProvider:
     cfg = cfg or acfg.agent_cfg()
-    name = acfg.provider_name(cfg)
+    name = name or acfg.provider_name(cfg)   # 显式 name 覆盖 config 默认 provider(如 eval 非自评 judge)
     spec = _spec_for(name, cfg)
 
     key = acfg.resolve_key(cfg, name, spec.key_env)

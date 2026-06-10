@@ -110,6 +110,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--e2e-set", choices=["default", "hard", "quality"], default="default",
                     help="agent_e2e 数据集: default(易集) / hard(口语化, keyword 误路由) / "
                          "quality(诊断难集: 多跳/近义误导/负样本陷阱)")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="agent_e2e: 每 case 跑 N 次取均值 + 报 min/max 跨度(压小集非确定方差)")
+    ap.add_argument("--judge-provider", default=None,
+                    help="agent_e2e --judge: 用指定 provider 做**非自评** judge(缺省=被测同款, 偏宽)")
     args = ap.parse_args(argv)
 
     suites = list(_RUNNERS) if args.suite == "all" else [args.suite]
@@ -130,13 +134,24 @@ def main(argv: list[str] | None = None) -> int:
         runners["planner"] = lambda project, k: run_planner(provider=provider)
     e2e_ds = {"default": "agent_e2e.jsonl", "hard": "agent_e2e_hard.jsonl",
               "quality": "agent_e2e_quality.jsonl"}[args.e2e_set]
+    # judge provider: --judge-provider 指定 = 非自评(构造失败则退回被测同款); 否则用被测 provider。
+    judge_prov = None
+    if args.judge:
+        judge_prov = provider
+        if args.judge_provider:
+            try:
+                from codev_platform.agent.brain.registry import get_provider
+                judge_prov = get_provider(name=args.judge_provider)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[--judge-provider] 构造 '{args.judge_provider}' 失败, 退回被测 provider: {exc}",
+                      file=sys.stderr)
     if args.planner_ab:
         runners["agent_e2e"] = lambda project, k: run_planner_e2e_ab(
             project or DEFAULT_RECALL_PID, provider=provider, dataset=e2e_ds)
     else:
         runners["agent_e2e"] = lambda project, k: run_agent_e2e(
             project or DEFAULT_RECALL_PID, provider=provider,
-            judge_provider=(provider if args.judge else None), dataset=e2e_ds)
+            judge_provider=judge_prov, dataset=e2e_ds, repeat=args.repeat)
 
     results = [runners[s](args.project, args.k) for s in suites]
 
