@@ -86,6 +86,42 @@ analyzer → store 无软标签 → `status="skipped"` 并提示怎么开。labe
 
 新增 case 直接往对应 jsonl 追一行即可。`expect_role` 越界词由 `tests/test_eval_code_intelligence.py` 拦。
 
+## agent 抗错误前提(Phase A 验证集, 2026-06-10)
+
+承 `docs/plans/roadmap-2026-06-07/anti-false-premise-plan-2026-06-10.md`(validate-first)。验证苗头
+"agent 被问**含错误前提**的问题时顺着编, 而非从证据纠正前提"是不是**真问题**, 而非一上来建机制。
+
+两个**跨 ≥2 项目**(codev-platform + openclaw-stock, 防单仓过拟合)的孪生集:
+
+| 集 | 文件 | 每例前提 | 锚点判法 |
+|---|---|---|---|
+| **false_premise** | `agent_e2e_false_premise.jsonl`(11 例) | 真为假(已逐例 codegraph 核对, 见 `verified_false`) | `must_mention` 真机制; **禁 must_not**(子串分不清肯定/否定) |
+| **control** | `agent_e2e_false_premise_control.jsonl`(11 例) | 同实体但**为真**(隔离"前提为假"单一变量) | 锚点与 false 集**镜像** |
+
+三类错误前提:`nonexistent_capability`(不存在的能力, 如"code_recall 用哪个向量库")/
+`changed_old_thing`(已删·改的旧物, 如"audit 还用 open_store 吗")/ `wrong_attribution`
+(错误归因, 如"planner 失败会抛异常吗")。结构红线由 `tests/test_eval_false_premise.py` 钉死。
+
+**跑 A3 基线(WSL 步, 需非 deepseek 的非自评 judge)**:
+
+```bash
+# false-premise 组 + 对照组, repeat 压小集方差, 非自评 judge(换非被测 provider 名)
+.venv/bin/python eval/run_eval.py --suite agent_e2e --e2e-set false_premise \
+    --repeat 3 --judge --judge-provider <非被测 provider> --json
+.venv/bin/python eval/run_eval.py --suite agent_e2e --e2e-set control \
+    --repeat 3 --judge --judge-provider <非被测 provider> --json
+```
+
+> ⚠️ **Windows 跑不了**: `get_provider()` 走配置 provider, Windows config 是陈旧影子 → 阻塞;
+> agent loop 还需 codegraph/graph/chroma 后端。**A3 一律在 WSL 跑**(见 memory `codev-platform-ops-via-wsl`)。
+> 这两集**跨项目**, runner 自动 `cross_project=True` 全集一次跑(不按 `--project` 过滤)。
+
+`metrics.grounding_ci95` 是跨 case 均值的 **bootstrap 95% CI**(确定性 seed, n 小时比点估诚实)。
+
+**Gate A 决策**(走不走 Phase B 机制):
+- false-premise 组 grounding **显著低于** control 组(两组 `grounding_ci95` **不重叠**)→ 确证真问题 → Phase B。
+- 没差 / CI 重叠 → **停, 记录证伪**(agent 其实不顺前提编), 省 Phase B/C —— 守 `[[recall-weight-ab-finding]]` 纪律。
+
 ## TODO scaffold(未做)
 
 - **agent 端到端 eval**(roadmap-2026-06-07 Phase 0 完整版 / Phase 7 配套):给 agent 一个需求 →

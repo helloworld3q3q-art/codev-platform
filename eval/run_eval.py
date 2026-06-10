@@ -107,9 +107,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="agent_e2e: 额外 LLM-judge 给答案 1-5 主观质量分 (E3, 多一次 LLM 调用)")
     ap.add_argument("--planner-ab", action="store_true",
                     help="agent_e2e: 跑 planner off/keyword/llm 三变体比答案质量 (E4)")
-    ap.add_argument("--e2e-set", choices=["default", "hard", "quality"], default="default",
+    ap.add_argument("--e2e-set",
+                    choices=["default", "hard", "quality", "false_premise", "control"],
+                    default="default",
                     help="agent_e2e 数据集: default(易集) / hard(口语化, keyword 误路由) / "
-                         "quality(诊断难集: 多跳/近义误导/负样本陷阱)")
+                         "quality(诊断难集) / false_premise(含错误前提, Phase A) / "
+                         "control(false_premise 的真前提对照组)")
     ap.add_argument("--repeat", type=int, default=1,
                     help="agent_e2e: 每 case 跑 N 次取均值 + 报 min/max 跨度(压小集非确定方差)")
     ap.add_argument("--judge-provider", default=None,
@@ -133,7 +136,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.llm:
         runners["planner"] = lambda project, k: run_planner(provider=provider)
     e2e_ds = {"default": "agent_e2e.jsonl", "hard": "agent_e2e_hard.jsonl",
-              "quality": "agent_e2e_quality.jsonl"}[args.e2e_set]
+              "quality": "agent_e2e_quality.jsonl",
+              "false_premise": "agent_e2e_false_premise.jsonl",
+              "control": "agent_e2e_false_premise_control.jsonl"}[args.e2e_set]
     # judge provider: --judge-provider 指定 = 非自评(构造失败则退回被测同款); 否则用被测 provider。
     judge_prov = None
     if args.judge:
@@ -145,13 +150,16 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"[--judge-provider] 构造 '{args.judge_provider}' 失败, 退回被测 provider: {exc}",
                       file=sys.stderr)
+    # false_premise/control 跨 ≥2 项目(Phase A 防单仓过拟合)→ 不按 --project 过滤, 全集一次跑。
+    cross_project = args.e2e_set in ("false_premise", "control")
     if args.planner_ab:
         runners["agent_e2e"] = lambda project, k: run_planner_e2e_ab(
             project or DEFAULT_RECALL_PID, provider=provider, dataset=e2e_ds)
     else:
         runners["agent_e2e"] = lambda project, k: run_agent_e2e(
             project or DEFAULT_RECALL_PID, provider=provider,
-            judge_provider=judge_prov, dataset=e2e_ds, repeat=args.repeat)
+            judge_provider=judge_prov, dataset=e2e_ds, repeat=args.repeat,
+            cross_project=cross_project)
 
     results = [runners[s](args.project, args.k) for s in suites]
 

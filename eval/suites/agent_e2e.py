@@ -47,13 +47,37 @@ def score_case(case: dict, answer: str, tools_used: list[str], tool_call_count: 
     }
 
 
+def _bootstrap_ci(values: list[float], *, iters: int = 2000, alpha: float = 0.05,
+                  seed: int = 12345) -> list[float] | None:
+    """对一组 per-case 分数做**确定性** bootstrap 百分位区间(默认 95%)。
+
+    小集(n=10~12)+ grounding 取值聚在 0/0.5/1 非正态 → bootstrap 比正态近似更诚实
+    (Phase A 红线: "n 小, CI 比点估诚实")。固定 seed 保可复现 + 可单测。
+    n=0 → None; n=1 → 退化为点(区间宽 0, 诚实反映"单点无法估方差")。
+    """
+    n = len(values)
+    if n == 0:
+        return None
+    if n == 1:
+        return [round(values[0], 3), round(values[0], 3)]
+    import random
+    rng = random.Random(seed)
+    means = sorted(sum(values[rng.randrange(n)] for _ in range(n)) / n for _ in range(iters))
+    lo = means[int((alpha / 2) * iters)]
+    hi = means[min(iters - 1, int((1 - alpha / 2) * iters))]
+    return [round(lo, 3), round(hi, 3)]
+
+
 def aggregate(details: list[dict]) -> dict:
-    """逐 case 子分 → suite 级均值/比率。"""
+    """逐 case 子分 → suite 级均值/比率(+ grounding 的 bootstrap 95% CI, 供 Gate A 比组)。"""
     n = len(details)
     if not n:
         return {}
+    gc_vals = [d["grounding_coverage"] for d in details]
     m = {
-        "grounding_coverage": round(sum(d["grounding_coverage"] for d in details) / n, 3),
+        "grounding_coverage": round(sum(gc_vals) / n, 3),
+        "grounding_ci95": _bootstrap_ci(gc_vals),   # 跨 case 均值的 95% CI(false vs control 比 CI 重叠否)
+        "grounding_n": n,
         "hallucination_rate": round(sum(1 for d in details if d["hallucinated"]) / n, 3),
         "tool_appropriate_rate": round(sum(1 for d in details if d["tool_appropriate"]) / n, 3),
         "within_budget_rate": round(sum(1 for d in details if d["within_budget"]) / n, 3),
@@ -134,7 +158,8 @@ def _summarize_runs(case: dict, run_scores: list[dict], reps: int) -> dict:
 
 
 def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=None,
-                  dataset: str = "agent_e2e.jsonl", repeat: int = 1) -> dict:
+                  dataset: str = "agent_e2e.jsonl", repeat: int = 1,
+                  cross_project: bool = False) -> dict:
     """跑 agent loop 答每个 case + 确定性打分(+ 可选 LLM-judge)。
 
     provider=None → skip。policy=None → 用配置档(loop_policy()); 传入自定义 policy 支持 planner
@@ -142,11 +167,13 @@ def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=No
     provider 做非自评(self-judge 偏宽实测给幻觉答案也 5.0)。
     repeat>1: 每 case 跑 N 次, grounding 取均值 + 报 min/max 跨度 —— 压小集非确定方差(质量面板:
     n=5/6 时 1 case 翻转 = ±0.17, 无均值无 CI 不可信)。
-    dataset: 数据集文件名(default 易集 / hard 口语化 / quality 诊断难集)。
+    dataset: 数据集文件名(default 易集 / hard 口语化 / quality 诊断难集 / false_premise / control)。
+    cross_project=True: **不按 project_id 过滤**, 每 case 用各自 r["project_id"] 建 registry 全跑 ——
+    false_premise/control 集跨 ≥2 项目防单仓过拟合(Phase A), 一次跑全集才好算跨组 CI。
     需 WSL 后端(工具调 codegraph/graph/chroma); 缺后端 loop 仍跑但 grounding 低(真实信号, 不额外 skip)。
     """
     rows = [r for r in load_jsonl(dataset)
-            if r.get("project_id", project_id) == project_id]
+            if cross_project or r.get("project_id", project_id) == project_id]
     if not rows:
         return _skip(rows, f"无 project={project_id} 的 agent_e2e 用例")
     if provider is None:
@@ -173,9 +200,12 @@ def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=No
              **_summarize_runs(r, run_scores, reps)}
         if judge_provider is not None:
             d["judge_score"] = judge_answer(r, last_answer, judge_provider)
+        d["project_id"] = pid
         details.append(d)
+    pid_label = (",".join(sorted({d["project_id"] for d in details}))
+                 if cross_project else project_id)
     return {"suite": "agent_e2e", "status": "ok", "n": len(details), "repeat": reps,
-            "project_id": project_id, "metrics": aggregate(details), "details": details}
+            "project_id": pid_label, "metrics": aggregate(details), "details": details}
 
 
 def run_planner_e2e_ab(project_id: str, provider=None,
