@@ -15,24 +15,13 @@ LLM-judge(主观质量)留 E3, 默认不做。
 """
 from __future__ import annotations
 
-import re
-
-from eval.suites._common import load_jsonl
+from eval.suites._common import load_jsonl, token_match
 
 
 def _mentions(answer: str, anchor: str) -> bool:
-    """anchor 是否作为**独立 token** 出现在 answer(大小写不敏感, 非字母数字为边界)。
-
-    审计后加固: 原裸子串匹配假阳严重 —— "sql" 命中 "sqlite"、"service" 命中 "services"、
-    "AI" 命中 "train" 等, 虚高 grounding。token 边界(前后非 [A-Za-z0-9])杜绝这类: 锚点要么
-    独立成词、要么以符号/标点/驼峰外的非字母数字为界(下划线/点算边界, 故 classify_query 在
-    `x.classify_query(` 内仍命中)。
-    """
-    a = (anchor or "").strip()
-    if not a:
-        return False
-    pat = r"(?<![A-Za-z0-9])" + re.escape(a) + r"(?![A-Za-z0-9])"
-    return re.search(pat, answer or "", re.IGNORECASE) is not None
+    """anchor 是否作为独立 token 出现在 answer —— 委托共享 `token_match`(单一真值源, recall
+    suite 同用)。token 边界杜绝裸子串假阳("sql"⊄"sqlite"); _/. 算边界故 `x.classify_query(` 命中。"""
+    return token_match(answer, anchor)
 
 
 def score_case(case: dict, answer: str, tools_used: list[str], tool_call_count: int,

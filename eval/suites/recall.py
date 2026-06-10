@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from eval.metrics import aggregate_mrr, aggregate_ndcg
-from eval.suites._common import load_jsonl
+from eval.suites._common import load_jsonl, token_match
 
 _RECALL_RELEVANT_FIELDS = ("name", "file")
 
@@ -15,20 +15,19 @@ _RECALL_RELEVANT_FIELDS = ("name", "file")
 def _recall_per_query(hits: list, expect: str) -> tuple[list[str], set[str], int]:
     """recall_code 结果 → (位置 id 列表, 相关位置集合, 首个相关 1-based rank)。
 
-    相关性按**模式匹配**(hit 的 name/file 含 expect 子串)—— 与 codegraph suite 同法,
-    bootstrap golden 不必枚举具体 node id(store-agnostic)。
+    相关性按 **token 边界匹配**(hit 的 name/file 把 expect 作独立 token 含)—— 2026-06-10
+    专家面板指出: 原裸子串 `expect in name` 假阳(`"impact"` 命中任何含 impact 的节点 → relevant
+    虚大 → rank 虚高), 与 agent_e2e 已修的 `_mentions` 不一致。改用共享 `token_match`(单一真值源)。
 
-    **只标真实现 ref**(2026-06-09 audit #1): 测试代码(test_ 函数 / tests 目录 / *_test.py /
-    *.spec.ts)即使 name/file 含 expect 子串也**不算相关** —— golden 要的是实现 ref, 同名测试
-    (如 test_weighted_rrf 之于 weighted_rrf)只是噪声, 计进相关会虚高 nDCG。判据复用 service
-    的 `_is_test_hit`(单一真值源, 与 lane 内降权用的同一定义), 不在 eval 侧重写启发式。
+    **只标真实现 ref**(audit #1): 测试代码(test_ 函数 / tests 目录 / *_test.py / *.spec.ts)即使
+    name/file 含 expect 也**不算相关** —— 复用 service 的 `_is_test_hit`(与 lane 内降权同一定义)。
     """
     from codev_platform.recall.service import _is_test_hit
 
     retrieved = [str(i) for i in range(len(hits))]
     relevant = {
         str(i) for i, h in enumerate(hits)
-        if any(expect in (getattr(h, f, None) or "") for f in _RECALL_RELEVANT_FIELDS)
+        if any(token_match(getattr(h, f, None), expect) for f in _RECALL_RELEVANT_FIELDS)
         and not _is_test_hit(getattr(h, "name", None), getattr(h, "file", None))
     }
     rank = next((i + 1 for i in range(len(hits)) if str(i) in relevant), -1)
