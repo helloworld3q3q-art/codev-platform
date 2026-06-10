@@ -1,7 +1,6 @@
 import {
   AppstoreOutlined,
   AuditOutlined,
-  BranchesOutlined,
   BulbOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
@@ -44,7 +43,8 @@ export const MENU_ITEMS: MenuDataItem[] = [
       { name: '文件列表', path: '/codegraph/filelist', icon: <FileOutlined /> },
       { name: '文件浏览', path: '/codegraph/files', icon: <FolderOutlined /> },
       { name: '统一图谱', path: '/codegraph/unified', icon: <DeploymentUnitOutlined /> },
-      { name: '影响分析', path: '/codegraph/impact', icon: <BranchesOutlined /> },
+      // 影响分析页已判低价值(查询=graph 引擎薄包装 + 盲填节点 UX 差, agent impact 工具已覆盖)→ 隐藏出菜单。
+      // 禁止继续开发该页(见 memory impact-page-frozen); 路由保留作 deep-link, 页面代码不动。
     ],
   },
   {
