@@ -45,3 +45,45 @@
 
 ## commit 链
 `da5ab08`(Phase A 数据集 + bootstrap CI + cross_project + 34 单测)→ 本日志 + plan 结案标注。
+
+---
+
+# 续(同日)—— 多组织 RBAC 闭环 + 平台收口 + 多仓 plan 立项
+
+Phase A 证伪后,本日继续推进多块,均 test-first + WSL 真跑 + push。
+
+## 六、config DI(next-steps #7)
+`create_app(cfg)` 的显式 cfg 原只作用 authenticator,session/job/agent 单例仍绑 import 期 `load_config()` → 多实例/测试注入不一致。加 `rebind_web_services(cfg)`(独立到 `web/service_binding.py`,避免 import app 触发装机副作用),session 跨模块消费方改走 `get_session_store()`(account_store getter 范式);`tests/conftest.py` autouse 还原 web 单例隔离 `create_app(cfg)` 跨测试污染。`a394fa8`→`4721e82`。
+
+## 七、soft-quality 前端卡片 + .gitattributes
+- dashboard 加「软标签健康度」卡(A1/A2 覆盖/巨型 cluster 退化),走已就绪端点;**发现前端 API 层 stale → 跑 `pnpm run api`** 补 `postSoftQuality`/`recallapi`。`ca46c35`。
+- 加 `.gitattributes` 强制文本 LF —— 根治"直接拷贝带进 CRLF"的事故(本会话 WSL WIP 误覆盖即此因)。`fae0b1e`。
+
+## 八、对抗式审计(无真 bug)
+派 general-purpose agent 写 5 个攻击用例 WSL 真跑,逐条证伪 config DI / set_roles 跨 org / session 串台 / eval 金标误标。结论**可放心**,黄项(test_web_users 用 import-global session_store)已优化为 `get_session_store()`。`d4984e5`。
+
+## 九、多组织 RBAC —— 从授权侧到完整可用(核心)
+产品决策(用户拍板):**用户↔org 多对多,跨 org 数据严格隔离(红线)**([[rbac-multi-org-membership-model]])。
+
+| 块 | 内容 | commit |
+|---|---|---|
+| **set_roles 放开(#8)** | platform_admin 跨 org 授角色 / org_admin 守本 org | `0f52e0d` |
+| **护栏分两类(#8 后续)** | `_guard_org_member`(读·角色,成员身份并集)vs `_guard_home_org`(全局身份变更);**安全发现**:全局身份(密码/状态)绝不能按成员放开,否则 orgA admin 重置共享用户密码→劫持登录→拿 orgB 身份(跨 org 泄露) | `fac6aae` |
+| **所属组织列(②)** | `UserItem.orgs` + 前端列(归属 vs 所属) | `ca46c35`/`d91fb81` |
+| **#1 活动 org 切换** | `POST /auth/switch-org` 校验成员身份重签 session + `SessionInfo.orgs`;前端 `OrgSelect` 改真切换(换 token + reload) | `72f357c`/`58b74a6`/`0dc135a` |
+| **#2 RBAC 按活动 org** | 随 `sess.org_id` 自动跟随(switch 落地即通) | — |
+| **#3 用户列表成员制** | org_admin 列"本 org 成员"(非首属过滤),角色=本 org 角色 | `4f74020` |
+| **🔴 #5 修真漏洞** | org 成员端点(add/remove/roles/list)原只校验 caller session org,但操作 `body.code` 任意 org → **orgA admin 传 code=orgB 跨 org 提权/泄露成员名单**。加 `_guard_target_org`(非超管必须 code==自己 org) | `4f74020`/`58d7347` |
+
+**验证**:全程 test-first;全量 web/rbac/acl 回归 **380 passed,0 回归**;codev-web 重启加载 live。
+**关键事实**:web RBAC 与 agent/MCP 侧**共享同一 RBAC store**(`membership._pg_rbac_store`→`agent.deps.get_rbac_store`)→ org/成员**在 web 配一次,claude/codex IDE agent 经 token 身份消费同一套**,不另配。
+
+## 十、多仓项目 plan 立项(独立轨)
+4 视角专家面板(图谱/IR · 平台多租户 · 微服务契约 · ROI)讨论"前后端分离多仓 + N 前端 M 后端"。收敛:**Phase 1 operationId 契约桥 + 契约漂移立即做**(不分仓也受益,repo 无关,顺修当前多服务 URL 串台 bug);**Phase 2 多根索引冻结**到 Gate(≥2 真实多仓项目被卡)。独立成 [`../roadmap-2026-06-10/`](../roadmap-2026-06-10/) 轨。`31f40f8`→`185c60a`。
+
+## 十一、流程沉淀
+- 用户授权**「改后端 schema→重启 codev-web(sudo 123456)→pnpm run api」整链自主跑不用问**([[authorized-web-schema-runapi-chain]])。
+- WSL 误搅动别人未提交 WIP 事故 + 恢复(教训:别在带未提交改动的共享仓跑 stash/checkout 对照)。
+
+## 续-commit 链
+`a394fa8`/`e73dbdc`/`39218b1`/`4721e82`(config DI)→ `ca46c35`(soft-quality+regen)→ `fae0b1e`(gitattributes)→ `0f52e0d`(set_roles 多 org)→ `d4984e5`(审计优化)→ `fac6aae`(#8 后续)→ `31f40f8`/`185c60a`(多仓 plan)→ `72f357c`/`58b74a6`(#1 switch-org)→ `4f74020`/`58d7347`(#3+#5)→ `d91fb81`/`0dc135a`(前端所属组织列 + 切换 reload)。全部 push `fuwuqi/dev` + WSL 同步。
