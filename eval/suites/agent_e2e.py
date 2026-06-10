@@ -15,7 +15,10 @@ LLM-judge(主观质量)留 E3, 默认不做。
 """
 from __future__ import annotations
 
-from eval.suites._common import load_jsonl, token_match
+from eval.suites._common import _bootstrap_ci, load_jsonl, token_match
+
+__all__ = ["_bootstrap_ci", "aggregate", "judge_answer", "run_agent_e2e",
+           "run_planner_e2e_ab", "score_case"]
 
 
 def _mentions(answer: str, anchor: str) -> bool:
@@ -45,27 +48,6 @@ def score_case(case: dict, answer: str, tools_used: list[str], tool_call_count: 
         "tools_used": sorted(used),
         "tool_calls": tool_call_count,
     }
-
-
-def _bootstrap_ci(values: list[float], *, iters: int = 2000, alpha: float = 0.05,
-                  seed: int = 12345) -> list[float] | None:
-    """对一组 per-case 分数做**确定性** bootstrap 百分位区间(默认 95%)。
-
-    小集(n=10~12)+ grounding 取值聚在 0/0.5/1 非正态 → bootstrap 比正态近似更诚实
-    (Phase A 红线: "n 小, CI 比点估诚实")。固定 seed 保可复现 + 可单测。
-    n=0 → None; n=1 → 退化为点(区间宽 0, 诚实反映"单点无法估方差")。
-    """
-    n = len(values)
-    if n == 0:
-        return None
-    if n == 1:
-        return [round(values[0], 3), round(values[0], 3)]
-    import random
-    rng = random.Random(seed)
-    means = sorted(sum(values[rng.randrange(n)] for _ in range(n)) / n for _ in range(iters))
-    lo = means[int((alpha / 2) * iters)]
-    hi = means[min(iters - 1, int((1 - alpha / 2) * iters))]
-    return [round(lo, 3), round(hi, 3)]
 
 
 def aggregate(details: list[dict]) -> dict:

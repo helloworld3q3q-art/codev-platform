@@ -41,3 +41,25 @@ def load_jsonl(name: str) -> list[dict]:
             if line:
                 rows.append(json.loads(line))
     return rows
+
+
+def _bootstrap_ci(values: list[float], *, iters: int = 2000, alpha: float = 0.05,
+                  seed: int = 12345) -> list[float] | None:
+    """对一组 per-case 分数做**确定性** bootstrap 百分位区间(默认 95%)。
+
+    eval CI 的单一真值源(agent_e2e grounding 均值 + recall 的 paired delta 共用)。小集(n=6~18)
+    + 取值非正态 → bootstrap 比正态近似更诚实。固定 seed 保可复现 + 可单测。values 可含负数
+    (如 weighted-uniform 的 paired delta): CI 不含 0 → 差异显著, 含 0 → 不可判(同 Gate A 语义)。
+    n=0 → None; n=1 → 退化为点(区间宽 0, 诚实反映"单点无法估方差")。
+    """
+    n = len(values)
+    if n == 0:
+        return None
+    if n == 1:
+        return [round(values[0], 3), round(values[0], 3)]
+    import random
+    rng = random.Random(seed)
+    means = sorted(sum(values[rng.randrange(n)] for _ in range(n)) / n for _ in range(iters))
+    lo = means[int((alpha / 2) * iters)]
+    hi = means[min(iters - 1, int((1 - alpha / 2) * iters))]
+    return [round(lo, 3), round(hi, 3)]

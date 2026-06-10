@@ -67,6 +67,34 @@ def test_recall_dataset_well_formed():
     assert {"codev-platform", "openclaw-stock"} <= pids
 
 
+def test_run_recall_wires_paired_delta_ci(monkeypatch, tmp_path):
+    """run_recall 必须把 paired bootstrap CI 接进 metrics —— mrr_delta_ci95 / ndcg@k_delta_ci95
+    各为 [lo, hi] 两元素。monkeypatch 掉双 lane store + recall_code, 在 Windows 即可验接线(不依赖 WSL)。"""
+    import codev_platform.core.paths as paths_mod
+    import codev_platform.graph.store as store_mod
+    import codev_platform.recall as recall_mod
+    from eval.suites.recall import run_recall
+
+    f = tmp_path / "store"
+    f.write_text("x")
+    monkeypatch.setattr(store_mod, "graph_store_path", lambda pid: f)
+    monkeypatch.setattr(paths_mod, "codegraph_db_path", lambda pid: f)
+
+    # weighted(planner 自动)把相关项排首位, uniform(等权)排第三 → 命中行得正 delta。
+    def fake_recall_code(query, pid, *, weights=None, limit=10, **kw):
+        rel = _hit("r", name="weighted_rrf", file="codev_platform/recall/fusion.py")
+        noise = [_hit("a", name="x"), _hit("b", name="y")]
+        return [rel, *noise] if weights is None else [*noise, rel]
+    monkeypatch.setattr(recall_mod, "recall_code", fake_recall_code)
+
+    res = run_recall("codev-platform", k=5)
+    assert res["status"] == "ok"
+    m = res["metrics"]
+    for key in ("mrr_delta_ci95", "ndcg@5_delta_ci95"):
+        assert isinstance(m[key], list) and len(m[key]) == 2
+        assert m[key][0] <= m[key][1]
+
+
 def test_recall_dataset_query_text_classifies_to_labeled_type():
     """金标 query 文本必须真的被 planner 关键词分类归到它标的 query_type。
 

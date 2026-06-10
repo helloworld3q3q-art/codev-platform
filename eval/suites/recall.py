@@ -6,8 +6,8 @@
 """
 from __future__ import annotations
 
-from eval.metrics import aggregate_mrr, aggregate_ndcg
-from eval.suites._common import load_jsonl, token_match
+from eval.metrics import aggregate_mrr, aggregate_ndcg, mrr, ndcg_at_k
+from eval.suites._common import _bootstrap_ci, load_jsonl, token_match
 
 _RECALL_RELEVANT_FIELDS = ("name", "file")
 
@@ -56,6 +56,8 @@ def run_recall(project_id: str, k: int = 5) -> dict:
     uniform = {GRAPH_LANE: 1.0, CODEGRAPH_LANE: 1.0}
     weighted_pq: list[tuple[list[str], set[str]]] = []
     uniform_pq: list[tuple[list[str], set[str]]] = []
+    rr_deltas: list[float] = []      # per-query reciprocal-rank 差 (weighted - uniform)
+    ndcg_deltas: list[float] = []    # per-query nDCG@k 差 (weighted - uniform)
     details = []
     for r in rows:
         expect = r["expect"]
@@ -65,6 +67,8 @@ def run_recall(project_id: str, k: int = 5) -> dict:
         ur, urel, u_rank = _recall_per_query(u_hits, expect)
         weighted_pq.append((wr, wrel))
         uniform_pq.append((ur, urel))
+        rr_deltas.append(mrr(wr, wrel) - mrr(ur, urel))
+        ndcg_deltas.append(ndcg_at_k(wr, wrel, k) - ndcg_at_k(ur, urel, k))
         details.append({
             "query": r["query"], "type": r.get("query_type", ""), "expect": expect,
             "weighted_rank": w_rank, "uniform_rank": u_rank, "n_hits": len(w_hits),
@@ -74,12 +78,17 @@ def run_recall(project_id: str, k: int = 5) -> dict:
         return {"mrr": round(aggregate_mrr(pq), 3), f"ndcg@{k}": round(aggregate_ndcg(pq, k), 3)}
 
     w_m, u_m = _agg(weighted_pq), _agg(uniform_pq)
+    # paired bootstrap CI: per-query (weighted-uniform) 差的均值 95% 区间。CI 全 > 0 → 加权显著优于
+    # 等权(可决策); 含 0 → 当前样本不足以判方向(同 agent_e2e Gate A 的 CI 重叠语义)。点估 delta
+    # 易被单 query 翻转带偏(n 小), CI 才是诚实的决策量([[recall-weight-ab-finding]] 的教训)。
     return {
         "suite": "recall", "status": "ok", "n": len(rows), "project_id": project_id,
         "metrics": {
             "weighted": w_m, "uniform": u_m,
             "mrr_delta": round(w_m["mrr"] - u_m["mrr"], 3),
             f"ndcg@{k}_delta": round(w_m[f"ndcg@{k}"] - u_m[f"ndcg@{k}"], 3),
+            "mrr_delta_ci95": _bootstrap_ci(rr_deltas),
+            f"ndcg@{k}_delta_ci95": _bootstrap_ci(ndcg_deltas),
         },
         "details": details,
     }
