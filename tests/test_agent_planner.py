@@ -84,6 +84,16 @@ def test_code_recall_is_primary_lane_for_find_code_types():
     assert "code_recall" not in p_doc.preferred_lanes
 
 
+def test_impact_lane_prefers_impact_paths_over_manual_traversal():
+    # 多跳影响题: 一次性多跳工具 impact_paths 必在 lane 且排在手动逐跳 codegraph_callers 之前
+    # (2026-06-11 quality 集实测: 缺它 → 多跳例手爬 15 次超 max_steps)。
+    plan = plan_query("改这个表影响谁", max_steps=12, available_tools=None)
+    assert plan.query_type == QueryType.IMPACT
+    lanes = plan.preferred_lanes
+    assert "impact_paths" in lanes
+    assert lanes.index("impact_paths") < lanes.index("codegraph_callers")
+
+
 def test_render_preamble_mentions_type_and_budget():
     plan = plan_query("改这个表影响谁", max_steps=12)
     text = render_plan_preamble(plan)
