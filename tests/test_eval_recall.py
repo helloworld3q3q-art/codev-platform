@@ -55,10 +55,29 @@ def test_recall_per_query_empty_hits():
 
 def test_recall_dataset_well_formed():
     rows = [json.loads(line) for line in _DATASET.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(rows) >= 4
+    assert len(rows) >= 16
     for r in rows:
-        assert r["query"] and r["expect"]
+        assert r["query"] and r["expect"] and r["project_id"]
         assert r["query_type"] in ("impact", "symbol", "overview", "doc_rule", "general")
     # 至少各有一个 impact / symbol(才能验出 planner 权重对两类的差异)
     types = {r["query_type"] for r in rows}
     assert {"impact", "symbol"} <= types
+    # 跨 ≥2 项目防单仓过拟合(run_recall 按 project_id 过滤, 每项目在自己双 lane 内跑 A/B)
+    pids = {r["project_id"] for r in rows}
+    assert {"codev-platform", "openclaw-stock"} <= pids
+
+
+def test_recall_dataset_query_text_classifies_to_labeled_type():
+    """金标 query 文本必须真的被 planner 关键词分类归到它标的 query_type。
+
+    run_recall 跑时 weights=None → recall_code 内部按 **query 文本** 自动分类决定 lane 加权;
+    query_type 字段只是标注。若 query 文本误分(如名字带 "impact" 的符号被归 IMPACT→graph 加权),
+    加权 lane 就错, 污染 weighted-vs-uniform A/B 信号。这条把"标的类型 == 真分类"钉死在 Windows
+    可跑的纯函数上, 防扩集时引入毒丸(子串匹配 + 平手 IMPACT 优先于 SYMBOL)。
+    """
+    from codev_platform.agent.planner import classify_query
+
+    rows = [json.loads(line) for line in _DATASET.read_text(encoding="utf-8").splitlines() if line.strip()]
+    mismatched = [(r["query"], r["query_type"], classify_query(r["query"]))
+                  for r in rows if classify_query(r["query"]) != r["query_type"]]
+    assert not mismatched, f"query 文本真分类 != 标的 query_type: {mismatched}"

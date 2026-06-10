@@ -40,7 +40,13 @@ def run_recall(project_id: str, k: int = 5) -> dict:
     from codev_platform.recall import recall_code
     from codev_platform.recall.service import CODEGRAPH_LANE, GRAPH_LANE
 
-    rows = load_jsonl("recall.jsonl")
+    # 按 project_id 过滤金标行(无字段的旧行默认归 codev-platform)—— recall A/B 是 per-project
+    # (加权 vs 等权在该项目自己的双 lane 内比), 故按 --project 选该项目的用例, 不混跑别项目。
+    rows = [r for r in load_jsonl("recall.jsonl")
+            if r.get("project_id", "codev-platform") == project_id]
+    if not rows:
+        return {"suite": "recall", "status": "skipped", "n": 0,
+                "reason": f"无 project={project_id} 的 recall 用例(检查 recall.jsonl 的 project_id)。"}
     if not graph_store_path(project_id).exists() or not codegraph_db_path(project_id).exists():
         return {
             "suite": "recall", "status": "skipped", "n": len(rows),
