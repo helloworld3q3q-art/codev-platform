@@ -252,7 +252,9 @@ class AgentLoop:
 
         for n in range(1, self.policy.max_steps + 1):
             turn: AssistantTurn = self.provider.chat(system_prompt, messages, specs)
-            for k in ("input_tokens", "output_tokens"):
+            # input/output + prompt 缓存命中拆分(cache_hit/miss 让"缓存率=hit/input"可观测,
+            # 云成本最大杠杆;非报告此项的 provider 累加 0)。
+            for k in ("input_tokens", "output_tokens", "cache_hit_tokens", "cache_miss_tokens"):
                 total_usage[k] = total_usage.get(k, 0) + int(turn.usage.get(k, 0) or 0)
 
             if not turn.tool_calls:

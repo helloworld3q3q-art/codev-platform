@@ -58,6 +58,32 @@ class OpenAICompatProvider(LLMProvider):
             for s in specs
         ]
 
+    @staticmethod
+    def _extract_usage(u: Any) -> dict[str, int]:
+        """resp.usage -> 中性 usage(含 prompt 缓存命中拆分)。纯逻辑, 可单测不触发 SDK。
+
+        缓存命中价 ~1/50(deepseek hit $0.0028 vs miss $0.14), 是云成本最大杠杆 → 必须可观测
+        才能优化。deepseek 直接给 prompt_cache_{hit,miss}_tokens; OpenAI 给 prompt_tokens_details
+        .cached_tokens(只命中, miss = input - cached)。两种都不报的 provider 取 0, 中性不报噪。
+        """
+        if not u:
+            return {}
+        out = {
+            "input_tokens": int(getattr(u, "prompt_tokens", 0) or 0),
+            "output_tokens": int(getattr(u, "completion_tokens", 0) or 0),
+        }
+        hit = getattr(u, "prompt_cache_hit_tokens", None)
+        miss = getattr(u, "prompt_cache_miss_tokens", None)
+        if hit is None:  # OpenAI 风格
+            details = getattr(u, "prompt_tokens_details", None)
+            cached = getattr(details, "cached_tokens", None) if details else None
+            if cached is not None:
+                hit = cached
+                miss = out["input_tokens"] - int(cached)
+        out["cache_hit_tokens"] = int(hit or 0)
+        out["cache_miss_tokens"] = int(miss or 0)
+        return out
+
     def chat(self, system: str, messages: list[Message], tools: list[dict[str, Any]]) -> AssistantTurn:
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -78,12 +104,7 @@ class OpenAICompatProvider(LLMProvider):
             tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, args=parsed))
 
         stop = "tool_use" if tool_calls else "end"
-        usage = {}
-        if resp.usage:
-            usage = {
-                "input_tokens": getattr(resp.usage, "prompt_tokens", 0),
-                "output_tokens": getattr(resp.usage, "completion_tokens", 0),
-            }
+        usage = self._extract_usage(resp.usage)
         # 思考模型返回 reasoning_content,存进 extra 以便下一轮原样回传
         extra: dict[str, Any] = {}
         rc = getattr(msg, "reasoning_content", None)

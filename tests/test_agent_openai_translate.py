@@ -41,3 +41,36 @@ def test_tools_native_shape():
     assert native[0]["type"] == "function"
     assert native[0]["function"]["name"] == "echo"
     assert native[0]["function"]["parameters"] == {"type": "object", "properties": {}}
+
+
+class _U:  # 假 resp.usage(鸭子类型, 不触发 SDK)
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def test_extract_usage_deepseek_cache_split():
+    # deepseek 直接给 prompt_cache_hit/miss_tokens → 缓存率可观测
+    u = _U(prompt_tokens=1000, completion_tokens=50,
+           prompt_cache_hit_tokens=900, prompt_cache_miss_tokens=100)
+    out = OpenAICompatProvider._extract_usage(u)
+    assert out["input_tokens"] == 1000 and out["output_tokens"] == 50
+    assert out["cache_hit_tokens"] == 900 and out["cache_miss_tokens"] == 100
+
+
+def test_extract_usage_openai_style_cached_tokens():
+    # OpenAI 把命中放 prompt_tokens_details.cached_tokens, miss = input - cached
+    u = _U(prompt_tokens=1000, completion_tokens=50,
+           prompt_tokens_details=_U(cached_tokens=600))
+    out = OpenAICompatProvider._extract_usage(u)
+    assert out["cache_hit_tokens"] == 600 and out["cache_miss_tokens"] == 400
+
+
+def test_extract_usage_no_cache_fields_zero():
+    # 不报缓存的 provider → cache 字段取 0, 不报噪
+    out = OpenAICompatProvider._extract_usage(_U(prompt_tokens=10, completion_tokens=2))
+    assert out["cache_hit_tokens"] == 0 and out["cache_miss_tokens"] == 0
+
+
+def test_extract_usage_none():
+    assert OpenAICompatProvider._extract_usage(None) == {}
