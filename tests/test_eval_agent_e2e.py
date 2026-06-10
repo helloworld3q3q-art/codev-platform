@@ -175,3 +175,16 @@ def test_dataset_param_loads_hard_set():
     assert rep["status"] == "skipped" and rep["n"] == 6
     ab = run_planner_e2e_ab("codev-platform", provider=None, dataset="agent_e2e_hard.jsonl")
     assert ab["n"] == 6
+
+
+def test_quality_set_loads_and_has_negatives():
+    # 诊断难集存在且含负样本(must_not)—— 让 hallucination_rate 有触发面。
+    import json
+    from pathlib import Path
+    rows = [json.loads(l) for l in
+            Path("eval/datasets/agent_e2e_quality.jsonl").read_text(encoding="utf-8").splitlines()
+            if l.strip()]
+    assert len(rows) >= 5
+    assert any(r.get("must_not") for r in rows)            # 至少一个负样本陷阱
+    rep = run_agent_e2e("codev-platform", provider=None, dataset="agent_e2e_quality.jsonl")
+    assert rep["status"] == "skipped" and rep["n"] == len(rows)

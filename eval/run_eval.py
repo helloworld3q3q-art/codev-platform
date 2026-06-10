@@ -107,8 +107,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="agent_e2e: 额外 LLM-judge 给答案 1-5 主观质量分 (E3, 多一次 LLM 调用)")
     ap.add_argument("--planner-ab", action="store_true",
                     help="agent_e2e: 跑 planner off/keyword/llm 三变体比答案质量 (E4)")
-    ap.add_argument("--hard-e2e", action="store_true",
-                    help="agent_e2e: 用口语化硬集 agent_e2e_hard.jsonl (keyword 多误路由, 拉开 keyword vs llm)")
+    ap.add_argument("--e2e-set", choices=["default", "hard", "quality"], default="default",
+                    help="agent_e2e 数据集: default(易集) / hard(口语化, keyword 误路由) / "
+                         "quality(诊断难集: 多跳/近义误导/负样本陷阱)")
     args = ap.parse_args(argv)
 
     suites = list(_RUNNERS) if args.suite == "all" else [args.suite]
@@ -127,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     runners = dict(_RUNNERS)
     if args.llm:
         runners["planner"] = lambda project, k: run_planner(provider=provider)
-    e2e_ds = "agent_e2e_hard.jsonl" if args.hard_e2e else "agent_e2e.jsonl"
+    e2e_ds = {"default": "agent_e2e.jsonl", "hard": "agent_e2e_hard.jsonl",
+              "quality": "agent_e2e_quality.jsonl"}[args.e2e_set]
     if args.planner_ab:
         runners["agent_e2e"] = lambda project, k: run_planner_e2e_ab(
             project or DEFAULT_RECALL_PID, provider=provider, dataset=e2e_ds)
