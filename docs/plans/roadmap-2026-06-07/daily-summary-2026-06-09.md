@@ -333,3 +333,19 @@ WSL 全量 **1401 passed / 0 failed**。**今日全会话改动经对抗式审�
 **处置(守纪律)**: 按 [[recall-weight-ab-finding]]"零 delta 的杠杆不留", **回退规则9**(production prompt 不背无效文案)+ 移除 A/B 脚手架(`rule9_ab.py` / `system` 透传 / 测试), 保留 ②(`--repeat` 方差 + 非自评 judge + `get_provider(name=)`, 已验证)。方法留在 git 历史(`09b4165`)。
 
 **① 闭合真结论**: agent 顺错误前提幻觉(case6 把平台**文档** chroma 混进 `code_recall`、case2 夹带旧 `open_store`)**不是一行 prompt 能修的** —— 是更深的 grounding/读码消歧问题(agent 读了代码仍混淆)。真修是独立课题(更强 grounding / 工具结果去歧义), 不在本轮。**本轮 ① 的净产出 = 证伪了一个 naive 修法 + 一套可复现的 prompt-rule A/B 方法。** 这正是"先证尺子准再下结论"的纪律闭环。
+
+## 三十二、专家面板"怎么做" → 否决 bm25 lane + 标定 recall 金标
+
+候选下一步是给 code_recall 加 bm25 lane。实测 recall MRR 0.917(6 查 5 个 rank-1)→ 近饱和。派 4 视角面板(IR/ROI/测量/产品)分析:
+
+**一致否决 bm25 lane**:
+- **IR**: bm25-over-符号名 **和** over-docstring **都**和 codegraph FTS5 冗余(它已索引 name+qualified_name+**docstring**+signature); 真盲区(body-text/语义改写)是**向量**的活非 bm25; ref 空间(chunk_id vs node_id)**fuse 不起来**(只增候选不叠分)。
+- **测量**(最尖锐): 0.917 是**指标挪用** —— recall suite 本职是 weighted-vs-uniform **权重 A/B**, 非饱和度测量; 且 `recall.py:31` 仍是裸子串 `expect in name`(agent_e2e 已修 recall 漏修)。**6 查询既不能证饱和也不能证 gap。**
+- **ROI**: 饱和指标追 ≤0.083 = 负 ROI 过度工程, 搁置进 §六。
+- **产品**: 对开发者不可感(答案早在 top-3)。
+
+**收敛执行(眼前便宜必做)**: recall 金标 substring→**token 边界匹配** —— 抽 `token_match` 进 `_common`(单一真值源, recall + agent_e2e 共用, 灭裸子串假阳)。诚实重测: **MRR 0.917 不变**(首命中稳)、**nDCG 0.858→0.897**(裸子串确实污染过 relevant 集)。`eae770c`。
+
+**锁定的真课题(留新一轮, 非 recall 调优)**: **agent 顺错误前提幻觉**(产品+测量共识: 开发者会**弃用**的点, §31 已证非一行 prompt)。机制 = **工具结果带"能力边界"元信息**(让 `code_recall` 自报"只覆盖 graph+codegraph 符号、不含向量/文档检索"), 让 agent 从证据知前提为假而非脑补; 配 IR 提的 weighted_rrf **未用的 `boosts` 参数**(精确符号 boost, 最便宜的 recall 真增益)。**前置**: 先用已交付的非自评 judge + `--repeat` 钉 case6/case2 回归基线(没可信尺子改了也判不准 —— rule9 的教训)。
+
+**bm25 lane 正式搁置。本轮净产出 = 否掉一个过度工程 + 标定 recall 金标一致化 + 锁定真课题。**
