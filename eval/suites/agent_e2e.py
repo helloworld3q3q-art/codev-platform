@@ -145,7 +145,8 @@ def _summarize_runs(case: dict, run_scores: list[dict], reps: int) -> dict:
 
 
 def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=None,
-                  dataset: str = "agent_e2e.jsonl", repeat: int = 1) -> dict:
+                  dataset: str = "agent_e2e.jsonl", repeat: int = 1,
+                  system: str | None = None) -> dict:
     """跑 agent loop 答每个 case + 确定性打分(+ 可选 LLM-judge)。
 
     provider=None → skip。policy=None → 用配置档(loop_policy()); 传入自定义 policy 支持 planner
@@ -176,7 +177,7 @@ def run_agent_e2e(project_id: str, provider=None, policy=None, judge_provider=No
         last_answer = ""
         for _ in range(reps):
             loop = AgentLoop(provider, build_default_registry(pid), policy=policy)
-            res = loop.run(r["query"])
+            res = loop.run(r["query"], system=system)   # system=None → 默认 CODE_UNDERSTANDING_SYSTEM
             last_answer = res.answer
             tools = [s.tool for s in res.steps if s.tool]
             run_scores.append(score_case(r, res.answer, tools, len(tools), budget=policy.max_steps))
