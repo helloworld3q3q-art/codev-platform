@@ -4,7 +4,7 @@
 revoke_user (会话失效) / 重复用户名报错 / password reset。
 本 venv 未装 fastapi → importorskip 自动 skip。
 
-授权地基: passthrough auth_mode; 用 session_store.create 造登录态; 经
+授权地基: passthrough auth_mode; 用 get_session_store().create 造登录态; 经
 member_store.upsert(OrgMember(role="admin")) 赋 org admin。无 platform_admin (走 org admin 路径)。
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from codev_platform.web.repositories.account_store import (  # noqa: E402
 )
 from codev_platform.web.routes import users  # noqa: E402
 from codev_platform.web.security.passwords import hash_password  # noqa: E402
-from codev_platform.web.security.sessions import session_store  # noqa: E402
+from codev_platform.web.security.sessions import get_session_store  # noqa: E402
 
 _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
 
@@ -34,13 +34,13 @@ _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
     reset_account_stores()
-    session_store.clear()
+    get_session_store().clear()
     # 隔离真实 config: 无 platform_admin → 走 org admin 授权路径
     monkeypatch.setattr(wdeps, "load_config", lambda: {"platform_admins": []})
     monkeypatch.setattr(users_routes, "load_config", lambda: {"platform_admins": []})
     yield
     reset_account_stores()
-    session_store.clear()
+    get_session_store().clear()
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def _admin_session(org="orgA", username="boss"):
     user_store.upsert(User(username=username, password_hash=hash_password("pw123456"),
                            org_id=org, display_name="Boss"))
     member_store.upsert(OrgMember(org_id=org, username=username, role="admin"))
-    t = session_store.create(username, org)
+    t = get_session_store().create(username, org)
     return {"Authorization": f"Bearer {t.access_token}"}
 
 
@@ -147,15 +147,15 @@ def test_disable_user_revokes_sessions(client):
     # 造一个目标用户 + 它自己的活跃会话
     user_store.upsert(User(username="victim", password_hash=hash_password("pw123456"),
                            org_id="orgA"))
-    vt = session_store.create("victim", "orgA")
-    assert session_store.resolve(vt.access_token) is not None
+    vt = get_session_store().create("victim", "orgA")
+    assert get_session_store().resolve(vt.access_token) is not None
     r = client.post("/api/v1/users/status", headers=auth,
                     json={"username": "victim", "status": STATUS_DISABLED})
     assert r.status_code == 200
     assert r.json()["data"]["status"] == STATUS_DISABLED
     assert user_store.get("victim").status == STATUS_DISABLED
     # 会话已被撤销
-    assert session_store.resolve(vt.access_token) is None
+    assert get_session_store().resolve(vt.access_token) is None
 
 
 # ---- password reset ----
@@ -235,7 +235,7 @@ def test_platform_admin_sets_role_across_orgs(client, monkeypatch):
     # 两处成员关系并存。跨 org 隔离仍由 org_admin 路径守(见上一个测试)。
     monkeypatch.setattr(users_routes, "load_config", lambda: {"platform_admins": ["boss"]})
     monkeypatch.setattr(wdeps, "load_config", lambda: {"platform_admins": ["boss"]})
-    t = session_store.create("boss", "orgA")
+    t = get_session_store().create("boss", "orgA")
     auth = {"Authorization": f"Bearer {t.access_token}"}
     user_store.upsert(User(username="multi", password_hash=hash_password("pw123456"), org_id="orgA"))
     member_store.upsert(OrgMember(org_id="orgA", username="multi", role="member"))
@@ -251,7 +251,7 @@ def test_platform_admin_sets_role_across_orgs(client, monkeypatch):
 def test_non_admin_cannot_list(client):
     user_store.upsert(User(username="plain", password_hash=hash_password("pw123456"),
                            org_id="orgA"))
-    t = session_store.create("plain", "orgA")
+    t = get_session_store().create("plain", "orgA")
     auth = {"Authorization": f"Bearer {t.access_token}"}
     assert client.post("/api/v1/users/list", headers=auth).status_code == 403
 
