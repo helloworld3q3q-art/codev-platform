@@ -87,3 +87,40 @@ Phase A 证伪后,本日继续推进多块,均 test-first + WSL 真跑 + push。
 
 ## 续-commit 链
 `a394fa8`/`e73dbdc`/`39218b1`/`4721e82`(config DI)→ `ca46c35`(soft-quality+regen)→ `fae0b1e`(gitattributes)→ `0f52e0d`(set_roles 多 org)→ `d4984e5`(审计优化)→ `fac6aae`(#8 后续)→ `31f40f8`/`185c60a`(多仓 plan)→ `72f357c`/`58b74a6`(#1 switch-org)→ `4f74020`/`58d7347`(#3+#5)→ `d91fb81`/`0dc135a`(前端所属组织列 + 切换 reload)。全部 push `fuwuqi/dev` + WSL 同步。
+
+---
+
+# 续(同日)—— Phase 0 recall 金标扩集 + 跨项目 + 权重 A/B 带 CI
+
+> 承 §三十二 专家面板「先证尺子准,再加长尺子」。尺子(token 边界 + 排除测试 ref)已在 06-09 标定,本轮**加长尺子**:把 recall 金标从 6 例扩到 24 例 + 跨 2 项目 + 给 delta 加 paired bootstrap CI。
+
+## 十二、recall 金标 6 → 24(扩 n 收窄 CI)
+- `eval/datasets/recall.jsonl`:**codev-platform 18 例**(9 symbol / 9 impact,英术语 / 英口语 / 中文三风格)+ **openclaw-stock 6 例**(symbol,锚 stock-pipeline 真实函数 `calculate_yield`/`compute_model_hash`/`build_policy_version`/`fetch_lhb_events`/`build_feature_frame`/`fetch_forecasts`)。全行加 `project_id`。
+- **锚点逐一核实真存在**:codev 走 codegraph_search / graph search_nodes;openclaw 走 grep 源码兜底(本 session 的 codegraph/graph MCP 绑死 codev,`projectPath` 实测不生效 → openclaw 属"MCP 不可用"合法兜底)。
+- **防毒丸守卫**:`classify_query` 是子串匹配且平手 IMPACT 优先于 SYMBOL → 名字带 "impact" 的符号(如 `find_impact_paths`)当 symbol 会被误路由 graph lane 污染 A/B。新增单测断言**每条 query 真分类 == 标注 query_type**,Windows 纯函数可跑,扩集再不会引入毒丸。
+- `run_recall` 按 `project_id` 过滤金标行(A/B 是 per-project,各项目在自己双 lane 内比),`--project` 真正选用例。commit `5956fa9`。
+
+## 十三、delta 加 paired bootstrap CI(点估 → 可决策)
+- `_bootstrap_ci` 从 `agent_e2e` 抽进 `_common`(单一真值源,agent_e2e re-export 保旧 import 不破)。
+- `run_recall` per-query 算 `(weighted − uniform)` 的 reciprocal-rank / nDCG 差 → paired bootstrap,metrics 增 `mrr_delta_ci95` / `ndcg@k_delta_ci95`。**CI 全 > 0 = 加权显著优,含 0 = 样本不足判方向**(同 Gate A 语义)。commit `37ce633`。
+
+## 十四、WSL 真跑结果(双 lane,planner 自动加权 vs 等权)
+
+| 项目 | n | mrr_delta [CI95] | ndcg@5_delta [CI95] | 判定 |
+|---|---|---|---|---|
+| codev-platform | 18 | +0.108 **[0.008, 0.215]** | +0.061 **[−0.062, 0.179]** | MRR 显著(CI 刚过 0)/ nDCG **不显著** |
+| openclaw-stock | 6 | +0.347 **[0.222, 0.458]** | +0.423 **[0.379, 0.466]** | 两者**都强显著** |
+
+## 十五、结论 + 对旧结论的精确化
+1. **加权 vs 等权确实正增益,且跨仓泛化**:两项目 MRR delta CI 都 > 0;openclaw(纯 symbol)上 MRR/nDCG 都远离 0,即便 n=6。
+2. **codev nDCG 不显著**:CI [−0.062, 0.179] 跨 0,点估 +0.061 被 CI 揭穿不可判 —— 诚实。怀疑 impact 类用例稀释信号(下一钩子)。
+3. **精确化 [[recall-weight-ab-finding]]**:旧"delta=0"指的是 `_PREFER` **权重幅度调参**(lane 内排序,确实动不了);**weighted-vs-uniform**(有没有加权)是**另一杠杆**,现 CI 证明为正。两者不矛盾。
+4. **旧 6 例 MRR 0.917 是易集饱和假象**:扩到 18 例掉到 0.624 = 尺子脱离天花板、能动了,这是健康的。
+
+## 十六、留作下一步
+- openclaw-stock 补 impact 类用例(需能查它 graph 的节点命名,避免锚错 token → 假性 rank=-1)。
+- 查 codev nDCG delta 为何不显著(impact 类是否稀释)。
+- **agent_e2e 矩阵扩集**(5 → ~20):解锁 Phase 7 LLM planner 默认开的 e2e A/B(最大未解锁项)。
+
+## 续2-commit 链
+`5956fa9`(recall 6→24 + 跨项目 + project_id 过滤 + 防毒丸守卫)→ `37ce633`(delta paired bootstrap CI + `_bootstrap_ci` 抽 `_common`)。push `fuwuqi/dev` → WSL `origin` ff,两项目真跑出 CI,WSL 8 passed。
