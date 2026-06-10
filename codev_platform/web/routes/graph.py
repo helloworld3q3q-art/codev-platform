@@ -295,3 +295,48 @@ def unified_stats(request: Request, ctx=Depends(require_project_access)) -> Comm
         totalNodes=len(result.nodes), totalEdges=len(result.edges),
     )
     return ok(resp, request_id=_rid(request))
+
+
+def _impact_node_brief(d: dict) -> S.ImpactNodeBrief:
+    """graph.impact._node_brief dict → schema(只取已声明字段, 多余键 pydantic 自动忽略)。"""
+    return S.ImpactNodeBrief(id=d.get("id", ""), kind=d.get("kind"), name=d.get("name"),
+                             layer=d.get("layer"), file=d.get("file"), line=d.get("line"))
+
+
+@router.post(
+    "/api/v1/graph/impact-paths",
+    tags=[_UNIFIED_TAG],
+    summary="统一图谱-多跳依赖路径",
+    operation_id="graphImpactPaths",
+    response_model=CommonResult[S.GraphImpactPathsResponse],
+)
+def graph_impact_paths(request: Request, body: S.GraphImpactPathsRequest,
+                       ctx=Depends(require_project_access)) -> CommonResult:
+    """改某节点 → top-N 最强依赖路径(每跳带 src/confidence/certain, 可解释)。store 缺/节点未找到 → 空。"""
+    _identity, project_id = ctx
+    from codev_platform.graph.impact import find_impact_paths
+    conn = _open_store_ro(project_id)
+    if conn is None:
+        return ok(S.GraphImpactPathsResponse(), request_id=_rid(request))
+    try:
+        rep = find_impact_paths(conn, project_id, body.nodeRef,
+                                top_n=body.topN, certain_only=body.certainOnly)
+    finally:
+        conn.close()
+    if not rep.get("found"):
+        return ok(S.GraphImpactPathsResponse(found=False), request_id=_rid(request))
+    paths = [
+        S.ImpactPath(
+            endpoint=_impact_node_brief(p["endpoint"]),
+            score=p.get("score", 0.0), depth=p.get("depth", 0), certain=p.get("certain", False),
+            hops=[S.ImpactPathHop(
+                node=_impact_node_brief(h["node"]), viaEdge=h.get("via_edge"),
+                src=h.get("src"), confidence=h.get("confidence"), certain=h.get("certain", False),
+            ) for h in p.get("hops", [])],
+        ) for p in rep.get("paths", [])
+    ]
+    resp = S.GraphImpactPathsResponse(
+        found=True, target=_impact_node_brief(rep["target"]),
+        paths=paths, count=rep.get("count", 0), totalReached=rep.get("totalReached", 0),
+    )
+    return ok(resp, request_id=_rid(request))

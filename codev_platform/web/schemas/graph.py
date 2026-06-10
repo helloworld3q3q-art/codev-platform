@@ -185,3 +185,55 @@ class UnifiedGraphStatsResponse(BaseModel):
     edgesByKind: dict[str, int] = Field(default_factory=dict)
     totalNodes: int = 0
     totalEdges: int = 0
+
+
+# ---- 多跳影响路径 (Phase 5: find_impact_paths web 暴露) ----
+
+
+class GraphImpactPathsRequest(BaseModel):
+    """改某节点 → top-N 最强依赖路径分析入参。"""
+
+    nodeRef: str = Field(..., min_length=1, max_length=512, description="目标节点 ref (id / name / file)")
+    topN: int = Field(10, ge=1, le=50, description="返回 top-N 最强路径")
+    certainOnly: bool = Field(False, description="只走确定依赖边 (滤候选边)")
+
+
+class ImpactNodeBrief(BaseModel):
+    """路径上的节点摘要 (对齐 graph.impact._node_brief)。"""
+
+    id: str
+    kind: str | None = None
+    name: str | None = None
+    layer: str | None = None
+    file: str | None = None
+    line: int | None = None
+
+
+class ImpactPathHop(BaseModel):
+    """路径中的一跳: 到达节点 + 经由边 + 来源/置信 (可解释)。"""
+
+    node: ImpactNodeBrief
+    viaEdge: str | None = None
+    src: str | None = None
+    confidence: float | None = None
+    certain: bool = False
+
+
+class ImpactPath(BaseModel):
+    """一条依赖路径: 依赖方 endpoint + 评分 + 逐跳。"""
+
+    endpoint: ImpactNodeBrief
+    score: float = 0.0
+    depth: int = 0
+    certain: bool = False
+    hops: list[ImpactPathHop] = Field(default_factory=list)
+
+
+class GraphImpactPathsResponse(BaseModel):
+    """top-N 依赖路径 (Phase 5)。store 缺 / 节点未找到 → found=False 空。"""
+
+    found: bool = False
+    target: ImpactNodeBrief | None = None
+    paths: list[ImpactPath] = Field(default_factory=list)
+    count: int = 0
+    totalReached: int = 0
