@@ -43,3 +43,11 @@ export async function getSession(): Promise<API.CommonResult_SessionInfo_> {
   });
 }
 
+// 认证-切换活动组织
+export async function postSwitchOrg(data: Partial<API.SwitchOrgRequest>): Promise<API.CommonResult_TokenPair_> {
+  return await post<API.CommonResult_TokenPair_>({
+    url: `${commonUrl}/api/v1/auth/switch-org`,
+    data,
+  });
+}
+

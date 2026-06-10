@@ -8,6 +8,7 @@ export interface UserInfo {
   userId?: number;
   displayName?: string;
   roles?: string[];
+  orgs?: string[]; // 本人所属全部 org code(会话下发), 供 OrgSelect 列可切换组织
   permissions?: string[];
   [key: string]: unknown;
 }

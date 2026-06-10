@@ -1,6 +1,5 @@
-// 顶栏组织选择器 —— @jlogi/ui Select + fetchOptions 远程拉组织选项(DemoSelect 模式, 纯展示无副作用)。
-// 受控值绑 useModel('org').currentOrgId; 默认值/初始化由 org model 负责(全局常驻必跑), 本组件不在 fetchOptions 里设默认。
-// 切换写 localStorage 注入 X-Org-Id, 并重置项目(切 org 后 project model 按新 org 重新默认第一个)。
+// 顶栏组织切换器 —— 真切换: 调 /auth/switch-org 重签 session(新 token 绑新 org), RBAC 随之按新 org 判。
+// 选项 = 本人所属 org(平台超管见全部); 切换成功后换 token + 重拉 initialState(roles/菜单按新 org)+ 重置项目。
 import { useCallback } from 'react';
 import { useModel } from '@umijs/max';
 
@@ -8,19 +7,29 @@ import type { SelectProps } from '@jlogi/ui';
 import { Select } from '@jlogi/ui';
 
 import { postOrgsList } from '@/services/apis/orgapi';
+import { postSwitchOrg } from '@/services/apis/authapi';
 
 type OrgSelectProps = Omit<SelectProps, 'fetchOptions'>;
 
 const OrgSelect: React.FC<OrgSelectProps> = ({ ...restProps }) => {
   const { currentOrgId, setCurrentOrg } = useModel('org');
   const { setCurrentProject } = useModel('project');
+  const { initialState, refresh } = useModel('@@initialState');
+
+  const roles = initialState?.userInfo?.roles ?? [];
+  const isPlatformAdmin = roles.includes('platform_admin');
+  const myOrgs = initialState?.userInfo?.orgs ?? [];
 
   const handleFetchOptions = useCallback(
     async (params: { keyWord: string; page: number; pageSize: number }) => {
       try {
         const result = await postOrgsList({ pageNumber: 1, pageSize: 200 });
         const list = result?.data ?? [];
-        const options = list.map((item) => ({
+        // 非平台超管只列本人所属 org(切到非成员 org 后端 403); 超管见全部(可跨 org 运维)。
+        const scoped = isPlatformAdmin
+          ? list
+          : list.filter((item) => myOrgs.includes(item.code ?? ''));
+        const options = scoped.map((item) => ({
           value: item.code ?? '',
           label: item.name ?? item.code ?? '',
           title: item.name ?? '',
@@ -40,15 +49,32 @@ const OrgSelect: React.FC<OrgSelectProps> = ({ ...restProps }) => {
         return { data: [], totalCounts: 0 };
       }
     },
-    [],
+    [isPlatformAdmin, myOrgs],
   );
 
   const handleChange = useCallback(
-    (value: string): void => {
-      setCurrentOrg(value); // 写 localStorage(current_org), fetch 据此注入 X-Org-Id
-      setCurrentProject(''); // 切 org 重置项目(ProjectSelect 会按新 org 重新 fetch)
+    async (value: string): Promise<void> => {
+      if (!value || value === currentOrgId) {
+        return;
+      }
+      try {
+        // 真切换: 后端校验成员身份后重签 session, 返回绑新 org 的 token 对。
+        const res = await postSwitchOrg({ orgId: value });
+        const pair = res.data;
+        if (pair?.accessToken) {
+          localStorage.setItem('auth_token', pair.accessToken);
+          if (pair.refreshToken) {
+            localStorage.setItem('refresh_token', pair.refreshToken);
+          }
+        }
+        setCurrentOrg(value); // 写 current_org(fetch 注入 X-Org-Id)
+        setCurrentProject(''); // 切 org 重置项目
+        await refresh(); // 重拉 initialState → roles/菜单按新 org 重算
+      } catch {
+        // 切换失败(非成员等)由 fetch 统一弹错; 不改本地状态。
+      }
     },
-    [setCurrentOrg, setCurrentProject],
+    [currentOrgId, setCurrentOrg, setCurrentProject, refresh],
   );
 
   return (

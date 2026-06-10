@@ -967,6 +967,7 @@ interface SessionInfo {
   username: string;
   orgId: string;
   roles?: string[]; // 会话用户角色 (platform_admin/admin/member/viewer)
+  orgs?: string[]; // 会话用户所属组织 code 列表 (多 org 成员可切换)
 }
 
 // 会话摘要 (agent SessionOut 的 web 投影, camelCase)。
@@ -983,6 +984,11 @@ interface SessionMessageItem {
   role: string; // user | assistant
   content?: string; // 消息正文
   steps?: ChatStep[]; // 工具调用流(assistant)
+}
+
+// 切换活动组织。多 org 成员在会话内切到另一所属 org, 重签 session 后 RBAC 按新 org 判。
+interface SwitchOrgRequest {
+  orgId: string; // 目标组织 code (须为本人所属 org)
 }
 
 // TableUsageRequest 请求参数
