@@ -110,6 +110,18 @@ def test_aggregate_rates():
     assert agg["hallucination_rate"] == 0.5
     assert agg["tool_appropriate_rate"] == 0.5
     assert agg["within_budget_rate"] == 1.0
+    # within_budget 也带 bootstrap CI(planner A/B 效率红利判显著用); 两 case 都 within → [1.0, 1.0]
+    assert agg["within_budget_ci95"] == [1.0, 1.0]
+
+
+def test_aggregate_within_budget_ci_reflects_spread():
+    # within_budget 混合(3 True / 1 False)→ CI 下界 < 均值 < 1.0, 暴露 n 小的不确定。
+    details = [{"grounding_coverage": 1.0, "hallucinated": [], "tool_appropriate": True,
+                "within_budget": b} for b in (True, True, True, False)]
+    agg = aggregate(details)
+    assert agg["within_budget_rate"] == 0.75
+    lo, hi = agg["within_budget_ci95"]
+    assert 0.0 <= lo <= 0.75 <= hi <= 1.0
 
 
 def test_run_skips_without_provider():

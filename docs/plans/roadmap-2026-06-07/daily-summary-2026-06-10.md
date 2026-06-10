@@ -124,3 +124,40 @@ Phase A 证伪后,本日继续推进多块,均 test-first + WSL 真跑 + push。
 
 ## 续2-commit 链
 `5956fa9`(recall 6→24 + 跨项目 + project_id 过滤 + 防毒丸守卫)→ `37ce633`(delta paired bootstrap CI + `_bootstrap_ci` 抽 `_common`)。push `fuwuqi/dev` → WSL `origin` ff,两项目真跑出 CI,WSL 8 passed。
+
+---
+
+# 续(同日)—— agent_e2e 硬集扩集 + planner A/B 反转:grounding 零 delta,红利在效率
+
+> 承 [[phase7-llm-planner-and-e2e-eval]]「翻 planner_llm 默认前先补硬 e2e 集」。本轮补硬集 + 真跑 keyword-vs-llm A/B,结论**反转预期**。
+
+## 十七、agent_e2e 硬集 6 → 16(commit `4294de8`)
+- `agent_e2e_hard.jsonl`:11 codev + 5 openclaw 口语化例,锚点全核实真符号(codev codegraph / openclaw grep 源码兜底)。**15/16 被 keyword 误判**=真"硬"。
+- 守卫:must_mention 非空 + expect_type 合法 + 跨 ≥2 项目 + **多数被 keyword 误分(≥70%)**(锁住"硬"属性,扩集混易例会让 A/B 失区分度)。
+
+## 十八、planner A/B 真跑(off/keyword/llm × codev 硬集 11 例,deepseek-chat,后台 ~10min)
+
+| 变体 | grounding [CI95] | within_budget | tool_ok |
+|---|---|---|---|
+| off | 0.909 [0.727, 1.0] | 0.455 | 1.0 |
+| keyword | 0.909 [0.727, 1.0] | 0.455 | 1.0 |
+| **llm** | 0.909 [0.727, 1.0] | **0.818** | 0.909 |
+
+## 十九、反转结论(预期 vs 实测)
+1. **grounding 三变体完全相同(0.909,CI 一致)→ planner 对答案正确性零 delta**。deepseek 不管分类对错都答得一样好;hard 集"硬"是对**关键词分类器**硬,对 deepseek 的**答案**不硬(它工具齐全照样答对)。又一个「看似该有用的杠杆实测 0 delta」([[recall-weight-ab-finding]] / [[anti-false-premise-phaseA-falsified]] 纪律)。
+2. **红利落在效率,不是质量**:`within_budget` llm 0.818 vs keyword/off 0.455。机制自洽 —— keyword 把口语硬题误判 general → 无计划/stop_hint → agent 瞎逛到 max_steps;llm 正确分类 → 注入对的预算 + 停止条件 → **少绕路早收尾**。off==keyword(都 0.455)进一步印证(keyword 在硬集上等于没 planner)。
+3. **代价**:llm tool_appropriate 1.0→0.909(一例路由偏)+ 每轮多一次分类 LLM 调用。
+
+**Phase 7 翻默认问题被重构**:依据从"分类准→答案更好"(证伪)变成"分类准→工具调用更省/更快收尾"。这是合理但需权衡的理由(省 latency/token vs 多一次分类调用),**不是质量驱动**。
+
+## 二十、还差一步 + 顺带发现
+- **within_budget 目前是裸比率(5/11 vs 9/11)无 CI** —— `run_planner_e2e_ab` 只返回每变体 aggregate、不含 per-case，这次 JSON 算不出。**下一步小改**:`aggregate` 加 `within_budget_ci95`(与 grounding_ci95 同法 bootstrap),再跑一次拿区间判效率红利是否显著(n=11 可能仍重叠 = 诚实)。
+- **deepseek 配置陈旧**:平台配 `deepseek-chat`,查 `/models` 现仅 `deepseek-v4-flash` / `deepseek-v4-pro`,官方 **2026/07/24 下线** chat/reasoner 旧名。需迁 → 选型见 §二十一。
+
+## 二十一、模型选型(flash vs pro,数据 + 我们 eval 双驱动)
+- 规格(官方):两者 1M 上下文 / 384K 输出;flash $0.14/$0.28、pro $0.435/$0.87(输出约 3×);pro agentic/SimpleQA 更强,flash 是 RAG/tool-calling 默认款。
+- **判断:默认上 `deepseek-v4-flash`** —— 我们负载正是 RAG+工具调用(flash 甜区);§十九 已证 **grounding 饱和**(0.909),pro 推理红利无发挥空间;flash 便宜 ~3×、agent 多步 loop 省 token。
+- **pro 只留给**那个唯一掉 0.67 的**多跳耗尽 max_steps** 题(pro agentic 占优),按难度路由,不全局上 pro([[agent-design-multi-model-first]])。
+
+## 续3-commit 链
+`4294de8`(agent_e2e 硬集 6→16 + 守卫)→ 后续 within_budget CI 小改 + deepseek 配置迁 flash。

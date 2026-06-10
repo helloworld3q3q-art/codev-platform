@@ -56,13 +56,17 @@ def aggregate(details: list[dict]) -> dict:
     if not n:
         return {}
     gc_vals = [d["grounding_coverage"] for d in details]
+    wb_vals = [1.0 if d["within_budget"] else 0.0 for d in details]
     m = {
         "grounding_coverage": round(sum(gc_vals) / n, 3),
         "grounding_ci95": _bootstrap_ci(gc_vals),   # 跨 case 均值的 95% CI(false vs control 比 CI 重叠否)
         "grounding_n": n,
         "hallucination_rate": round(sum(1 for d in details if d["hallucinated"]) / n, 3),
         "tool_appropriate_rate": round(sum(1 for d in details if d["tool_appropriate"]) / n, 3),
-        "within_budget_rate": round(sum(1 for d in details if d["within_budget"]) / n, 3),
+        "within_budget_rate": round(sum(wb_vals) / n, 3),
+        # planner A/B 的效率红利在 within_budget(2026-06-10: llm 0.818 vs keyword 0.455);裸比率
+        # 不够判显著, 同法 bootstrap 出 CI —— keyword vs llm 变体 CI 不重叠才算效率红利坐实。
+        "within_budget_ci95": _bootstrap_ci(wb_vals),
     }
     judged = [d["judge_score"] for d in details if d.get("judge_score") is not None]
     if judged:
