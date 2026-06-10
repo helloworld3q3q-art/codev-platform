@@ -73,7 +73,23 @@ export function createColumns({
     { title: '用户名', dataIndex: 'username', width: 160, copyable: true, search: false },
     { title: '显示名', dataIndex: 'displayName', width: 160, search: false },
     { title: '邮箱', dataIndex: 'email', width: 200, ellipsis: true, search: false },
-    { title: '组织', dataIndex: 'orgId', width: 160, search: false },
+    { title: '归属组织', dataIndex: 'orgId', width: 140, search: false },
+    {
+      title: '所属组织',
+      dataIndex: 'orgs',
+      width: 200,
+      search: false,
+      render: (_, record) => {
+        const orgs = record.orgs ?? [];
+        return orgs.length
+          ? orgs.map((o) => (
+            <Tag key={o} color={o === record.orgId ? 'blue' : 'default'}>
+              {o}
+            </Tag>
+          ))
+          : '-';
+      },
+    },
     {
       title: '角色',
       dataIndex: 'role',

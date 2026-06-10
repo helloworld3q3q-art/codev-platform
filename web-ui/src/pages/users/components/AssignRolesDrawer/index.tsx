@@ -34,9 +34,11 @@ const AssignRolesDrawer: React.FC<AssignRolesDrawerProps> = ({
 
   useEffect(() => {
     if (open && record) {
-      form.setFieldsValue({ orgId: record.orgId });
+      // 默认填用户首属 org; 若它不在可选范围(org_admin 下拉只含自己 org)→ 退首个可选项, 防默认非法。
+      const inOpts = orgOptions.some((o) => o.value === record.orgId);
+      form.setFieldsValue({ orgId: inOpts ? record.orgId : orgOptions[0]?.value });
     }
-  }, [open, record, form]);
+  }, [open, record, orgOptions, form]);
 
   const handleOk = useCallback(async (): Promise<void> => {
     const values = await form.validateFields();

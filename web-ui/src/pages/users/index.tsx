@@ -26,6 +26,8 @@ const DEFAULT_PASSWORD = 'Admin@123';
 const UsersPage: React.FC = () => {
   // 状态 / 角色枚举走后端真值源 (useModel('enum')), 不前端硬编码。
   const { getEnumOptions, getFormattedEnums } = useModel('enum');
+  // 角色权威源 = initialState(app.tsx getSession 下发, 含 platform_admin), 不读 localStorage user。
+  const { initialState } = useModel('@@initialState');
   const actionRef = useRef<ActionType>();
   const [formCtx, setFormCtx] = useState<UserFormDrawerContext>(FORM_DEFAULT);
   const [assignCtx, setAssignCtx] = useState<AssignRolesDrawerContext>(ASSIGN_DEFAULT);
@@ -35,14 +37,20 @@ const UsersPage: React.FC = () => {
   const roleMap = useMemo(() => getFormattedEnums('MemberRoleEnum'), [getFormattedEnums]);
   const roleOptions = useMemo(() => getEnumOptions('MemberRoleEnum'), [getEnumOptions]);
 
+  // platform_admin 可跨 org 授权/建用户 → 下拉给全部 org; org_admin 只能管自己 org(选别的后端 403)
+  // → 收窄到自己 org, 避免误选。roles 由后端可信下发(含 platform_admin); 会话 org 在 localStorage('current_org')。
+  const isPlatformAdmin = (initialState?.userInfo?.roles ?? []).includes('platform_admin');
+  const callerOrg =
+    typeof window !== 'undefined' ? (localStorage.getItem('current_org') ?? '') : '';
+
   const loadOrgOptions = useCallback(async (): Promise<void> => {
     try {
       const options = await fetchOrgOptions();
-      setOrgOptions(options);
+      setOrgOptions(isPlatformAdmin ? options : options.filter((o) => o.value === callerOrg));
     } catch {
       setOrgOptions([]);
     }
-  }, []);
+  }, [isPlatformAdmin, callerOrg]);
 
   const handleAdd = useCallback(() => {
     setFormCtx({ open: true, mode: 'create' });

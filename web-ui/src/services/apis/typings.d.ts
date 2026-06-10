@@ -1054,6 +1054,7 @@ interface UserItem {
   email?: any;
   status?: string;
   role?: any;
+  orgs?: string[]; // 该用户所属全部组织 code (成员关系, 多对多)
 }
 
 // 重置 / 生成初始密码。新明文仅入参, service hash 后落库。
