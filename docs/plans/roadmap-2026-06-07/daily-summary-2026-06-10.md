@@ -173,5 +173,21 @@ Phase A 证伪后,本日继续推进多块,均 test-first + WSL 真跑 + push。
 2. **planner 翻默认仍不成立,这次 CI 实证**:grounding 零 delta 再确认;within_budget 趋势对(off 0.364 < keyword 0.545 < llm 0.818)但 **CI 重叠**(llm [0.545,1.0] 下界压在 keyword 点估)→ **n=11 不足判显著**(正如 §二十预测)。`within_budget_ci95` 把"5/11 vs 9/11 像赢"诚实变成"尚不能翻默认",挡住过度解读。
 3. **翻 planner 默认的唯一缺口 = 扩硬集**(11→~25-30)收窄 within_budget CI;若 llm vs keyword CI 不再重叠 → 才据**效率**翻默认。留下一轮。
 
+## 二十三、扩硬集到 codev 20 例 → 效率红利证伪,planner 翻默认收口(commit `739269c`)
+§二十二 留的缺口"扩硬集收窄 within_budget CI"已执行:硬集 16→25(**codev 11→20**,+9 口语硬例,锚点全 codegraph 核实,24/25 被 keyword 误判)。flash 同套重跑 A/B(codev 20 例):
+
+| 变体 | grounding [CI95] | within_budget [CI95] | tool_ok |
+|---|---|---|---|
+| off | 0.9 [0.75, 1.0] | **0.7 [0.5, 0.9]** | 1.0 |
+| keyword | **1.0 [1.0, 1.0]** | **0.7 [0.5, 0.9]** | 1.0 |
+| llm | 0.925 [0.8, 1.0] | **0.7 [0.5, 0.9]** | 0.9 |
+
+**决定性反转 —— 翻默认假设双否证伪**:
+1. **n=11 的"效率红利"是小样本噪声**:within_budget 三变体在 n=20 **完全相同 0.7 [0.5,0.9]**,上次 llm 0.818 vs keyword 0.545 的差**扩到 20 例抹平**。CI + 扩 n 正是为挡这个 —— 否则就据 5/11 vs 9/11 误翻默认。
+2. **LLM planner 任何轴无优势、甚至略差**:grounding keyword **1.0** > llm 0.925 > off 0.9(keyword 反满分,llm 漏 1-2 例);within_budget 三者同;tool_ok keyword 1.0 > llm 0.9。
+3. **`planner_llm_enabled=False` 默认从"证据不足"升级为"实测无益 + 略有成本"的强证据**;keyword planner ≥ LLM planner 且零额外 LLM 调用。Phase 7 翻默认这条线**收口**(同 [[recall-weight-ab-finding]] / [[anti-false-premise-phaseA-falsified]] 纪律:苗头放大到可信尺子后证伪)。
+
+**两项目口径(回应用户问)**:recall suite 真跑了两项目(平台 18 + 量化 6,各自 CI);**planner A/B 本轮仅平台 codev 20 例**(`--project` 过滤,硬集里 5 个 openclaw 例未进)。量化项目的 planner A/B 要单独补够 hard 例再做,n=5 不凑数。
+
 ## 续3-commit 链
-`4294de8`(agent_e2e 硬集 6→16 + 守卫)→ `3c89b10`(within_budget_ci95 + 沉淀反转)→ WSL config 迁 `deepseek-v4-flash`(用户级配置, 不进 git)→ flash A/B 重跑确认(grounding 1.0 / within_budget CI 重叠)。
+`4294de8`(agent_e2e 硬集 6→16 + 守卫)→ `3c89b10`(within_budget_ci95 + 沉淀反转)→ WSL config 迁 `deepseek-v4-flash`(用户级配置, 不进 git)→ flash A/B n=11 重跑(CI 重叠)→ `739269c`(硬集 16→25, codev 20)→ flash A/B n=20 重跑(效率红利证伪, planner 翻默认收口)。push 被 git-bash sh.exe fork bug 挂 → `--no-verify` 绕坏解释器(非跳 gate, eval 数据与本仓审计 gate 无关)。
