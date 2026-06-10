@@ -52,4 +52,75 @@ jobs:
       - name: Run tests
         # --timeout: 单测墙钟上限, 防个别用例挂死 (如插件全仓扫描进大目录) 静默堵住整个 CI。
         # thread 方法跨平台一致 (signal 仅 Unix; CI 含 windows/macos)。
+        # 套件含: provider 文件纪律 + 测试数地板 (防自挂盲区复发, 见对应 test_*.py)。
         run: python -m pytest tests/ -q --timeout=120 --timeout-method=thread
+
+  commit-lint:
+    name: commit message (no AI traces)
+    runs-on: ubuntu-latest
+    # 只在 PR 触发, 只扫本 PR 引入的 commit —— 不碰主历史 (已推送的不强求改写, 见
+    # commit-pr-conventions.md)。阻断型: PR 新 commit 带 AI 痕迹即拒。
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan PR commit messages
+        run: |
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          if git log --format=%B "$base..$head" \
+              | grep -iEn 'co-authored-by:.*(claude|opus|sonnet|anthropic)|generated with .*claude|🤖 generated|noreply@anthropic'; then
+            echo "::error::commit message 含 AI 痕迹 (见 commit-pr-conventions.md), 请 amend 去掉"
+            exit 1
+          fi
+          echo "OK: PR commit message 无 AI 痕迹"
+
+  secrets:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    # 报告型起步 (continue-on-error): 扫明文密码 / API key (security.md 自挂盲区)。
+    # allowlist 见 .gitleaks.toml。观察期确认无误报后, 去掉 continue-on-error 转阻断。
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source /repo --config /repo/.gitleaks.toml --no-git --redact -v
+
+  web-ui:
+    name: web-ui static checks (tsc + eslint)
+    runs-on: ubuntu-latest
+    # 报告型起步 (continue-on-error): 前端不写单测 (见 frontend-no-unit-tests 偏好),
+    # 但 tsc/lint 静态门禁仍有价值 —— 防类型错误 / lint 不过直接进 main。
+    # 观察期清零后, 去掉 continue-on-error 转阻断。
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+
+      - name: Install deps
+        run: pnpm --dir web-ui install --frozen-lockfile
+
+      - name: tsc (type check)
+        run: pnpm --dir web-ui run tsc
+
+      - name: eslint
+        run: pnpm --dir web-ui run lint:js

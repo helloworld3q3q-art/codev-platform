@@ -59,6 +59,18 @@ pyproject.toml            pip 包定义 (package-data 含 resources/**)
 > 使普通 `pip install`(非 editable)的 wheel 也带得走 → `sync-rules`/`sync-skills` 在客户机可用。
 > CLI 经 `importlib.resources` 定位(editable + wheel 通用),旧仓根布局仍作 fallback。
 
+### 易混命名澄清(同名不同职,勿混)
+
+下列模块名字撞车但职责完全不同(各文件 docstring 有详述),改前先认准是哪一个:
+
+| 名 | 职责 | 关系 |
+|---|---|---|
+| `codev_platform/recall/` | **代码召回**融合(Phase 6,跨 lane vector/bm25/codegraph/graph → weighted RRF)→ `recall_code` | 与下者无关 |
+| `codev_platform/agent/recall/` | **记忆召回**流水线(memory recall:ACL/去重/redline/截断);`agent/recall_service.py` 是其薄 shim | 与上者无关 |
+| `codev_platform/reindex/` | reindex **队列引擎**三层(queue/runners/worker,写侧串行) | 引擎 |
+| `codev_platform/ops/reindex/` | 4 个 `.ps1` 的**跨平台 CLI 移植**(reindex/post-commit/dirty-check 命令) | CLI 命令 |
+| `codev_platform/ops/reindex_queue.py` | `reindex-queue` **CLI 薄壳**(enqueue/status/worker),调 reindex 引擎 | 三者分层不重复 |
+
 ---
 
 ## 三、当前 project 接入清单
