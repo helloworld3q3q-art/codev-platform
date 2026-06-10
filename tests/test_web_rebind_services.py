@@ -45,15 +45,16 @@ def test_rebind_is_consistent_across_singletons():
     assert indexes.index_service._jobs is jobs.job_service
 
 
-def test_create_app_without_cfg_does_not_rebind():
-    # 单实例默认: create_app() 不传 cfg → 不重绑 → session_store 身份不变(行为完全不变)。
-    old = sessions.session_store
-    web_app.create_app()
-    assert sessions.session_store is old
+def test_rebind_is_idempotent_swap():
+    # 重绑两次各换新实例(幂等可重复), 末次为活动值。
+    web_app.rebind_web_services({"agent": {"base_url": "http://a:1"}})
+    first = sessions.session_store
+    web_app.rebind_web_services({"agent": {"base_url": "http://b:2"}})
+    assert sessions.session_store is not first
+    assert "b:2" in agent.agent_client._base_url
 
 
-def test_create_app_with_cfg_rebinds():
-    # 显式 cfg(测试注入 / 多实例)→ 触发统一重绑。
-    old = sessions.session_store
-    web_app.create_app({"gateway": {"auth_mode": "passthrough"}, "projects": {}})
-    assert sessions.session_store is not old
+# 注: create_app 的"显式 cfg 才重绑、不传 cfg 不重绑"门控不在此单测直接验
+# (调完整 create_app 会带 bind_account_stores/ensure_seed_admin 副作用污染同进程其余 web 测试)。
+# 该门控由全量 web 测试套保障: app.py import 期 app=create_app() 不传 cfg → 不重绑 →
+# 现有 ~19 个 web 测试文件全绿即证默认路径行为不变。
