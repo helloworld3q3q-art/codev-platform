@@ -190,7 +190,7 @@ Phase A 证伪后,本日继续推进多块,均 test-first + WSL 真跑 + push。
 **两项目口径(回应用户问)**:recall suite 真跑了两项目(平台 18 + 量化 6,各自 CI);**planner A/B 本轮仅平台 codev 20 例**(`--project` 过滤,硬集里 5 个 openclaw 例未进)。量化项目的 planner A/B 要单独补够 hard 例再做,n=5 不凑数。
 
 ## 二十四、多跳 max_steps 弱点诊断 + planner lane 小修(commit `4a28f03`)
-planner 收口后,查本会话唯一真实弱点(多跳耗 max_steps)。scope 先否了 Phase 4(社区检测核心已被 A1 95% 交付, 且 naive 图聚类实测 58% 干不过 file 启发式, 重做负 ROI)。转查多跳:
+planner 收口后,查本会话唯一真实弱点(多跳耗 max_steps)。scope 先否了 Phase 4(社区检测核心已被 A1 95% 交付,重做低 ROI)。**⚠️ 更正(2026-06-11 实测复核,详见 daily-summary-2026-06-11)**:当时随口引的"naive 图聚类 58% 干不过 file 启发式"**对 Louvain 不准**——真图谱实测:连通分量确退化成巨型簇(97%/90%),但 **Louvain 结构上可行**(22/52 个合理社区)。否 Phase 4 的真实理由应为"A1 已覆盖业务域 + 无需求驱动",而非"Louvain 跑不动"。转查多跳:
 - **quality 集 per-case 实证(flash)**:6 例 grounding 全 1.0;**仅 1 例超预算** —— "LoopPolicy 加字段改哪几处"手爬 codegraph_callers+impact_analysis+codegraph_search **15 次** > max_steps,**从未用 `impact_paths`**(一次性多跳工具,原不在 planner IMPACT lane)。**弱点轻:效率非正确性**。
 - **修**:`impact_paths` 补进 IMPACT lane(排 codegraph_callers 前)。+ 单测。
 - **诚实边界**:`impact_paths` 走 graph store,只解**跨层多跳**(endpoint/table/page);**符号级多跳**(LoopPolicy 类不在 graph,实测 search_nodes 0 命中)仍手爬 —— 该口子无一次性 codegraph 多跳工具,但**轻(纯效率/答案已对),不为其造重型**(同 Phase 4 纪律)。

@@ -31,5 +31,14 @@
 ## 四、阶段判断:eval/智能调优到平台期
 本会话连续证伪 3+ 假设(recall _PREFER 调参 / planner LLM 质量+效率 / 抗错误前提)、grounding 在两模型两项目都饱和 → **agent 答案质量/检索智能层已成熟,继续在此层挖是边际递减**。下一步真正值钱的在别的轴(产品化 / 多仓契约桥),非 eval 微调。本轮"扩 golden 集让 recall/planner 有可信 CI 结论"目标达成且全部收口。
 
+## 五、Phase 4 实测复核 + 按客户分档标注(8 视角面板 → 搁置 plan)
+用户问"标注能否省钱/提效/可不用 deepseek,按客户需求"。
+- **Phase 4 实测复核(纠前一日 §二十四 overstatement)**:真图谱跑社区检测——**连通分量退化成巨型簇**(codev 97%/openclaw 90% 一坨,确认 naive 没用),但 **Louvain 结构可行**(22/52 个合理社区,无巨型簇)。所以"Louvain 跑不动"是错的;否 Phase 4 的真实理由=A1 已 95% 覆盖业务域 + 无需求驱动。
+- **8 视角面板裁决**:标注是云账单**小头**(loop 大 2-3 个数量级);hybrid 实测真省 ~46% 标注调用但**正确率不涨**(纯规则无置信门实测 **27% 静默错**);→ **现在不做**,唯一有产品意义的是免费/离线档纯规则器,留触发条件。沉淀 [`tiered-domain-labeler-plan-2026-06-11.md`](tiered-domain-labeler-plan-2026-06-11.md)(设计+置信门+golden 门+触发条件,commit `1a1e43a`)。
+- **真省钱杠杆 = agent loop token**(prompt-cache 命中/recall·context 体量/per-档 caps),非标注。
+
+## 六、flash 迁移收尾验证(无回归)
+今天 chat→flash 后,验当前 codev 图谱标签(53min 前 @4a28f03 重建,flash 重标):**A2 arch_role 0.933**(14/15)+ A1 域名两仓干净(代码召回/审计/智能体… ‖ 选股推荐/回测持仓/龙虎榜…)。**flash 标注无质量回归。**
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
