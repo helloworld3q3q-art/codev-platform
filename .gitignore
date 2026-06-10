@@ -38,7 +38,8 @@ platform_meta/health/
 mcp_server.log
 *.log
 search_recall.jsonl
-codegraph_usage.jsonl
+# MCP 调用遥测 (codegraph_usage / memory_mcp_usage / cross_link_usage 等, daemon 在包内写, 不入仓)
+*_usage.jsonl
 
 # maven build artifacts
 target/
