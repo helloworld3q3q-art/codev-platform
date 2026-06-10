@@ -14,7 +14,7 @@ type OrgSelectProps = Omit<SelectProps, 'fetchOptions'>;
 const OrgSelect: React.FC<OrgSelectProps> = ({ ...restProps }) => {
   const { currentOrgId, setCurrentOrg } = useModel('org');
   const { setCurrentProject } = useModel('project');
-  const { initialState, refresh } = useModel('@@initialState');
+  const { initialState } = useModel('@@initialState');
 
   const roles = initialState?.userInfo?.roles ?? [];
   const isPlatformAdmin = roles.includes('platform_admin');
@@ -68,13 +68,15 @@ const OrgSelect: React.FC<OrgSelectProps> = ({ ...restProps }) => {
           }
         }
         setCurrentOrg(value); // 写 current_org(fetch 注入 X-Org-Id)
-        setCurrentProject(''); // 切 org 重置项目
-        await refresh(); // 重拉 initialState → roles/菜单按新 org 重算
+        setCurrentProject(''); // 切 org 清项目, 重载后按新 org 重新默认
+        // 整页重载: 新 token/org 已落 localStorage, reload 后 getInitialState 重取 roles/菜单,
+        // 各页数据(用户表/项目等)也按新 org 重新拉 —— 仅 refresh() 不会刷新已渲染页面数据。
+        window.location.reload();
       } catch {
         // 切换失败(非成员等)由 fetch 统一弹错; 不改本地状态。
       }
     },
-    [currentOrgId, setCurrentOrg, setCurrentProject, refresh],
+    [currentOrgId, setCurrentOrg, setCurrentProject],
   );
 
   return (
