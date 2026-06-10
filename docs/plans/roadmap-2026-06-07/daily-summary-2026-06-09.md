@@ -300,3 +300,20 @@ WSL 全量 **1401 passed / 0 failed**。**今日全会话改动经对抗式审�
 - 多跳题(case 1/4: recall 融合链 / config 链)agent 答得好(grounding 1.0)→ 多跳综合**不是**瓶颈。
 
 **意义**: 易集 saturated 测不出东西; 难集**一跑就找到 agent 真弱点(顺错误前提幻觉)+ 证伪 self-judge** —— 正是面板说的"扩集价值在暴露下一个真杠杆"。**下一个真活**: ① agent 抗错误前提(system prompt / loop 加"先验证问题前提, 假则纠正而非顺答")② judge 换非自评 + 多跳取均值压方差(本次 halluc 0.33↔0.5 抖动印证小集非确定)。
+
+## 三十、① 抗错误前提 prompt + ② 多跑/非自评 judge —— 兼揪出金标自身缺陷
+
+用户"都要"。落地 ①②, 但诚实复盘(`135f868`/`c589496`):
+
+**②(交付 + 机制验证)**: `run_agent_e2e --repeat N` 每 case 跑 N 次, grounding 取均值 + 报 `grounding_min/max` 跨度 + `hallucination_runs`(压小集非确定方差)。`_summarize_runs` 纯函数 + 多数票 tool/budget。`get_provider(name=)` + `run_eval --judge-provider` = 非自评 judge。4 单测。
+
+**①(prompt 规则9)+ 真发现: 金标自身有缺陷**:
+- 加 `CODE_UNDERSTANDING_SYSTEM` 规则9: 先验证问题预设, 前提为假明确纠正而非迎合编造。
+- **但诊断难集首跑的 hallucination 0.5 大半是金标缺陷, 非 agent bug**(质量面板预警命中):
+  - `must_not` 子串**分不清肯定/否定**: `"抛异常"` 会假阳命中"**不**抛异常"的正确答案 → case3 假幻觉。
+  - case6 把 `chroma/embedding` 标 `must_not` 是**误标** —— 平台**文档**检索真用 chroma + Qwen embedding; agent 答它是把文档检索混进 `code_recall`, 非纯幻觉。
+- 修金标: 删 case3 假阳 must_not、reframe case6 靠 `must_mention`(graph+codegraph)判真机制(不用 must_not, 子串无法判肯定/否定)。
+- **修后重测(repeat=2)**: grounding **0.833→0.917**, hallucination **0.5→0.167**。
+- **诚实归因**: 改善**大半来自修金标**(去假阳), **规则9 净效果仍未单独证出**(被金标修复混淆)。干净验证需在修好金标上做 rule9 on/off A/B —— 留 follow-up。
+
+**最大价值(元层面)**: eval 第一次**反过来查出金标自身缺陷**(must_not 脆性 + 误标陷阱)。坐实质量面板核心论点: **测量信度比堆例子重要; 负样本必须真为假, must_not 子串不适合判否定语境**。这条比"agent 有没有幻觉"更值钱 —— 它防止后续用错尺子做错决策。
