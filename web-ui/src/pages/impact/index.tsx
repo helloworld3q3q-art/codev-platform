@@ -13,9 +13,16 @@ import {
   postPageDependencies,
   postTableUsage,
 } from '@/services/apis/reportsapi';
+import { postImpactPaths } from '@/services/apis/graphapi';
 
 import ResultPanel from './components/ResultPanel';
-import { normalizeImpact, normalizeQuery, QUERY_META, QUERY_OPTIONS } from './utils';
+import {
+  normalizeImpact,
+  normalizeImpactPaths,
+  normalizeQuery,
+  QUERY_META,
+  QUERY_OPTIONS,
+} from './utils';
 import type { QueryKind, ResultView } from './utils';
 
 const ImpactPage: React.FC = () => {
@@ -43,9 +50,12 @@ const ImpactPage: React.FC = () => {
       } else if (kind === 'pageDependencies') {
         const res = await postPageDependencies({ pageRef: ref });
         setResult(normalizeQuery(kind, res.data));
-      } else {
+      } else if (kind === 'apiCallers') {
         const res = await postApiCallers({ endpointRef: ref });
         setResult(normalizeQuery(kind, res.data));
+      } else {
+        const res = await postImpactPaths({ nodeRef: ref });
+        setResult(normalizeImpactPaths(res.data));
       }
     } catch {
       setResult(undefined);

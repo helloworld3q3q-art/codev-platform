@@ -3,7 +3,7 @@
 // 收敛成统一的 ResultView (目标节点 + 按层分组清单 + 风险 + summary), 供 index/ResultPanel 渲染。
 // 后端壳: impact 走 ImpactReportResponse; 其余 3 个走 GraphQueryResponse.data 内的引擎原始 dict。
 
-export type QueryKind = 'impact' | 'tableUsage' | 'pageDependencies' | 'apiCallers';
+export type QueryKind = 'impact' | 'tableUsage' | 'pageDependencies' | 'apiCallers' | 'impactPaths';
 
 export interface ImpactNodeItem {
   id: string;
@@ -14,6 +14,25 @@ export interface ImpactNodeItem {
   line?: number;
   depth?: number;
   viaEdge?: string;
+}
+
+// 多跳路径(Phase 5 impactPaths): 一条依赖路径 = 依赖方 endpoint + 评分 + 逐跳(可解释)。
+export interface PathHopView {
+  name: string;
+  layer: string;
+  viaEdge?: string;
+  confidence?: number;
+  certain: boolean;
+}
+
+export interface PathView {
+  endpointId: string;
+  endpointName: string;
+  endpointLayer: string;
+  score: number;
+  depth: number;
+  certain: boolean;
+  hops: PathHopView[];
 }
 
 export interface ResultView {
@@ -27,6 +46,8 @@ export interface ResultView {
   total: number;
   ambiguous: ImpactNodeItem[];
   emptyHint?: string;
+  // impactPaths 专用: 非空时 ResultPanel 渲染路径链(而非按层清单)。
+  paths?: PathView[];
 }
 
 // 查询类型切换项 (纯前端 UI 开关, 决定调哪个 API, 不进入请求体)。
@@ -35,6 +56,7 @@ export const QUERY_OPTIONS: { label: string; value: QueryKind }[] = [
   { label: '表被谁用', value: 'tableUsage' },
   { label: '页依赖什么', value: 'pageDependencies' },
   { label: '端点被谁调', value: 'apiCallers' },
+  { label: '依赖路径', value: 'impactPaths' },
 ];
 
 export const QUERY_META: Record<QueryKind, { placeholder: string; hint: string }> = {
@@ -53,6 +75,10 @@ export const QUERY_META: Record<QueryKind, { placeholder: string; hint: string }
   apiCallers: {
     placeholder: '输入后端端点 id 或名称',
     hint: '哪些前端在调用这个端点',
+  },
+  impactPaths: {
+    placeholder: '输入节点 id 或名称 (函数 / 端点 / 表名)',
+    hint: 'top-N 最强依赖路径: 谁经哪几跳依赖它, 每跳带置信 / 确定性(可解释)',
   },
 };
 
@@ -218,6 +244,56 @@ export const normalizeQuery = (kind: QueryKind, resp?: API.GraphQueryResponse): 
     byLayer,
     total: countAll(byLayer),
     ambiguous: [],
+  };
+};
+
+// impactPaths: GraphImpactPathsResponse(target + paths[endpoint/score/depth/certain/hops]) → ResultView.paths。
+export const normalizeImpactPaths = (resp?: API.GraphImpactPathsResponse): ResultView => {
+  if (!resp || !resp.found) {
+    return {
+      found: false,
+      byLayer: {},
+      total: 0,
+      ambiguous: [],
+      emptyHint: '未找到节点或该项目尚无统一图谱索引',
+    };
+  }
+  const target = asObj(resp.target);
+  const rawPaths = Array.isArray(resp.paths) ? resp.paths : [];
+  const paths: PathView[] = rawPaths.map((p) => {
+    const obj = asObj(p);
+    const ep = asObj(obj.endpoint);
+    const rawHops = Array.isArray(obj.hops) ? obj.hops : [];
+    const hops: PathHopView[] = rawHops.map((h) => {
+      const ho = asObj(h);
+      const hn = asObj(ho.node);
+      return {
+        name: str(hn.name) || str(hn.id),
+        layer: str(hn.layer) || 'other',
+        viaEdge: ho.viaEdge !== null && ho.viaEdge !== undefined ? str(ho.viaEdge) : undefined,
+        confidence: numOrUndef(ho.confidence),
+        certain: Boolean(ho.certain),
+      };
+    });
+    return {
+      endpointId: str(ep.id),
+      endpointName: str(ep.name) || str(ep.id),
+      endpointLayer: str(ep.layer) || 'other',
+      score: numOrUndef(obj.score) ?? 0,
+      depth: numOrUndef(obj.depth) ?? 0,
+      certain: Boolean(obj.certain),
+      hops,
+    };
+  });
+  return {
+    found: true,
+    targetName: str(target.name),
+    targetKind: str(target.kind),
+    targetLayer: str(target.layer),
+    byLayer: {},
+    total: numOrUndef(resp.count) ?? paths.length,
+    ambiguous: [],
+    paths,
   };
 };
 

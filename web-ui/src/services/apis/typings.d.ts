@@ -238,6 +238,15 @@ interface CommonResult_GraphAuditResponse_ {
   requestId?: any;
 }
 
+// CommonResult_GraphImpactPathsResponse_ 响应数据
+interface CommonResult_GraphImpactPathsResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_GraphQueryResponse_ 响应数据
 interface CommonResult_GraphQueryResponse_ {
   result?: number;
@@ -534,6 +543,22 @@ interface GraphAuditResponse {
   edges?: number; // 边总数
 }
 
+// 改某节点 → top-N 最强依赖路径分析入参。
+interface GraphImpactPathsRequest {
+  nodeRef: string; // 目标节点 ref (id / name / file)
+  topN?: number; // 返回 top-N 最强路径
+  certainOnly?: boolean; // 只走确定依赖边 (滤候选边)
+}
+
+// top-N 依赖路径 (Phase 5)。store 缺 / 节点未找到 → found=False 空。
+interface GraphImpactPathsResponse {
+  found?: boolean;
+  target?: any;
+  paths?: ImpactPath[];
+  count?: number;
+  totalReached?: number;
+}
+
 // table-usage / page-deps / api-callers 通用容器 (结构随查询不同, data 透传)。
 interface GraphQueryResponse {
   found?: boolean;
@@ -563,6 +588,34 @@ interface HealthData {
   status?: string;
   service?: string;
   dependencies?: Record<string, string>;
+}
+
+// 路径上的节点摘要 (对齐 graph.impact._node_brief)。
+interface ImpactNodeBrief {
+  id: string;
+  kind?: any;
+  name?: any;
+  layer?: any;
+  file?: any;
+  line?: any;
+}
+
+// 一条依赖路径: 依赖方 endpoint + 评分 + 逐跳。
+interface ImpactPath {
+  endpoint: ImpactNodeBrief;
+  score?: number;
+  depth?: number;
+  certain?: boolean;
+  hops?: ImpactPathHop[];
+}
+
+// 路径中的一跳: 到达节点 + 经由边 + 来源/置信 (可解释)。
+interface ImpactPathHop {
+  node: ImpactNodeBrief;
+  viaEdge?: any;
+  src?: any;
+  confidence?: any;
+  certain?: boolean;
 }
 
 // ImpactReportResponse 响应数据

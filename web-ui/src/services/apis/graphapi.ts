@@ -84,3 +84,11 @@ export async function postStats2(): Promise<API.CommonResult_UnifiedGraphStatsRe
   });
 }
 
+// 统一图谱-多跳依赖路径
+export async function postImpactPaths(data: Partial<API.GraphImpactPathsRequest>): Promise<API.CommonResult_GraphImpactPathsResponse_> {
+  return await post<API.CommonResult_GraphImpactPathsResponse_>({
+    url: `${commonUrl}/api/v1/graph/impact-paths`,
+    data,
+  });
+}
+

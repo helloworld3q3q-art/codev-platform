@@ -12,9 +12,43 @@ import {
   RISK_COLOR,
   RISK_LABEL,
 } from '../utils';
-import type { ImpactNodeItem, ResultView } from '../utils';
+import type { ImpactNodeItem, PathView, ResultView } from '../utils';
 
 const { Text } = Typography;
+
+interface PathsListProps {
+  paths: PathView[];
+}
+
+// 多跳依赖路径渲染: 每条 = 依赖方 endpoint(层/确定性/评分)+ 逐跳链(经哪条边到哪个节点)。
+const PathsList: React.FC<PathsListProps> = ({ paths }) => {
+  return (
+    <div className="flex flex-col gap-8">
+      {paths.map((p) => (
+        <div key={p.endpointId} className="p-12 bg-#f5f5f5 rounded-6">
+          <div className="flex items-center gap-8 flex-wrap mb-8">
+            <span className="font-600">{p.endpointName}</span>
+            <Tag color={LAYER_COLOR[p.endpointLayer] ?? 'default'}>
+              {LAYER_LABEL[p.endpointLayer] ?? p.endpointLayer}
+            </Tag>
+            <Tag color={p.certain ? 'green' : 'orange'}>{p.certain ? '确定' : '候选'}</Tag>
+            <span className="text-12 text-#8c8c8c">
+              score {p.score.toFixed(3)} · {p.depth} 跳
+            </span>
+          </div>
+          <div className="flex items-center gap-6 flex-wrap text-12">
+            {p.hops.map((h, i) => (
+              <span key={`${p.endpointId}-${i}`} className="flex items-center gap-6">
+                <span className="text-#bfbfbf">{h.viaEdge ? `—${h.viaEdge}→` : '→'}</span>
+                <span className={h.certain ? '' : 'text-#fa8c16'}>{h.name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 interface AmbiguousListProps {
   candidates: ImpactNodeItem[];
@@ -80,7 +114,9 @@ const ResultPanel: React.FC<ResultPanelProps> = ({ result }) => {
             {RISK_LABEL[result.risk] ?? result.risk}
           </Tag>
         ) : null}
-        <span className="text-12 text-#8c8c8c">共 {result.total} 个关联节点</span>
+        <span className="text-12 text-#8c8c8c">
+          共 {result.total} {result.paths ? '条路径' : '个关联节点'}
+        </span>
       </div>
 
       {result.summary ? (
@@ -89,7 +125,11 @@ const ResultPanel: React.FC<ResultPanelProps> = ({ result }) => {
         </div>
       ) : null}
 
-      <LayerGroups byLayer={result.byLayer} />
+      {result.paths ? (
+        <PathsList paths={result.paths} />
+      ) : (
+        <LayerGroups byLayer={result.byLayer} />
+      )}
     </Card>
   );
 };
