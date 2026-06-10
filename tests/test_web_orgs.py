@@ -34,6 +34,7 @@ def _isolate(monkeypatch):
     reset_account_stores()
     session_store.clear()
     monkeypatch.setattr(wdeps, "load_config", lambda: _ADMINS)
+    monkeypatch.setattr(orgs, "load_config", lambda: _ADMINS)  # orgs._guard_target_org 也用 load_config
     yield
     reset_account_stores()
     session_store.clear()
