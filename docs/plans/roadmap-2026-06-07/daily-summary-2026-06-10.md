@@ -189,5 +189,11 @@ Phase A 证伪后,本日继续推进多块,均 test-first + WSL 真跑 + push。
 
 **两项目口径(回应用户问)**:recall suite 真跑了两项目(平台 18 + 量化 6,各自 CI);**planner A/B 本轮仅平台 codev 20 例**(`--project` 过滤,硬集里 5 个 openclaw 例未进)。量化项目的 planner A/B 要单独补够 hard 例再做,n=5 不凑数。
 
+## 二十四、多跳 max_steps 弱点诊断 + planner lane 小修(commit `4a28f03`)
+planner 收口后,查本会话唯一真实弱点(多跳耗 max_steps)。scope 先否了 Phase 4(社区检测核心已被 A1 95% 交付, 且 naive 图聚类实测 58% 干不过 file 启发式, 重做负 ROI)。转查多跳:
+- **quality 集 per-case 实证(flash)**:6 例 grounding 全 1.0;**仅 1 例超预算** —— "LoopPolicy 加字段改哪几处"手爬 codegraph_callers+impact_analysis+codegraph_search **15 次** > max_steps,**从未用 `impact_paths`**(一次性多跳工具,原不在 planner IMPACT lane)。**弱点轻:效率非正确性**。
+- **修**:`impact_paths` 补进 IMPACT lane(排 codegraph_callers 前)。+ 单测。
+- **诚实边界**:`impact_paths` 走 graph store,只解**跨层多跳**(endpoint/table/page);**符号级多跳**(LoopPolicy 类不在 graph,实测 search_nodes 0 命中)仍手爬 —— 该口子无一次性 codegraph 多跳工具,但**轻(纯效率/答案已对),不为其造重型**(同 Phase 4 纪律)。
+
 ## 续3-commit 链
 `4294de8`(agent_e2e 硬集 6→16 + 守卫)→ `3c89b10`(within_budget_ci95 + 沉淀反转)→ WSL config 迁 `deepseek-v4-flash`(用户级配置, 不进 git)→ flash A/B n=11 重跑(CI 重叠)→ `739269c`(硬集 16→25, codev 20)→ flash A/B n=20 重跑(效率红利证伪, planner 翻默认收口)。push 被 git-bash sh.exe fork bug 挂 → `--no-verify` 绕坏解释器(非跳 gate, eval 数据与本仓审计 gate 无关)。
