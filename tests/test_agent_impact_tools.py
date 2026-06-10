@@ -10,6 +10,7 @@ from codev_platform.agent.tools import build_default_registry
 from codev_platform.agent.tools.impact import (
     ApiCallersTool,
     ImpactAnalysisTool,
+    ImpactPathsTool,
     PageDependenciesTool,
     TableUsageTool,
 )
@@ -83,6 +84,18 @@ def test_page_dependencies_tool(tmp_path, monkeypatch):
     assert {n["id"] for n in d["dependsOn"]["byLayer"]["database"]} == {_TB}
 
 
+def test_impact_paths_tool(tmp_path, monkeypatch):
+    _seed(tmp_path, monkeypatch)
+    res = ImpactPathsTool(_PID).run({"nodeRef": "users"})
+    assert res.is_error is False
+    d = json.loads(res.content)
+    assert d["found"] and d["target"]["name"] == "users"
+    eps = {p["endpoint"]["id"] for p in d["paths"]}
+    assert {_FN, _EP, _FE} <= eps          # 反向: 函数/端点/前端 都依赖 users
+    fe = next(p for p in d["paths"] if p["endpoint"]["id"] == _FE)
+    assert fe["hops"] and "certain" in fe["hops"][0]  # 逐跳带可解释字段
+
+
 def test_missing_arg_is_error():
     res = ImpactAnalysisTool(_PID).run({})
     assert res.is_error is True
@@ -97,5 +110,5 @@ def test_store_missing_is_error(tmp_path, monkeypatch):
 
 def test_registered_in_default_registry():
     reg = build_default_registry(_PID)
-    for name in ("impact_analysis", "table_usage", "page_dependencies", "api_callers"):
+    for name in ("impact_analysis", "table_usage", "page_dependencies", "api_callers", "impact_paths"):
         assert reg.get(name) is not None

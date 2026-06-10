@@ -132,8 +132,32 @@ class ApiCallersTool(Tool):
         return _run_query(self.project_id, I.find_api_callers, ref)
 
 
+class ImpactPathsTool(Tool):
+    name = "impact_paths"
+    description = (
+        "改某节点 → top-N 最强依赖路径:谁经哪几跳依赖它, 每跳带 src/置信/确定性 (可解释)。"
+        "比 impact_analysis 的扁平清单多了「逐跳路径链 + 评分排序 + 每跳可信度」, 想看具体怎么依赖、"
+        "哪条链最该担心时用它。入参 nodeRef=节点 id 或 name (表名 / 端点名 / 函数名)。"
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {"nodeRef": {"type": "string", "description": "节点 id 或 name"}},
+        "required": ["nodeRef"],
+    }
+
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        ref = (args or {}).get("nodeRef", "").strip()
+        if not ref:
+            return ToolResult(call_id="", content="缺少 nodeRef 参数", is_error=True)
+        return _run_query(self.project_id, I.find_impact_paths, ref)
+
+
 def register_into(registry, project_id: str | None = None) -> None:
     registry.register(ImpactAnalysisTool(project_id))
     registry.register(TableUsageTool(project_id))
     registry.register(PageDependenciesTool(project_id))
     registry.register(ApiCallersTool(project_id))
+    registry.register(ImpactPathsTool(project_id))
