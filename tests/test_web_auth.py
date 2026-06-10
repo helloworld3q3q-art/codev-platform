@@ -144,3 +144,60 @@ def test_session_roles_platform_admin_from_config(client, monkeypatch):
     r = client.get("/api/v1/auth/session", headers={"Authorization": f"Bearer {access}"})
     assert r.status_code == 200
     assert "platform_admin" in r.json()["data"]["roles"]
+
+
+# ---- 活动 org 切换 (多 org 成员) ----
+
+def _add_member(org, username="alice", role="member"):
+    from codev_platform.web.domain.accounts import OrgMember
+    from codev_platform.web.repositories.account_store import member_store
+    member_store.upsert(OrgMember(org_id=org, username=username, role=role))
+
+
+def test_session_includes_member_orgs(client):
+    # /session 返回本人所属全部 org(含当前活动 org), 供前端切换器列选项。
+    _seed_user()  # home orgA
+    _add_member("orgA")
+    _add_member("orgB")
+    access = _login(client).json()["data"]["accessToken"]
+    r = client.get("/api/v1/auth/session", headers={"Authorization": f"Bearer {access}"})
+    orgs = r.json()["data"]["orgs"]
+    assert "orgA" in orgs and "orgB" in orgs
+
+
+def test_switch_org_to_member_org(client):
+    # alice 是 orgA+orgB 成员, 登录(orgA)后切到 orgB → 新 token 的 session orgId=orgB(#2: RBAC 随之按新 org 判)。
+    _seed_user()  # home orgA
+    _add_member("orgA")
+    _add_member("orgB")
+    access = _login(client).json()["data"]["accessToken"]
+    r = client.post("/api/v1/auth/switch-org", json={"orgId": "orgB"},
+                    headers={"Authorization": f"Bearer {access}"})
+    assert r.status_code == 200
+    new_access = r.json()["data"]["accessToken"]
+    s = client.get("/api/v1/auth/session", headers={"Authorization": f"Bearer {new_access}"})
+    assert s.json()["data"]["orgId"] == "orgB"
+
+
+def test_switch_org_to_non_member_403(client):
+    # 🔴 红线: 不是 orgB 成员 → 切换被拒。否则任意登录用户改个 orgId 就能拿别 org 会话身份 = 越权。
+    _seed_user()  # home orgA
+    _add_member("orgA")  # 只 orgA 成员
+    access = _login(client).json()["data"]["accessToken"]
+    r = client.post("/api/v1/auth/switch-org", json={"orgId": "orgB"},
+                    headers={"Authorization": f"Bearer {access}"})
+    assert r.status_code == 403
+    assert r.json()["errors"][0]["errorCode"] == "access_denied"
+
+
+def test_switch_org_platform_admin_any(client, monkeypatch):
+    # platform_admin 可切任意 org(即便非成员)—— 运维特权。
+    monkeypatch.setenv("CODEV_PLATFORM_ADMINS", "alice")
+    _seed_user()  # home orgA, 无 orgZ 成员
+    access = _login(client).json()["data"]["accessToken"]
+    r = client.post("/api/v1/auth/switch-org", json={"orgId": "orgZ"},
+                    headers={"Authorization": f"Bearer {access}"})
+    assert r.status_code == 200
+    new_access = r.json()["data"]["accessToken"]
+    s = client.get("/api/v1/auth/session", headers={"Authorization": f"Bearer {new_access}"})
+    assert s.json()["data"]["orgId"] == "orgZ"

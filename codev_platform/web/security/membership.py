@@ -73,6 +73,18 @@ def resolve_session_roles(sess: Session) -> list[str]:
     return roles
 
 
+def resolve_session_orgs(sess: Session) -> list[str]:
+    """会话用户所属全部 org code(成员关系 + 当前活动 org), 供前端 org 切换器列选项。
+
+    含当前 `sess.org_id`(即便该 org 无成员行, 如 platform_admin 切到非成员 org 的活动态)+ 成员表
+    里本人的所有 org。去重保序。只读可信源, 不信 client。
+    """
+    orgs = {sess.org_id}
+    for member in get_member_store().list_user(sess.username):
+        orgs.add(member.org_id)
+    return sorted(orgs)
+
+
 def can_access_project(sess: Session, project_id: str, action: str) -> bool:
     """session 用户对 project_id 是否覆盖 action(read|write|admin)。org/platform admin bypass。"""
     if is_org_admin(sess):

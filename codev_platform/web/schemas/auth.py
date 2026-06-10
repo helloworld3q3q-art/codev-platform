@@ -34,6 +34,12 @@ class RefreshRequest(BaseModel):
     refreshToken: str = Field(..., min_length=1, max_length=512, description="refresh token")
 
 
+class SwitchOrgRequest(BaseModel):
+    """切换活动组织。多 org 成员在会话内切到另一所属 org, 重签 session 后 RBAC 按新 org 判。"""
+
+    orgId: str = Field(..., min_length=1, max_length=64, description="目标组织 code (须为本人所属 org)")
+
+
 class TokenPair(BaseModel):
     """登录 / 刷新返回的 token 对。"""
 
@@ -48,3 +54,5 @@ class SessionInfo(BaseModel):
     orgId: str
     # 可信角色清单 (后端从 membership/platform_admin 算, 不信 client); 前端 isAdminRole 消费做菜单显隐。
     roles: list[str] = Field(default_factory=list, description="会话用户角色 (platform_admin/admin/member/viewer)")
+    # 本人所属全部 org (成员关系 + 当前活动 org), 供前端 org 切换器。
+    orgs: list[str] = Field(default_factory=list, description="会话用户所属组织 code 列表 (多 org 成员可切换)")

@@ -9,17 +9,20 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
+from codev_platform.core.config import load_config
 from codev_platform.core.httpkit.envelope import CommonResult, ok
+from codev_platform.core.platform_admin import is_platform_admin
 from codev_platform.web.schemas.auth import (
     LoginRequest,
     LogoutRequest,
     PublicKeyInfo,
     RefreshRequest,
     SessionInfo,
+    SwitchOrgRequest,
     TokenPair,
 )
 from codev_platform.web.security.deps import current_session
-from codev_platform.web.security.membership import resolve_session_roles
+from codev_platform.web.security.membership import resolve_session_orgs, resolve_session_roles
 from codev_platform.web.security.rsa_keys import get_keypair
 from codev_platform.web.security.sessions import Session
 from codev_platform.web.services.auth_service import AuthService
@@ -111,6 +114,28 @@ def current(
 ) -> CommonResult[SessionInfo]:
     roles = resolve_session_roles(sess)
     return ok(
-        SessionInfo(username=sess.username, orgId=sess.org_id, roles=roles),
+        SessionInfo(username=sess.username, orgId=sess.org_id, roles=roles,
+                    orgs=resolve_session_orgs(sess)),
         request_id=_rid(request),
     )
+
+
+@router.post(
+    "/api/v1/auth/switch-org",
+    tags=[_TAG],
+    summary="认证-切换活动组织",
+    operation_id="authSwitchOrg",
+    response_model=CommonResult[TokenPair],
+)
+def switch_org(
+    request: Request,
+    body: SwitchOrgRequest,
+    sess: Session = Depends(current_session),
+    svc: AuthService = Depends(_service),
+) -> CommonResult[TokenPair]:
+    """多 org 成员切到另一所属 org, 重签 session(新 token 绑新 org)。非成员 org 拒(越权红线)。"""
+    pair = svc.switch_org(
+        username=sess.username, target_org=body.orgId,
+        caller_is_platform_admin=is_platform_admin(load_config(), sess.username),
+    )
+    return ok(pair, request_id=_rid(request))
