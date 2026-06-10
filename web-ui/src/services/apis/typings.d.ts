@@ -247,6 +247,15 @@ interface CommonResult_GraphQueryResponse_ {
   requestId?: any;
 }
 
+// CommonResult_GraphSoftQualityResponse_ 响应数据
+interface CommonResult_GraphSoftQualityResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_HealthData_ 接口
 interface CommonResult_HealthData_ {
   result?: number;
@@ -366,6 +375,15 @@ interface CommonResult_ProjectListItem_ {
 
 // CommonResult_PublicKeyInfo_ 接口
 interface CommonResult_PublicKeyInfo_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_RecallCodeResponse_ 响应数据
+interface CommonResult_RecallCodeResponse_ {
   result?: number;
   message?: string;
   data?: any;
@@ -520,6 +538,19 @@ interface GraphAuditResponse {
 interface GraphQueryResponse {
   found?: boolean;
   data?: any;
+}
+
+// A1/A2 软标签健康度诊断结果: 分布/覆盖/退化信号。空软层(未跑 analyzer) = healthy。
+interface GraphSoftQualityResponse {
+  healthy?: boolean; // 无退化信号即 healthy
+  flagCount?: number; // 退化信号总数
+  flags?: string[]; // 人类可读退化信号清单
+  domainCount?: number; // 业务域(A1)软节点数
+  domainCoverage?: any; // 业务域标注覆盖率 (labeled/eligible)
+  domainGiant?: number; // 业务域巨型 cluster 数 (成员占比超阈值, 疑似退化)
+  layerCount?: number; // 架构层(A2)软节点数
+  layerCoverage?: any; // 架构层标注覆盖率
+  layerGiant?: number; // 架构层巨型 cluster 数
 }
 
 // HTTPValidationError 接口
@@ -900,6 +931,30 @@ interface ProjectRegisterRequest {
 // 登录口令加密用 RSA 公钥 (PEM, SubjectPublicKeyInfo)。前端 JSEncrypt setPublicKey 用。
 interface PublicKeyInfo {
   publicKey: string;
+}
+
+// RecallCodeHit 接口
+interface RecallCodeHit {
+  ref: string; // 候选标识(node_id / symbol_id)
+  score: number; // 融合得分(加权 RRF + boost)
+  name?: string; // 名称
+  kind?: string; // 类型(backend_function / db_table / method ...)
+  file?: any; // 源文件
+  lanes?: string[]; // 命中它的 lane(可解释)
+}
+
+// RecallCodeRequest 请求参数
+interface RecallCodeRequest {
+  query: string; // 检索词
+  limit?: number; // 返回上限
+  weights?: any; // lane→权重(symbol 类偏 codegraph / 架构类偏 graph); 缺省等权
+}
+
+// 跨 lane 融合代码召回结果: 统一排名 + 实际参与 lane(可解释/可观测)。
+interface RecallCodeResponse {
+  hits?: RecallCodeHit[];
+  count?: number; // 结果数
+  lanes?: string[]; // 实际有贡献的 lane(某 lane 缺失则不在内)
 }
 
 // 刷新请求。refreshToken 换新 token 对 (旧 refresh 轮换失效)。

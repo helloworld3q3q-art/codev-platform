@@ -1,7 +1,7 @@
 // 仪表盘数据装配 —— 并发拉取平台健康 + 当前项目图谱统计 + 资源计数, 各源独立容错。
 import { postOrgsList } from '@/services/apis/orgapi';
 import { getCheck } from '@/services/apis/healthapi';
-import { postAudit, postStats, postStats2 } from '@/services/apis/graphapi';
+import { postAudit, postSoftQuality, postStats, postStats2 } from '@/services/apis/graphapi';
 import { postStatus } from '@/services/apis/indexapi';
 import { postProjectsList } from '@/services/apis/projectapi';
 import { getMcpUsage } from '@/services/apis/reportsapi';
@@ -17,6 +17,8 @@ export interface DashboardData {
   indexStatus?: API.IndexStatusResponse;
   // 统一图谱结构审计摘要 (Phase 3)。
   graphAudit?: API.GraphAuditResponse;
+  // A1/A2 软标签健康度 (soft-quality): 分布/覆盖/巨型 cluster 退化, 与 audit 正交。
+  softQuality?: API.GraphSoftQualityResponse;
   projectCount: number;
   orgCount: number;
 }
@@ -28,6 +30,7 @@ export const DASHBOARD_DEFAULT: DashboardData = {
   mcpUsage: undefined,
   indexStatus: undefined,
   graphAudit: undefined,
+  softQuality: undefined,
   projectCount: 0,
   orgCount: 0,
 };
@@ -55,38 +58,51 @@ async function loadMcpUsage(enabled: boolean): Promise<API.McpUsageReportRespons
 }
 
 export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
-  const [health, codegraph, unified, projectCount, orgCount, mcpUsage, indexStatus, graphAudit] =
-    await Promise.all([
-      safe(async (): Promise<API.HealthData | undefined> => {
-        const res = await getCheck();
-        return res.data;
-      }, undefined),
-      safe(async (): Promise<API.CodegraphStatsResponse | undefined> => {
-        const res = await postStats();
-        return res.data;
-      }, undefined),
-      safe(async (): Promise<API.UnifiedGraphStatsResponse | undefined> => {
-        const res = await postStats2();
-        return res.data;
-      }, undefined),
-      safe(async (): Promise<number> => {
-        const res = await postProjectsList({ pageNumber: 1, pageSize: 1 });
-        return res.total ?? 0;
-      }, 0),
-      safe(async (): Promise<number> => {
-        const res = await postOrgsList({ pageNumber: 1, pageSize: 1 });
-        return res.total ?? 0;
-      }, 0),
-      loadMcpUsage(isAdmin),
-      safe(async (): Promise<API.IndexStatusResponse | undefined> => {
-        const res = await postStatus();
-        return res.data;
-      }, undefined),
-      safe(async (): Promise<API.GraphAuditResponse | undefined> => {
-        const res = await postAudit();
-        return res.data;
-      }, undefined),
-    ]);
+  const [
+    health,
+    codegraph,
+    unified,
+    projectCount,
+    orgCount,
+    mcpUsage,
+    indexStatus,
+    graphAudit,
+    softQuality,
+  ] = await Promise.all([
+    safe(async (): Promise<API.HealthData | undefined> => {
+      const res = await getCheck();
+      return res.data;
+    }, undefined),
+    safe(async (): Promise<API.CodegraphStatsResponse | undefined> => {
+      const res = await postStats();
+      return res.data;
+    }, undefined),
+    safe(async (): Promise<API.UnifiedGraphStatsResponse | undefined> => {
+      const res = await postStats2();
+      return res.data;
+    }, undefined),
+    safe(async (): Promise<number> => {
+      const res = await postProjectsList({ pageNumber: 1, pageSize: 1 });
+      return res.total ?? 0;
+    }, 0),
+    safe(async (): Promise<number> => {
+      const res = await postOrgsList({ pageNumber: 1, pageSize: 1 });
+      return res.total ?? 0;
+    }, 0),
+    loadMcpUsage(isAdmin),
+    safe(async (): Promise<API.IndexStatusResponse | undefined> => {
+      const res = await postStatus();
+      return res.data;
+    }, undefined),
+    safe(async (): Promise<API.GraphAuditResponse | undefined> => {
+      const res = await postAudit();
+      return res.data;
+    }, undefined),
+    safe(async (): Promise<API.GraphSoftQualityResponse | undefined> => {
+      const res = await postSoftQuality();
+      return res.data;
+    }, undefined),
+  ]);
   return {
     health,
     codegraph,
@@ -96,5 +112,6 @@ export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
     mcpUsage,
     indexStatus,
     graphAudit,
+    softQuality,
   };
 }

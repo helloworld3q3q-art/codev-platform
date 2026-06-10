@@ -1,4 +1,4 @@
-// API 生成时间：2026-06-08T17:00:35.277Z
+// API 生成时间：2026-06-10T08:24:27.319Z
 
 import * as healthAPI from './healthapi';
 import * as authAPI from './authapi';
@@ -10,6 +10,7 @@ import * as graphAPI from './graphapi';
 import * as jobAPI from './jobapi';
 import * as indexAPI from './indexapi';
 import * as reportsAPI from './reportsapi';
+import * as recallAPI from './recallapi';
 import * as agentAPI from './agentapi';
 import * as memoryAPI from './memoryapi';
 import * as auditAPI from './auditapi';
@@ -25,6 +26,7 @@ export {
   jobAPI,
   indexAPI,
   reportsAPI,
+  recallAPI,
   agentAPI,
   memoryAPI,
   auditAPI,
@@ -41,6 +43,7 @@ export default {
   jobAPI,
   indexAPI,
   reportsAPI,
+  recallAPI,
   agentAPI,
   memoryAPI,
   auditAPI,

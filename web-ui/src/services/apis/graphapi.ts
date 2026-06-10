@@ -68,6 +68,14 @@ export async function postAudit(): Promise<API.CommonResult_GraphAuditResponse_>
   });
 }
 
+// 统一图谱-软标签健康度
+export async function postSoftQuality(): Promise<API.CommonResult_GraphSoftQualityResponse_> {
+  return await post<API.CommonResult_GraphSoftQualityResponse_>({
+    url: `${commonUrl}/api/v1/graph/soft-quality`,
+    data: {},
+  });
+}
+
 // 统一图谱-统计
 export async function postStats2(): Promise<API.CommonResult_UnifiedGraphStatsResponse_> {
   return await post<API.CommonResult_UnifiedGraphStatsResponse_>({
