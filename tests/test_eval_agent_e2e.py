@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from codev_platform.agent.brain import AssistantTurn, LLMProvider
 from eval.suites.agent_e2e import (
+    _mentions,
     _parse_score,
     aggregate,
     judge_answer,
@@ -69,6 +70,33 @@ def test_score_over_budget():
 def test_score_case_insensitive_match():
     sc = score_case({"must_mention": ["AuditAllStores"]}, "答案提到 auditallstores", [], 0)
     assert sc["grounding_coverage"] == 1.0
+
+
+# ---- 审计加固: token 边界匹配灭裸子串假阳 ----
+
+def test_mentions_token_boundary_no_substring_false_positive():
+    # 裸子串会假阳的经典案例, token 边界应拒绝:
+    assert _mentions("用的是 sqlite 存储", "sql") is False        # sql ⊄ sqlite
+    assert _mentions("微服务 services 层", "service") is False     # service ⊄ services
+    assert _mentions("training the model", "AI") is False         # AI ⊄ training
+    assert _mentions("myclassify_query 不是它", "classify_query") is False  # 前缀粘连
+    # 真正独立 token / 符号边界仍命中:
+    assert _mentions("这是 SQL 插件", "sql") is True              # 大小写不敏感
+    assert _mentions("调用 x.classify_query( 处", "classify_query") is True  # . ( 是边界
+    assert _mentions("audit_all_stores(conn) 打开", "audit_all_stores") is True
+
+
+def test_score_irrelevant_answer_no_grounding_leak():
+    # 无关但含"近似词"的答案: 裸子串会假阳, 边界匹配应 grounding≈0(对照实验)。
+    case = {"must_mention": ["sql", "fusion", "service"]}
+    sc = score_case(case, "这答案讲的是 sqlite、confusion 和 services, 跟问题无关", [], 0)
+    assert sc["grounding_coverage"] == 0.0
+    assert set(sc["missing_mentions"]) == {"sql", "fusion", "service"}
+
+
+def test_score_empty_answer_zero_grounding():
+    sc = score_case({"must_mention": ["audit_all_stores"]}, "", [], 0)
+    assert sc["grounding_coverage"] == 0.0
 
 
 def test_aggregate_rates():

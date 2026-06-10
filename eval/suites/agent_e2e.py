@@ -15,21 +15,33 @@ LLM-judge(主观质量)留 E3, 默认不做。
 """
 from __future__ import annotations
 
+import re
+
 from eval.suites._common import load_jsonl
 
 
-def _norm(s: str | None) -> str:
-    return (s or "").lower()
+def _mentions(answer: str, anchor: str) -> bool:
+    """anchor 是否作为**独立 token** 出现在 answer(大小写不敏感, 非字母数字为边界)。
+
+    审计后加固: 原裸子串匹配假阳严重 —— "sql" 命中 "sqlite"、"service" 命中 "services"、
+    "AI" 命中 "train" 等, 虚高 grounding。token 边界(前后非 [A-Za-z0-9])杜绝这类: 锚点要么
+    独立成词、要么以符号/标点/驼峰外的非字母数字为界(下划线/点算边界, 故 classify_query 在
+    `x.classify_query(` 内仍命中)。
+    """
+    a = (anchor or "").strip()
+    if not a:
+        return False
+    pat = r"(?<![A-Za-z0-9])" + re.escape(a) + r"(?![A-Za-z0-9])"
+    return re.search(pat, answer or "", re.IGNORECASE) is not None
 
 
 def score_case(case: dict, answer: str, tools_used: list[str], tool_call_count: int,
                budget: int | None = None) -> dict:
     """纯函数: 对单个 case 的答案 + 工具使用打确定性分。脱 AgentLoop, 可单测。"""
-    a = _norm(answer)
     must = case.get("must_mention", []) or []
-    hit = [m for m in must if _norm(m) in a]
+    hit = [m for m in must if _mentions(answer, m)]
     coverage = round(len(hit) / len(must), 3) if must else 1.0
-    bad = [m for m in (case.get("must_not", []) or []) if _norm(m) in a]
+    bad = [m for m in (case.get("must_not", []) or []) if _mentions(answer, m)]
     expect_tools = set(case.get("expect_tools", []) or [])
     used = set(t for t in (tools_used or []) if t)
     # 至少用到一个期望工具类 = 路子对(不要求精确集合, 工具可多可少)。无期望则恒 True。
