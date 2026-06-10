@@ -317,3 +317,19 @@ WSL 全量 **1401 passed / 0 failed**。**今日全会话改动经对抗式审�
 - **诚实归因**: 改善**大半来自修金标**(去假阳), **规则9 净效果仍未单独证出**(被金标修复混淆)。干净验证需在修好金标上做 rule9 on/off A/B —— 留 follow-up。
 
 **最大价值(元层面)**: eval 第一次**反过来查出金标自身缺陷**(must_not 脆性 + 误标陷阱)。坐实质量面板核心论点: **测量信度比堆例子重要; 负样本必须真为假, must_not 子串不适合判否定语境**。这条比"agent 有没有幻觉"更值钱 —— 它防止后续用错尺子做错决策。
+
+## 三十一、rule9 on/off A/B 闭合 ① —— 零净效, 回退
+
+在**修好金标**的 quality 难集上做干净的 rule9 on/off 对照(repeat=2, 隔离规则9):
+
+| 变体 | grounding | hallucination |
+|---|---|---|
+| rule9 ON | 0.833 | 0.167 |
+| rule9 OFF | 0.917 | 0.167 |
+| **delta(on−off)** | **−0.084** | **0.0** |
+
+**结论: 规则9 零净效** —— hallucination 一模一样(0.167), grounding 反而略低(−0.084 = 1 case/12 跑的噪声)。前一轮 0.5→0.167 的改善**全部来自修金标**(去假阳), 与规则9 无关。
+
+**处置(守纪律)**: 按 [[recall-weight-ab-finding]]"零 delta 的杠杆不留", **回退规则9**(production prompt 不背无效文案)+ 移除 A/B 脚手架(`rule9_ab.py` / `system` 透传 / 测试), 保留 ②(`--repeat` 方差 + 非自评 judge + `get_provider(name=)`, 已验证)。方法留在 git 历史(`09b4165`)。
+
+**① 闭合真结论**: agent 顺错误前提幻觉(case6 把平台**文档** chroma 混进 `code_recall`、case2 夹带旧 `open_store`)**不是一行 prompt 能修的** —— 是更深的 grounding/读码消歧问题(agent 读了代码仍混淆)。真修是独立课题(更强 grounding / 工具结果去歧义), 不在本轮。**本轮 ① 的净产出 = 证伪了一个 naive 修法 + 一套可复现的 prompt-rule A/B 方法。** 这正是"先证尺子准再下结论"的纪律闭环。

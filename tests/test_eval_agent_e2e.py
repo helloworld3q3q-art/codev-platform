@@ -193,17 +193,6 @@ def test_summarize_runs_mean_and_spread():
     assert d["runs"] == 3
 
 
-def test_rule9_strip_isolates_rule9():
-    # rule9 A/B 的 off 变体: 仅去掉规则9 行, 其余 prompt 不动。
-    from codev_platform.agent.prompts import CODE_UNDERSTANDING_SYSTEM
-    from eval.rule9_ab import _without_rule9
-    off = _without_rule9(CODE_UNDERSTANDING_SYSTEM)
-    assert "先验证问题的预设" not in off          # 规则9 去掉
-    assert "先验证问题的预设" in CODE_UNDERSTANDING_SYSTEM
-    assert "8. " in off                          # 规则8 仍在(只删了 9)
-    assert off != CODE_UNDERSTANDING_SYSTEM
-
-
 def test_summarize_runs_single_equals_score():
     sc = {"grounding_coverage": 0.8, "missing_mentions": ["a"], "hallucinated": [],
           "tool_appropriate": True, "within_budget": True, "tools_used": ["t"], "tool_calls": 2}
