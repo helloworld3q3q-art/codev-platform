@@ -15,7 +15,7 @@ from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.platform_admin import is_platform_admin
 from codev_platform.core.rbac import role_allows
 from codev_platform.web.repositories.account_store import get_member_store
-from codev_platform.web.security.sessions import Session, session_store
+from codev_platform.web.security.sessions import Session, get_session_store
 
 
 def _bearer(request: Request) -> str | None:
@@ -27,7 +27,7 @@ def _bearer(request: Request) -> str | None:
 
 def current_session(request: Request) -> Session:
     """解析登录态; 无 / 失效 → 403。"""
-    sess = session_store.resolve(_bearer(request) or "")
+    sess = get_session_store().resolve(_bearer(request) or "")
     if sess is None:
         raise PlatformError(ErrorCode.ACCESS_DENIED, "未登录或会话已失效")
     return sess

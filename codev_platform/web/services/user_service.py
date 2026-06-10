@@ -28,7 +28,7 @@ from codev_platform.web.schemas.users import (
     UserSelectionItem,
 )
 from codev_platform.web.security.passwords import hash_password
-from codev_platform.web.security.sessions import session_store
+from codev_platform.web.security.sessions import get_session_store
 
 _VALID_STATUS = {e.enum_value for e in UserStatusEnum}
 _VALID_ROLE = {e.enum_value for e in MemberRoleEnum}
@@ -104,7 +104,7 @@ class UserService:
         )
         get_user_store().upsert(updated)
         if status == STATUS_DISABLED:
-            session_store.revoke_user(username)  # plan §十五: 禁用必须令 token/session 失效
+            get_session_store().revoke_user(username)  # plan §十五: 禁用必须令 token/session 失效
             self._audit(actor, "user.disable", username, {"org_id": user.org_id})
         else:
             self._audit(actor, "user.enable", username, {"org_id": user.org_id})

@@ -14,7 +14,7 @@ from codev_platform.web.repositories.account_store import get_user_store
 from codev_platform.web.schemas.auth import TokenPair
 from codev_platform.web.security.passwords import verify_password
 from codev_platform.web.security.rsa_keys import get_keypair
-from codev_platform.web.security.sessions import IssuedTokens, session_store
+from codev_platform.web.security.sessions import IssuedTokens, get_session_store
 
 
 class AuthService:
@@ -38,19 +38,19 @@ class AuthService:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "AUTH_LOGIN_FAILED", detail="user disabled")
         if not verify_password(password, user.password_hash):
             raise PlatformError(ErrorCode.ACCESS_DENIED, "AUTH_LOGIN_FAILED", detail="bad password")
-        issued = session_store.create(user.username, user.org_id)
+        issued = get_session_store().create(user.username, user.org_id)
         return self._to_pair(issued)
 
     def refresh(self, *, refresh_token: str) -> TokenPair:
         """refresh token 换新 token 对。失效 / 过期 → ACCESS_DENIED。"""
-        issued = session_store.refresh(refresh_token)
+        issued = get_session_store().refresh(refresh_token)
         if issued is None:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "AUTH_REFRESH_FAILED", detail="invalid refresh token")
         return self._to_pair(issued)
 
     def logout(self, *, refresh_token: str) -> None:
         """登出: 撤销 refresh token 对应会话 (幂等; 未知 token 静默放行)。"""
-        session_store.revoke(refresh_token)
+        get_session_store().revoke(refresh_token)
 
     @staticmethod
     def _to_pair(issued: IssuedTokens) -> TokenPair:

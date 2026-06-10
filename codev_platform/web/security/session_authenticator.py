@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from codev_platform.gateway.auth import Authenticator, Identity
-from codev_platform.web.security.sessions import session_store
+from codev_platform.web.security.sessions import get_session_store
 
 
 def _bearer(headers: Mapping[str, str]) -> str | None:
@@ -38,7 +38,7 @@ class SessionAwareAuthenticator:
     def authenticate(self, headers: Mapping[str, str]) -> Identity:
         tok = _bearer(headers)
         if tok:
-            sess = session_store.resolve(tok)
+            sess = get_session_store().resolve(tok)
             if sess is not None:
                 # session 身份仅用于过中间件; 逐项目授权由 current_session + service 闸判。
                 return Identity(user_id=sess.username, org_id=sess.org_id, via="session")

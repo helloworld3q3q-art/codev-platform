@@ -220,5 +220,16 @@ def bind_session_store(cfg: dict | None = None):
 
 
 # 活动会话存储: import 时 bind(dev 无 dsn 回退内存 = 行为不变; prod 配 dsn 用 PG —— 重启不丢 /
-# 多 worker 共享 / revoke 跨进程)。各模块仍 import 本单例, 经 bind 无感切后端。
+# 多 worker 共享 / revoke 跨进程)。
 session_store = bind_session_store(load_config())
+
+
+def get_session_store():
+    """取活动会话存储(经 getter 而非 `from ... import session_store` 捕获对象)。
+
+    复刻 account_store 的 getter 范式: 跨模块消费方(deps/authenticator/auth_service/user_service)
+    走本 getter, 才能在 `rebind_web_services(cfg)` 重绑后看到新后端 —— 直接 import 单例会捕获旧对象,
+    create_app(cfg) 传显式 cfg 时就会 authenticator 用一份、session 用另一份(本次修复目标)。
+    返回调用期的模块全局, 故重绑(`sessions.session_store = ...`)对本 getter 可见。
+    """
+    return session_store
