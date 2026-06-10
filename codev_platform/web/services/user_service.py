@@ -125,19 +125,26 @@ class UserService:
 
     def set_roles(self, *, username: str, org_id: str, role: str, caller_org_id: str,
                   caller_is_admin: bool, actor: str) -> UserActionResult:
-        """变更用户在某 org 的成员角色 (须审计)。"""
+        """变更用户在某 org 的成员角色 (须审计)。
+
+        多对多成员模型 ([[rbac-multi-org-membership-model]]): 一个用户可属多个 org, OrgMember
+        复合键即承载。授权按**目标 org** 判, 跨 org 隔离是红线:
+        - **platform_admin**: 可给任意用户在任意 org 授角色 (跨 org 成员管理, 多对多的来源)。
+        - **org_admin** (非 platform_admin): 只能在自己 (session) org 内、且只能管本 org 现有用户 ——
+          绝不能写其它 org (堵跨 org 越权)。把外组用户拉进本组、或往外组写角色都拒。
+        注: org_admin 暂仍按用户**首 org** (user.org_id) 判归属, 故"管理本 org 内非本组首属的多 org
+        成员"需 platform_admin 代劳 —— 偏严(失败安全); 按成员身份判的细化留 follow-up, 不在 #8 范围。
+        """
         user = self._require_user(username)
-        # P0-2 越权护栏: 校验目标用户属于 caller org (非 platform_admin), 堵"把外组用户写进本组
-        # 成员表"——其它 5 个写方法都调了此 guard, set_roles 此前漏调是真实跨 org 边界漏洞。
-        self._guard_same_org(user, caller_org_id, caller_is_admin)
         org_id = org_id.strip()
-        if org_id != user.org_id:
-            # 单一归属模型: 角色必须写用户真实归属 org (含 platform_admin 路径)。审计 MAJOR —— admin
-            # 路径此前不校验 org_id, 误传可在外组成员表造 orphan membership (RBAC 反推 org 读到幽灵归属)。
-            raise PlatformError(ErrorCode.INVALID_PARAMS, "org_id 与用户归属组织不一致")
         role = self._coerce_role(role)
-        get_member_store().upsert(OrgMember(org_id=user.org_id, username=username, role=role))
-        self._audit(actor, "user.roles", username, {"org_id": user.org_id, "role": role})
+        if not caller_is_admin:
+            # org_admin 越权护栏: 目标用户须属 caller org + 只能写 caller 自己 org。
+            self._guard_same_org(user, caller_org_id, caller_is_admin)
+            if org_id != caller_org_id:
+                raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能在其他组织授角色")
+        get_member_store().upsert(OrgMember(org_id=org_id, username=username, role=role))
+        self._audit(actor, "user.roles", username, {"org_id": org_id, "role": role})
         return UserActionResult(username=username, status=user.status)
 
     def selections(self, *, org_id: str) -> list[UserSelectionItem]:

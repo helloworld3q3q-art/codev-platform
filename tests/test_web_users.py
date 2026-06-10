@@ -219,14 +219,31 @@ def test_create_user_respects_explicit_role(client):
 
 
 def test_set_roles_rejects_mismatched_org_id(client):
-    # 审计 MAJOR 回归: org_id 必须 == 用户真实归属 org (单一归属), 防误传 org_id 造 orphan 成员。
+    # 跨 org 隔离红线: org_admin 只能在自己 (session) org 授角色, 往其它 org 写一律拒
+    # (多对多模型下跨 org 成员管理是 platform_admin 的活, 见 test_platform_admin_sets_role_across_orgs)。
     auth = _admin_session(org="orgA", username="boss")
     user_store.upsert(User(username="u2", password_hash=hash_password("pw123456"), org_id="orgA"))
-    # u2 归属 orgA, 传 org_id=orgB → 拒绝, orgB 成员表不留幽灵 membership
+    # boss 是 orgA org_admin(非 platform_admin), 传 org_id=orgB → 拒绝, orgB 成员表不留越权 membership
     r = client.post("/api/v1/users/roles", headers=auth,
                     json={"username": "u2", "orgId": "orgB", "role": "admin"})
     assert r.status_code != 200
     assert member_store.get("orgB", "u2") is None
+
+
+def test_platform_admin_sets_role_across_orgs(client, monkeypatch):
+    # 多对多成员模型: platform_admin 可给用户在其首 org 之外的第 2 个 org 授角色 → 用户成多 org 成员,
+    # 两处成员关系并存。跨 org 隔离仍由 org_admin 路径守(见上一个测试)。
+    monkeypatch.setattr(users_routes, "load_config", lambda: {"platform_admins": ["boss"]})
+    monkeypatch.setattr(wdeps, "load_config", lambda: {"platform_admins": ["boss"]})
+    t = session_store.create("boss", "orgA")
+    auth = {"Authorization": f"Bearer {t.access_token}"}
+    user_store.upsert(User(username="multi", password_hash=hash_password("pw123456"), org_id="orgA"))
+    member_store.upsert(OrgMember(org_id="orgA", username="multi", role="member"))
+    r = client.post("/api/v1/users/roles", headers=auth,
+                    json={"username": "multi", "orgId": "orgB", "role": "admin"})
+    assert r.status_code == 200
+    assert member_store.get("orgB", "multi").role == "admin"   # 第 2 个 org 成员关系建立
+    assert member_store.get("orgA", "multi").role == "member"  # 首 org 成员关系仍在 → 多对多并存
 
 
 # ---- 授权: 非 admin 被拒 ----
