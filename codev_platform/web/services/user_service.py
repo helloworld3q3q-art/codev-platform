@@ -42,11 +42,26 @@ class UserService:
             raise PlatformError(ErrorCode.PROJECT_UNKNOWN, f"user not found: {username}")
         return self._to_item(user)
 
-    def list_users(self, *, org_id: str, offset: int, limit: int) -> tuple[list[UserItem], int]:
-        """分页列出某 org 用户 (org_id 由路由层用 caller 的 org / 越权护栏决定)。"""
-        rows = sorted(get_user_store().list(org_id=org_id), key=lambda u: u.username)
-        total = len(rows)
-        items = [self._to_item(u) for u in rows[offset:offset + limit]]
+    def list_users(self, *, org_id: str | None, offset: int, limit: int) -> tuple[list[UserItem], int]:
+        """分页列出用户。`org_id=None`(platform_admin)→ 全部用户; 否则**成员制**列本 org 成员。
+
+        成员制([[rbac-multi-org-membership-model]]): 列"是本 org 成员"的用户(含首属别处但已加入本 org
+        的多 org 成员), 不再按用户首属 org 过滤 —— 与 org 成员抽屉口径统一。每行 `role` = 该用户**在本
+        org** 的成员角色(非首属 org 角色)。
+        """
+        if org_id is None:
+            rows = sorted(get_user_store().list(org_id=None), key=lambda u: u.username)
+            return [self._to_item(u) for u in rows[offset:offset + limit]], len(rows)
+        members = sorted(get_member_store().list_org(org_id), key=lambda m: m.username)
+        total = len(members)
+        items: list[UserItem] = []
+        for m in members[offset:offset + limit]:
+            u = get_user_store().get(m.username)
+            if u is None:
+                continue  # 成员行无对应 user(理论不该)→ 跳, 不臆造
+            item = self._to_item(u)
+            item.role = m.role  # 角色取**在本 org** 的成员角色, 非首属 org 角色
+            items.append(item)
         return items, total
 
     def get_detail(self, *, username: str, caller_org_id: str, caller_is_admin: bool) -> UserItem:

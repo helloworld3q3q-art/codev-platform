@@ -140,6 +140,18 @@ def test_list_and_detail_include_role(client):
     assert d2.json()["data"]["role"] is None
 
 
+def test_list_users_is_membership_based(client):
+    # #3 成员制: 首属 orgB 但已加入 orgA 的用户, 出现在 orgA 列表里; 角色=在 orgA 的角色; 归属仍 orgB。
+    auth = _admin_session(org="orgA", username="boss")
+    user_store.upsert(User(username="shared", password_hash=hash_password("pw123456"), org_id="orgB"))
+    member_store.upsert(OrgMember(org_id="orgA", username="shared", role="viewer"))
+    r = client.post("/api/v1/users/list", headers=auth)
+    by_name = {u["username"]: u for u in r.json()["data"]}
+    assert "shared" in by_name                     # 成员制: 首属别处也列出(旧的首属过滤不会)
+    assert by_name["shared"]["role"] == "viewer"   # 角色 = 在本 org(orgA)的成员角色
+    assert by_name["shared"]["orgId"] == "orgB"    # 归属组织仍是首属 orgB
+
+
 # ---- status 禁用 → revoke_user ----
 
 def test_disable_user_revokes_sessions(client):

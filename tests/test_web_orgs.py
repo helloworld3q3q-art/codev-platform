@@ -134,6 +134,46 @@ def test_member_add_nonexistent_user_rejected(client):
     assert member_store.get("acme", "ghost") is None  # 未写成员表(无幽灵成员)
 
 
+# ---- #5 跨 org 成员管理越权(隔离红线)----
+
+def test_member_add_cross_org_denied(client):
+    # 🔴 #5: acme org_admin 不能用 code=beta 把人写进 beta(跨 org 提权)。护栏先于 service, 无需 beta 存在。
+    member_store.upsert(OrgMember(org_id="acme", username="bob", role="admin"))
+    h = _auth("bob", "acme")  # bob 的 session org = acme
+    r = client.post("/api/v1/orgs/members/add",
+                    json={"code": "beta", "username": "x", "role": "admin"}, headers=h)
+    assert r.status_code == 403
+    assert r.json()["errors"][0]["errorCode"] == "access_denied"
+    assert member_store.get("beta", "x") is None  # 未写 beta 成员表
+
+
+def test_member_roles_remove_list_cross_org_denied(client):
+    # 🔴 #5: 改角色 / 移除 / 列成员 跨 org 一律拒。
+    member_store.upsert(OrgMember(org_id="acme", username="bob", role="admin"))
+    h = _auth("bob", "acme")
+    cases = [
+        ("/api/v1/orgs/members/roles", {"code": "beta", "username": "x", "role": "admin"}),
+        ("/api/v1/orgs/members/remove", {"code": "beta", "username": "x"}),
+        ("/api/v1/orgs/members/list", {"code": "beta"}),
+    ]
+    for path, payload in cases:
+        r = client.post(path, json=payload, headers=h)
+        assert r.status_code == 403, path
+        assert r.json()["errors"][0]["errorCode"] == "access_denied", path
+
+
+def test_member_add_cross_org_platform_admin_allowed(client):
+    # platform_admin 可跨 org 加成员(运维特权)。
+    org_store.create(Org(code="beta", name="Beta"))
+    user_store.create(User(username="carol", password_hash="x", org_id="beta",
+                           status="ACTIVE", display_name="", email=""))
+    h = _auth("super", "")  # platform_admin
+    r = client.post("/api/v1/orgs/members/add",
+                    json={"code": "beta", "username": "carol"}, headers=h)
+    assert r.status_code == 200
+    assert member_store.get("beta", "carol") is not None
+
+
 def test_status_disable_filters_selections(client):
     org_store.create(Org(code="acme", name="Acme"))
     org_store.create(Org(code="beta", name="Beta"))

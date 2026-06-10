@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from codev_platform.core.config import load_config
+from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.httpkit.envelope import CommonResult, PageResult, ok, page
 from codev_platform.core.httpkit.pagination import PageBody
+from codev_platform.core.platform_admin import is_platform_admin
 from codev_platform.web.schemas.orgs import (
     MemberActionResult,
     MemberAddRequest,
@@ -47,6 +50,17 @@ def _service() -> OrgService:
 
 def _rid(request: Request):
     return getattr(request.state, "request_id", None)
+
+
+def _guard_target_org(sess, code: str) -> None:
+    """org 成员管理越权护栏(跨 org 隔离红线): 非 platform_admin 只能操作**自己 (session) org** 的成员。
+
+    require_org_role('admin') 只校验 caller 是其 session org 的 admin, 但成员端点的目标 org 是 body.code
+    (任意 org)—— 不加这条, orgA admin 传 code=orgB 就能把任意人写成 orgB 成员/admin = 跨 org 提权;
+    成员列表也会泄露别 org 成员名单。platform_admin 可跨 org(运维特权)。
+    """
+    if not is_platform_admin(load_config(), sess.username) and code != sess.org_id:
+        raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能管理其他组织的成员")
 
 
 # ---- 组织 ----
@@ -163,9 +177,10 @@ def list_org_selections(
 def list_org_members(
     request: Request,
     body: MemberListRequest,
-    _sess=Depends(current_session),
+    sess=Depends(current_session),
     svc: OrgService = Depends(_service),
 ) -> PageResult[MemberItem]:
+    _guard_target_org(sess, body.code)  # 非超管不能列别 org 成员(防成员名单跨 org 泄露)
     # code/分页从 body 取(前端 post() 一律发 body, 不是 query); 修 members/list 400。
     offset = (body.pageNumber - 1) * body.pageSize
     items, total = svc.list_members(body.code, offset=offset, limit=body.pageSize)
@@ -183,9 +198,10 @@ def list_org_members(
 def add_org_member(
     request: Request,
     body: MemberAddRequest,
-    _sess=Depends(_require_admin),
+    sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[MemberActionResult]:
+    _guard_target_org(sess, body.code)  # 🔴 防 orgA admin 用 code=orgB 把人写进 orgB(跨 org 提权)
     result = svc.add_member(code=body.code, username=body.username, role=body.role)
     return ok(result, request_id=_rid(request))
 
@@ -200,9 +216,10 @@ def add_org_member(
 def remove_org_member(
     request: Request,
     body: MemberRemoveRequest,
-    _sess=Depends(_require_admin),
+    sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[MemberActionResult]:
+    _guard_target_org(sess, body.code)  # 防跨 org 移除别 org 成员
     result = svc.remove_member(code=body.code, username=body.username)
     return ok(result, request_id=_rid(request))
 
@@ -217,8 +234,9 @@ def remove_org_member(
 def set_org_member_role(
     request: Request,
     body: MemberRoleRequest,
-    _sess=Depends(_require_admin),
+    sess=Depends(_require_admin),
     svc: OrgService = Depends(_service),
 ) -> CommonResult[MemberActionResult]:
+    _guard_target_org(sess, body.code)  # 🔴 防 orgA admin 改 orgB 成员角色(跨 org 提权)
     result = svc.set_member_role(code=body.code, username=body.username, role=body.role)
     return ok(result, request_id=_rid(request))
