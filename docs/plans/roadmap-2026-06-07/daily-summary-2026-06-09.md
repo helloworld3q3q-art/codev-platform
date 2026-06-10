@@ -349,3 +349,17 @@ WSL 全量 **1401 passed / 0 failed**。**今日全会话改动经对抗式审�
 **锁定的真课题(留新一轮, 非 recall 调优)**: **agent 顺错误前提幻觉**(产品+测量共识: 开发者会**弃用**的点, §31 已证非一行 prompt)。机制 = **工具结果带"能力边界"元信息**(让 `code_recall` 自报"只覆盖 graph+codegraph 符号、不含向量/文档检索"), 让 agent 从证据知前提为假而非脑补; 配 IR 提的 weighted_rrf **未用的 `boosts` 参数**(精确符号 boost, 最便宜的 recall 真增益)。**前置**: 先用已交付的非自评 judge + `--repeat` 钉 case6/case2 回归基线(没可信尺子改了也判不准 —— rule9 的教训)。
 
 **bm25 lane 正式搁置。本轮净产出 = 否掉一个过度工程 + 标定 recall 金标一致化 + 锁定真课题。**
+
+## 三十三、roadmap 盘点 + 下一轮立项(收尾)
+
+**11-Phase 蓝图盘点**(对照 `code-intelligence-platform-plan-2026-06-07.md`):
+- 🟢 完成/近完成(4): Phase 0(评测框架, 金标偏薄)、3(provenance/冲突/审计 ~90%)、5(多跳路径评分 MVP)、7(Query Planner 完整版)。
+- 🟡 MVP/部分(4): Phase 1(IndexManifest MVP)、4(A1 业务域有 / Louvain 社区检测未, ~35%)、6(graph+codegraph 2 lane + code_recall MRR 0.917 / doc·vector·memory lane + reranker 未, ~55%)、10(部分 CLI+dashboard, ~25%)。
+- 🔴 纯未启动重型(3): **Phase 2(统一 IR 解析引擎, 最大一块)、8(响应性能)、9(多语言 adapter, 依赖 2)**。
+- 字面进度 ~55-60%; 但蓝图本就标"不整体启动、重型真实需求触发再做"。高 ROI 切片已交付, 实质到**平台期**。下一步真正值钱的不是补 Phase 2/8/9, 而是 agent **答案质量**(Phase 7 延伸)。
+
+**下一轮立项**: [`anti-false-premise-plan-2026-06-10.md`](anti-false-premise-plan-2026-06-10.md)(`08b8bf3`)—— agent 抗错误前提幻觉, **validate-first** 分期(A 验证→B 机制→C measure), 红线"不重蹈 rule9"。**两个起步前提**: ① judge 非自评需 WSL 配非 deepseek provider key ② Phase A 的 false-premise 集 + 对照组顺带补 Phase 0 "≥20 真实金标" gate。新窗口 Read 该 plan 即可开工 Phase A。
+
+---
+
+**本会话(2026-06-09 22:22 → 06-10, ~38 commit, `b2c03a1`→`08b8bf3`)总览**: #10 只读 audit + #1 recall eval golden → impact.py 拆分 + web RBAC 测试隔离 → Phase 7 完整版(LLM planner 验证 + e2e eval E1-E4 + keyword-vs-LLM 端到端实证)→ 对抗审计 0 真 bug → eval 信度加固(token 边界灭假阳、自查金标缺陷、rule9 证伪回退)→ 专家面板否决 bm25 lane + 标定 recall 金标 → roadmap 盘点 + 抗错误前提 plan 立项。WSL 全量 1407 passed。全程纪律: 数据驱动 / 多模型 / determinism-first / 先证尺子准 / 零 delta 不留 / commit 无 AI 痕迹。
