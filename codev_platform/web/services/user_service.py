@@ -51,7 +51,7 @@ class UserService:
 
     def get_detail(self, *, username: str, caller_org_id: str, caller_is_admin: bool) -> UserItem:
         user = self._require_user(username)
-        self._guard_same_org(user, caller_org_id, caller_is_admin)
+        self._guard_org_member(user, caller_org_id, caller_is_admin)
         return self._to_item(user)
 
     def create_user(self, *, username: str, password: str, org_id: str,
@@ -82,7 +82,7 @@ class UserService:
                     caller_org_id: str, caller_is_admin: bool) -> UserActionResult:
         """更新资料 (不碰密码/状态/角色)。"""
         user = self._require_user(username)
-        self._guard_same_org(user, caller_org_id, caller_is_admin)
+        self._guard_home_org(user, caller_org_id, caller_is_admin)
         updated = User(
             username=user.username, password_hash=user.password_hash, org_id=user.org_id,
             status=user.status,
@@ -96,7 +96,7 @@ class UserService:
                    caller_is_admin: bool, actor: str) -> UserActionResult:
         """启用 / 禁用。禁用 → 撤销其所有会话 + 审计。"""
         user = self._require_user(username)
-        self._guard_same_org(user, caller_org_id, caller_is_admin)
+        self._guard_home_org(user, caller_org_id, caller_is_admin)
         status = self._coerce_status(status)
         updated = User(
             username=user.username, password_hash=user.password_hash, org_id=user.org_id,
@@ -114,7 +114,7 @@ class UserService:
                        caller_is_admin: bool, actor: str) -> UserActionResult:
         """重置 / 生成初始密码。新明文 hash 后落库, 明文不日志。"""
         user = self._require_user(username)
-        self._guard_same_org(user, caller_org_id, caller_is_admin)
+        self._guard_home_org(user, caller_org_id, caller_is_admin)
         updated = User(
             username=user.username, password_hash=hash_password(new_password), org_id=user.org_id,
             status=user.status, display_name=user.display_name, email=user.email,
@@ -130,17 +130,16 @@ class UserService:
         多对多成员模型 ([[rbac-multi-org-membership-model]]): 一个用户可属多个 org, OrgMember
         复合键即承载。授权按**目标 org** 判, 跨 org 隔离是红线:
         - **platform_admin**: 可给任意用户在任意 org 授角色 (跨 org 成员管理, 多对多的来源)。
-        - **org_admin** (非 platform_admin): 只能在自己 (session) org 内、且只能管本 org 现有用户 ——
-          绝不能写其它 org (堵跨 org 越权)。把外组用户拉进本组、或往外组写角色都拒。
-        注: org_admin 暂仍按用户**首 org** (user.org_id) 判归属, 故"管理本 org 内非本组首属的多 org
-        成员"需 platform_admin 代劳 —— 偏严(失败安全); 按成员身份判的细化留 follow-up, 不在 #8 范围。
+        - **org_admin** (非 platform_admin): 只能在自己 (session) org 内, 且目标用户须是本 org 成员
+          (首属本 org 或已是本 org 成员, 见 `_guard_org_member`) —— 绝不能写其它 org (堵跨 org 越权)。
+          set_roles 只写**目标 org 的成员角色**(不碰用户全局身份/凭据), 故按成员身份判安全。
         """
         user = self._require_user(username)
         org_id = org_id.strip()
         role = self._coerce_role(role)
         if not caller_is_admin:
-            # org_admin 越权护栏: 目标用户须属 caller org + 只能写 caller 自己 org。
-            self._guard_same_org(user, caller_org_id, caller_is_admin)
+            # org_admin 越权护栏: 目标用户须是 caller org 成员 + 只能写 caller 自己 org。
+            self._guard_org_member(user, caller_org_id, caller_is_admin)
             if org_id != caller_org_id:
                 raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能在其他组织授角色")
         get_member_store().upsert(OrgMember(org_id=org_id, username=username, role=role))
@@ -161,9 +160,29 @@ class UserService:
         return user
 
     @staticmethod
-    def _guard_same_org(user: User, caller_org_id: str, caller_is_admin: bool) -> None:
-        """org_admin 越权护栏: 非 platform_admin 只能动自己 org 的用户。"""
+    def _guard_home_org(user: User, caller_org_id: str, caller_is_admin: bool) -> None:
+        """**全局身份**变更护栏: 非 platform_admin 只能动**首属**自己 org 的用户。
+
+        用于 reset_password / set_status / update_user —— 这些改的是用户**全局**属性
+        (凭据 / 启用态 / 资料), 影响该用户在**所有** org 的登录。多对多模型下绝不能按"本 org 成员"
+        放开: 否则 org A admin 重置共享用户 U 的密码 → 以 U 登录 → 拿到 U 的 org B 成员身份 →
+        **跨 org 凭据劫持/数据泄露**(红线)。故全局变更只许 U 的首属 org admin 或 platform_admin。
+        """
         if not caller_is_admin and user.org_id != caller_org_id:
+            raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能管理其他组织用户")
+
+    @staticmethod
+    def _guard_org_member(user: User, caller_org_id: str, caller_is_admin: bool) -> None:
+        """**per-org** 护栏: 非 platform_admin 只能动**本 org 成员**(首属本 org 或已是本 org 成员)。
+
+        用于 get_detail / set_roles —— 只读用户信息 / 只写**目标 org 的成员角色**, **不碰全局身份**,
+        故按成员身份放开安全(多对多: 用户首属别处但已是本 org 成员, 本 org admin 可管其角色)。
+        是 `_guard_home_org` 的**超集**(首属本 org 必命中), 故不放松任何既有约束; 仅新增"管理本 org
+        现有成员"。非本 org 成员且首属别处 → 拒(无跨 org reach)。
+        """
+        if caller_is_admin or user.org_id == caller_org_id:
+            return
+        if get_member_store().get(caller_org_id, user.username) is None:
             raise PlatformError(ErrorCode.ACCESS_DENIED, "org_admin 不能管理其他组织用户")
 
     @staticmethod

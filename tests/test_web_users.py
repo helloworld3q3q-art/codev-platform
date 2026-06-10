@@ -246,6 +246,44 @@ def test_platform_admin_sets_role_across_orgs(client, monkeypatch):
     assert member_store.get("orgA", "multi").role == "member"  # 首 org 成员关系仍在 → 多对多并存
 
 
+def _seed_shared_member():
+    # U 首属 orgB, 但已是 orgA 成员(模拟 platform_admin 把 U 加入 orgA)。
+    user_store.upsert(User(username="shared", password_hash=hash_password("pw123456"), org_id="orgB"))
+    member_store.upsert(OrgMember(org_id="orgA", username="shared", role="member"))
+
+
+def test_org_admin_manages_member_from_other_home_org(client):
+    # #8 后续 per-org: orgA org_admin 可管"首属 orgB 但已是 orgA 成员"的用户在 orgA 的角色 + 看详情
+    # (此前按首 org 判会 403)。set_roles 只写目标 org 成员角色, 不碰全局身份, 故安全。
+    auth = _admin_session(org="orgA", username="boss")
+    _seed_shared_member()
+    r = client.post("/api/v1/users/roles", headers=auth,
+                    json={"username": "shared", "orgId": "orgA", "role": "admin"})
+    assert r.status_code == 200
+    assert member_store.get("orgA", "shared").role == "admin"
+    d = client.get("/api/v1/users/detail", headers=auth, params={"username": "shared"})
+    assert d.status_code == 200
+
+
+def test_org_admin_cannot_reset_password_of_shared_member(client):
+    # 🔴 红线: orgA admin 不能重置共享成员(首属 orgB)的**全局密码** —— 否则可劫持凭据登录拿 orgB 身份。
+    auth = _admin_session(org="orgA", username="boss")
+    _seed_shared_member()
+    r = client.post("/api/v1/users/password/reset", headers=auth,
+                    json={"username": "shared", "newPassword": "hijack-pw"})
+    assert r.status_code == 403
+    assert r.json()["errors"][0]["errorCode"] == "access_denied"
+
+
+def test_org_admin_cannot_disable_shared_member(client):
+    # 🔴 红线: orgA admin 不能禁用共享成员(首属 orgB)的**全局账号** —— 否则跨 org 拒绝该用户在 orgB 登录。
+    auth = _admin_session(org="orgA", username="boss")
+    _seed_shared_member()
+    r = client.post("/api/v1/users/status", headers=auth,
+                    json={"username": "shared", "status": STATUS_DISABLED})
+    assert r.status_code == 403
+
+
 # ---- 授权: 非 admin 被拒 ----
 
 def test_non_admin_cannot_list(client):
