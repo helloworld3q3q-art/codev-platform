@@ -12,7 +12,8 @@
 | [next-steps-2026-06-09.md](next-steps-2026-06-09.md) | 接下来做什么: 审计剩余项(#10 ✅ 已修 / #7 config DI / #8 set_roles 多 org 延后)+ 三梯队整体剩余计划 + 新窗口开局动作 | 进行中(审计 10/11) |
 | [agent-e2e-eval-design-2026-06-09.md](agent-e2e-eval-design-2026-06-09.md) | Phase 7 完整版剩余: agent 端到端 eval 设计(grounding 优先打分 + 数据集格式 + harness + 分期 E1-E4)| 设计(E1-E4 已落地) |
 | [anti-false-premise-plan-2026-06-10.md](anti-false-premise-plan-2026-06-10.md) | 下一轮: agent 抗错误前提幻觉(validate-first 分期 A 验证→B 机制→C measure; 不重蹈 rule9)| 🔚 Phase A 证伪结案(停轮) |
-| [multi-repo-contract-bridge-plan-2026-06-10.md](multi-repo-contract-bridge-plan-2026-06-10.md) | 多仓项目跨层链路: operationId 契约桥(4 专家面板收敛; Phase 1 契约桥+漂移立即做, Phase 2 多根索引冻结到 Gate) | 计划(待起 Phase 1) |
+
+> 多仓 operationId 契约桥课题独立成轨, 见 [`../roadmap-2026-06-10/`](../roadmap-2026-06-10/)。
 
 ## 落地状态(2026-06-08, 只拎 2 高 ROI 项)
 
