@@ -266,3 +266,19 @@ WSL 全量 pytest(完整环境: PG/模型/codegraph)首跑 **1361 passed / 10 fa
 - #1 `test_web_membership`(新): 直接钉 `resolve_membership` 三路径(PG-优先注入 fake store / 内存回退 / 无身份空)—— **PG 分支此前无直接单测**(被 web 测试的 `_pg_rbac_store→None` monkeypatch 遮蔽)的盲区补上。WSL 3 passed。
 
 WSL 全量 **1401 passed / 0 failed**。**今日全会话改动经对抗式审计 + follow-up, 可放心。**
+
+## 二十八、专家面板定方向 + eval 打分器信度标定
+
+用户要"先来几个专家分析再继续"。派 4 视角面板(架构 / 检索-AI / 务实-ROI / 质量-测量)分析下一步候选(扩 eval 集 A / #7 config DI / Phase 6 lane / 重型):
+
+- **共识否掉 C 原样**(架构 + AI): `search_docs`/memory **早是独立 agent 工具**, 异构语料(doc chunk vs 代码符号)塞进 `code_recall` fusion 会污染以代码实体为 ground truth 的金标; 当前"planner 路由到对的通道"才是正解, 要扩也是 bm25-over-代码(同构)。
+- **B(#7)暂缓**(务实/AI/质量): 与检索真杠杆无关 + RBAC 敏感 + band-aid 零真实风险([[post-change-adversarial-audit]] 的 `test_web_membership` 已补盲区)。架构师想还债但承认不紧急。
+- **务实视角力主收摊**(已到干净完成点); 但用户要继续。
+- **检索 + 质量专家一致洞见**: 所有数字撞**易集天花板**(planner 饱和 / recall MRR 0.917 见顶 / grounding 0.9 / judge 自评 5.0)→ **测量已盲**; 且打分器有真漏洞: `must_mention` 裸子串假阳("sql"命中"sqlite"、"service"命中"services")→ grounding 虚高。质量专家定调: **"先证明尺子准, 再加长尺子。"**
+
+**执行(A 的正确第一步 = 标定尺子, 非堆例子)** `4d3e50b`:
+- `_mentions` 改 **token 边界匹配**(前后非 `[A-Za-z0-9]`; `_`/`.` 算边界, 故 `x.classify_query(` 仍命中)→ 灭裸子串假阳。+3 单测(假阳灭除 + 空/无关答案对照)。
+- 锚点加固: 去通用单词("AI"→"Generated")、补特异锚("sql"+"plugins")、加 `must_not` 诱饵(open_store)让恒 0 的 hallucination_rate 能动。
+- **标定结果(WSL 真跑)**: grounding **1.0 → 0.9** —— 证实旧 1.0 含 ~0.1 子串假阳虚高, 现更诚实; `hallucination_rate 0.0` 现**有意义**(诱饵在场未误触)。WSL 全量 **1404 passed**。
+
+**下一步(面板共识路线, 留新一轮)**: 尺子准了 → 扩集才有意义。扩法(质量 + 检索专家): 覆盖矩阵(4 类 × 3 风格 × ≥2 项目, 30-40 例)+ 多跳/易错/**负样本**难题(让 grounding 脱天花板)+ judge 换**非自评**模型 + 多次取均值 + 报置信区间。这是把 Phase 7 "趋势"变"定论"、并暴露下一个真杠杆(召不全?读码不深?)的路 —— 属认真一轮, 不在本窗口仓促铺开。
