@@ -16,25 +16,6 @@ export interface ImpactNodeItem {
   viaEdge?: string;
 }
 
-// 多跳路径(Phase 5 impactPaths): 一条依赖路径 = 依赖方 endpoint + 评分 + 逐跳(可解释)。
-export interface PathHopView {
-  name: string;
-  layer: string;
-  viaEdge?: string;
-  confidence?: number;
-  certain: boolean;
-}
-
-export interface PathView {
-  endpointId: string;
-  endpointName: string;
-  endpointLayer: string;
-  score: number;
-  depth: number;
-  certain: boolean;
-  hops: PathHopView[];
-}
-
 export interface ResultView {
   found: boolean;
   targetName?: string;
@@ -46,8 +27,8 @@ export interface ResultView {
   total: number;
   ambiguous: ImpactNodeItem[];
   emptyHint?: string;
-  // impactPaths 专用: 非空时 ResultPanel 渲染路径链(而非按层清单)。
-  paths?: PathView[];
+  // impactPaths 专用: 非空时 ResultPanel 渲染路径链(而非按层清单)。直接用生成类型 API.ImpactPath。
+  paths?: API.ImpactPath[];
 }
 
 // 查询类型切换项 (纯前端 UI 开关, 决定调哪个 API, 不进入请求体)。
@@ -259,32 +240,7 @@ export const normalizeImpactPaths = (resp?: API.GraphImpactPathsResponse): Resul
     };
   }
   const target = asObj(resp.target);
-  const rawPaths = Array.isArray(resp.paths) ? resp.paths : [];
-  const paths: PathView[] = rawPaths.map((p) => {
-    const obj = asObj(p);
-    const ep = asObj(obj.endpoint);
-    const rawHops = Array.isArray(obj.hops) ? obj.hops : [];
-    const hops: PathHopView[] = rawHops.map((h) => {
-      const ho = asObj(h);
-      const hn = asObj(ho.node);
-      return {
-        name: str(hn.name) || str(hn.id),
-        layer: str(hn.layer) || 'other',
-        viaEdge: ho.viaEdge !== null && ho.viaEdge !== undefined ? str(ho.viaEdge) : undefined,
-        confidence: numOrUndef(ho.confidence),
-        certain: Boolean(ho.certain),
-      };
-    });
-    return {
-      endpointId: str(ep.id),
-      endpointName: str(ep.name) || str(ep.id),
-      endpointLayer: str(ep.layer) || 'other',
-      score: numOrUndef(obj.score) ?? 0,
-      depth: numOrUndef(obj.depth) ?? 0,
-      certain: Boolean(obj.certain),
-      hops,
-    };
-  });
+  const paths = Array.isArray(resp.paths) ? resp.paths : [];
   return {
     found: true,
     targetName: str(target.name),
@@ -293,7 +249,7 @@ export const normalizeImpactPaths = (resp?: API.GraphImpactPathsResponse): Resul
     byLayer: {},
     total: numOrUndef(resp.count) ?? paths.length,
     ambiguous: [],
-    paths,
+    paths,            // 直接透传 API.ImpactPath[]; 渲染在 ResultPanel 做 ?./fallback
   };
 };
 
