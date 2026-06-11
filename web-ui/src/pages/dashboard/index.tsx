@@ -1,6 +1,6 @@
 // 仪表盘首页 —— 平台健康 + 当前项目图谱统计 + 资源计数概览。
-import { useCallback, useEffect, useState } from 'react';
 import { useModel } from '@umijs/max';
+import { useCallback, useEffect, useState } from 'react';
 
 import { ProCard, StatisticCard } from '@ant-design/pro-components';
 import { Descriptions, Spin, Tag } from 'antd';
@@ -12,6 +12,7 @@ import GraphHealthCard from './components/GraphHealthCard';
 import IndexFreshnessCard from './components/IndexFreshnessCard';
 import McpUsageCard from './components/McpUsageCard';
 import SoftQualityCard from './components/SoftQualityCard';
+import TokenUsageCard from './components/TokenUsageCard';
 import { DASHBOARD_DEFAULT, loadDashboard, type DashboardData } from './components/utils';
 
 export default function DashboardPage() {
@@ -44,6 +45,7 @@ export default function DashboardPage() {
     codegraph,
     unified,
     mcpUsage,
+    agentUsage,
     indexStatus,
     graphAudit,
     softQuality,
@@ -59,7 +61,9 @@ export default function DashboardPage() {
         <StatisticCard.Group direction="row" className="i:mb-16">
           <StatisticCard statistic={{ title: '项目数', value: projectCount }} />
           <StatisticCard statistic={{ title: '组织数', value: orgCount }} />
-          <StatisticCard statistic={{ title: 'CodeGraph 节点', value: codegraph?.totalNodes ?? 0 }} />
+          <StatisticCard
+            statistic={{ title: 'CodeGraph 节点', value: codegraph?.totalNodes ?? 0 }}
+          />
           <StatisticCard statistic={{ title: '统一图谱 节点', value: unified?.totalNodes ?? 0 }} />
           <StatisticCard statistic={{ title: '统一图谱 边', value: unified?.totalEdges ?? 0 }} />
         </StatisticCard.Group>
@@ -80,8 +84,12 @@ export default function DashboardPage() {
 
         <ProCard title="当前项目图谱" variant="outlined" classNames={{ root: 'i:mb-16' }}>
           <Descriptions column={3} size="small">
-            <Descriptions.Item label="CodeGraph 文件">{codegraph?.totalFiles ?? 0}</Descriptions.Item>
-            <Descriptions.Item label="CodeGraph 节点">{codegraph?.totalNodes ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="CodeGraph 文件">
+              {codegraph?.totalFiles ?? 0}
+            </Descriptions.Item>
+            <Descriptions.Item label="CodeGraph 节点">
+              {codegraph?.totalNodes ?? 0}
+            </Descriptions.Item>
             <Descriptions.Item label="CodeGraph 边">{codegraph?.totalEdges ?? 0}</Descriptions.Item>
             <Descriptions.Item label="统一图谱 节点">{unified?.totalNodes ?? 0}</Descriptions.Item>
             <Descriptions.Item label="统一图谱 边">{unified?.totalEdges ?? 0}</Descriptions.Item>
@@ -99,6 +107,8 @@ export default function DashboardPage() {
         <GraphHealthCard data={graphAudit} />
 
         <SoftQualityCard data={softQuality} />
+
+        {isAdmin && <TokenUsageCard data={agentUsage} />}
 
         {isAdmin && <McpUsageCard data={mcpUsage} />}
       </Spin>

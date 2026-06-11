@@ -1,10 +1,10 @@
 // 仪表盘数据装配 —— 并发拉取平台健康 + 当前项目图谱统计 + 资源计数, 各源独立容错。
-import { postOrgsList } from '@/services/apis/orgapi';
-import { getCheck } from '@/services/apis/healthapi';
 import { postAudit, postSoftQuality, postStats, postStats2 } from '@/services/apis/graphapi';
+import { getCheck } from '@/services/apis/healthapi';
 import { postStatus } from '@/services/apis/indexapi';
+import { postOrgsList } from '@/services/apis/orgapi';
 import { postProjectsList } from '@/services/apis/projectapi';
-import { getMcpUsage } from '@/services/apis/reportsapi';
+import { getAgentUsage, getMcpUsage } from '@/services/apis/reportsapi';
 
 export interface DashboardData {
   health?: API.HealthData;
@@ -13,6 +13,8 @@ export interface DashboardData {
   unified?: API.UnifiedGraphStatsResponse;
   // MCP 调用分析 (仅管理员可见, 后端 403 兜底); 非管理员不拉取。
   mcpUsage?: API.McpUsageReportResponse;
+  // agent token 用量 (仅管理员可见): 总量/按模型/缓存率/估算成本, 读 agent_trace。
+  agentUsage?: API.AgentUsageReportResponse;
   // 各类索引相对当前 HEAD 的新鲜度 (统一 IndexManifest, Phase 1)。
   indexStatus?: API.IndexStatusResponse;
   // 统一图谱结构审计摘要 (Phase 3)。
@@ -28,6 +30,7 @@ export const DASHBOARD_DEFAULT: DashboardData = {
   codegraph: undefined,
   unified: undefined,
   mcpUsage: undefined,
+  agentUsage: undefined,
   indexStatus: undefined,
   graphAudit: undefined,
   softQuality: undefined,
@@ -57,6 +60,16 @@ async function loadMcpUsage(enabled: boolean): Promise<API.McpUsageReportRespons
   }, undefined);
 }
 
+async function loadAgentUsage(enabled: boolean): Promise<API.AgentUsageReportResponse | undefined> {
+  if (!enabled) {
+    return undefined;
+  }
+  return safe(async (): Promise<API.AgentUsageReportResponse | undefined> => {
+    const res = await getAgentUsage();
+    return res.data as API.AgentUsageReportResponse | undefined;
+  }, undefined);
+}
+
 export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
   const [
     health,
@@ -65,6 +78,7 @@ export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
     projectCount,
     orgCount,
     mcpUsage,
+    agentUsage,
     indexStatus,
     graphAudit,
     softQuality,
@@ -90,6 +104,7 @@ export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
       return res.total ?? 0;
     }, 0),
     loadMcpUsage(isAdmin),
+    loadAgentUsage(isAdmin),
     safe(async (): Promise<API.IndexStatusResponse | undefined> => {
       const res = await postStatus();
       return res.data;
@@ -110,6 +125,7 @@ export async function loadDashboard(isAdmin: boolean): Promise<DashboardData> {
     projectCount,
     orgCount,
     mcpUsage,
+    agentUsage,
     indexStatus,
     graphAudit,
     softQuality,

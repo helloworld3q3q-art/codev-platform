@@ -44,3 +44,10 @@ export async function getMcpUsage(): Promise<API.CommonResult_McpUsageReportResp
   });
 }
 
+// agent token 用量-总量+按模型+最近明细(7天/全时段, 含缓存率与估算成本)
+export async function getAgentUsage(): Promise<API.CommonResult_AgentUsageReportResponse_> {
+  return await get<API.CommonResult_AgentUsageReportResponse_>({
+    url: `${commonUrl}/api/v1/reports/agent-usage`,
+  });
+}
+

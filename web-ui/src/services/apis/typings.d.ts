@@ -3,6 +3,51 @@ declare namespace API {
   // any 类型定义
 type any = any;
 
+// 单次 agent 查询的 token 用量明细(审计列表行)。
+interface AgentUsageEntry {
+  ts?: number;
+  sessionId?: string;
+  model?: string;
+  steps?: number;
+  stopReason?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  costUsd?: number;
+}
+
+// 按模型聚合一行(token + 估算成本 + 缓存命中率)。
+interface AgentUsageModel {
+  model?: string;
+  queries?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  cacheHitRate?: number;
+  costUsd?: number;
+}
+
+// AgentUsageReportResponse 响应数据
+interface AgentUsageReportResponse {
+  last7d?: AgentUsageWindow;
+  allTime?: AgentUsageWindow;
+}
+
+// 一个时间窗的总量 + 按模型 + 最近明细。
+interface AgentUsageWindow {
+  queries?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  cacheHitRate?: number;
+  costUsd?: number;
+  byModel?: AgentUsageModel[];
+  recent?: AgentUsageEntry[];
+}
+
 // ApiCallersRequest 请求参数
 interface ApiCallersRequest {
   endpointRef: string;
@@ -164,6 +209,15 @@ interface CodegraphStatsResponse {
   byLanguage?: Record<string, number>;
   byNodeKind?: Record<string, number>;
   byEdgeKind?: Record<string, number>;
+}
+
+// CommonResult_AgentUsageReportResponse_ 响应数据
+interface CommonResult_AgentUsageReportResponse_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
 }
 
 // CommonResult_ChatData_ 接口
@@ -756,7 +810,7 @@ interface MemberActionResult {
 // 加成员 (幂等 upsert; org_admin 管本 org)。role 对齐 MemberRoleEnum。
 interface MemberAddRequest {
   code: string; // 组织编码
-  username: string; // 成员用户名
+  username: string; // 成员用户���
   role?: string; // 成员角色 (MemberRoleEnum: viewer|member|admin)
 }
 
@@ -1032,11 +1086,12 @@ interface SessionItem {
   updatedAt?: any; // 最近活跃时间 (ISO8601)
 }
 
-// 历史消息 (agent MessageOut 的 web 投影)。assistant 携带工具调用流 steps。
+// 历史消息 (agent MessageOut 的 web 投影)。assistant 携带工具调用流 steps + usage。
 interface SessionMessageItem {
   role: string; // user | assistant
   content?: string; // 消息正文
   steps?: ChatStep[]; // 工具调用流(assistant)
+  usage?: Record<string, any>; // token / 缓存统计(assistant)
 }
 
 // 切换活动组织。多 org 成员在会话内切到另一所属 org, 重签 session 后 RBAC 按新 org 判。
