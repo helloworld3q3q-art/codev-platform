@@ -1,7 +1,7 @@
-import { MessageOutlined } from '@ant-design/icons';
+import { MenuUnfoldOutlined, MessageOutlined } from '@ant-design/icons';
 import { useCallback, useRef, useState } from 'react';
 
-// 会话开关:贴左边缘(菜单右侧)的竖向小钮, 可上下拖动(位置持久化), 点击开/关会话面板。
+// 会话开关:贴左边缘(菜单右侧)的竖向小钮, 可上下拖动(位置持久化), 点击在"菜单 ↔ 会话列表"间切换。
 // 区分点击与拖动(位移阈值): 拖动只挪位置, 未拖动才视为点击。
 
 const CARD_H = 720; // 与 index.tsx 卡片 h-720 对齐
@@ -22,10 +22,11 @@ const readY = (): number | null => {
 };
 
 interface SessionToggleProps {
+  open: boolean;
   onToggle: () => void;
 }
 
-const SessionToggle: React.FC<SessionToggleProps> = ({ onToggle }) => {
+const SessionToggle: React.FC<SessionToggleProps> = ({ open, onToggle }) => {
   const [y, setY] = useState<number>(() => {
     const saved = readY();
     return clamp(saved ?? (CARD_H - TAB_H) / 2, 4, CARD_H - TAB_H);
@@ -77,12 +78,12 @@ const SessionToggle: React.FC<SessionToggleProps> = ({ onToggle }) => {
     <div
       className="absolute left-0 z-20 flex items-center justify-center w-18 bg-primaryHover text-#ffffff rounded-r-8 shadow-md cursor-grab select-none touch-none active:cursor-grabbing"
       style={{ top: y, height: TAB_H }}
-      title="会话(点击开/关, 可上下拖动)"
+      title={open ? '切回菜单(可上下拖动)' : '会话列表(点击展开, 可上下拖动)'}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
-      <MessageOutlined className="text-14" />
+      {open ? <MenuUnfoldOutlined className="text-14" /> : <MessageOutlined className="text-14" />}
     </div>
   );
 };
