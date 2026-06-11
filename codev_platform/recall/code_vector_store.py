@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 # 节点文本拼接字段(语义意义从强到弱); file 只入 metadata 不入嵌入文本(路径噪声)。
 _TEXT_FIELDS = ("name", "qualifiedName", "signature", "docstring")
 
+# 索引排除的低价值 kind(2026-06-11 综合验证发现): import=纯模块路径无语义体 / file=名即路径
+# (与 file metadata 冗余)/ variable=多为局部·模块杂项。实测占两项目近半节点且污染语义召回
+# (query「load config」召回的全是 import 节点而非 load_config 函数)。**blocklist 非 allowlist**:
+# 跨语言 kind 词汇不同, 排除已证噪声的 3 类即可, 不漏 function/method/class/field/route 等有用 kind。
+_SKIP_KINDS = frozenset({"import", "file", "variable"})
+
 
 def code_vec_collection_name(project_id: str) -> str:
     """该项目的代码向量 collection 名(与 platform_docs / agent_memory 隔离)。"""
@@ -125,6 +131,8 @@ def build_code_vector_index(project_id: str) -> int:
     with CodegraphClient(project_id) as cg:
         for node in cg.iter_nodes():
             nid = node.get("id")
+            if node.get("kind") in _SKIP_KINDS:   # 低价值 kind 不入向量库(import/file/variable)
+                continue
             text = build_text(node)
             if not nid or not text.strip():
                 continue
