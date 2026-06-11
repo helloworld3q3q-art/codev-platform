@@ -2,7 +2,7 @@
 import type { ProColumns } from '@ant-design/pro-components';
 import dayjs from 'dayjs';
 
-import type { UsageRow } from '../types';
+import type { UsageRow } from './types';
 
 function renderTime(_: unknown, r: UsageRow): string {
   return r.ts ? dayjs.unix(r.ts).format('YYYY/MM/DD HH:mm:ss') : '—';

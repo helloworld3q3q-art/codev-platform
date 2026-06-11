@@ -9,8 +9,8 @@ import ResizableTable from '@/components/ResizableTable';
 import { getAgentUsage } from '@/services/apis/reportsapi';
 
 import { createColumns } from './components/Columns';
-import type { UsageRow, WindowKey } from './types';
-import { buildRows, WINDOW_OPTIONS } from './utils';
+import type { UsageRow, WindowKey } from './components/types';
+import { buildRows, WINDOW_OPTIONS } from './components/utils';
 
 const UsageAuditPage: React.FC = () => {
   const [data, setData] = useState<API.AgentUsageReportResponse | undefined>(undefined);

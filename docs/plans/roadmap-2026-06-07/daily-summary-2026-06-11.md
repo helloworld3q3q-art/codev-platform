@@ -65,6 +65,7 @@
 - **首页看板卡** `TokenUsageCard`(总量 5 StatisticCard + 按模型表 + 窗口切换,`538f5e9`)。
 - **系统管理 Token 用量审计页** `/usage`(per-query 明细列表,复用 getAgentUsage().recent,`d9e607e`)。
 - **流程教训**:误跑 `pnpm run lint`(全 src prettier --write)churn 48 文件 → 已 git checkout 还原,只提交 feature 文件。验前端只跑 `pnpm run tsc` + 针对性 `eslint <file>`,不跑会 --write 全量的 lint。
+- **规范修正(用户两次纠正)**:Token 用量审计页初版照搬 dashboard 卡片(用了卡片版 `@/components/Table` + 列定义塞 index)→ 改对:① 用 **`ResizableTable`**(页面表格封装版,支持纯 dataSource)② 按**关注点分离**拆 `components/{Columns,utils,types}`,index 轻量。**根因 + 教训:新建页面要镜像同类「页面」模板(`system/audit`),不是镜像卡片组件**;component-patterns §Table 封装版 + architecture §2 关注点分离都指向这个。`f3b0298`/`6be5a9c`。
 
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
