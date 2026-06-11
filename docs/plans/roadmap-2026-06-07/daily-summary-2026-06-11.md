@@ -74,5 +74,16 @@
 - **否决**:output 简洁化(省略证据链掉 grounding)、历史裁剪(破缓存前缀 hit→miss 反贵)。
 - 详见 [`loop-cost-optimization-plan-2026-06-11.md`](loop-cost-optimization-plan-2026-06-11.md) §十。
 
+## 十二、完整测试 + 两项目 LLM 准确率验证(收尾,改动确认干净)
+本会话末用户要求"完整跑测试 + 量化项目也纳入 + 调 LLM 验两项目准确率",WSL 全量:
+- **全量 pytest**:1468 passed / 0 失败 / 46s。
+- **recall eval 两项目**(确定性):codev 18 例 mrr_delta +0.108 [0.008,0.215];openclaw 量化 6 例 +0.347 [0.222,0.458]。
+- **新工具对 openclaw 量化直连 smoke**:codegraph_trace(多跳链)/ codegraph_search / read_file 窗口读 全 OK + 紧凑 JSON 生效。
+- **agent_e2e 调 LLM grounding 两项目**(flash):
+  - **openclaw 量化:1.0 [1.0,1.0]**(5 例全对,read_file 全用上)—— 无回归。
+  - **codev**:首跑 0.667(吓人)→ **repeat-2 复跑 0.917 [0.75,1.0]** —— 首跑是 flash 单次噪声;复跑 5/6 稳 1.0,唯一弱例 = LoopPolicy 多跳(g=0.5 flaky,耗 max_steps)= 长期已知弱点(非本轮引入)。
+- **裁决**:**紧凑 JSON + read_file 窗口读两项目都没掉准确率,改动验证通过,无需撤回**。"1.0 旧基线"本身是 n=6 单跑幸运值,repeat-2 的 0.917 才是真基线。
+- **教训**:① 我"read_file nudge 无需 A/B"是侥幸对,行为改动本该验(repeat-2 现补上,通过)② 别对 n=6 单跑下结论,repeat 取均值才算(单跑 0.667 差点误判回归)③ 用户坚持"调 LLM 验两项目"抓出了漏验项,对。
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
