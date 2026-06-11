@@ -19,7 +19,7 @@ from codev_platform.graph.schema import (  # noqa: E402
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result  # noqa: E402
+from codev_platform.graph.store import open_store  # noqa: E402
 from codev_platform.web.routes import graph as graph_routes  # noqa: E402
 
 _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
@@ -49,7 +49,8 @@ def _seed(store, nodes, edges):
 
 
 def _client(monkeypatch, store):
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store)
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=store, mode=mode))
     app = build_app(title="t", routers=[graph_routes.router], cfg=_CFG)
     return TestClient(app)
 
@@ -78,7 +79,8 @@ def test_soft_quality_detects_giant(tmp_path, monkeypatch):
 
 
 def test_soft_quality_store_missing_graceful(tmp_path, monkeypatch):
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "nope.sqlite")
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=tmp_path / "nope.sqlite", mode=mode))
     app = build_app(title="t", routers=[graph_routes.router], cfg=_CFG)
     r = TestClient(app).post("/api/v1/graph/soft-quality", json={}, headers=_H)
     assert r.status_code == 200 and r.json()["data"]["healthy"] is True

@@ -19,7 +19,7 @@ from codev_platform.graph.schema import (  # noqa: E402
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result  # noqa: E402
+from codev_platform.graph.store import open_store  # noqa: E402
 from codev_platform.web.routes import graph as graph_routes  # noqa: E402
 
 _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
@@ -40,7 +40,9 @@ def _seed(store, edges):
 
 
 def _client(monkeypatch, store):
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store)
+    # 路由经 open_store 工厂取 store(不再 graph_store_path); patch 工厂重定向到 seed 路径。
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=store, mode=mode))
     app = build_app(title="t", routers=[graph_routes.router], cfg=_CFG)
     return TestClient(app)
 
@@ -64,7 +66,8 @@ def test_graph_audit_detects_dangling(tmp_path, monkeypatch):
 
 
 def test_graph_audit_store_missing_graceful(tmp_path, monkeypatch):
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "nope.sqlite")
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=tmp_path / "nope.sqlite", mode=mode))
     app = build_app(title="t", routers=[graph_routes.router], cfg=_CFG)
     r = TestClient(app).post("/api/v1/graph/audit", json={}, headers=_H)
     assert r.status_code == 200 and r.json()["data"]["clean"] is True

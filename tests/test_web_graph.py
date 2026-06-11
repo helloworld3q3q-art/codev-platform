@@ -20,6 +20,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from codev_platform.core.httpkit import build_app  # noqa: E402
+from codev_platform.graph.store import open_store  # noqa: E402
 from codev_platform.web.routes import graph as graph_routes  # noqa: E402
 
 # passthrough → require_project_access 放行任意 X-Project-Id (acl advisory allow)。
@@ -177,7 +178,8 @@ def test_unified_graph_returns_all_plugin_nodes(tmp_path, monkeypatch):
     """统一图谱返回全部插件节点 (db_table/db_column + backend_endpoint), 统一 kind 直出。"""
     store_db = tmp_path / "store.sqlite"
     _seed_unified_store(store_db, _PID)
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=store_db, mode=mode))
     c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
     r = c.post("/api/v1/graph/unified/graph", headers=_HEADERS, json={})
     assert r.status_code == 200
@@ -196,7 +198,8 @@ def test_unified_stats_counts_by_kind(tmp_path, monkeypatch):
     """统一统计按 kind 聚合全部插件节点/边。"""
     store_db = tmp_path / "store.sqlite"
     _seed_unified_store(store_db, _PID)
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store_db)
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=store_db, mode=mode))
     c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
     r = c.post("/api/v1/graph/unified/stats", headers=_HEADERS, json={})
     assert r.status_code == 200
@@ -208,7 +211,8 @@ def test_unified_stats_counts_by_kind(tmp_path, monkeypatch):
 
 def test_unified_graph_empty_when_store_missing(tmp_path, monkeypatch):
     """store 缺失 → 统一图谱返回空 (200, 非错误)。"""
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "nope.sqlite")
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=tmp_path / "nope.sqlite", mode=mode))
     c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
     rg = c.post("/api/v1/graph/unified/graph", headers=_HEADERS, json={})
     assert rg.status_code == 200

@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 from codev_platform.core.httpkit import build_app  # noqa: E402
 from codev_platform.graph.schema import AnalyzerResult, GraphNode, NodeKind  # noqa: E402
 from codev_platform.graph.store import open_store as real_open_store  # noqa: E402
-from codev_platform.graph.store import upsert_result  # noqa: E402
 from codev_platform.web.routes import recall as recall_routes  # noqa: E402
 
 _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
@@ -38,7 +37,7 @@ def test_recall_code_graph_only_fail_soft(tmp_path, monkeypatch):
     c.close()
     # codegraph db 不存在 → 该 lane fail-soft, graph lane 仍出结果。
     monkeypatch.setattr("codev_platform.graph.store.open_store",
-                        lambda pid: real_open_store(pid, path=store))
+                        lambda pid, mode="rw": real_open_store(pid, path=store, mode=mode))
     r = TestClient(_app()).post("/api/v1/recall/code", json={"query": "user"}, headers=_H)
     assert r.status_code == 200
     d = r.json()["data"]

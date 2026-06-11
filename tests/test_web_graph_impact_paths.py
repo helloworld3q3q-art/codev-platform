@@ -19,7 +19,7 @@ from codev_platform.graph.schema import (  # noqa: E402
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result  # noqa: E402
+from codev_platform.graph.store import open_store  # noqa: E402
 from codev_platform.web.routes import graph as graph_routes  # noqa: E402
 
 _CFG = {"gateway": {"auth_mode": "passthrough"}, "projects": {}}
@@ -52,7 +52,8 @@ def _seed(store):
 
 
 def _client(monkeypatch, store):
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: store)
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=store, mode=mode))
     return TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG))
 
 
@@ -80,7 +81,8 @@ def test_impact_paths_node_not_found(tmp_path, monkeypatch):
 
 
 def test_impact_paths_store_missing_graceful(tmp_path, monkeypatch):
-    monkeypatch.setattr(graph_routes, "graph_store_path", lambda pid: tmp_path / "nope.sqlite")
+    monkeypatch.setattr(graph_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=tmp_path / "nope.sqlite", mode=mode))
     r = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG)).post(
         "/api/v1/graph/impact-paths", json={"nodeRef": "users"}, headers=_H)
     assert r.status_code == 200 and r.json()["data"]["found"] is False

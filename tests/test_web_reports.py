@@ -21,7 +21,7 @@ from codev_platform.graph.schema import (  # noqa: E402
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result  # noqa: E402
+from codev_platform.graph.store import open_store  # noqa: E402
 from codev_platform.web.routes import reports as reports_routes  # noqa: E402
 from codev_platform.web.security.sessions import session_store  # noqa: E402
 
@@ -54,7 +54,8 @@ def client(tmp_path, monkeypatch):
     ]
     c.upsert_result(_PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     c.close()
-    monkeypatch.setattr(reports_routes, "graph_store_path", lambda pid: store)
+    monkeypatch.setattr(reports_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=store, mode=mode))
     app = build_app(title="t", routers=[reports_routes.router], cfg=_CFG)
     return TestClient(app)
 
@@ -99,7 +100,8 @@ def test_impact_unknown_node(client):
 
 
 def test_store_missing_graceful(tmp_path, monkeypatch):
-    monkeypatch.setattr(reports_routes, "graph_store_path", lambda pid: tmp_path / "nope.sqlite")
+    monkeypatch.setattr(reports_routes, "open_store",
+                        lambda pid, mode="rw": open_store(pid, path=tmp_path / "nope.sqlite", mode=mode))
     app = build_app(title="t", routers=[reports_routes.router], cfg=_CFG)
     r = TestClient(app).post("/api/v1/reports/impact", json={"nodeRef": "users"}, headers=_H)
     assert r.status_code == 200 and r.json()["data"]["found"] is False
