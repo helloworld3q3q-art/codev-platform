@@ -60,7 +60,6 @@ ai-health --all
 | Phase 6 bm25 lane | 0.5天 | recall 再加一 lane;同 fusion 接线模式 |
 | Phase 6 reranker | 1天 | reranker 模型;压缩候选精排,关闭时降级加权 RRF(plan Gate 已设计) |
 | Phase 6 memory lane | 0.5天 | PG(agent memory);把 agent/recall 接进 fusion |
-| Phase 6 vector lane reindex 集成 | 0.5天 | 现为独立 CLI;接 reindex worker(`--kind code_vec` 或挂 codegraph 后)让索引随提交自动刷新 |
 
 ### 🔵 第三梯队:前端(需 pnpm/tsc,本机 3D 内存风险)
 
