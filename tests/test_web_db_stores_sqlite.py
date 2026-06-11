@@ -80,6 +80,18 @@ def test_user_store_get_org_id_from_membership(engine):
     assert got2.password_hash == "h2" and got2.status == "DISABLED" and got2.display_name == "Alice2"
 
 
+def test_user_store_set_password_targeted_update(engine):
+    # set_password 只改 password_hash, 保住 display_name/email/status(不全量覆盖, 不造 fork)。
+    usr = PgUserStore(engine=engine)
+    usr.create(User(username="carol", password_hash="old", org_id="acme",
+                    status="ACTIVE", display_name="Carol", email="c@x"))
+    assert usr.set_password("carol", "newh") is True
+    got = usr.get("carol")
+    assert got.password_hash == "newh"
+    assert got.display_name == "Carol" and got.email == "c@x" and got.status == "ACTIVE"  # 保住
+    assert usr.set_password("ghost", "h") is False   # 不存在 → False(调用方提示先 add-user)
+
+
 def test_user_store_list_filtered_by_org(engine):
     org = PgOrgStore(engine=engine)
     usr = PgUserStore(engine=engine)

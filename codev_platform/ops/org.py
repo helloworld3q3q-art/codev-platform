@@ -42,7 +42,35 @@ def _get_store():
     return store
 
 
+def _cmd_set_password(args: argparse.Namespace) -> int:
+    """web 控制台登录密码 → account_store(A) 的 users.password_hash 定向更新。
+
+    双 store 关系(2026-06-12 厘清): orgs/users/org_members 同表单一真值源, A(account_store)管
+    身份+密码(web 登录读它), B(RbacStore, 本文件其余命令)管授权+角色(can_access 读它)。密码只一列
+    users.password_hash, 只 A 写 → 这里走 A 定向 UPDATE(不全量 upsert, 不覆盖 B add-user 设的
+    display_name)。**MCP/SSE 接入用 gateway token, 不需要密码**; 本命令仅给 web 控制台登录。
+    """
+    if not args.target or not getattr(args, "password", None):
+        _err("FATAL: set-password 需 <user_id> --password <明文>")
+        return 1
+    from codev_platform.core.config import load_config
+    from codev_platform.web.repositories.account_store import bind_account_stores, get_user_store
+    from codev_platform.web.security.passwords import hash_password
+
+    backend = bind_account_stores(load_config())
+    ok = get_user_store().set_password(args.target, hash_password(args.password))
+    if not ok:
+        _err(f"FATAL: user {args.target!r} 不存在 —— 先 codev-platform org add-user {args.target}")
+        return 1
+    _out(f"OK[{backend}]: user {args.target} 的 web 登录密码已设 (users.password_hash)")
+    _out("  (web 控制台登录用; MCP/SSE 接入走 gateway token, 不需要密码)")
+    return 0
+
+
 def cmd_org(args: argparse.Namespace) -> int:
+    # 密码走 A(account_store), 不需要 RbacStore(B) —— 在 B init 前分流。
+    if args.action == "set-password":
+        return _cmd_set_password(args)
     store = _get_store()
     if store is None:
         return 1
@@ -197,3 +225,10 @@ def register(subparsers) -> None:
     p_list = sub.add_parser("list", help="列已建 org + 成员")
     p_list.set_defaults(func=cmd_org, action="list", target=None, user=None, principal=None,
                         name=None, org=None, kind="user", role="member")
+
+    p_sp = sub.add_parser("set-password",
+                          help="设 web 控制台登录密码 (account_store.users.password_hash; MCP token 接入不需要)")
+    p_sp.add_argument("target", help="user_id (须先 org add-user 建)")
+    p_sp.add_argument("--password", required=True, help="明文密码 (只用于 pbkdf2 hash, 不落库)")
+    p_sp.set_defaults(func=cmd_org, action="set-password", user=None, principal=None,
+                      name=None, org=None, kind="user", role="member")

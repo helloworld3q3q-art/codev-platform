@@ -57,6 +57,16 @@ class UserStore:
         self._by_username[user.username] = user
         return user
 
+    def set_password(self, username: str, password_hash: str) -> bool:
+        """只改 password_hash, 保住其它字段(与 PgUserStore.set_password 同语义)。
+        返回 True=user 存在已更新; False=不存在。"""
+        import dataclasses
+        u = self._by_username.get(username)
+        if u is None:
+            return False
+        self._by_username[username] = dataclasses.replace(u, password_hash=password_hash)
+        return True
+
 
 class MemberStore:
     def __init__(self) -> None:

@@ -170,6 +170,18 @@ class PgUserStore(_PgBase):
             conn.execute(stmt)
         return user
 
+    def set_password(self, username: str, password_hash: str) -> bool:
+        """定向 UPDATE users.password_hash(只这一列)—— 不全量 upsert, 保住 RbacStore.add_user
+        已写的 display_name 等(同表互补: A 管密码 / B 管授权, 见 daily-summary 双 store 关系)。
+        返回 True=该 user 存在已更新; False=user 不存在(调用方提示先 org add-user)。"""
+        self._ensure()
+        from sqlalchemy import update
+        u = tables.users
+        with self._engine.begin() as conn:
+            res = conn.execute(
+                update(u).where(u.c.user_id == username).values(password_hash=password_hash))
+        return (res.rowcount or 0) > 0
+
 
 class PgMemberStore(_PgBase):
     def get(self, org_id: str, username: str) -> OrgMember | None:
