@@ -26,6 +26,9 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "jobs": {"job_id", "project_id", "job_type", "status", "created_at", "updated_at", "error"},
     "sessions": {"session_id", "username", "org_id", "access_hash", "refresh_hash",
                  "access_expires_at", "refresh_expires_at"},
+    # reindex_jobs: 2026-06-11 新增(PgJobQueue 多机共享 reindex 队列), 守护扩展到 10 表。
+    "reindex_jobs": {"project_id", "kind", "enqueued_at", "status", "claimed_by",
+                     "lease_expires_at", "claim_token"},
 }
 
 # 原 _SCHEMA 的主键列(PRIMARY KEY / PRIMARY KEY(...) 复合) + jobs。
@@ -39,6 +42,7 @@ EXPECTED_PK: dict[str, set[str]] = {
     "project_access": {"project_id", "principal"},
     "jobs": {"job_id"},
     "sessions": {"session_id"},
+    "reindex_jobs": {"project_id", "kind"},
 }
 
 # 原 _SCHEMA 的 NOT NULL 列(PK 列在 PG 隐含 NOT NULL,这里只列显式声明 / 业务约束列)。
@@ -53,12 +57,13 @@ EXPECTED_NOT_NULL: dict[str, set[str]] = {
     "jobs": {"job_id", "project_id", "job_type", "status", "created_at", "updated_at"},
     "sessions": {"session_id", "username", "org_id", "access_hash", "refresh_hash",
                  "access_expires_at", "refresh_expires_at"},
+    "reindex_jobs": {"project_id", "kind", "enqueued_at", "status"},
 }
 
-# 索引名(原 _SCHEMA 3 个 + jobs 1 + sessions 3, 2026-06-08)。
+# 索引名(原 _SCHEMA 3 个 + jobs 1 + sessions 3 + reindex_jobs 1, 2026-06-11)。
 EXPECTED_INDEXES = {"ix_org_members_user", "ix_team_members_user", "ix_teams_org",
                     "ix_jobs_project", "ix_sessions_access", "ix_sessions_refresh",
-                    "ix_sessions_username"}
+                    "ix_sessions_username", "ix_reindex_jobs_claim"}
 
 
 def test_table_names_match():
