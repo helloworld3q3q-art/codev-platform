@@ -33,6 +33,12 @@
 - runbook [`multi-user-server-deploy-runbook-2026-06-12.md`](multi-user-server-deploy-runbook-2026-06-12.md):WSL-sim→token 模式多人服务器 5 步临界路径(发 token→切模式→org 建账号/set-password/授权→client-auth --query-token→网络+重启)+ 验证 + 待补(Stage C / 真机端到端)。
 - 记忆:[[account-rbac-two-store-model]] 新增;[[multi-machine-platform-arc]] 补 server 化 + auth 临界路径 + Stage A/B 完成 + 隔离决策。
 
+## 八、roadmap-2026-06-07 收尾(盘点剩余 + 2 兄弟并行清 4 项)
+盘点本 roadmap"还有多少没做":11-Phase 蓝图刻意只交付高 ROI 项,其余 trigger-gated;对照 06-08~12 实际交付,真正"可做但未做"只 4 小项(其余=刻意 trigger-gated / 已证伪收口)。派 2 兄弟并行(后端 ‖ 前端不相交树):
+- **前端兄弟**(`967bbdd`):① soft-quality dashboard 卡、② impact-paths 路径可视化 —— 核查**早已存在并接线**(SoftQualityCard 接 postSoftQuality / impact 页 PathsList 接 postImpactPaths),roadmap TODO 系 stale。③ 清 `codegraph/common/services.ts` 二次封装(真活):删 wrapper, 5 消费者直调生成接口(postSearch/postCodegraphNode/postNeighbors/postGraph/postFileTree)+ res.data 不 as, tsc 0 error。只提交 agent 6 文件(不卷入非它改的 loginVideo.mp4)。
+- **后端兄弟**(`19e77ef`):loop-cost 残留 —— ① per-租户 token 计量(只读: Trace 加 org/user 取已记录身份不造新通道, usage_report 增 byOrg/byUser + agent_usage_by_tenant; 既有 report+web schema 不动前端无感)② per-档 max_steps cap 机制(LoopPolicy.max_steps_caps 默认 {} = 不改现状, effective_max_steps=min, config 按 provider 档解析, **cap 值 A/B 后再定不盲砍**)。366 agent 测试过, WSL 全量 1606 passed。
+- **结论**: roadmap-2026-06-07 **基本做完或刻意不做**;真活只剩 trigger-gated 重型地基(Phase 2 IR/4 社区检测否/8 性能/9 多语言/10 治理)。代码智能层判定到平台期, 主线已转多机/多组织服务器 arc。
+
 ## commit 链(2026-06-12 段)
 `de801ea`(query-token 服务端+runbook)→`de10714`(client-auth --query-token + 端到端验)→`72365f8`(runbook 用真 CLI)→`9a103b6`(双 store 厘清 + org set-password)→`8f95ff7`(runbook 密码路径)。
 (承 06-11 段:graph→PG Stage A `0d51903` / Stage B `4c773ef` / 审计修 `679714b` / MCP authz `2f13c56`。)
