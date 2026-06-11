@@ -165,6 +165,91 @@ def _relations(name: str, incoming: bool, project_id: str | None = None) -> Tool
     return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
 
 
+def _trace(name: str, incoming: bool, depth: int, project_id: str | None = None) -> ToolResult:
+    """多跳 BFS 调用链:沿 edges 表把 callers(incoming)/callees(!incoming)展开到 depth 层,
+    一次返回逐层链。替代 agent 手动逐跳调 codegraph_callers(多跳题省步=省 cache-miss 主成本)。
+    每层去重 + 限 _MAX_ROWS 防爆;访问过的节点不重复展开(防环)。"""
+    if not name:
+        return ToolResult(call_id="", content="缺少 name 参数", is_error=True)
+    depth = max(1, min(int(depth or 3), 6))  # clamp 1..6, 默认 3
+    candidates = [name]
+    if "." in name:
+        candidates.append(name.rsplit(".", 1)[1])
+    try:
+        con = _connect(project_id)
+        try:
+            frontier: list[Any] = []
+            for cand in candidates:
+                frontier = [r["id"] for r in con.execute(
+                    "SELECT id FROM nodes WHERE name = ? LIMIT 5", (cand,))]
+                if frontier:
+                    break
+            if not frontier:
+                return ToolResult(call_id="", content=f"未找到符号: {name}")
+            visited = set(frontier)
+            levels: list[list[dict[str, Any]]] = []
+            for _hop in range(depth):
+                if not frontier:
+                    break
+                ph = ",".join("?" * len(frontier))
+                col_in, col_out = ("e.target", "e.source") if incoming else ("e.source", "e.target")
+                sql = (f"SELECT n.id, n.name, n.kind, n.file_path, n.start_line, e.kind AS edge "
+                       f"FROM edges e JOIN nodes n ON n.id = {col_out} "
+                       f"WHERE {col_in} IN ({ph}) LIMIT ?")
+                rows = con.execute(sql, (*frontier, _MAX_ROWS)).fetchall()
+                level: list[dict[str, Any]] = []
+                nxt: list[Any] = []
+                for r in rows:
+                    if r["id"] in visited:
+                        continue
+                    visited.add(r["id"])
+                    nxt.append(r["id"])
+                    level.append({"name": r["name"], "kind": r["kind"],
+                                  "loc": f"{r['file_path']}:{r['start_line']}", "edge": r["edge"]})
+                if not level:
+                    break
+                levels.append(level)
+                frontier = nxt
+        finally:
+            con.close()
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(call_id="", content=f"codegraph 查询失败: {e}", is_error=True)
+    if not levels:
+        rel = "调用方" if incoming else "被调用项"
+        return ToolResult(call_id="", content=f"{name} 无{rel}记录。")
+    out = {"symbol": name, "direction": "callers" if incoming else "callees",
+           "depth": len(levels), "levels": {f"hop{i + 1}": lv for i, lv in enumerate(levels)}}
+    return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
+
+
+class CodegraphTraceTool(Tool):
+    name = "codegraph_trace"
+    description = (
+        "多跳调用链:一次返回某符号的逐层 callers 或 callees(默认 3 层),省去手动逐跳调 "
+        "codegraph_callers/callees。问'X 一路被谁用到/X 一路调到哪'、多跳影响面时用它。"
+        "入参 name=符号名;direction=callers(谁用它,默认)|callees(它用谁);depth=层数(默认 3,上限 6)。"
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "符号名"},
+            "direction": {"type": "string", "enum": ["callers", "callees"],
+                          "description": "callers=谁指向它(默认)/ callees=它指向谁"},
+            "depth": {"type": "integer", "description": "遍历层数,默认 3,上限 6"},
+        },
+        "required": ["name"],
+    }
+
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        a = args or {}
+        incoming = (a.get("direction", "callers") != "callees")
+        return _trace(a.get("name", "").strip(), incoming=incoming,
+                      depth=a.get("depth", 3), project_id=self.project_id)
+
+
 class CodegraphCallersTool(Tool):
     name = "codegraph_callers"
     description = "找一个符号的调用方/引用方(谁指向它)。入参 name=符号名。用于评估改动影响面。"
@@ -201,3 +286,4 @@ def register_into(registry, project_id: str | None = None) -> None:
     registry.register(CodegraphSearchTool(project_id))
     registry.register(CodegraphCallersTool(project_id))
     registry.register(CodegraphCalleesTool(project_id))
+    registry.register(CodegraphTraceTool(project_id))  # 多跳链(省多步手爬, loop 成本第一刀)

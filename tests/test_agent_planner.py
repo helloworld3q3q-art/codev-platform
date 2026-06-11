@@ -92,6 +92,12 @@ def test_impact_lane_prefers_impact_paths_over_manual_traversal():
     lanes = plan.preferred_lanes
     assert "impact_paths" in lanes
     assert lanes.index("impact_paths") < lanes.index("codegraph_callers")
+    # 符号级一次性多跳工具 codegraph_trace 也排在单跳 codegraph_callers 前(多跳省步主杠杆)
+    assert "codegraph_trace" in lanes
+    assert lanes.index("codegraph_trace") < lanes.index("codegraph_callers")
+    p_sym = plan_query("save_user 这个函数在哪定义", max_steps=12, available_tools=None)
+    assert p_sym.query_type == QueryType.SYMBOL
+    assert p_sym.preferred_lanes.index("codegraph_trace") < p_sym.preferred_lanes.index("codegraph_callers")
 
 
 def test_render_preamble_mentions_type_and_budget():

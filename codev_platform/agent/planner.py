@@ -70,13 +70,13 @@ _BUDGET: dict[str, int] = {
 # 首位、impact 末位(定位起点后交 impact_analysis 算链路);doc_rule 是文档不加。
 _LANES: dict[str, tuple[str, ...]] = {
     QueryType.OVERVIEW: ("code_recall", "list_dir", "search_docs", "read_file"),
-    # impact_paths(一次性多跳依赖路径)排在 codegraph_callers 之前 —— 多跳影响题(改 X 牵连谁)
-    # 优先用它一次拿逐跳链, 而非手动 codegraph_callers 逐跳爬烧预算(2026-06-11 quality 集实测:
-    # LoopPolicy 多跳例手爬 15 次超 max_steps, 从未用 impact_paths)。仍是 lane 提示, agent 自由选。
+    # 一次性多跳工具(impact_paths 跨层 / codegraph_trace 符号级)排在单跳 codegraph_callers 之前 ——
+    # 多跳题优先一次拿逐跳链, 而非手爬烧预算(2026-06-11: multihop 例手爬 18 步/170K token, miss 占
+    # 成本主项; codegraph_trace 让 18 步塌成 2-3 步, loop 成本第一刀)。仍是 lane 提示, agent 自由选。
     QueryType.IMPACT: ("impact_analysis", "impact_paths", "table_usage", "api_callers",
-                       "page_dependencies", "codegraph_callers", "code_recall"),
-    QueryType.SYMBOL: ("code_recall", "codegraph_search", "codegraph_callers",
-                       "codegraph_callees", "read_file"),
+                       "page_dependencies", "codegraph_trace", "codegraph_callers", "code_recall"),
+    QueryType.SYMBOL: ("code_recall", "codegraph_search", "codegraph_trace",
+                       "codegraph_callers", "codegraph_callees", "read_file"),
     QueryType.DOC_RULE: ("search_docs", "read_file"),
     QueryType.GENERAL: ("code_recall",),
 }
