@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from codev_platform.agent.usage_report import agent_usage_report
+from codev_platform.agent.usage_report import agent_usage_by_tenant, agent_usage_report
 
 NOW = 1_000_000_000.0
 
@@ -17,11 +17,16 @@ def _write(tmp_path, records):
     return d
 
 
-def _done(ts, model, inp, out, hit, miss, sid="s"):
-    return {"event": "done", "stop_reason": "answered", "steps": 3, "ts": ts,
-            "session_id": sid, "provider": "deepseek", "model": model,
-            "usage": {"input_tokens": inp, "output_tokens": out,
-                      "cache_hit_tokens": hit, "cache_miss_tokens": miss}}
+def _done(ts, model, inp, out, hit, miss, sid="s", org=None, user=None):
+    rec = {"event": "done", "stop_reason": "answered", "steps": 3, "ts": ts,
+           "session_id": sid, "provider": "deepseek", "model": model,
+           "usage": {"input_tokens": inp, "output_tokens": out,
+                     "cache_hit_tokens": hit, "cache_miss_tokens": miss}}
+    if org is not None:
+        rec["org_id"] = org
+    if user is not None:
+        rec["user_id"] = user
+    return rec
 
 
 def test_window_filter_and_totals(tmp_path):
@@ -63,3 +68,43 @@ def test_unknown_model_zero_cost(tmp_path):
 def test_empty_dir(tmp_path):
     rep = agent_usage_report(tmp_path / "nope", now_ts=NOW)
     assert rep["last7d"]["queries"] == 0 and rep["allTime"]["queries"] == 0
+
+
+def test_per_tenant_aggregation_by_org_and_user(tmp_path):
+    d = _write(tmp_path, [
+        _done(NOW - 100, "deepseek-v4-flash", 100, 10, 80, 20, sid="a", org="acme", user="u1"),
+        _done(NOW - 200, "deepseek-v4-flash", 100, 10, 80, 20, sid="b", org="acme", user="u2"),
+        _done(NOW - 300, "deepseek-v4-flash", 100, 10, 80, 20, sid="c", org="beta", user="u3"),
+    ])
+    w = agent_usage_report(d, now_ts=NOW)["allTime"]
+    by_org = {o["orgId"]: o for o in w["byOrg"]}
+    assert by_org["acme"]["queries"] == 2 and by_org["beta"]["queries"] == 1
+    assert by_org["acme"]["inputTokens"] == 200 and by_org["acme"]["cacheHitRate"] == 0.8
+    by_user = {u["userId"]: u for u in w["byUser"]}
+    assert by_user["u1"]["queries"] == 1 and by_user["u1"]["orgId"] == "acme"
+    assert {u["userId"] for u in w["byUser"]} == {"u1", "u2", "u3"}
+    # recent 行带 orgId/userId(审计可按租户筛)。
+    assert all("orgId" in r and "userId" in r for r in w["recent"])
+
+
+def test_per_tenant_missing_identity_falls_to_unknown(tmp_path):
+    # 旧 trace 无 org_id/user_id → 归 "unknown" 桶, 不丢量(红线: 不臆造身份)。
+    d = _write(tmp_path, [_done(NOW - 100, "deepseek-v4-flash", 100, 10, 80, 20)])
+    w = agent_usage_report(d, now_ts=NOW)["allTime"]
+    assert {o["orgId"] for o in w["byOrg"]} == {"unknown"}
+    assert {u["userId"] for u in w["byUser"]} == {"unknown"}
+
+
+def test_agent_usage_by_tenant_dimensions(tmp_path):
+    d = _write(tmp_path, [
+        _done(NOW - 100, "deepseek-v4-flash", 100, 10, 80, 20, org="acme", user="u1"),
+        _done(NOW - 200, "deepseek-v4-flash", 100, 10, 80, 20, org="acme", user="u2"),
+        _done(NOW - 10 * 86400, "deepseek-v4-flash", 999, 99, 0, 999, org="acme", user="u1"),  # 7d 外
+    ])
+    org_rep = agent_usage_by_tenant(d, now_ts=NOW, dimension="org")
+    assert org_rep["last7d"]["queries"] == 2 and org_rep["allTime"]["queries"] == 3
+    org7 = {t["orgId"]: t for t in org_rep["last7d"]["byTenant"]}
+    assert org7["acme"]["queries"] == 2 and org7["acme"]["inputTokens"] == 200
+    user_rep = agent_usage_by_tenant(d, now_ts=NOW, dimension="user")
+    u7 = {t["userId"]: t for t in user_rep["last7d"]["byTenant"]}
+    assert set(u7) == {"u1", "u2"} and u7["u1"]["orgId"] == "acme"

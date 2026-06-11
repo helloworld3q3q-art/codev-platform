@@ -174,10 +174,24 @@ def loop_policy(cfg: dict[str, Any] | None = None, name: str | None = None) -> L
             return v.strip().lower() in ("1", "true", "yes", "on")
         return bool(v)
 
+    def _steps_caps() -> dict[str, int]:
+        # per-档 max_steps 上限: config dict {query_type: cap}。非 dict / 坏值 → 回退 base(默认 {})。
+        v = _raw("max_steps_caps")
+        if not isinstance(v, dict):
+            return dict(base.max_steps_caps)
+        out: dict[str, int] = {}
+        for qt, cap in v.items():
+            try:
+                out[str(qt)] = int(cap)
+            except (TypeError, ValueError):
+                continue
+        return out
+
     # retrieval_distinct_cap 兼容旧 per_tool_cap 别名(provider 与 global 两级)。
     _cap_legacy = (f"agent.providers.{name}.loop.per_tool_cap", "agent.loop.per_tool_cap")
     return LoopPolicy(
         max_steps=_int("max_steps", ("agent.max_steps",)),
+        max_steps_caps=_steps_caps(),
         retrieval_distinct_cap=_int("retrieval_distinct_cap", _cap_legacy),
         no_progress_limit=_int("no_progress_limit"),
         novelty_check=_bool("novelty_check"),

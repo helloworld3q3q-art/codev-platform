@@ -238,6 +238,7 @@ class AgentLoop:
         # planner(Phase 7, 默认关): 按问题类型规划工具 + 软预算。计划注入 system 作引导,
         # tool_budget 在 _postprocess 作软停止条件。关闭时 budget=0 → 全程不约束(原行为)。
         tool_budget = 0
+        query_type: str | None = None
         if self.policy.planner_enabled:
             # planner_llm_enabled(默认关)→ 把同一 provider 喂给 planner 做 LLM 分类(关键词兜底);
             # 关 → provider=None 走纯关键词(存量行为)。多一次分类 LLM 调用, 故默认关待 A/B。
@@ -247,10 +248,16 @@ class AgentLoop:
                               provider=planner_provider)
             system_prompt = system_prompt + "\n\n" + render_plan_preamble(plan)
             tool_budget = plan.tool_budget
+            query_type = plan.query_type
             if trace:
                 trace.plan(plan.query_type, plan.tool_budget, plan.preferred_lanes)
 
-        for n in range(1, self.policy.max_steps + 1):
+        # per-档 max_steps 上限(config 驱动, 默认空 = 不封顶 → == self.policy.max_steps, 行为不变)。
+        # query_type 来自 planner(关 planner 时为 None → 同样回退全局 max_steps)。cap 仅向下收紧。
+        # 红线: 本次只接"可配置机制 + 默认不变", 不启用激进上限(A/B 后再定值, 见 policy.py 注释)。
+        max_steps = self.policy.effective_max_steps(query_type)
+
+        for n in range(1, max_steps + 1):
             turn: AssistantTurn = self.provider.chat(system_prompt, messages, specs)
             # input/output + prompt 缓存命中拆分(cache_hit/miss 让"缓存率=hit/input"可观测,
             # 云成本最大杠杆;非报告此项的 provider 累加 0)。
@@ -268,7 +275,7 @@ class AgentLoop:
             # 有工具调用:记录 assistant 这轮,执行每个 call,把结果回灌
             messages.append(Message(role="assistant", content=turn.text,
                                     tool_calls=turn.tool_calls, extra=turn.extra))
-            near_limit = n >= self.policy.max_steps - 1  # 倒数一步:提示强制收尾
+            near_limit = n >= max_steps - 1  # 倒数一步:提示强制收尾
             for call in turn.tool_calls:
                 fp = f"{call.name}:{json.dumps(call.args, sort_keys=True, ensure_ascii=False)}"
                 tool = self.registry.get(call.name)
@@ -293,7 +300,7 @@ class AgentLoop:
         # 用尽 step 仍未收尾。读取充分性门:几乎没真读到文件 **且尾部在连续无效调用** → 判卡无效调用。
         # (加 consecutive_invalid 判据: 纯检索类任务可合法地从不 read_file, 不能仅凭"没读文件"误判空转。)
         if trace:
-            trace.done("max_steps", self.policy.max_steps, total_usage)
+            trace.done("max_steps", max_steps, total_usage)
         if len(guard.readonly_paths) < self.policy.min_read_for_finish and guard.consecutive_invalid > 0:
             answer = ("(达到 max_steps 上限仍未收尾;且几乎没读到文件、尾部在连续无效调用——疑似卡在参数错误。"
                       "建议核对工具参数:路径用 list_dir 确认、module 用 list_collections 看合法值,"

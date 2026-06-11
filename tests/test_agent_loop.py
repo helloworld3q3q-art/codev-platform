@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from codev_platform.agent.brain import AssistantTurn, LLMProvider, ToolCall, ToolResult
 from codev_platform.agent.loop import AgentLoop
+from codev_platform.agent.policy import LoopPolicy
 from codev_platform.agent.tools.base import Tool, ToolRegistry
 
 
@@ -81,6 +82,36 @@ def test_loop_max_steps_guard():
     loop = AgentLoop(provider, _registry_with(tool), max_steps=3)
     result = loop.run("q")
     assert result.stop_reason == "max_steps"
+
+
+def test_per_tier_max_steps_cap_bounds_loop():
+    # planner 开 + 配 overview 档 cap=2 → "概览"类问题被截断在 2 步(< 全局 max_steps=8)。
+    tool = EchoTool()
+    provider = FakeProvider([
+        AssistantTurn(text=None, tool_calls=[ToolCall(f"c{i}", "echo", {"v": str(i)})], stop_reason="tool_use")
+        for i in range(10)
+    ])
+    policy = LoopPolicy(max_steps=8, planner_enabled=True, max_steps_caps={"overview": 2})
+    loop = AgentLoop(provider, _registry_with(tool), policy=policy)
+    # "这个项目是做什么的" → overview 类 → cap 2 生效。
+    result = loop.run("这个项目是做什么的 overview")
+    assert result.stop_reason == "max_steps"
+    # 截断在 2 步(每步一次 echo)而非 8 步。
+    assert len([s for s in result.steps if s.tool == "echo"]) == 2
+
+
+def test_default_caps_do_not_change_loop_bound():
+    # 红线: 默认 max_steps_caps={} → loop 仍跑满全局 max_steps(行为不变), 即便 planner 开。
+    tool = EchoTool()
+    provider = FakeProvider([
+        AssistantTurn(text=None, tool_calls=[ToolCall(f"c{i}", "echo", {"v": str(i)})], stop_reason="tool_use")
+        for i in range(10)
+    ])
+    policy = LoopPolicy(max_steps=4, planner_enabled=True)  # caps 默认空
+    loop = AgentLoop(provider, _registry_with(tool), policy=policy)
+    result = loop.run("这个项目是做什么的 overview")
+    assert result.stop_reason == "max_steps"
+    assert len([s for s in result.steps if s.tool == "echo"]) == 4  # 跑满 4 步, cap 未生效
 
 
 def test_usage_accumulates():

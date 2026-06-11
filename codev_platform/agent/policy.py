@@ -12,12 +12,20 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class LoopPolicy:
     max_steps: int = 12              # 单次问答最多循环步数
+
+    # --- per-档(query-type)max_steps 上限(config 驱动, 默认空 = 不封顶, 行为 = 现状) ---
+    # planner 已按问题类型分档(overview/impact/symbol/doc_rule/general), 此处给每档一个 step 上限,
+    # loop 取 min(max_steps, cap[query_type]) —— 让免费档/简单题封得更紧而不动全局 max_steps。
+    # **红线: 默认 {} = 任何档都不封顶, 与不配此项时行为完全一致**(plan §五: cap 值须 A/B 后再定,
+    # 本次只交付"可配置机制 + 默认不变", 不启用激进上限)。cap 值进 config/此字段按 provider 档解析,
+    # 不为单模型硬编(agent-design-multi-model-first): _STRONG/_MID/_WEAK 可各带默认, config 再覆盖。
+    max_steps_caps: dict[str, int] = field(default_factory=dict)
 
     # --- 检索类(RETRIEVAL): distinct-args 上限 + 输出侧零增量 ---
     retrieval_distinct_cap: int = 8  # 同一检索工具 distinct-args 执行上限(防变参 thrash)
@@ -54,3 +62,16 @@ class LoopPolicy:
             object.__setattr__(self, "retrieval_distinct_cap", int(self.per_tool_cap))
         # 让 .per_tool_cap 读取恒等于 retrieval_distinct_cap(deprecated 读别名,不破旧代码/旧断言)。
         object.__setattr__(self, "per_tool_cap", self.retrieval_distinct_cap)
+
+    def effective_max_steps(self, query_type: str | None) -> int:
+        """按问题类型解析本轮 step 上限: min(max_steps, cap[query_type])。
+
+        max_steps_caps 未配该档(或为空) → 直接返回 max_steps(默认行为不变)。
+        cap 仅向下收紧, 永不放大(min); query_type=None / general 无 cap 时即全局 max_steps。
+        """
+        if not self.max_steps_caps or not query_type:
+            return self.max_steps
+        cap = self.max_steps_caps.get(query_type)
+        if cap is None:
+            return self.max_steps
+        return min(self.max_steps, int(cap))

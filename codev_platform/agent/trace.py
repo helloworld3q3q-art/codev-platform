@@ -22,16 +22,25 @@ def _trace_dir() -> Path:
 
 
 class Trace:
-    def __init__(self, session_id: str, provider: str, model: str) -> None:
+    def __init__(self, session_id: str, provider: str, model: str,
+                 org_id: str | None = None, user_id: str | None = None) -> None:
         self.session_id = session_id
         self.provider = provider
         self.model = model
+        # 租户身份(org/user)随每条 trace 落盘 → per-租户 token 计量地基。身份取**已记录**的请求
+        # 身份(ChatService 从认证 token / RunContext 传入), trace 不自造身份通道(红线)。
+        self.org_id = org_id
+        self.user_id = user_id
 
     def _write(self, record: dict[str, Any]) -> None:
         record.update(
             ts=time.time(), session_id=self.session_id,
             provider=self.provider, model=self.model,
         )
+        if self.org_id is not None:
+            record.setdefault("org_id", self.org_id)
+        if self.user_id is not None:
+            record.setdefault("user_id", self.user_id)
         try:
             path = _trace_dir() / (time.strftime("%Y-%m-%d") + ".jsonl")
             with path.open("a", encoding="utf-8") as f:

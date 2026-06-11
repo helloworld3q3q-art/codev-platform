@@ -117,7 +117,8 @@ class ChatService:
             policy = replace(policy, max_steps=max_steps)
         # planner 开关/硬封顶随 policy(每模型档, registry 按 provider 解析)走, 无需独立 factory。
         loop = AgentLoop(provider, registry, policy=policy)
-        trace = Trace(sid, provider.name, provider.model)
+        # org_id/user_id 落 trace → per-租户 token 计量(身份取请求已记录身份, 非新造通道)。
+        trace = Trace(sid, provider.name, provider.model, org_id=org_id, user_id=user_id)
         # M1: 设运行上下文(身份/项目/任务), 供 remember 等工具在 run() 内拿来写 memory;
         # 退出即 reset, 不跨请求泄漏。
         from codev_platform.agent.runctx import RunContext, reset_run_context, set_run_context

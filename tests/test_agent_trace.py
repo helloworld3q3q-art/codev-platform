@@ -29,3 +29,21 @@ def test_done_without_usage_has_no_usage_key(monkeypatch, tmp_path):
     Trace("s", "p", "m").done("max_steps", 12)
     rec = _read_records(tmp_path)[-1]
     assert rec["event"] == "done" and "usage" not in rec
+
+
+def test_done_writes_tenant_identity(monkeypatch, tmp_path):
+    # org_id/user_id 随 trace 落盘 → per-租户计量地基(身份由 ChatService 从请求身份传入)。
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    Trace("sess", "deepseek", "deepseek-v4-flash", org_id="acme", user_id="u1").done(
+        "answered", 3, {"input_tokens": 100, "output_tokens": 10,
+                        "cache_hit_tokens": 80, "cache_miss_tokens": 20})
+    rec = _read_records(tmp_path)[-1]
+    assert rec["org_id"] == "acme" and rec["user_id"] == "u1"
+
+
+def test_done_omits_identity_when_not_given(monkeypatch, tmp_path):
+    # 不给身份(旧调用 / CLI 单机)→ 不写 org_id/user_id 键(下游归 unknown 桶, 不臆造)。
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    Trace("s", "p", "m").done("answered", 1, {"input_tokens": 1, "output_tokens": 1})
+    rec = _read_records(tmp_path)[-1]
+    assert "org_id" not in rec and "user_id" not in rec

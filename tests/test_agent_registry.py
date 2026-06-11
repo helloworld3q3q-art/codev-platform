@@ -131,6 +131,36 @@ def test_loop_policy_per_field_override():
     assert p2.novelty_check is False
 
 
+def test_loop_policy_max_steps_caps_default_empty_no_change():
+    # 红线: 不配 max_steps_caps → 默认 {} → 任何档 effective_max_steps == 全局 max_steps(行为不变)。
+    for prov in ("claude", "deepseek", "qwen", "gpt"):
+        p = reg.loop_policy({"agent": {"provider": prov}}, prov)
+        assert p.max_steps_caps == {}, f"{prov} 默认不应带 per-档上限"
+        # 任意 query_type 在默认下都退回全局 max_steps(不封顶)。
+        assert p.effective_max_steps("overview") == p.max_steps
+        assert p.effective_max_steps("impact") == p.max_steps
+        assert p.effective_max_steps(None) == p.max_steps
+
+
+def test_loop_policy_max_steps_caps_config_driven():
+    # config 可按 query-type 配上限(provider 级 + 全局两级), 坏值忽略, cap 仅向下收紧。
+    cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"loop": {
+        "max_steps": 12,
+        "max_steps_caps": {"overview": 5, "impact": "9", "symbol": "oops", "doc_rule": 20},
+    }}}}}
+    p = reg.loop_policy(cfg, "deepseek")
+    assert p.max_steps_caps == {"overview": 5, "impact": 9, "doc_rule": 20}  # symbol 坏值丢弃
+    assert p.effective_max_steps("overview") == 5         # 5 < 12 → 收紧
+    assert p.effective_max_steps("impact") == 9           # 字符串 "9" 解析为 int
+    assert p.effective_max_steps("doc_rule") == 12        # cap 20 但 min(12,20)=12, 不放大
+    assert p.effective_max_steps("symbol") == 12          # 未配该档 → 全局 max_steps
+    assert p.effective_max_steps("general") == 12
+    # 全局 agent.loop 维度亦认。
+    cfg_g = {"agent": {"provider": "qwen", "loop": {"max_steps_caps": {"overview": 4}}}}
+    pg = reg.loop_policy(cfg_g, "qwen")
+    assert pg.effective_max_steps("overview") == 4
+
+
 def test_loop_policy_per_tool_cap_deprecated_alias():
     # (c) per_tool_cap 别名向后兼容: 旧 config / 旧构造仍映射 retrieval_distinct_cap。
     cfg = {"agent": {"provider": "deepseek", "providers": {"deepseek": {"loop": {"per_tool_cap": 7}}}}}
