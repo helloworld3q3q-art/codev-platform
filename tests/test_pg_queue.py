@@ -8,6 +8,7 @@ import time
 import pytest
 
 _TEST_TABLE = "reindex_jobs_test"
+_EXTRA_QUEUES: list = []   # _q_owner 造的额外实例, fixture teardown 统一关池
 
 
 def _dsn():
@@ -33,6 +34,11 @@ def q():
     _clean()
     yield queue
     _clean()
+    # 关本 fixture 池 + _q_owner 造的额外池(避免 psycopg_pool atexit 自 join 崩, Windows 尤甚)。
+    queue.close()
+    for extra in _EXTRA_QUEUES:
+        extra.close()
+    _EXTRA_QUEUES.clear()
 
 
 def _pids(jobs):
@@ -159,37 +165,39 @@ def test_affinity_empty_set_claims_nothing(q):
 
 # ---- 崩溃恢复: reclaim_stale_own 复位自己卡 running 的行 ----
 
-def test_reclaim_stale_own_resets_own_running(q):
-    # worker 认领后崩溃, 行卡 status=running; 重启调 reclaim_stale_own → 复位 pending 重领,
-    # 不必等 lease(1800s)过期。
-    q.enqueue("t-pgq-rec", "chroma")
-    claimed = q.pending()                       # 本 owner 认领 → running, lease 1800s
-    assert any(j.project_id == "t-pgq-rec" for j in claimed)
-    with q._pool.connection() as c:            # 确认确实卡 running 且 lease 远未过期
-        st = c.execute(
-            f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-rec'").fetchone()[0]
-    assert st == "running"
-    n = q.reclaim_stale_own()                   # 模拟同 owner 重启接管自己的 stale 行
-    assert n >= 1
-    with q._pool.connection() as c:            # 已复位 pending + 清 lease/token
+def _q_owner(owner):
+    """造一个指定 owner 的 PgJobQueue(模拟特定 host 的进程); 注册到 _EXTRA_QUEUES 由 fixture 关池。"""
+    from codev_platform.reindex.pg_queue import PgJobQueue
+    qx = PgJobQueue(_dsn(), table=_TEST_TABLE, owner=owner)
+    _EXTRA_QUEUES.append(qx)
+    return qx
+
+
+def test_reclaim_across_real_restart_same_host(q):
+    # 审计 P0 回归: **真实崩溃重启** = 新进程新 pid。owner=hostname 稳定 → 新实例 reclaim 能复位
+    # 崩前的行。旧实现 owner=host:pid → 重启 owner 变 → reclaim 返 0, 崩溃恢复 no-op(本测会失败)。
+    host = "audit-host-X"
+    crashed = _q_owner(host)                     # 崩前进程
+    crashed.enqueue("t-pgq-rec", "chroma")
+    assert any(j.project_id == "t-pgq-rec" for j in crashed.pending())   # running, claimed_by=host
+    restarted = _q_owner(host)                   # 重启后新进程(同 host, 真实新 pid; owner 仍=host)
+    assert restarted.reclaim_stale_own() >= 1    # 关键: 复位崩前的行(旧 pid-owner 实现会返 0)
+    with q._pool.connection() as c:
         row = c.execute(
             f"SELECT status, lease_expires_at, claim_token FROM {_TEST_TABLE} "
             "WHERE project_id='t-pgq-rec'").fetchone()
     assert row[0] == "pending" and row[1] is None and row[2] is None
-    assert any(j.project_id == "t-pgq-rec" for j in q.pending())   # 立即重领, 没等 lease
+    assert any(j.project_id == "t-pgq-rec" for j in restarted.pending())  # 立即重领, 不等 lease
 
 
-def test_reclaim_stale_own_skips_other_owner_running(q):
-    # 只复位自己(同 owner)的行; 别 worker(别 owner)在跑的行不动。
-    q.enqueue("t-pgq-ro", "chroma")
-    with q._pool.connection() as c:            # 模拟别 worker 认领(owner != 本 q._owner)
-        c.execute(
-            f"UPDATE {_TEST_TABLE} SET status='running', claimed_by='other-host:999', "
-            "lease_expires_at=%s, claim_token='tok-other' WHERE project_id='t-pgq-ro'",
-            (time.time() + 1800,))
-    n = q.reclaim_stale_own()                   # 本 owner 复位: 不该碰别 owner 的行
+def test_reclaim_does_not_touch_other_host(q):
+    # 跨机不误伤: 别机(别 hostname)reclaim 不该复位本机 host-A 正在跑的行。
+    a = _q_owner("audit-host-A")
+    a.enqueue("t-pgq-ro", "chroma")
+    assert any(j.project_id == "t-pgq-ro" for j in a.pending())          # host-A running
+    other = _q_owner("audit-host-B")
+    other.reclaim_stale_own()                    # host-B reclaim: 不碰 host-A 的行
     with q._pool.connection() as c:
         st = c.execute(
             f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-ro'").fetchone()[0]
-    assert st == "running"                      # 别 worker 在跑的行原封不动
-    # n 可能含本测前残留, 只断言别 owner 行未被复位(上面 st=='running' 已证)
+    assert st == "running"                        # host-A 在跑的行原封不动(无跨机误伤)

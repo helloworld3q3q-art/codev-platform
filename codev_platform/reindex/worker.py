@@ -64,12 +64,20 @@ class ReindexWorker:
         多机/多 org 亲和: 传给 pending() 让 PG 后端只认领本机 project, 不抢别机/别 org 的 job
         (否则认领后因本地无 repo_path 而 complete() 删掉它 = 吃掉别人的 reindex)。
 
-        返回 None = config 未配 projects 段 → 退回"认领全部"旧语义(单机 file 后端常态, 行为不变;
-        _run_job 对无 repo 的 job 仍兜底丢弃)。"""
+        **未配 projects 段时按后端 fail-open / fail-closed 分流**(审计 risk #3):
+        - file 后端(单机)→ 返 None = 认领全部(单机常态, 唯一 worker, 安全)。
+        - PG 后端(多机/多 org)→ 返 **空集 = 不认领任何 job** + WARN。fail-closed: 多机下漏配
+          projects 若退回"认领全部", 会吃掉别 org/别机 job(本 feature 要修的原始 bug)。宁可这台
+          worker 暂不干活(可见告警)也不静默删别人的 reindex。"""
         projects = _cfg_get(self._cfg, "projects")
-        if not isinstance(projects, dict) or not projects:
-            return None
-        return {pid for pid in projects if _repo_for(self._cfg, pid) is not None}
+        if isinstance(projects, dict) and projects:
+            return {pid for pid in projects if _repo_for(self._cfg, pid) is not None}
+        # 无 projects 配置: PG 后端(有 reclaim_stale_own = 多机语境)fail-closed, file 后端 None=全部。
+        if hasattr(self._q, "reclaim_stale_own"):
+            _log("WARN: PG 队列后端但未配 config.projects 白名单 → 为防认领/删除别 org/别机 job, "
+                 "本 worker 暂不认领任何 job; 请配 config.projects.<pid>.repo_path")
+            return set()
+        return None
 
     def drain_once(self) -> int:
         """跑完当前所有 pending (串行)。返回处理 job 数。

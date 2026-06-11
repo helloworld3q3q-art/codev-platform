@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import socket
 import time
@@ -42,7 +41,7 @@ class PgJobQueue:
     """JobQueue 的 PG 实现。缺 psycopg_pool → 构造期 ImportError(调用方回退 FileSpoolQueue)。"""
 
     def __init__(self, dsn: str, *, lease_ttl_sec: int = _DEFAULT_LEASE_TTL_SEC,
-                 max_size: int = 4, table: str = "reindex_jobs") -> None:
+                 max_size: int = 4, table: str = "reindex_jobs", owner: str | None = None) -> None:
         from psycopg_pool import ConnectionPool  # 缺 → ImportError, 调用方回退
         if not _TABLE_RE.match(table):
             raise ValueError(f"非法表名: {table!r}")
@@ -51,7 +50,13 @@ class PgJobQueue:
         self._pool = ConnectionPool(dsn, min_size=1, max_size=max_size, open=False,
                                     timeout=_POOL_TIMEOUT_SEC)
         self._lease_ttl = lease_ttl_sec
-        self._owner = f"{socket.gethostname()}:{os.getpid()}"   # 认领者标识(诊断 + 跨机区分)
+        # owner = **机器级稳定标识**(默认 hostname, 跨重启不变)。**不含 pid** —— 含 pid 则真实崩溃
+        # 重启=新 pid=新 owner → reclaim_stale_own 匹配不到崩前(旧 pid)留下的行, 崩溃恢复 no-op
+        # (审计 P0 实证)。host 级让"同机重启的 worker 接管自己崩前的行", 跨机不同 hostname 不误伤。
+        # **前提: 单机单 worker 实例**(ReindexWorker 设计)。若未来同机起多 worker, 须注入唯一稳定
+        # worker_id(非 pid, 重启不变), 否则同机两 worker 会互相复位对方在跑的行。owner 参数供测试
+        # 模拟"重启(同 host)"与"另一台机(不同 host)"。
+        self._owner = owner or socket.gethostname()
         self._opened = False
 
     def _ensure(self) -> None:
@@ -73,6 +78,16 @@ class PgJobQueue:
                 f"CREATE INDEX IF NOT EXISTS ix_{self._t}_claim ON {self._t} (status, enqueued_at)"
             )
         self._opened = True
+
+    def close(self) -> None:
+        """显式关连接池(测试 / 短命实例)。常驻 worker 进程不需调(随进程退出)。
+        显式关避免 psycopg_pool 在解释器 atexit 时自 join worker 线程报错。"""
+        if self._opened:
+            try:
+                self._pool.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._opened = False
 
     def probe(self) -> None:
         """轻量探活(open_default_queue 用): 触发建连 + 建表; PG 不可达则在 _POOL_TIMEOUT_SEC 内抛。"""
@@ -163,12 +178,14 @@ class PgJobQueue:
             return cur.rowcount > 0
 
     def reclaim_stale_own(self) -> int:
-        """崩溃恢复: 把上一进程(同 owner)留下的 status='running' 行复位 pending, 自己重启即接管,
-        不必干等 lease(默认 1800s)过期。owner = host:pid; 同机 worker 重启 pid 变 → 不会误抢
-        别进程在跑的行(只复位自己曾认领的)。返回复位行数。复位时清 lease/token, 下轮 pending() 重领。
+        """崩溃恢复: 把**本机**(owner=hostname)崩前留下的 status='running' 行复位 pending, 重启即
+        接管, 不必干等 lease(默认 1800s)过期。owner 是机器级稳定标识(非 pid)→ systemd 重启后
+        新进程 owner 仍 = 本 hostname, 能匹配到崩前的行(若用 host:pid 则重启 owner 变, 匹配 0 行,
+        恢复 no-op —— 审计 P0)。跨机不同 hostname 的 running 行不被复位(无误伤)。复位清 lease/token,
+        下轮 pending() 重领。返回复位行数。
 
-        注: 同一 owner 字符串复用(罕见: pid 回绕)理论可能复位活跃行, 但 worker 单实例串行,
-        启动时不存在自己另一活跃认领, 故安全。返回数仅诊断用。"""
+        前提: **单机单 worker 实例**(ReindexWorker 设计)→ 启动时本机不存在自己另一活跃认领, host 级
+        复位安全。若未来同机起多 worker, 须改注入唯一稳定 worker_id 作 owner。"""
         self._ensure()
         with self._pool.connection() as conn:
             cur = conn.execute(

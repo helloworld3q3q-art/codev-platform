@@ -11,9 +11,19 @@ from codev_platform.reindex.worker import ReindexWorker
 
 
 def test_own_projects_none_when_no_projects_cfg(tmp_path):
-    # config 无 projects 段 → None(退回"认领全部"旧语义, 单机 file 常态)。
+    # config 无 projects 段 + file 后端(无 reclaim_stale_own) → None(认领全部, 单机 file 常态)。
     w = ReindexWorker(FileSpoolQueue(tmp_path), {})
     assert w._own_projects() is None
+
+
+def test_own_projects_failclosed_on_pg_backend_without_cfg():
+    # 审计 risk #3: PG 后端(多机)+ 无 projects 配置 → 不认领任何 job(空集 fail-closed),
+    # 而非 None=认领全部(否则吃别 org/别机 job)。PG 信号 = 队列有 reclaim_stale_own 方法。
+    class _PgLikeQueue:
+        def reclaim_stale_own(self):   # 有此方法 = PG 后端语境
+            return 0
+    w = ReindexWorker(_PgLikeQueue(), {})        # 无 projects 配置
+    assert w._own_projects() == set()            # fail-closed: 不认领, 不退回"全部"
 
 
 def test_own_projects_only_those_with_existing_repo(tmp_path):

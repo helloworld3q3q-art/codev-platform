@@ -13,6 +13,8 @@ import sys
 
 from codev_platform.core.project_id import ProjectIdError, resolve_local, validate
 
+_STALE_PENDING_SEC = 300   # status: 待办 > 5min 仍未被认领 → 标 STALE(疑孤儿: 无 worker 白名单覆盖)
+
 
 def _out(msg: str = "") -> None:
     print(msg, flush=True)
@@ -59,13 +61,19 @@ def cmd_reindex_queue(args: argparse.Namespace) -> int:
         return 0
 
     if args.action == "status":
+        import time as _time
         jobs = q.peek()   # 只读, 不认领 —— pending() 在 PG 后端有副作用(原子认领+锁租约), status 不能用
         if not jobs:
             _out("队列空")
             return 0
-        _out(f"待办 {len(jobs)}:")
+        now = _time.time()
+        # STALE 标记: 长时间 pending 仍未被认领 = 可能孤儿(无 worker 白名单覆盖 / worker 没起, 审计 risk #2)。
+        stale = [j for j in jobs if j.enqueued_at and (now - j.enqueued_at) > _STALE_PENDING_SEC]
+        _out(f"待办 {len(jobs)}:" + (f"  ⚠ {len(stale)} 个 STALE(>{_STALE_PENDING_SEC // 60}min 未认领, 疑孤儿)" if stale else ""))
         for j in jobs:
-            _out(f"  {j.key}")
+            age = int(now - j.enqueued_at) if j.enqueued_at else -1
+            flag = " ⚠STALE" if j in stale else ""
+            _out(f"  {j.key}  (age {age}s){flag}")
         return 0
 
     if args.action == "worker":
