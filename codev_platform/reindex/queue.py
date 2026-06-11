@@ -98,15 +98,24 @@ class FileSpoolQueue:
         self._path(project_id, kind).touch()
 
     def pending(self) -> list[Job]:
-        # 按 mtime(= 入队时刻)排 = FIFO, **不是文件名字母序**。字母序会让有依赖的 kind 乱序跑:
-        # 如 'code_vec' < 'codegraph'(_ < g)→ code_vec 先于 codegraph 跑 → 读到陈旧 codegraph.db
-        # (dispatch/webhook 按依赖序 append 入队的语义全靠这里保住)。mtime 平手(同 ms 入队,极罕见)
-        # 退文件名稳定序。
+        # 排序 = (mtime_ns, kind 依赖序, name)。**不能用文件名做 tie-break**: dispatch/webhook 在同一
+        # loop 里连续 touch codegraph/ingest/code_vec, 在 ext4(reindex worker 实际运行处)三者 mtime
+        # **完全相同**, 而 'code_vec' < 'codegraph'(_ 0x5F < g 0x67)字母序会让 code_vec 先于 codegraph
+        # 跑 → code_vec 读陈旧 codegraph.db, vector 索引滞后一个 commit(2026-06-11 全流程审计实证 ~99%)。
+        # tie-break 改 **runner 注册序 = 依赖序**(codegraph 先于其下游 ingest/code_vec), 数据驱动。
+        from codev_platform.reindex.runners import kinds as _kinds
+        rank = {k: i for i, k in enumerate(_kinds())}
+        unknown = len(rank)   # 未注册 kind 排最后
         jobs: list[Job] = []
         if not self._dir.is_dir():
             return jobs
         entries = [f for f in self._dir.iterdir() if f.is_file() and _SEP in f.name]
-        for f in sorted(entries, key=lambda x: (x.stat().st_mtime, x.name)):
+
+        def _key(f: Path):
+            kind = f.name.partition(_SEP)[2]
+            return (f.stat().st_mtime_ns, rank.get(kind, unknown), f.name)
+
+        for f in sorted(entries, key=_key):
             pid, _, kind = f.name.partition(_SEP)
             if pid and kind:
                 jobs.append(Job(pid, kind, f.stat().st_mtime))

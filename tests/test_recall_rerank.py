@@ -34,6 +34,13 @@ def test_reorder_len_mismatch_keeps_original():
     assert _reorder_by_scores(hits, [0.9]) == hits   # 越界保护 → 原序
 
 
+def test_reorder_nan_inf_keeps_original():
+    # 审计 P2: cross-encoder 对退化文本可能吐 NaN/inf, NaN 比较未定义会乱排 → 必须退原序。
+    hits = [_hit("a"), _hit("b"), _hit("c")]
+    assert _reorder_by_scores(hits, [0.1, float("nan"), 0.9]) == hits
+    assert _reorder_by_scores(hits, [0.1, float("inf"), 0.9]) == hits
+
+
 # ---- maybe_rerank_hits 编排 ----
 
 def test_no_model_keeps_order(monkeypatch):

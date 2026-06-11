@@ -140,6 +140,8 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     collection 缺失 → chromadb 抛(调用侧 fail-soft); 嵌入模型不可用 → ([], {}) 优雅空返。
     **先开 collection 后建 embedder**: 无索引时不白加载嵌入模型(省内存 + 单测脱模型)。
     """
+    if k <= 0:                 # chromadb 对 n_results<=0 抛 TypeError; 正常边界值直接空返
+        return [], {}
     import chromadb
 
     client = chromadb.PersistentClient(path=str(_code_vec_persist_dir(project_id)))
@@ -190,7 +192,16 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
 
     persist = _code_vec_persist_dir(project_id)
     manifest_path = persist / _MANIFEST_NAME
-    full = (not incremental) or (not manifest_path.exists())   # 无 manifest 不可信增量 → 退全量
+    # 先定 full(读 manifest 在 rmtree 前): 无 manifest 或 manifest 损坏都退全量 —— **必须 rmtree
+    # 拿干净库**, 否则"全量重嵌 onto 既有 segment"正是 chromadb 多 flush 522 触发条件(audit risk)。
+    full = (not incremental) or (not manifest_path.exists())
+    old_manifest: dict = {}
+    if not full:
+        try:
+            old_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 — manifest 损坏 → 转全量(rmtree), 不在旧 segment 上重灌
+            logger.warning("[code_vec] manifest 损坏(%s), 转全量重建(rmtree)", exc)
+            full = True
     if full:
         shutil.rmtree(persist, ignore_errors=True)
     persist.mkdir(parents=True, exist_ok=True)
@@ -198,13 +209,6 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
     ensure_wal(persist)
     name = code_vec_collection_name(project_id)
     col = client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
-
-    old_manifest: dict = {}
-    if not full:
-        try:
-            old_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001 — manifest 坏 → 当空(全量重嵌, 但不 rmtree)
-            logger.warning("[code_vec] manifest 损坏(%s), 本次全量重嵌", exc)
 
     # 枚举节点 → 收 text/meta + 算新 manifest(跳过低价值 kind 与空文本)
     repo = _resolve_repo(project_id)   # 读源码片段补语义; None → 退基础文本(降级不崩)

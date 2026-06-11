@@ -14,14 +14,18 @@ query+候选全文逐对打分, 把最相关顶到最前)。复用平台 Qwen3-R
 from __future__ import annotations
 
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
 
 def _reorder_by_scores(hits: list, scores: list[float]) -> list:
-    """按 rerank 分降序重排 hits(稳定: 同分保原序)。len 不匹配 → 原序(防越界)。纯函数。"""
+    """按 rerank 分降序重排 hits(稳定: 同分保原序)。len 不匹配 / 含 NaN·inf → 原序(防越界 + 防
+    NaN 比较未定义把项错插中间)。纯函数。"""
     if not scores or len(scores) != len(hits):
         return hits
+    if not all(isinstance(s, (int, float)) and math.isfinite(s) for s in scores):
+        return hits   # NaN/inf(cross-encoder 对退化文本可能吐)→ fail-soft 退原序, 不乱排
     order = sorted(range(len(hits)), key=lambda i: -scores[i])   # sorted 稳定 → 同分保原序
     return [hits[i] for i in order]
 

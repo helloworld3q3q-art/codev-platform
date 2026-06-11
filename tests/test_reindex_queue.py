@@ -42,18 +42,31 @@ def test_complete_literal_dotdot_file_is_deleted(tmp_path):
     assert not f.exists()                   # 已删, 不再无限重处理
 
 
-def test_pending_orders_by_mtime_not_alphabetical(tmp_path):
-    """审计 B2: pending() 按入队时刻(mtime)= FIFO, 不是文件名字母序。
+def test_pending_codegraph_before_code_vec_on_SAME_mtime(tmp_path):
+    """审计 B2(真修): mtime **平手**时 code_vec 必须仍排在 codegraph 之后。
 
-    'code_vec' < 'codegraph'(_ < g)字母序会让 code_vec 先跑 → 读陈旧 codegraph.db。
-    dispatch/webhook 按依赖序入队的语义全靠 pending() 保 FIFO。
+    全流程审计实证: ext4 上同 loop touch 三文件 mtime 完全相同, 文件名 tie-break
+    ('code_vec'<'codegraph')会让 code_vec 先跑 → 读陈旧 codegraph.db。修法=tie-break 用
+    runner 注册依赖序。**本测刻意设同 mtime 强制平手**(旧测用 os.utime 拉开 mtime 掩盖了它)。
     """
     import os
     q = FileSpoolQueue(tmp_path)
+    q.enqueue("demo-proj", "code_vec")     # 字母序靠前者先入队, 放大文件名 tie-break 翻车几率
     q.enqueue("demo-proj", "codegraph")
-    q.enqueue("demo-proj", "code_vec")
-    # 显式设 mtime: codegraph 先入队(旧), code_vec 后(新)
-    os.utime(tmp_path / "demo-proj__codegraph", (1000, 1000))
-    os.utime(tmp_path / "demo-proj__code_vec", (2000, 2000))
+    same = (1000, 1000)                     # 同 mtime → 强制走 tie-break
+    os.utime(tmp_path / "demo-proj__code_vec", same)
+    os.utime(tmp_path / "demo-proj__codegraph", same)
     kinds = [j.kind for j in q.pending()]
-    assert kinds.index("codegraph") < kinds.index("code_vec")   # FIFO; 字母序会反过来
+    assert kinds.index("codegraph") < kinds.index("code_vec")   # 依赖序; 文件名 tie-break 会反
+
+
+def test_pending_preserves_fifo_across_mtimes(tmp_path):
+    """不同 mtime 仍按 FIFO(mtime 主序优先于依赖序 tie-break)。"""
+    import os
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("demo-proj", "code_vec")
+    q.enqueue("demo-proj", "chroma")
+    os.utime(tmp_path / "demo-proj__code_vec", (1000, 1000))    # 先入队(旧)
+    os.utime(tmp_path / "demo-proj__chroma", (2000, 2000))      # 后入队(新)
+    kinds = [j.kind for j in q.pending()]
+    assert kinds.index("code_vec") < kinds.index("chroma")      # mtime 主序 = FIFO

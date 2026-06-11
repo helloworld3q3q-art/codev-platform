@@ -36,6 +36,14 @@ def test_parse_query_result_empty():
     assert _parse_query_result({"ids": [[]]}) == ([], {})
 
 
+def test_query_code_vectors_k_le_0_empty(monkeypatch):
+    # 审计 edge: k<=0 chromadb 会抛 TypeError; query_code_vectors 应直接空返不走异常路径。
+    from codev_platform.recall.code_vector_store import query_code_vectors
+    # 不应触达 chromadb（k<=0 早返）→ 即使无索引也返 ([],{})
+    assert query_code_vectors("any-pid", "q", 0) == ([], {})
+    assert query_code_vectors("any-pid", "q", -3) == ([], {})
+
+
 def test_parse_query_result_missing_meta_falls_back_to_none():
     ranked, details = _parse_query_result({"ids": [["x"]], "metadatas": [[None]]})
     assert ranked == ["x"]
