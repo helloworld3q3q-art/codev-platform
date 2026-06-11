@@ -18,6 +18,7 @@ from codev_platform.core.config import load_config
 from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.httpkit.envelope import error_response, internal_error_response
 from codev_platform.core.httpkit.request_id import RequestIdMiddleware
+from codev_platform.core.project_id import ProjectIdError
 
 
 def _request_id(request: Request) -> str | None:
@@ -33,6 +34,14 @@ def _install_exception_handlers(app: FastAPI) -> None:
     async def _validation_err(request: Request, exc: RequestValidationError):  # noqa: ANN202
         # 入参校验失败 → INVALID_PARAMS;detail 仅日志, 不回显原始报文 (防泄漏内部结构)。
         err = PlatformError(ErrorCode.INVALID_PARAMS, "invalid request params", detail=str(exc))
+        return error_response(err, request_id=_request_id(request))
+
+    @app.exception_handler(ProjectIdError)
+    async def _project_id_err(request: Request, exc: ProjectIdError):  # noqa: ANN202
+        # HTTP 入口的 project_id 必然源自 X-Project-Id / 入参 → 空/非法是客户端错(400),
+        # 不许漏到兜底变 500 internal (例: 缺头打 graph 路由曾 500)。原文仅进日志。
+        err = PlatformError(ErrorCode.INVALID_PARAMS, "invalid or missing project id",
+                            detail=str(exc))
         return error_response(err, request_id=_request_id(request))
 
     @app.exception_handler(Exception)

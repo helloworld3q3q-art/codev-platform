@@ -209,6 +209,17 @@ def test_unified_stats_counts_by_kind(tmp_path, monkeypatch):
     assert data["edgesByKind"] == {"contains": 1, "reads_table": 1}
 
 
+def test_missing_project_header_is_400_not_500(client):
+    """缺 X-Project-Id 打 project 范围路由 → 400 invalid_params(ProjectIdError 统一映射),
+    不许漏到兜底 500 internal(2026-06-11 audit/soft-quality 曾因此 500)。"""
+    for path in ("/api/v1/graph/audit", "/api/v1/graph/soft-quality"):
+        r = client.post(path, json={})
+        assert r.status_code == 400, path
+        body = r.json()
+        assert body["result"] == 1
+        assert body["errors"][0]["errorCode"] == "invalid_params"
+
+
 def test_unified_graph_empty_when_store_missing(tmp_path, monkeypatch):
     """store 缺失 → 统一图谱返回空 (200, 非错误)。"""
     monkeypatch.setattr(graph_routes, "open_store",
