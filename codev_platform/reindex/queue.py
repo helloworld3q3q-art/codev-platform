@@ -46,9 +46,12 @@ class JobQueue(Protocol):
         """登记一个 (project, kind) reindex 需求 (幂等合并同 key)。"""
         ...
 
-    def pending(self) -> list[Job]:
+    def pending(self, projects: set[str] | None = None) -> list[Job]:
         """认领并返回待办 (worker 专用)。**可能有副作用**: PG 实现会原子认领 + 打租约,
-        故只 worker 调; 仅"查看"用 peek()。"""
+        故只 worker 调; 仅"查看"用 peek()。
+
+        projects: None=认领全部 (兼容现状); 传集合=只认领其中 project 的 job
+        (多机/多 org 亲和: worker 不抢自己 config 无 repo_path 的别机 project, 见 worker.drain_once)。"""
         ...
 
     def peek(self) -> list[Job]:
@@ -107,7 +110,9 @@ class FileSpoolQueue:
         # touch: 不存在则建, 存在则刷新 mtime (= 重新触发, 供 dirty 重入)
         self._path(project_id, kind).touch()
 
-    def pending(self) -> list[Job]:
+    def pending(self, projects: set[str] | None = None) -> list[Job]:
+        # projects: None=全部 (单机默认无需过滤); 传集合则只返回其中 project (保 Protocol 一致,
+        # 单机 file 后端正常不传, 行为不变)。
         # 排序 = (mtime_ns, kind 依赖序, name)。**不能用文件名做 tie-break**: dispatch/webhook 在同一
         # loop 里连续 touch codegraph/ingest/code_vec, 在 ext4(reindex worker 实际运行处)三者 mtime
         # **完全相同**, 而 'code_vec' < 'codegraph'(_ 0x5F < g 0x67)字母序会让 code_vec 先于 codegraph
@@ -127,7 +132,7 @@ class FileSpoolQueue:
 
         for f in sorted(entries, key=_key):
             pid, _, kind = f.name.partition(_SEP)
-            if pid and kind:
+            if pid and kind and (projects is None or pid in projects):
                 jobs.append(Job(pid, kind, f.stat().st_mtime))
         return jobs
 

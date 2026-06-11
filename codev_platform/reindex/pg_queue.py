@@ -98,10 +98,23 @@ class PgJobQueue:
 
     # ---- 消费者(worker)----
 
-    def pending(self) -> list[Job]:
-        """原子认领: 每行打唯一 claim_token, 返回 Job 带 token(complete 据此精确删自己那次认领)。"""
+    def pending(self, projects: set[str] | None = None) -> list[Job]:
+        """原子认领: 每行打唯一 claim_token, 返回 Job 带 token(complete 据此精确删自己那次认领)。
+
+        projects: None=认领全表所有 project(兼容现状); 传集合=只认领其中 project 的 job ——
+        多机/多 org 亲和: worker 只该认领自己 config 配了 repo_path 的 project, 否则会认领
+        别机/别 org 的 job 再因本地无 repo_path 而 complete() **删掉**它(吃掉别人的 reindex)。
+        空集合 → 不认领任何 job(本 worker 无可处理 project)。"""
         self._ensure()
         now = time.time()
+        # projects 为集合时加 project_id = ANY(%s) 过滤; %s 走参数化绑定(非内插)无注入面。
+        proj_filter = ""
+        proj_params: tuple = ()
+        if projects is not None:
+            if not projects:
+                return []   # 空白名单: 无可处理 project, 不认领(避免 ANY 空数组语义歧义)
+            proj_filter = "  AND project_id = ANY(%s) "
+            proj_params = (list(projects),)
         with self._pool.connection() as conn:
             rows = conn.execute(
                 f"UPDATE {self._t} SET status = 'running', claimed_by = %s, lease_expires_at = %s, "
@@ -110,12 +123,13 @@ class PgJobQueue:
                 "  claim_token = md5(random()::text || clock_timestamp()::text) "
                 "WHERE (project_id, kind) IN ("
                 f"  SELECT project_id, kind FROM {self._t} "
-                "  WHERE status = 'pending' OR (status = 'running' AND lease_expires_at < %s) "
+                "  WHERE (status = 'pending' OR (status = 'running' AND lease_expires_at < %s)) "
+                f"{proj_filter}"
                 "  ORDER BY enqueued_at "
                 "  FOR UPDATE SKIP LOCKED"
                 ") "
                 "RETURNING project_id, kind, enqueued_at, claim_token",
-                (self._owner, now + self._lease_ttl, now),
+                (self._owner, now + self._lease_ttl, now, *proj_params),
             ).fetchall()
         rank = _kind_rank()
         unknown = len(rank)
@@ -147,6 +161,23 @@ class PgJobQueue:
                 (job.project_id, job.kind, job.token),
             )
             return cur.rowcount > 0
+
+    def reclaim_stale_own(self) -> int:
+        """崩溃恢复: 把上一进程(同 owner)留下的 status='running' 行复位 pending, 自己重启即接管,
+        不必干等 lease(默认 1800s)过期。owner = host:pid; 同机 worker 重启 pid 变 → 不会误抢
+        别进程在跑的行(只复位自己曾认领的)。返回复位行数。复位时清 lease/token, 下轮 pending() 重领。
+
+        注: 同一 owner 字符串复用(罕见: pid 回绕)理论可能复位活跃行, 但 worker 单实例串行,
+        启动时不存在自己另一活跃认领, 故安全。返回数仅诊断用。"""
+        self._ensure()
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                f"UPDATE {self._t} SET status = 'pending', claimed_by = NULL, "
+                "  lease_expires_at = NULL, claim_token = NULL "
+                "WHERE status = 'running' AND claimed_by = %s",
+                (self._owner,),
+            )
+            return cur.rowcount
 
     async def watch(self):
         """poll: 周期 yield 让 worker drain。LISTEN/NOTIFY 留后(worker 自带周期兜底, poll 足够)。"""

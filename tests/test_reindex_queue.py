@@ -70,3 +70,22 @@ def test_pending_preserves_fifo_across_mtimes(tmp_path):
     os.utime(tmp_path / "demo-proj__chroma", (2000, 2000))      # 后入队(新)
     kinds = [j.kind for j in q.pending()]
     assert kinds.index("code_vec") < kinds.index("chroma")      # mtime 主序 = FIFO
+
+
+def test_pending_projects_none_returns_all(tmp_path):
+    """projects=None(默认): file 后端行为不变, 返回全部(回归保护)。"""
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("proj-a", "chroma")
+    q.enqueue("proj-b", "chroma")
+    pids = {j.project_id for j in q.pending()}
+    assert pids == {"proj-a", "proj-b"}
+
+
+def test_pending_projects_filter_local(tmp_path):
+    """projects=集合: 只返回白名单内的 project(Protocol 一致, file 后端本地过滤)。"""
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("proj-a", "chroma")
+    q.enqueue("proj-b", "chroma")
+    pids = {j.project_id for j in q.pending({"proj-a"})}
+    assert pids == {"proj-a"}
+    assert q.pending(set()) == []                               # 空白名单 → 空

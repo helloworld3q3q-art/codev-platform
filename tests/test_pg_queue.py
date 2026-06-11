@@ -119,3 +119,77 @@ def test_peek_no_side_effect(q):
         st = c.execute(f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-pk'").fetchone()[0]
     assert st == "pending"
     assert any(j.project_id == "t-pgq-pk" for j in q.pending())   # 之后 worker 仍能认领
+
+
+# ---- 多 org 亲和: pending(projects=...) 白名单认领 ----
+
+def test_affinity_claims_only_whitelisted_projects(q):
+    # 多 org: worker 只认领自己 config 有 repo_path 的 project, 不抢别机/别 org 的 job。
+    q.enqueue("t-pgq-mine", "chroma")
+    q.enqueue("t-pgq-other", "chroma")        # 别 org/别机的 job
+    claimed = q.pending({"t-pgq-mine"})       # 只认领白名单内的
+    cl = _pids(claimed)
+    assert ("t-pgq-mine", "chroma") in cl
+    assert ("t-pgq-other", "chroma") not in cl
+    with q._pool.connection() as c:           # other 仍 pending(没被本 worker 抢/删)
+        st = c.execute(
+            f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-other'").fetchone()[0]
+    assert st == "pending"
+    other = q.pending({"t-pgq-other"})        # 别 worker(其白名单含 other)仍能认领
+    assert ("t-pgq-other", "chroma") in _pids(other)
+
+
+def test_affinity_none_claims_all(q):
+    # 兼容现状: projects=None(默认)认领全部。
+    q.enqueue("t-pgq-na", "chroma")
+    q.enqueue("t-pgq-nb", "chroma")
+    cl = _pids(q.pending())
+    assert ("t-pgq-na", "chroma") in cl and ("t-pgq-nb", "chroma") in cl
+
+
+def test_affinity_empty_set_claims_nothing(q):
+    # 空白名单(本 worker 无可处理 project)→ 不认领任何 job, 不误删。
+    q.enqueue("t-pgq-empty", "chroma")
+    assert q.pending(set()) == []
+    with q._pool.connection() as c:
+        st = c.execute(
+            f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-empty'").fetchone()[0]
+    assert st == "pending"                     # 仍待领, 没被空白名单 worker 动
+
+
+# ---- 崩溃恢复: reclaim_stale_own 复位自己卡 running 的行 ----
+
+def test_reclaim_stale_own_resets_own_running(q):
+    # worker 认领后崩溃, 行卡 status=running; 重启调 reclaim_stale_own → 复位 pending 重领,
+    # 不必等 lease(1800s)过期。
+    q.enqueue("t-pgq-rec", "chroma")
+    claimed = q.pending()                       # 本 owner 认领 → running, lease 1800s
+    assert any(j.project_id == "t-pgq-rec" for j in claimed)
+    with q._pool.connection() as c:            # 确认确实卡 running 且 lease 远未过期
+        st = c.execute(
+            f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-rec'").fetchone()[0]
+    assert st == "running"
+    n = q.reclaim_stale_own()                   # 模拟同 owner 重启接管自己的 stale 行
+    assert n >= 1
+    with q._pool.connection() as c:            # 已复位 pending + 清 lease/token
+        row = c.execute(
+            f"SELECT status, lease_expires_at, claim_token FROM {_TEST_TABLE} "
+            "WHERE project_id='t-pgq-rec'").fetchone()
+    assert row[0] == "pending" and row[1] is None and row[2] is None
+    assert any(j.project_id == "t-pgq-rec" for j in q.pending())   # 立即重领, 没等 lease
+
+
+def test_reclaim_stale_own_skips_other_owner_running(q):
+    # 只复位自己(同 owner)的行; 别 worker(别 owner)在跑的行不动。
+    q.enqueue("t-pgq-ro", "chroma")
+    with q._pool.connection() as c:            # 模拟别 worker 认领(owner != 本 q._owner)
+        c.execute(
+            f"UPDATE {_TEST_TABLE} SET status='running', claimed_by='other-host:999', "
+            "lease_expires_at=%s, claim_token='tok-other' WHERE project_id='t-pgq-ro'",
+            (time.time() + 1800,))
+    n = q.reclaim_stale_own()                   # 本 owner 复位: 不该碰别 owner 的行
+    with q._pool.connection() as c:
+        st = c.execute(
+            f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-ro'").fetchone()[0]
+    assert st == "running"                      # 别 worker 在跑的行原封不动
+    # n 可能含本测前残留, 只断言别 owner 行未被复位(上面 st=='running' 已证)

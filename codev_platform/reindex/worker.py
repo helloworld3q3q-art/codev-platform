@@ -58,6 +58,19 @@ class ReindexWorker:
         self._q = queue
         self._cfg = cfg
 
+    def _own_projects(self) -> set[str] | None:
+        """本 worker 能处理的 project 集合 = config.projects 里配了(存在的)repo_path 的 project。
+
+        多机/多 org 亲和: 传给 pending() 让 PG 后端只认领本机 project, 不抢别机/别 org 的 job
+        (否则认领后因本地无 repo_path 而 complete() 删掉它 = 吃掉别人的 reindex)。
+
+        返回 None = config 未配 projects 段 → 退回"认领全部"旧语义(单机 file 后端常态, 行为不变;
+        _run_job 对无 repo 的 job 仍兜底丢弃)。"""
+        projects = _cfg_get(self._cfg, "projects")
+        if not isinstance(projects, dict) or not projects:
+            return None
+        return {pid for pid in projects if _repo_for(self._cfg, pid) is not None}
+
     def drain_once(self) -> int:
         """跑完当前所有 pending (串行)。返回处理 job 数。
 
@@ -65,7 +78,7 @@ class ReindexWorker:
         """
         n = 0
         touched: dict[str, Path] = {}
-        for job in self._q.pending():
+        for job in self._q.pending(self._own_projects()):
             repo = self._run_job(job)
             if repo is not None:
                 touched[job.project_id] = repo
@@ -142,9 +155,24 @@ class ReindexWorker:
         except Exception:  # noqa: BLE001
             pass
 
+    def _reclaim_stale_own(self) -> None:
+        """崩溃恢复: 启动时把上一进程(本 worker 崩前)认领后卡在 running 的自己的行复位 pending,
+        自己重启即接管, 不必干等 lease(1800s)过期。仅 PG 后端有此方法(file 后端无 lease 概念,
+        重启即重列, 无需复位)→ hasattr 守卫, 不动 file 语义。best-effort, 失败不阻断启动。"""
+        reclaim = getattr(self._q, "reclaim_stale_own", None)
+        if not callable(reclaim):
+            return
+        try:
+            n = reclaim()
+            if n:
+                _log(f"崩溃恢复: 复位 {n} 个本 worker 上次崩前卡 running 的 job → pending")
+        except Exception as exc:  # noqa: BLE001 — 复位失败不阻断启动(最坏退化到等 lease 过期)
+            _log(f"reclaim_stale_own 失败 (不阻断, 退化到等 lease 过期): {exc!s}")
+
     async def run_forever(self) -> None:
         import asyncio
         _log(f"worker 启动, 监视队列 ({type(self._q).__name__})")
+        self._reclaim_stale_own()
         self.drain_once()
 
         async def _periodic() -> None:
