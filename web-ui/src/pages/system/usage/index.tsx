@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Segmented } from 'antd';
 
 import PageContainer from '@/components/PageContainer';
-import Table from '@/components/Table';
+import ResizableTable from '@/components/ResizableTable';
 import { getAgentUsage } from '@/services/apis/reportsapi';
 
 import { createColumns } from './components/Columns';
@@ -54,7 +54,7 @@ const UsageAuditPage: React.FC = () => {
   return (
     <PageContainer>
       <div className="mb-12 flex justify-end">{segmented}</div>
-      <Table<UsageRow>
+      <ResizableTable<UsageRow>
         rowKey="key"
         loading={loading}
         columns={columns}
