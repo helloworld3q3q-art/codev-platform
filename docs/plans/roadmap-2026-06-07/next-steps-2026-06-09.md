@@ -52,6 +52,12 @@ ai-health --all
 | 2 | ✅ #10 只读 audit(`4cdf204`)| 0.3天 | 低(清爽收尾) | 已完成, 见 §一 #10 |
 | 3 | Phase 7 完整版 | 2-3天 | 中-高 | LLM planner(可选增强,现为关键词)+ agent 端到端 eval(测完整回答质量,非只分类准确率)。复用 `agent/planner.py` + eval planner suite |
 
+### 🟢 Panel 评审后执行(2026-06-11,eval 驱动)
+
+- **✅ recall 金标扩 24→35**(+11 general 语义类,`d27371d`):旧集全 symbol/impact 遮蔽天花板(panel #1 共识:瓶颈是缺 eval 不是缺 lane)。query_type 经 classify_query 确认、expect 经 token_match 验证。
+- **✅ vector 嵌入加源码片段**(`fb12f99`):扩集暴露 vector 在 general/中文行为查询上很弱(找到 3/11)→ 诊断真因 codegraph docstring 覆盖仅 7-11%、嵌入文本无语义(非 query-prompt,实测 query-prompt 只 +1/11)→ `_embed_text` 读 start_line..end_line 源码片段补 docstring。两项目重建后 general 找到 **3→7/11**、MRR 0.195→0.422、**vector delta +0.331 CI[0.101,0.594] 转统计显著**。剩 4 长尾=0.6B 模型极限(换大模型 trigger-gated)。
+- **panel 其余裁决**:bm25 lane=**drop**(被 codegraph-FTS+vector 夹的冗余);reranker=**保持默认关**(扩集上 paired CI 下界>0 才开,代码已就绪);memory lane=**绝不进 recall_code 核心**(无身份入口塌缩 default/local 跨 org 红线,要做只在 web 身份齐入口分区编排);前端=清 services.ts + soft-quality 卡片 do、3D 可视化 defer;重型 Phase 2/4/8=trigger-gated,Phase 3 残留顺带补。
+
 ### 🟡 第二梯队:需 WSL daemon(在 WSL 窗口做)
 
 | 任务 | 估时 | 前置 |
