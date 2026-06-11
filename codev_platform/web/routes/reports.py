@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 
@@ -139,3 +140,18 @@ def report_mcp_usage(request: Request, _sess=Depends(require_platform_admin)) ->
     from codev_platform import platform_status
     data = platform_status.mcp_usage_report(platform_status._repo_root())
     return ok(S.McpUsageReportResponse(**data), request_id=_rid(request))
+
+
+@router.get(
+    "/api/v1/reports/agent-usage",
+    tags=[_TAG],
+    summary="agent token 用量-总量+按模型+最近明细(7天/全时段, 含缓存率与估算成本)",
+    operation_id="reportAgentUsage",
+    response_model=CommonResult[S.AgentUsageReportResponse],
+)
+def report_agent_usage(request: Request, _sess=Depends(require_platform_admin)) -> CommonResult:
+    # 平台级跨会话 token 计量(读 agent_trace jsonl) → require_platform_admin。
+    from codev_platform.agent.usage_report import agent_usage_report
+    from codev_platform.core.paths import data_root
+    data = agent_usage_report(Path(data_root()) / "agent_trace")
+    return ok(S.AgentUsageReportResponse(**data), request_id=_rid(request))

@@ -88,3 +88,52 @@ class McpUsageWindow(BaseModel):
 class McpUsageReportResponse(BaseModel):
     last7d: McpUsageWindow = Field(default_factory=McpUsageWindow)    # 近 7 天
     allTime: McpUsageWindow = Field(default_factory=McpUsageWindow)   # 全时段累计
+
+
+# ---- agent token 用量(Phase 8 计量看板 + system 审计列表)----
+
+class AgentUsageEntry(BaseModel):
+    """单次 agent 查询的 token 用量明细(审计列表行)。"""
+
+    ts: float = 0.0
+    sessionId: str = ""
+    model: str = ""
+    steps: int = 0
+    stopReason: str = ""
+    inputTokens: int = 0
+    outputTokens: int = 0
+    cacheHitTokens: int = 0
+    cacheMissTokens: int = 0
+    costUsd: float = 0.0
+
+
+class AgentUsageModel(BaseModel):
+    """按模型聚合一行(token + 估算成本 + 缓存命中率)。"""
+
+    model: str = ""
+    queries: int = 0
+    inputTokens: int = 0
+    outputTokens: int = 0
+    cacheHitTokens: int = 0
+    cacheMissTokens: int = 0
+    cacheHitRate: float = 0.0
+    costUsd: float = 0.0
+
+
+class AgentUsageWindow(BaseModel):
+    """一个时间窗的总量 + 按模型 + 最近明细。"""
+
+    queries: int = 0
+    inputTokens: int = 0
+    outputTokens: int = 0
+    cacheHitTokens: int = 0
+    cacheMissTokens: int = 0
+    cacheHitRate: float = 0.0
+    costUsd: float = 0.0
+    byModel: list[AgentUsageModel] = Field(default_factory=list)
+    recent: list[AgentUsageEntry] = Field(default_factory=list)
+
+
+class AgentUsageReportResponse(BaseModel):
+    last7d: AgentUsageWindow = Field(default_factory=AgentUsageWindow)    # 近 7 天
+    allTime: AgentUsageWindow = Field(default_factory=AgentUsageWindow)   # 全时段累计
