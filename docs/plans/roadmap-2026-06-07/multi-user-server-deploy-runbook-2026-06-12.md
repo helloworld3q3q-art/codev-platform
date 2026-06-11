@@ -37,8 +37,12 @@ codev-platform org project grant openclaw-stock dev2 --role member   # 授项目
 codev-platform org list                                      # 核对
 ```
 > token 身份(第 1 步的 user_id/org_id)必须与上面账号(user/org)对齐,RBAC 才一致。
-> web 控制台登录(username+密码)是另一条路(account_store),当前仅 bootstrap admin 有密码;
-> 第二个人若要登 web-ui,密码-set CLI 是待补项(MCP token 接入不需要密码)。
+> **要登 web 控制台**(username+密码)再加一步设密码(MCP/SSE token 接入不需要):
+> ```bash
+> codev-platform org set-password dev2 --password "<密码>"   # 写 users.password_hash(A)
+> ```
+> 双 store 厘清:orgs/users/org_members 同表单一真值源;`org add-user/add-member/grant`(RbacStore=授权)
+> 与 `org set-password`(account_store=身份+密码)**同表互补不冲突**(详见 [[account-rbac-two-store-model]])。
 
 ### 4. 第二台 client 的 .mcp.json(带 token 连 SSE)—— 一条命令搞定
 ```bash
@@ -72,6 +76,6 @@ codev-platform gateway client-auth --repo . --query-token        # 写 ?token=<�
 - [x] token-mode 端到端验证(in-process:AuthMiddleware→query_string→authenticator→identity 整链测过)
 - [ ] sqlite→pg graph 迁移命令(切 PG 不丢现有图谱)— Stage C,并发上来再做
 - [ ] health/status pg-aware(pg 模式不误报 "未建")— Stage C
-- [ ] web 控制台密码-set CLI(account_store 路径;MCP token 接入不需要,web-ui 登录才要;
-      需先理清 account_store vs RbacStore 双 store 关系,别造 fork)
+- [x] web 控制台密码-set CLI(2026-06-12 `org set-password`;厘清双 store=同表互补非 fork,
+      密码定向 UPDATE users.password_hash 不覆盖 B 的 display_name)
 - [ ] 真机端到端(真 Claude Code 客户端连 token-mode 服务器)— 周末接入时验
