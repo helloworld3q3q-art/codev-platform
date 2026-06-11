@@ -17,17 +17,22 @@ const { data, loading, refresh } = useRequest(postXxx, { formatResult: (res) => 
 const [data, setData] = useState<API.XxxResponse | undefined>(undefined);
 const [loading, setLoading] = useState(false);
 
-const loadData = useCallback(async (): Promise<void> => {
-  setLoading(true);
-  try {
-    const res = await postXxx({});
-    setData(res.data);
-  } catch {
-    setData(undefined);
-  } finally {
-    setLoading(false);
-  }
-}, [/* refreshDeps 行为放这 */]);
+const loadData = useCallback(
+  async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const res = await postXxx({});
+      setData(res.data);
+    } catch {
+      setData(undefined);
+    } finally {
+      setLoading(false);
+    }
+  },
+  [
+    /* refreshDeps 行为放这 */
+  ],
+);
 
 const handleRefresh = useCallback((): void => {
   loadData();
@@ -50,14 +55,14 @@ setItems(res.data ?? []);
 
 **关键映射**（旧 `useRequest` 配置 → 新模式）：
 
-| 旧 | 新 |
-|---|---|
-| `useRequest(fn)` 自动 mount 触发 | `useEffect(() => { loadFn() }, [loadFn])` |
-| `refreshDeps: [a, b]` | 把 `[a, b]` 放到 `loadFn = useCallback(..., [a, b])` 依赖 |
-| `formatResult: (res) => res.data` | try 内直接 `setData(res.data)` |
-| `manual: true` | 不写 useEffect，只在用户触发时调 `loadFn` |
-| `refresh()` | `handleRefresh = useCallback(() => loadFn(), [loadFn])` |
-| `pollingInterval` | useEffect 内 `setInterval` 手动管理 |
+| 旧                                | 新                                                        |
+| --------------------------------- | --------------------------------------------------------- |
+| `useRequest(fn)` 自动 mount 触发  | `useEffect(() => { loadFn() }, [loadFn])`                 |
+| `refreshDeps: [a, b]`             | 把 `[a, b]` 放到 `loadFn = useCallback(..., [a, b])` 依赖 |
+| `formatResult: (res) => res.data` | try 内直接 `setData(res.data)`                            |
+| `manual: true`                    | 不写 useEffect，只在用户触发时调 `loadFn`                 |
+| `refresh()`                       | `handleRefresh = useCallback(() => loadFn(), [loadFn])`   |
+| `pollingInterval`                 | useEffect 内 `setInterval` 手动管理                       |
 
 **参考实现**：`src/pages/sampleprogress/index.tsx` / `src/pages/recommendpnl/components/TrackDetailDrawer.tsx`。
 

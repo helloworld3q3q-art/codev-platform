@@ -15,13 +15,7 @@ from codev_platform.graph.schema import (
     GraphEdge,
     GraphNode,
 )
-from codev_platform.graph.store import (
-    graph_store_path,
-    load_graph,
-    open_store,
-    stats,
-    upsert_result,
-)
+from codev_platform.graph.store import graph_store_path, open_store
 
 PID = "demo-project"
 
@@ -62,8 +56,8 @@ def _sample_result(plugin: str = "builtin.fake") -> AnalyzerResult:
 def test_roundtrip(tmp_path: Path) -> None:
     p = tmp_path / "g.sqlite"
     conn = open_store(PID, path=p)
-    upsert_result(conn, PID, _sample_result())
-    got = load_graph(conn, PID, plugin="builtin.fake")
+    conn.upsert_result(PID, _sample_result())
+    got = conn.load_graph(PID, plugin="builtin.fake")
     conn.close()
 
     src = _sample_result()
@@ -79,8 +73,8 @@ def test_roundtrip(tmp_path: Path) -> None:
 def test_meta_and_types_preserved(tmp_path: Path) -> None:
     p = tmp_path / "g.sqlite"
     conn = open_store(PID, path=p)
-    upsert_result(conn, PID, _sample_result())
-    node = next(n for n in load_graph(conn, PID).nodes if n.name == "t1")
+    conn.upsert_result(PID, _sample_result())
+    node = next(n for n in conn.load_graph(PID).nodes if n.name == "t1")
     conn.close()
     assert node.meta == {"rows": 100, "raw": "x"}
     assert node.line == 3
@@ -90,10 +84,10 @@ def test_meta_and_types_preserved(tmp_path: Path) -> None:
 def test_idempotent_same_plugin(tmp_path: Path) -> None:
     p = tmp_path / "g.sqlite"
     conn = open_store(PID, path=p)
-    upsert_result(conn, PID, _sample_result())
-    upsert_result(conn, PID, _sample_result())  # 重灌
-    got = load_graph(conn, PID, plugin="builtin.fake")
-    s = stats(conn)
+    conn.upsert_result(PID, _sample_result())
+    conn.upsert_result(PID, _sample_result())  # 重灌
+    got = conn.load_graph(PID, plugin="builtin.fake")
+    s = conn.stats(PID)
     conn.close()
     # 重灌不翻倍
     assert len(got.nodes) == 2
@@ -105,12 +99,12 @@ def test_idempotent_same_plugin(tmp_path: Path) -> None:
 def test_multi_plugin_coexist(tmp_path: Path) -> None:
     p = tmp_path / "g.sqlite"
     conn = open_store(PID, path=p)
-    upsert_result(conn, PID, _sample_result(plugin="builtin.a"))
-    upsert_result(conn, PID, _sample_result(plugin="builtin.b"))
+    conn.upsert_result(PID, _sample_result(plugin="builtin.a"))
+    conn.upsert_result(PID, _sample_result(plugin="builtin.b"))
     # 全集 = 两插件之和
-    all_nodes = load_graph(conn, PID).nodes
-    only_a = load_graph(conn, PID, plugin="builtin.a").nodes
-    s = stats(conn)
+    all_nodes = conn.load_graph(PID).nodes
+    only_a = conn.load_graph(PID, plugin="builtin.a").nodes
+    s = conn.stats(PID)
     conn.close()
     assert len(all_nodes) == 4  # 2 + 2
     assert len(only_a) == 2
@@ -120,14 +114,14 @@ def test_multi_plugin_coexist(tmp_path: Path) -> None:
 def test_reingest_one_plugin_does_not_touch_other(tmp_path: Path) -> None:
     p = tmp_path / "g.sqlite"
     conn = open_store(PID, path=p)
-    upsert_result(conn, PID, _sample_result(plugin="builtin.a"))
-    upsert_result(conn, PID, _sample_result(plugin="builtin.b"))
+    conn.upsert_result(PID, _sample_result(plugin="builtin.a"))
+    conn.upsert_result(PID, _sample_result(plugin="builtin.b"))
     # 只重灌 a (节点减为 1)
     thin = _sample_result(plugin="builtin.a")
     thin.nodes = thin.nodes[:1]
-    upsert_result(conn, PID, thin)
-    a = load_graph(conn, PID, plugin="builtin.a").nodes
-    b = load_graph(conn, PID, plugin="builtin.b").nodes
+    conn.upsert_result(PID, thin)
+    a = conn.load_graph(PID, plugin="builtin.a").nodes
+    b = conn.load_graph(PID, plugin="builtin.b").nodes
     conn.close()
     assert len(a) == 1  # a 被替换
     assert len(b) == 2  # b 不受影响
@@ -138,10 +132,10 @@ def test_project_isolation(tmp_path: Path) -> None:
     pb = tmp_path / "b.sqlite"
     ca = open_store("proj-a", path=pa)
     cb = open_store("proj-b", path=pb)
-    upsert_result(ca, "proj-a", _sample_result())
+    ca.upsert_result("proj-a", _sample_result())
     # proj-b store 是独立文件, 完全空
-    assert load_graph(cb, "proj-b").nodes == []
-    assert load_graph(ca, "proj-a").nodes
+    assert cb.load_graph("proj-b").nodes == []
+    assert ca.load_graph("proj-a").nodes
     ca.close()
     cb.close()
 
@@ -149,9 +143,9 @@ def test_project_isolation(tmp_path: Path) -> None:
 def test_empty_result(tmp_path: Path) -> None:
     p = tmp_path / "g.sqlite"
     conn = open_store(PID, path=p)
-    upsert_result(conn, PID, AnalyzerResult(plugin="builtin.empty"))
-    got = load_graph(conn, PID, plugin="builtin.empty")
-    s = stats(conn)
+    conn.upsert_result(PID, AnalyzerResult(plugin="builtin.empty"))
+    got = conn.load_graph(PID, plugin="builtin.empty")
+    s = conn.stats(PID)
     conn.close()
     assert got.nodes == [] and got.edges == []
     assert s["plugins"][0]["plugin"] == "builtin.empty"

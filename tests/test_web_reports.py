@@ -52,7 +52,7 @@ def client(tmp_path, monkeypatch):
         GraphEdge(source=_EP, target=_FN, kind=EdgeKind.CALLS.value),
         GraphEdge(source=_FN, target=_TB, kind=EdgeKind.WRITES_TABLE.value),
     ]
-    upsert_result(c, _PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    c.upsert_result(_PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     c.close()
     monkeypatch.setattr(reports_routes, "graph_store_path", lambda pid: store)
     app = build_app(title="t", routers=[reports_routes.router], cfg=_CFG)

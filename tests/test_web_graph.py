@@ -141,7 +141,7 @@ def test_codegraph_search_or_mode_finds_partial(tmp_path):
 def _seed_unified_store(path: Path, project_id: str) -> None:
     """往 store 写多插件混合产出: database (db_table/db_column) + 后端端点。"""
     from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode
-    from codev_platform.graph.store import open_store, upsert_result
+    from codev_platform.graph.store import open_store
 
     table = GraphNode(
         id=f"{project_id}:db_table:t1", kind="db_table", name="stock_quote_daily",
@@ -167,8 +167,8 @@ def _seed_unified_store(path: Path, project_id: str) -> None:
     )
     conn = open_store(project_id, path=path)
     try:
-        upsert_result(conn, project_id, db_result)
-        upsert_result(conn, project_id, be_result)
+        conn.upsert_result(project_id, db_result)
+        conn.upsert_result(project_id, be_result)
     finally:
         conn.close()
 

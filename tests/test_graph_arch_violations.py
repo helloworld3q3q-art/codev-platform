@@ -16,7 +16,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import load_graph, open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 
 def _file(path):
@@ -35,11 +35,11 @@ def _seed(conn, *, reverse: bool):
     fctrl, frepo = _file("web/controller/order_ctrl.py"), _file("web/repository/order_repo.py")
     fc, fr = _func("web/controller/order_ctrl.py", "handle"), _func("web/repository/order_repo.py", "save")
     src, tgt = (fr.id, fc.id) if reverse else (fc.id, fr.id)
-    upsert_result(conn, "p", AnalyzerResult(
+    conn.upsert_result("p", AnalyzerResult(
         nodes=[fctrl, frepo, fc, fr],
         edges=[GraphEdge(source=src, target=tgt, kind=EdgeKind.CALLS)]))
-    m = load_graph(conn, "p")   # 用真 analyzer 产软(对齐生产: 节点级 PLAYS_ROLE 连该 file 每个节点)
-    upsert_result(conn, "p", ArchLayerAnalyzer(FakeLayerLabeler()).analyze("p", m.nodes, m.edges))
+    m = conn.load_graph("p")   # 用真 analyzer 产软(对齐生产: 节点级 PLAYS_ROLE 连该 file 每个节点)
+    conn.upsert_result("p", ArchLayerAnalyzer(FakeLayerLabeler()).analyze("p", m.nodes, m.edges))
     return fctrl, frepo
 
 

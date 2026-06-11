@@ -12,7 +12,7 @@ from pathlib import Path
 
 from codev_platform.graph.ingest import LINKER_PLUGIN, ingest_project
 from codev_platform.graph.schema import EdgeKind
-from codev_platform.graph.store import load_graph, open_store
+from codev_platform.graph.store import open_store
 
 PID = "demo-linker"
 
@@ -61,7 +61,7 @@ def test_linker_links_frontend_to_fastapi_and_spring(tmp_path: Path) -> None:
 
     conn = open_store(PID, path=store)
     try:
-        graph = load_graph(conn, PID)
+        graph = conn.load_graph(PID)
     finally:
         conn.close()
 
@@ -84,7 +84,7 @@ def test_linker_idempotent_on_reingest(tmp_path: Path) -> None:
 
     conn = open_store(PID, path=store)
     try:
-        graph = load_graph(conn, PID)
+        graph = conn.load_graph(PID)
     finally:
         conn.close()
     calls = [e for e in graph.edges if e.kind == EdgeKind.CALLS_API.value]

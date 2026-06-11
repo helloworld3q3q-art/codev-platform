@@ -9,7 +9,7 @@ from codev_platform.graph.schema import (
     NodeKind,
 )
 from codev_platform.graph.soft_quality import assess_soft_labels, render_markdown
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 PID = "t-softq"
 
@@ -45,7 +45,7 @@ def _plays(hard_id: str, role: str) -> GraphEdge:
 
 def _seed(tmp_path, nodes, edges):
     conn = open_store(PID, path=tmp_path / "g.sqlite")
-    upsert_result(conn, PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    conn.upsert_result(PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     return conn
 
 

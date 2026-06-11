@@ -16,11 +16,10 @@
 """
 from __future__ import annotations
 
-import sqlite3
 from collections import defaultdict
 
 from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode, NodeKind
-from codev_platform.graph.store import load_graph
+from codev_platform.graph.store import GraphStore
 
 # 默认阈值(可由调用方覆盖)。
 _GIANT_SHARE = 0.5      # 单 cluster 成员占比 > 此 = 巨型(疑似共享节点退化)
@@ -108,14 +107,14 @@ def _axis_flags(label: str, ax: dict, *, min_coverage: float) -> list[str]:
     return flags
 
 
-def assess_soft_labels(conn: sqlite3.Connection, project_id: str, *,
+def assess_soft_labels(store: GraphStore, project_id: str, *,
                        giant_share: float = _GIANT_SHARE,
                        min_coverage: float = _MIN_COVERAGE) -> dict:
     """软标签健康度诊断。返回两轴指标 + flags + healthy 布尔(无 flag = healthy)。
 
     无软层(未跑 analyzer)→ 两轴空 + healthy True(不报假阳性, 没标就没退化)。
     """
-    g = load_graph(conn, project_id)
+    g = store.load_graph(project_id)
     domains = _assess_axis(
         g.nodes, g.edges, soft_kind=NodeKind.BUSINESS_DOMAIN.value,
         soft_edge_kind=EdgeKind.BELONGS_TO_DOMAIN.value, eligible_kinds=_DOMAIN_ELIGIBLE,

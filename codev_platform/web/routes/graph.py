@@ -9,15 +9,13 @@ DB 缺失=index_missing(503) / 入参非法=invalid_params(400) / sqlite 故障=
 """
 from __future__ import annotations
 
-import sqlite3
-
 from fastapi import APIRouter, Depends, Request
 
 from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.graph.schema import AnalyzerResult
-from codev_platform.graph.store import graph_store_path, load_graph
+from codev_platform.graph.store import GraphStore, GraphStoreUnreadable, open_store
 from codev_platform.web.integrations.codegraph_client import CodegraphClient
 from codev_platform.web.schemas import graph as S
 
@@ -40,13 +38,12 @@ def _is_missing(exc: PlatformError) -> bool:
 # 统一图谱 store 只读访问 (unified 组直读全量节点/边)。
 
 
-def _open_store_ro(project_id: str) -> sqlite3.Connection | None:
-    """只读打开统一图谱 store; 文件不存在返回 None (走 fallback)。"""
-    path = graph_store_path(project_id)
-    if not path.exists():
+def _open_store_ro(project_id: str) -> GraphStore | None:
+    """只读打开统一图谱 store; 不存在 / 旧 schema / 读不动返回 None (走 fallback)。"""
+    try:
+        return open_store(project_id, mode="ro")
+    except GraphStoreUnreadable:
         return None
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    return conn
 
 
 # ======================================================================
@@ -180,13 +177,13 @@ def codegraph_graph(request: Request, body: S.CodegraphGraphRequest | None = Non
 
 def _load_unified_from_store(project_id: str) -> AnalyzerResult:
     """读 store 内本 project 的全量图谱 (所有插件); store 缺/空 → 空 AnalyzerResult。"""
-    conn = _open_store_ro(project_id)
-    if conn is None:
+    store = _open_store_ro(project_id)
+    if store is None:
         return AnalyzerResult()
     try:
-        return load_graph(conn, project_id)
+        return store.load_graph(project_id)
     finally:
-        conn.close()
+        store.close()
 
 
 @router.post(
@@ -227,13 +224,13 @@ def graph_audit(request: Request, ctx=Depends(require_project_access)) -> Common
     """统一图谱结构审计 (Phase 3, 纯读): 断链/串台/孤儿 plugin/重复/低置信。store 缺/空 → clean。"""
     _identity, project_id = ctx
     from codev_platform.graph.audit import audit_graph
-    conn = _open_store_ro(project_id)
-    if conn is None:
+    store = _open_store_ro(project_id)
+    if store is None:
         return ok(S.GraphAuditResponse(), request_id=_rid(request))
     try:
-        rep = audit_graph(conn, project_id)
+        rep = audit_graph(store, project_id)
     finally:
-        conn.close()
+        store.close()
     err, warn, tot = rep["errors"], rep["warnings"], rep["totals"]
     resp = S.GraphAuditResponse(
         clean=rep["clean"], errorCount=rep["error_count"],
@@ -258,13 +255,13 @@ def graph_soft_quality(request: Request, ctx=Depends(require_project_access)) ->
     """A1/A2 软标签健康度诊断 (纯读): 分布/覆盖/巨型 cluster 退化。store 缺/无软层 → healthy。"""
     _identity, project_id = ctx
     from codev_platform.graph.soft_quality import assess_soft_labels
-    conn = _open_store_ro(project_id)
-    if conn is None:
+    store = _open_store_ro(project_id)
+    if store is None:
         return ok(S.GraphSoftQualityResponse(), request_id=_rid(request))
     try:
-        rep = assess_soft_labels(conn, project_id)
+        rep = assess_soft_labels(store, project_id)
     finally:
-        conn.close()
+        store.close()
     dom, lay = rep["domains"], rep["layers"]
     resp = S.GraphSoftQualityResponse(
         healthy=rep["healthy"], flagCount=len(rep["flags"]), flags=rep["flags"],
@@ -315,14 +312,14 @@ def graph_impact_paths(request: Request, body: S.GraphImpactPathsRequest,
     """改某节点 → top-N 最强依赖路径(每跳带 src/confidence/certain, 可解释)。store 缺/节点未找到 → 空。"""
     _identity, project_id = ctx
     from codev_platform.graph.impact import find_impact_paths
-    conn = _open_store_ro(project_id)
-    if conn is None:
+    store = _open_store_ro(project_id)
+    if store is None:
         return ok(S.GraphImpactPathsResponse(), request_id=_rid(request))
     try:
-        rep = find_impact_paths(conn, project_id, body.nodeRef,
+        rep = find_impact_paths(store, project_id, body.nodeRef,
                                 top_n=body.topN, certain_only=body.certainOnly)
     finally:
-        conn.close()
+        store.close()
     if not rep.get("found"):
         return ok(S.GraphImpactPathsResponse(found=False), request_id=_rid(request))
     paths = [

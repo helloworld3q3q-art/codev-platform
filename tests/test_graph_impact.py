@@ -20,7 +20,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 _PID = "p"
 _FE = "p:frontend_api_call:src/UserPage.tsx:POST:/users"
@@ -46,7 +46,7 @@ def conn(tmp_path):
         GraphEdge(source=_EP, target=_FN, kind=EdgeKind.CALLS.value),
         GraphEdge(source=_FN, target=_TB, kind=EdgeKind.WRITES_TABLE.value),
     ]
-    upsert_result(c, _PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    c.upsert_result(_PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     return c
 
 
@@ -88,7 +88,7 @@ def test_find_impacted_pages_transitive(tmp_path):
         GraphEdge(source=page, target=barrel, kind=EdgeKind.IMPORTS.value),
         GraphEdge(source=barrel, target=comp, kind=EdgeKind.IMPORTS.value),
     ]
-    upsert_result(c, pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="builtin.frontend_deps"))
+    c.upsert_result(pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="builtin.frontend_deps"))
     r = find_impacted_pages(c, pid, "PermissionButton.tsx")
     assert r["found"]
     assert r["count"] == 1                       # 只 1 个页面(barrel 非 is_page 不计)
@@ -129,7 +129,7 @@ def test_ambiguous_name_returns_candidates(tmp_path):
                    name="list", project_id="p2", file="a.py")
     n2 = GraphNode(id="p2:backend_endpoint:GET:/b/list", kind=NodeKind.BACKEND_ENDPOINT.value,
                    name="list", project_id="p2", file="b.py")
-    upsert_result(c, "p2", AnalyzerResult(nodes=[n1, n2], plugin="test"))
+    c.upsert_result("p2", AnalyzerResult(nodes=[n1, n2], plugin="test"))
     r = find_api_callers(c, "p2", "list")
     assert r["found"] is False and len(r["ambiguous"]) == 2
     assert {a["file"] for a in r["ambiguous"]} == {"a.py", "b.py"}
@@ -179,7 +179,7 @@ def test_search_nodes_ranks_exact_prefix_substring(tmp_path):
         GraphNode(id="p3:backend_function:unsaved", kind=NodeKind.BACKEND_FUNCTION.value,
                   name="unsaved", project_id="p3", file="c.py"),            # 子串
     ]
-    upsert_result(c, "p3", AnalyzerResult(nodes=nodes, plugin="test"))
+    c.upsert_result("p3", AnalyzerResult(nodes=nodes, plugin="test"))
     names = [h["name"] for h in search_nodes(c, "p3", "save")["hits"]]
     c.close()
     assert names == ["save", "save_user", "unsaved"]   # 精确 > 前缀 > 子串
@@ -226,7 +226,7 @@ def test_find_impact_paths_ranks_by_edge_quality(tmp_path):
         GraphEdge(source=B, target=TB, kind=EdgeKind.READS_TABLE.value, confidence=1.0), ProvSource.AST)
     e_rgx = stamp_provenance(
         GraphEdge(source=C, target=TB, kind=EdgeKind.READS_TABLE.value, confidence=0.65), ProvSource.REGEX)
-    upsert_result(c, "pp", AnalyzerResult(nodes=nodes, edges=[e_ast, e_rgx], plugin="test"))
+    c.upsert_result("pp", AnalyzerResult(nodes=nodes, edges=[e_ast, e_rgx], plugin="test"))
     r = find_impact_paths(c, "pp", "t")
     c.close()
     assert r["found"] and r["count"] == 2

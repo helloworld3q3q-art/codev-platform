@@ -44,7 +44,7 @@ def _belongs(hid: str, dom: str) -> GraphEdge:
 
 def _seed(store, nodes, edges):
     c = open_store(_PID, path=store)
-    upsert_result(c, _PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    c.upsert_result(_PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     c.close()
 
 

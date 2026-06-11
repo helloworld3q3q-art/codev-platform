@@ -9,7 +9,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 PID = "t-audit"
 
@@ -20,10 +20,9 @@ def _node(nid: str, name: str, file: str = "a.py",
 
 
 def _seed(conn, nodes, edges):
-    upsert_result(conn, PID, AnalyzerResult(
+    conn.upsert_result(PID, AnalyzerResult(
         plugin="t", plugin_version="0", nodes=nodes, edges=edges,
-        evidences=[], findings=[]))
-    conn.commit()
+        evidences=[], findings=[]))   # upsert_result 内部已 commit
 
 
 def test_audit_detects_dangling_dup_lowconf(tmp_path):
@@ -60,12 +59,16 @@ def test_audit_clean_graph(tmp_path):
 def test_audit_cross_project_leak(tmp_path):
     conn = open_store(PID, path=tmp_path / "g.sqlite")
     _seed(conn, [_node("f1", "foo")], [])
-    # 原表直插一行别 project 的节点 (绕过 upsert 的 pid 强制), 模拟串台泄漏
-    conn.execute(
+    # 原表直插一行别 project 的节点 (绕过 upsert 的 pid 强制), 模拟串台泄漏。GraphStore 不暴露
+    # 底层 conn(防 recouple), 对抗 fixture 走独立 sqlite3 直连同文件注入。
+    import sqlite3
+    raw = sqlite3.connect(tmp_path / "g.sqlite")
+    raw.execute(
         "INSERT INTO nodes (id, plugin, kind, name, project_id, file, line, language, meta_json) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         ("x1", "t", "backend_function", "leak", "OTHER-PID", "a.py", None, None, None))
-    conn.commit()
+    raw.commit()
+    raw.close()
     rep = audit_graph(conn, PID)
     conn.close()
     assert rep["errors"]["cross_project_nodes"]["count"] == 1
@@ -80,12 +83,11 @@ def test_audit_orphan_soft_plugin(tmp_path):
     role = GraphNode(id=f"{PID}:arch_layer:service", kind=NodeKind.ARCH_LAYER.value,
                      name="service", project_id=PID)
     # 规范来源
-    upsert_result(conn, PID, AnalyzerResult(plugin="builtin.analyzers", nodes=[role],
+    conn.upsert_result(PID, AnalyzerResult(plugin="builtin.analyzers", nodes=[role],
                                             edges=[], evidences=[], findings=[]))
     # 孤儿: 同软节点又被自名 plugin 写一份(plugin 漂移残留)
-    upsert_result(conn, PID, AnalyzerResult(plugin="arch_layer", nodes=[role],
+    conn.upsert_result(PID, AnalyzerResult(plugin="arch_layer", nodes=[role],
                                             edges=[], evidences=[], findings=[]))
-    conn.commit()
     rep = audit_graph(conn, PID)
     conn.close()
     osp = rep["errors"]["orphan_soft_plugins"]
@@ -97,9 +99,8 @@ def test_audit_no_orphan_when_only_canonical(tmp_path):
     conn = open_store(PID, path=tmp_path / "g.sqlite")
     role = GraphNode(id=f"{PID}:arch_layer:service", kind=NodeKind.ARCH_LAYER.value,
                      name="service", project_id=PID)
-    upsert_result(conn, PID, AnalyzerResult(plugin="builtin.analyzers", nodes=[role],
+    conn.upsert_result(PID, AnalyzerResult(plugin="builtin.analyzers", nodes=[role],
                                             edges=[], evidences=[], findings=[]))
-    conn.commit()
     rep = audit_graph(conn, PID)
     conn.close()
     assert rep["errors"]["orphan_soft_plugins"]["count"] == 0
@@ -111,22 +112,20 @@ def test_audit_all_stores_gate(tmp_path):
     gs.mkdir()
     # p1: clean
     c1 = open_store("p1", path=gs / "p1.sqlite")
-    upsert_result(c1, "p1", AnalyzerResult(
+    c1.upsert_result("p1", AnalyzerResult(
         plugin="t", plugin_version="0",
         nodes=[GraphNode(id="a", kind=NodeKind.BACKEND_FUNCTION.value, name="a",
                          project_id="p1", file="a.py")],
         edges=[], evidences=[], findings=[]))
-    c1.commit()
     c1.close()
     # p2: 断链(边指向不存在节点)
     c2 = open_store("p2", path=gs / "p2.sqlite")
-    upsert_result(c2, "p2", AnalyzerResult(
+    c2.upsert_result("p2", AnalyzerResult(
         plugin="t", plugin_version="0",
         nodes=[GraphNode(id="x", kind=NodeKind.BACKEND_FUNCTION.value, name="x",
                          project_id="p2", file="x.py")],
         edges=[GraphEdge(source="x", target="ghost", kind=EdgeKind.CALLS.value)],
         evidences=[], findings=[]))
-    c2.commit()
     c2.close()
 
     agg = audit_all_stores(gs)
@@ -151,12 +150,11 @@ def test_audit_all_stores_readonly_no_mutation(tmp_path):
     gs = tmp_path / "graph_store"
     gs.mkdir()
     c = open_store("p1", path=gs / "p1.sqlite")
-    upsert_result(c, "p1", AnalyzerResult(
+    c.upsert_result("p1", AnalyzerResult(
         plugin="t", plugin_version="0",
         nodes=[GraphNode(id="a", kind=NodeKind.BACKEND_FUNCTION.value, name="a",
                          project_id="p1", file="a.py")],
         edges=[], evidences=[], findings=[]))
-    c.commit()
     c.close()
     db = gs / "p1.sqlite"
     before = hashlib.sha256(db.read_bytes()).hexdigest()
@@ -211,9 +209,9 @@ def test_audit_detects_duplicate_edges(tmp_path):
     # → duplicate_edges 冲突 warning。
     conn = open_store(PID, path=tmp_path / "g.sqlite")
     e = GraphEdge(source="f1", target="f2", kind=EdgeKind.CALLS.value, confidence=0.7)
-    upsert_result(conn, PID, AnalyzerResult(nodes=[_node("f1", "a"), _node("f2", "b")],
+    conn.upsert_result(PID, AnalyzerResult(nodes=[_node("f1", "a"), _node("f2", "b")],
                                             edges=[e], plugin="builtin.call_resolvers"))
-    upsert_result(conn, PID, AnalyzerResult(edges=[e], plugin="builtin.codegraph_bridge"))
+    conn.upsert_result(PID, AnalyzerResult(edges=[e], plugin="builtin.codegraph_bridge"))
     rep = audit_graph(conn, PID)
     conn.close()
     dup = rep["warnings"]["duplicate_edges"]

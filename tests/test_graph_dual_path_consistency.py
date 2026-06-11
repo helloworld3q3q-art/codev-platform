@@ -15,7 +15,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 
 def _seed(conn):
@@ -25,7 +25,7 @@ def _seed(conn):
     dom = GraphNode(id="p:business_domain:订单", kind=NodeKind.BUSINESS_DOMAIN,
                     name="订单", project_id="p", meta={"confidence": 0.7})
     se = GraphEdge(source=e.id, target=dom.id, kind=EdgeKind.BELONGS_TO_DOMAIN, confidence=0.7)
-    upsert_result(conn, "p", AnalyzerResult(nodes=[e, t, dom], edges=[se], plugin="x"))
+    conn.upsert_result("p", AnalyzerResult(nodes=[e, t, dom], edges=[se], plugin="x"))
 
 
 def test_graph_dual_path_same_result(tmp_path):
@@ -51,7 +51,7 @@ def test_agent_direct_read_routes_via_graph_store_path(tmp_path, monkeypatch):
     target = tmp_path / "routed.sqlite"
     monkeypatch.setattr(gs, "graph_store_path", lambda *a, **k: target)
     conn0 = open_store("p", path=target)
-    upsert_result(conn0, "p", AnalyzerResult(
+    conn0.upsert_result("p", AnalyzerResult(
         nodes=[GraphNode(id="p:db_table:orders", kind=NodeKind.DB_TABLE,
                          name="orders", project_id="p")], plugin="x"))
     conn0.close()

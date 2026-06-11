@@ -59,27 +59,27 @@ def _parse_dt(text: str) -> datetime | None:
 
 def _local_graph(pid: str) -> Any:
     """统一图谱 store 节点/边数 (graph_store/<pid>.sqlite, 替代退役的 cross_layer)。未建返回 'not_built'。"""
-    from codev_platform.graph.store import graph_store_path
+    from codev_platform.graph.store import graph_store_path, open_store
     gdb = graph_store_path(pid)
     if not gdb.is_file():
         return "not_built"
-    c = _sqlite_counts(gdb, "nodes", "edges") or {}
-    return {"nodes": c.get("nodes", 0), "edges": c.get("edges", 0), "source": "local"}
+    try:
+        with open_store(pid, mode="ro") as store:
+            t = store.stats(pid)["totals"]
+    except Exception:  # noqa: BLE001 — 状态接口永不抛(旧 schema 等)
+        return "unknown"
+    return {"nodes": t["nodes"], "edges": t["edges"], "source": "local"}
 
 
 def _soft_quality_summary(gdb: Path, pid: str) -> Any:
     """A1/A2 软标签健康摘要 (只读, 状态接口**永不抛**)。未建='not_built' / 读失败='unknown'。"""
     if not gdb.is_file():
         return "not_built"
-    import sqlite3
-
     from codev_platform.graph.soft_quality import assess_soft_labels
+    from codev_platform.graph.store import open_store
     try:
-        conn = sqlite3.connect(f"file:{gdb}?mode=ro", uri=True)
-        try:
-            rep = assess_soft_labels(conn, pid)
-        finally:
-            conn.close()
+        with open_store(pid, mode="ro", path=gdb) as store:
+            rep = assess_soft_labels(store, pid)
     except Exception:  # noqa: BLE001 — 单项目读失败(旧 schema 等)不拖垮整个平台状态
         return "unknown"
     return {"healthy": rep["healthy"], "flags": len(rep["flags"]),

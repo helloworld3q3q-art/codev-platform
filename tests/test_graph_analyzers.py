@@ -145,17 +145,17 @@ def test_validate_drops_soft_edge_both_ends_dangling():
 
 def test_analyzers_pass_persists_soft_products(clean_registry, tmp_path):
     from codev_platform.graph.ingest import ANALYZERS_PLUGIN, IngestReport, _analyzers_pass
-    from codev_platform.graph.store import load_graph, open_store, upsert_result
+    from codev_platform.graph.store import open_store
 
     register_analyzer(_DomainAnalyzer())
     conn = open_store("p", path=tmp_path / "g.sqlite")
     try:
         ep = GraphNode(id="p:backend_endpoint:/orders", kind=NodeKind.BACKEND_ENDPOINT,
                        name="GET /orders", project_id="p")
-        upsert_result(conn, "p",
+        conn.upsert_result("p",
                       AnalyzerResult(nodes=[ep], plugin="builtin.backend_fastapi"))
         _analyzers_pass(conn, "p", IngestReport(project_id="p"))
-        g = load_graph(conn, "p", plugin=ANALYZERS_PLUGIN)
+        g = conn.load_graph("p", plugin=ANALYZERS_PLUGIN)
         assert any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in g.nodes)
         soft = [e for e in g.edges if e.kind == EdgeKind.BELONGS_TO_DOMAIN.value]
         assert soft and soft[0].source == ep.id  # 软边 grounding 到真实硬 endpoint
@@ -166,7 +166,7 @@ def test_analyzers_pass_persists_soft_products(clean_registry, tmp_path):
 def test_analyzers_pass_drops_hallucinated_edge(clean_registry, tmp_path):
     """analyzer 产指向虚构 endpoint 的软边 → ingest 校验丢弃(grounding 硬约束)。"""
     from codev_platform.graph.ingest import ANALYZERS_PLUGIN, IngestReport, _analyzers_pass
-    from codev_platform.graph.store import load_graph, open_store
+    from codev_platform.graph.store import open_store
 
     class _Halluc:
         name = "halluc"
@@ -185,7 +185,7 @@ def test_analyzers_pass_drops_hallucinated_edge(clean_registry, tmp_path):
     conn = open_store("p", path=tmp_path / "g.sqlite")
     try:
         _analyzers_pass(conn, "p", IngestReport(project_id="p"))
-        g = load_graph(conn, "p", plugin=ANALYZERS_PLUGIN)
+        g = conn.load_graph("p", plugin=ANALYZERS_PLUGIN)
         assert any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in g.nodes)  # 软节点留
         assert [e for e in g.edges
                 if e.kind == EdgeKind.BELONGS_TO_DOMAIN.value] == []  # 悬空软边被丢
@@ -196,7 +196,7 @@ def test_analyzers_pass_drops_hallucinated_edge(clean_registry, tmp_path):
 def test_analyze_error_is_fail_soft(clean_registry, tmp_path):
     """单 analyzer 的 analyze 抛错 → fail-soft, 不拖垮其余 analyzer 的产出。"""
     from codev_platform.graph.ingest import ANALYZERS_PLUGIN, IngestReport, _analyzers_pass
-    from codev_platform.graph.store import load_graph, open_store, upsert_result
+    from codev_platform.graph.store import open_store
 
     class _Boom:
         name = "boom"
@@ -213,10 +213,10 @@ def test_analyze_error_is_fail_soft(clean_registry, tmp_path):
     try:
         ep = GraphNode(id="p:backend_endpoint:/o", kind=NodeKind.BACKEND_ENDPOINT,
                        name="o", project_id="p")
-        upsert_result(conn, "p",
+        conn.upsert_result("p",
                       AnalyzerResult(nodes=[ep], plugin="builtin.backend_fastapi"))
         _analyzers_pass(conn, "p", IngestReport(project_id="p"))  # 不抛
-        g = load_graph(conn, "p", plugin=ANALYZERS_PLUGIN)
+        g = conn.load_graph("p", plugin=ANALYZERS_PLUGIN)
         # 崩的被跳过, 正常 analyzer 的软产物仍落库。
         assert any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in g.nodes)
     finally:
@@ -226,14 +226,14 @@ def test_analyze_error_is_fail_soft(clean_registry, tmp_path):
 def test_analyzers_pass_noop_without_registered(clean_registry, tmp_path):
     """无注册 analyzer → no-op(不抛, 写空 ANALYZERS_PLUGIN), 生产默认行为。"""
     from codev_platform.graph.ingest import ANALYZERS_PLUGIN, IngestReport, _analyzers_pass
-    from codev_platform.graph.store import load_graph, open_store
+    from codev_platform.graph.store import open_store
 
     conn = open_store("p", path=tmp_path / "g.sqlite")
     try:
         report = IngestReport(project_id="p")
         _analyzers_pass(conn, "p", report)
         assert ANALYZERS_PLUGIN in report.ingested
-        assert load_graph(conn, "p", plugin=ANALYZERS_PLUGIN).nodes == []
+        assert conn.load_graph("p", plugin=ANALYZERS_PLUGIN).nodes == []
     finally:
         conn.close()
 
@@ -242,7 +242,7 @@ def test_analyzers_pass_noop_without_registered(clean_registry, tmp_path):
 
 def test_impact_excludes_soft_by_default(tmp_path):
     from codev_platform.graph.impact import build_impact_graph
-    from codev_platform.graph.store import open_store, upsert_result
+    from codev_platform.graph.store import open_store
 
     conn = open_store("p", path=tmp_path / "g.sqlite")
     try:
@@ -255,7 +255,7 @@ def test_impact_excludes_soft_by_default(tmp_path):
         hard = GraphEdge(source=ep.id, target=fn.id, kind=EdgeKind.CALLS)
         soft = GraphEdge(source=ep.id, target=dom.id, kind=EdgeKind.BELONGS_TO_DOMAIN,
                          confidence=0.8)
-        upsert_result(conn, "p", AnalyzerResult(nodes=[ep, fn, dom],
+        conn.upsert_result("p", AnalyzerResult(nodes=[ep, fn, dom],
                                                 edges=[hard, soft], plugin="x"))
 
         g = build_impact_graph(conn, "p")  # 默认不含软

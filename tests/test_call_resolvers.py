@@ -23,7 +23,7 @@ from codev_platform.graph.call_resolvers.base import CallResolver
 from codev_platform.graph.call_resolvers.codegraph import CodegraphCallResolver
 from codev_platform.graph.ingest import CALLS_PLUGIN, IngestReport, _calls_pass
 from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode, NodeKind
-from codev_platform.graph.store import load_graph, open_store
+from codev_platform.graph.store import open_store
 
 _CALLS = EdgeKind.CALLS.value
 
@@ -133,7 +133,7 @@ def test_calls_pass_dedup_first_wins(isolated_registry, tmp_path):
         # confidence 并列(都 1.0) → 先注册者赢: first 占 f1+f2=2, second 的 f1 不更高 → 0。
         assert summary["by_resolver"] == {"first": 2, "second": 0}
         # 真落库可读回。
-        merged = load_graph(conn, pid)
+        merged = conn.load_graph(pid)
         calls = [e for e in merged.edges if e.kind == _CALLS]
         assert len(calls) == 2
     finally:
@@ -154,7 +154,7 @@ def test_calls_pass_confidence_overrides(isolated_registry, tmp_path):
         assert summary["calls_edges"] == 1  # 去重后仅 1 条
         # 高置信专门 resolver 盖过兜底 → 兜底归 0(尽管先注册)。
         assert summary["by_resolver"] == {"codegraph-like": 0, "spring-like": 1}
-        merged = load_graph(conn, pid)
+        merged = conn.load_graph(pid)
         calls = [e for e in merged.edges if e.kind == _CALLS]
         assert len(calls) == 1
         assert calls[0].confidence == 1.0  # 落库的是高置信边

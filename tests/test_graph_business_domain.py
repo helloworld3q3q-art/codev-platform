@@ -242,7 +242,7 @@ def test_business_domain_via_ingest_analyzers_pass(tmp_path):
         IngestReport,
         _analyzers_pass,
     )
-    from codev_platform.graph.store import load_graph, open_store, upsert_result
+    from codev_platform.graph.store import open_store
 
     saved = list(abase._ANALYZERS)
     abase._ANALYZERS.clear()
@@ -252,10 +252,10 @@ def test_business_domain_via_ingest_analyzers_pass(tmp_path):
         conn = open_store("p", path=tmp_path / "g.sqlite")
         try:
             e, t = _ep("GET /orders"), _tbl("orders")
-            upsert_result(conn, "p", AnalyzerResult(
+            conn.upsert_result("p", AnalyzerResult(
                 nodes=[e, t], edges=[_reads(e, t)], plugin="builtin.backend_fastapi"))
             _analyzers_pass(conn, "p", IngestReport(project_id="p"))
-            g = load_graph(conn, "p", plugin=ANALYZERS_PLUGIN)
+            g = conn.load_graph("p", plugin=ANALYZERS_PLUGIN)
             doms = [n for n in g.nodes if n.kind == NodeKind.BUSINESS_DOMAIN.value]
             assert doms and doms[0].name == "订单"
             assert doms[0].meta["confidence"] < 1.0          # validate 后软标记
@@ -353,7 +353,7 @@ def test_ownership_override_still_produces_edges(tmp_path):
 def test_find_node_domain_and_list_members(tmp_path):
     # 消费前门: 正向(节点→业务域)+ 反向(业务域→成员), 读已标好的软节点不调 LLM。
     from codev_platform.graph.impact import find_node_domain, list_domain_members
-    from codev_platform.graph.store import open_store, upsert_result
+    from codev_platform.graph.store import open_store
 
     conn = open_store("p", path=tmp_path / "g.sqlite")
     try:
@@ -364,7 +364,7 @@ def test_find_node_domain_and_list_members(tmp_path):
                         confidence=0.7)
         se2 = GraphEdge(source=e2.id, target=dom.id, kind=EdgeKind.BELONGS_TO_DOMAIN,
                         confidence=0.7)
-        upsert_result(conn, "p", AnalyzerResult(nodes=[e1, e2, dom],
+        conn.upsert_result("p", AnalyzerResult(nodes=[e1, e2, dom],
                                                 edges=[se1, se2], plugin="x"))
         r = find_node_domain(conn, "p", "GET /orders")
         assert r["found"] and r["domains"] == ["订单"]

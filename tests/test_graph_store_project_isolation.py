@@ -17,7 +17,7 @@ from codev_platform.graph.schema import (
     GraphEdge,
     GraphNode,
 )
-from codev_platform.graph.store import load_graph, open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 
 def _result(node_id: str, node_project_id: str) -> AnalyzerResult:
@@ -42,22 +42,22 @@ def test_shared_store_isolates_projects(tmp_path: Path) -> None:
 
     conn = open_store("proj-a", path=shared)
     try:
-        upsert_result(conn, "proj-a", ra)
-        upsert_result(conn, "proj-b", rb)
+        conn.upsert_result("proj-a", ra)
+        conn.upsert_result("proj-b", rb)
 
         # load_graph("proj-a") 只回 proj-a 的节点。
-        ga = load_graph(conn, "proj-a")
+        ga = conn.load_graph("proj-a")
         assert [n.id for n in ga.nodes] == ["a:fn"]
         assert all(n.project_id == "proj-a" for n in ga.nodes)
 
         # load_graph("proj-b") 只回 proj-b 的节点。
-        gb = load_graph(conn, "proj-b")
+        gb = conn.load_graph("proj-b")
         assert [n.id for n in gb.nodes] == ["b:fn"]
         assert all(n.project_id == "proj-b" for n in gb.nodes)
 
         # 再次 upsert proj-a (同 plugin "px") 不能误删 proj-b 的节点。
-        upsert_result(conn, "proj-a", ra)
-        gb_after = load_graph(conn, "proj-b")
+        conn.upsert_result("proj-a", ra)
+        gb_after = conn.load_graph("proj-b")
         assert [n.id for n in gb_after.nodes] == ["b:fn"]
     finally:
         conn.close()
@@ -71,11 +71,11 @@ def test_node_project_id_forced_from_param(tmp_path: Path) -> None:
 
     conn = open_store("proj-a", path=shared)
     try:
-        upsert_result(conn, "proj-a", rogue)
-        ga = load_graph(conn, "proj-a")
+        conn.upsert_result("proj-a", rogue)
+        ga = conn.load_graph("proj-a")
         assert [n.project_id for n in ga.nodes] == ["proj-a"]
         # 用错误的 project_id 读, 读不到 (没被污染到 "wrong" 桶)。
-        gw = load_graph(conn, "wrong")
+        gw = conn.load_graph("wrong")
         assert gw.nodes == []
     finally:
         conn.close()
@@ -106,23 +106,23 @@ def test_shared_store_isolates_edges_evidences_findings(tmp_path: Path) -> None:
     shared = tmp_path / "shared.sqlite"
     conn = open_store("proj-a", path=shared)
     try:
-        upsert_result(conn, "proj-a", _full_result("proj-a"))
+        conn.upsert_result("proj-a", _full_result("proj-a"))
         # proj-b 同插件、evidences/findings seq 同为 0: C1 主键纳入 project_id 后不撞。
-        upsert_result(conn, "proj-b", _full_result("proj-b"))
+        conn.upsert_result("proj-b", _full_result("proj-b"))
 
-        ga = load_graph(conn, "proj-a")
+        ga = conn.load_graph("proj-a")
         assert [e.source for e in ga.edges] == ["proj-a:fn1"]
         assert [ev.detail for ev in ga.evidences] == ["proj-a-ev"]
         assert [f.title for f in ga.findings] == ["proj-a-find"]
 
-        gb = load_graph(conn, "proj-b")
+        gb = conn.load_graph("proj-b")
         assert [e.source for e in gb.edges] == ["proj-b:fn1"]
         assert [ev.detail for ev in gb.evidences] == ["proj-b-ev"]
         assert [f.title for f in gb.findings] == ["proj-b-find"]
 
         # 重 upsert proj-a (同插件) 不误删 proj-b 的 edges/evidences/findings。
-        upsert_result(conn, "proj-a", _full_result("proj-a"))
-        gb2 = load_graph(conn, "proj-b")
+        conn.upsert_result("proj-a", _full_result("proj-a"))
+        gb2 = conn.load_graph("proj-b")
         assert [e.source for e in gb2.edges] == ["proj-b:fn1"]
         assert [ev.detail for ev in gb2.evidences] == ["proj-b-ev"]
         assert [f.title for f in gb2.findings] == ["proj-b-find"]
@@ -167,18 +167,23 @@ def test_legacy_schema_migrates_preserving_data(tmp_path: Path) -> None:
 
     conn = open_store("proj-a", path=db)  # 触发迁移, 回填 project_id = "proj-a"
     try:
-        for table in ("edges", "evidences", "findings"):
-            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
-            assert "project_id" in cols, f"{table} 迁移后应有 project_id 列"
         # 数据保留, 按回填的 pid 读得到。
-        g = load_graph(conn, "proj-a")
+        g = conn.load_graph("proj-a")
         assert [e.source for e in g.edges] == ["a"]
         assert [ev.detail for ev in g.evidences] == ["ev-d"]
         assert [f.title for f in g.findings] == ["find-t"]
         # 回填正确: 换个 project_id 读不到。
-        assert load_graph(conn, "proj-b").edges == []
+        assert conn.load_graph("proj-b").edges == []
     finally:
         conn.close()
+    # 验 schema 迁移(project_id 列已加)走独立 raw 连接(GraphStore 不暴露底层 conn)。
+    raw2 = sqlite3.connect(db)
+    try:
+        for table in ("edges", "evidences", "findings"):
+            cols = [r[1] for r in raw2.execute(f"PRAGMA table_info({table})")]
+            assert "project_id" in cols, f"{table} 迁移后应有 project_id 列"
+    finally:
+        raw2.close()
 
 
 def test_legacy_migration_is_idempotent(tmp_path: Path) -> None:
@@ -197,7 +202,7 @@ def test_legacy_migration_is_idempotent(tmp_path: Path) -> None:
     open_store("proj-a", path=db).close()   # 第一次 open 触发迁移
     conn = open_store("proj-a", path=db)    # 第二次 open: 列已在 → 跳过, 不抛
     try:
-        g = load_graph(conn, "proj-a")
+        g = conn.load_graph("proj-a")
         assert [e.source for e in g.edges] == ["a"]  # 仍 1 条, 未翻倍
     finally:
         conn.close()

@@ -21,7 +21,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 _PID = "tp"
 _FE = f"{_PID}:frontend_api_call:src/UserPage.tsx:POST:/users"
@@ -47,7 +47,7 @@ def _seed(tmp_path, monkeypatch):
         GraphEdge(source=_EP, target=_FN, kind=EdgeKind.CALLS.value),
         GraphEdge(source=_FN, target=_TB, kind=EdgeKind.WRITES_TABLE.value),
     ]
-    upsert_result(c, _PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    c.upsert_result(_PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     c.close()
     import codev_platform.graph.store as gs
     monkeypatch.setattr(gs, "graph_store_path", lambda pid: store)

@@ -10,7 +10,6 @@ name 多同名时返回 ambiguous 候选, 让 agent 用 id 消歧。
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import Any
 
 from codev_platform.agent.brain import ToolResult
@@ -19,28 +18,29 @@ from codev_platform.core.project_id import resolve_local
 from codev_platform.graph import impact as I
 
 
-def _open_store_ro(project_id: str | None) -> tuple[sqlite3.Connection, str]:
-    """开只读统一图谱 store; 返回 (conn, 实际 project_id)。缺失抛 FileNotFoundError。"""
-    from codev_platform.graph.store import graph_store_path
+def _open_store_ro(project_id: str | None):
+    """开只读统一图谱 store; 返回 (store, 实际 project_id)。不存在/读不动抛 FileNotFoundError。"""
+    from codev_platform.graph.store import GraphStoreUnreadable, open_store
     pid = project_id or resolve_local()
-    path = graph_store_path(pid)
-    if not path.exists():
-        raise FileNotFoundError(f"project '{pid}' 的统一图谱 store 不存在: {path} (先跑 reindex --ingest)")
-    return sqlite3.connect(f"file:{path}?mode=ro", uri=True), pid
+    try:
+        return open_store(pid, mode="ro"), pid
+    except GraphStoreUnreadable as exc:
+        raise FileNotFoundError(
+            f"project '{pid}' 的统一图谱 store 不存在或读不动: {exc} (先跑 reindex --ingest)") from exc
 
 
 def _run_query(project_id: str | None, fn, *args) -> ToolResult:
     """共用: 开 store -> 调引擎 -> JSON 结果 (异常/未命中转结果回灌模型)。"""
     try:
-        conn, pid = _open_store_ro(project_id)
+        store, pid = _open_store_ro(project_id)
     except Exception as e:  # noqa: BLE001 — 工具边界
         return ToolResult(call_id="", content=f"统一图谱 store 不可用: {e}", is_error=True)
     try:
-        r = fn(conn, pid, *args)
+        r = fn(store, pid, *args)
     except Exception as e:  # noqa: BLE001
         return ToolResult(call_id="", content=f"影响分析查询失败: {e}", is_error=True)
     finally:
-        conn.close()
+        store.close()
     # 紧凑 JSON(去缩进/分隔空格): tool-result 计入 miss, 缩进纯格式零信息 → 压扁省 token, grounding 不变(免费 win)。
     return ToolResult(call_id="", content=json.dumps(r, ensure_ascii=False, separators=(",", ":")))
 

@@ -235,12 +235,9 @@ def cmd_graph(args: argparse.Namespace) -> int:
             )
         return 0
     if args.action == "stats":
-        from codev_platform.graph.store import open_store, stats
-        conn = open_store(pid)
-        try:
-            data = stats(conn)
-        finally:
-            conn.close()
+        from codev_platform.graph.store import open_store
+        with open_store(pid) as store:
+            data = store.stats(pid)
         _print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
     if args.action == "audit":
@@ -268,11 +265,8 @@ def cmd_graph(args: argparse.Namespace) -> int:
             if agg["total_errors"]:
                 _print(f"\n✗ graph audit 门禁失败: {agg['total_errors']} 个结构 error, 修复后再 push。")
             return 0 if agg["total_errors"] == 0 else 1
-        conn = open_store(pid)
-        try:
-            report = audit_graph(conn, pid)
-        finally:
-            conn.close()
+        with open_store(pid) as store:
+            report = audit_graph(store, pid)
         if getattr(args, "json", False):
             _print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
@@ -281,11 +275,8 @@ def cmd_graph(args: argparse.Namespace) -> int:
     if args.action == "soft-quality":
         from codev_platform.graph.soft_quality import assess_soft_labels, render_markdown
         from codev_platform.graph.store import open_store
-        conn = open_store(pid)
-        try:
-            report = assess_soft_labels(conn, pid)
-        finally:
-            conn.close()
+        with open_store(pid) as store:
+            report = assess_soft_labels(store, pid)
         if getattr(args, "json", False):
             _print(json.dumps(report, ensure_ascii=False, indent=2))
         else:

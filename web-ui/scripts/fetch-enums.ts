@@ -386,7 +386,7 @@ async function main(): Promise<void> {
 }
 
 // 导出模块
-export { fetchEnumsData, generateTsxContent, CONFIG, EnumItem, EnumGroup, ApiResponse };
+export { ApiResponse, CONFIG, EnumGroup, EnumItem, fetchEnumsData, generateTsxContent };
 
 // 执行主函数
 if (require.main === module) {

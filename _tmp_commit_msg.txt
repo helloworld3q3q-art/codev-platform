@@ -1,0 +1,17 @@
+refactor(graph): Stage A — GraphStore 抽象 + sqlite 实现 + 工厂(纯重构零行为变化)
+
+graph store 从"模块函数 + 裸 sqlite conn 满天飞"重构为 GraphStore Protocol(load_graph/
+upsert_result/stats(pid)/audit_scan/close+ctx-mgr)+ SqliteGraphStore 实现 + open_store
+工厂 + list_project_ids。为多机共享(后续 Stage B 接 PG)铺干净分层。设计 panel 三票一致。
+
+要点(防屎山):
+- 绝不暴露底层 conn/execute(漏 conn=recouple);消费方只依赖 Protocol。
+- 直接改 ~13 消费方(cli/impact/audit/soft_quality/ingest/mcp_server/web routes/recall/
+  agent tool/health/platform_status)调 store.method(), 删旧 conn 版模块函数, 不留薄委托。
+- impact.py find_* 全部后端无关(build_impact_graph(store) 一处改, 所有 find_* 自动跟随)。
+- audit 的跨项目串台/软产物漂移探查收进 store.audit_scan(load_graph 按 pid 过滤看不见的底层),
+  audit.py 不再 import sqlite3;只读门禁走 open_store(mode=ro)。
+- 读路径中性异常 GraphStoreUnreadable(缺/旧 schema/读不动), web/recall/agent 优雅降级不 import sqlite3。
+- 修隐藏 bug: stats 旧版全库 COUNT(*) 无 pid 过滤 → 按 project_id 过滤(共享库防串台)。
+- 共享 _row_to_* 纯映射(sqlite/PG 复用防双拷漂移)。
+- Stage A 仅 sqlite, 零 PG、零行为变化:全量 graph 测试绿(Windows 165 passed)。

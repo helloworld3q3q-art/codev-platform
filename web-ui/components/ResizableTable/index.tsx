@@ -136,7 +136,7 @@ export default Table;
 export {
   FieldType,
   customRequestWrapper as requestWrapper,
-  type ProColumns,
   type AdvancedSearchData,
   type ConditionItem,
+  type ProColumns,
 };

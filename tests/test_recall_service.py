@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from codev_platform.graph.schema import AnalyzerResult, GraphNode, NodeKind
 from codev_platform.graph.store import open_store as real_open_store
-from codev_platform.graph.store import upsert_result
 from codev_platform.recall import service
 from codev_platform.recall.fusion import LaneResult
 from codev_platform.recall.service import _fuse_and_enrich, recall_code
@@ -61,7 +60,7 @@ def test_recall_code_graph_integration(monkeypatch, tmp_path):
     # 真实 graph store: search_nodes 子串命中; codegraph db 不存在 → fail-soft → graph-only。
     store = tmp_path / "g.sqlite"
     c = real_open_store(PID, path=store)
-    upsert_result(c, PID, AnalyzerResult(
+    c.upsert_result(PID, AnalyzerResult(
         nodes=[GraphNode(id="fn:save_user", kind=NodeKind.BACKEND_FUNCTION.value,
                          name="save_user", project_id=PID, file="repo.py"),
                GraphNode(id="t:users", kind=NodeKind.DB_TABLE.value,
@@ -69,7 +68,7 @@ def test_recall_code_graph_integration(monkeypatch, tmp_path):
         plugin="test"))
     c.close()
     monkeypatch.setattr("codev_platform.graph.store.open_store",
-                        lambda pid: real_open_store(pid, path=store))
+                        lambda pid, mode="rw": real_open_store(pid, path=store, mode=mode))
     hits = recall_code("user", PID)
     assert len(hits) == 1                      # 只 save_user 含 "user"
     assert hits[0].name == "save_user" and hits[0].lanes == ["graph"]

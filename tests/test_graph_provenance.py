@@ -27,7 +27,7 @@ from codev_platform.graph.schema import (
     stamp_provenance,
     stamp_unprovenanced,
 )
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 PID = "t-prov"
 
@@ -182,7 +182,7 @@ def _seed_chain(conn):
         ProvSource.REGEX, parser="fastapi")
     e_table = GraphEdge(source=_FN, target=_TB, kind=EdgeKind.WRITES_TABLE.value,
                         confidence=1.0)  # 未盖戳(模拟插件直产边)
-    upsert_result(conn, PID, AnalyzerResult(nodes=nodes, edges=[e_api, e_calls, e_table],
+    conn.upsert_result(PID, AnalyzerResult(nodes=nodes, edges=[e_api, e_calls, e_table],
                                             plugin="test"))
 
 
@@ -280,7 +280,7 @@ def test_audit_counts_no_provenance_hard_edges(tmp_path):
                           confidence=1.0)  # 硬边未盖戳 → 计入
     soft = GraphEdge(source="f1", target="dom", kind=EdgeKind.BELONGS_TO_DOMAIN.value,
                      confidence=0.8)  # 软边未盖戳 → 不计
-    upsert_result(conn, PID, AnalyzerResult(nodes=nodes, edges=[stamped, unstamped, soft],
+    conn.upsert_result(PID, AnalyzerResult(nodes=nodes, edges=[stamped, unstamped, soft],
                                             plugin="test"))
     rep = audit_graph(conn, PID)
     conn.close()

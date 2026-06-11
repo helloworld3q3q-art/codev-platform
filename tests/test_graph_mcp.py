@@ -15,7 +15,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 
 
 def test_dispatch_table_has_thirteen_tools():
@@ -64,7 +64,7 @@ def test_dispatch_business_domain_queries(tmp_path):
                         name="订单", project_id="p", meta={"confidence": 0.7})
         se = GraphEdge(source=e.id, target=dom.id, kind=EdgeKind.BELONGS_TO_DOMAIN,
                        confidence=0.7)
-        upsert_result(conn, "p", AnalyzerResult(nodes=[e, dom], edges=[se], plugin="x"))
+        conn.upsert_result("p", AnalyzerResult(nodes=[e, dom], edges=[se], plugin="x"))
 
         r = gm.dispatch("find_node_domain", {"ref": "GET /orders"}, conn, "p")
         assert r["found"] and r["domains"] == ["订单"]
@@ -82,7 +82,7 @@ def test_dispatch_search_nodes(tmp_path):
                       name="GET /orders", project_id="p")
         t = GraphNode(id="p:db_table:orders", kind=NodeKind.DB_TABLE, name="orders",
                       project_id="p")
-        upsert_result(conn, "p", AnalyzerResult(nodes=[e, t], plugin="x"))
+        conn.upsert_result("p", AnalyzerResult(nodes=[e, t], plugin="x"))
         r = gm.dispatch("search_nodes", {"query": "order"}, conn, "p")
         assert {h["name"] for h in r["hits"]} == {"GET /orders", "orders"}
         r2 = gm.dispatch("search_nodes", {"query": "order", "kind": "db_table"}, conn, "p")

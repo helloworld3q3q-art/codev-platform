@@ -12,7 +12,6 @@
 """
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
@@ -20,7 +19,7 @@ from fastapi import APIRouter, Depends, Request
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.graph import impact as I
-from codev_platform.graph.store import graph_store_path
+from codev_platform.graph.store import GraphStore, GraphStoreUnreadable, open_store
 from codev_platform.web.schemas import reports as S
 from codev_platform.web.security.deps import require_platform_admin
 
@@ -33,14 +32,11 @@ def _rid(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
 
-def _open_store_ro(project_id: str) -> sqlite3.Connection | None:
-    """只读打开统一图谱 store; 文件不存在 / 打不开返回 None (统一降级 found=False)。"""
-    path = graph_store_path(project_id)
-    if not path.exists():
-        return None
+def _open_store_ro(project_id: str) -> GraphStore | None:
+    """只读打开统一图谱 store; 不存在 / 旧 schema / 读不动返回 None (统一降级 found=False)。"""
     try:
-        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    except sqlite3.Error:
+        return open_store(project_id, mode="ro")
+    except GraphStoreUnreadable:
         return None
 
 
@@ -54,16 +50,16 @@ def _open_store_ro(project_id: str) -> sqlite3.Connection | None:
 def report_impact(request: Request, body: S.ImpactRequest,
                   ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    conn = _open_store_ro(project_id)
-    if conn is None:
+    store = _open_store_ro(project_id)
+    if store is None:
         return ok(S.ImpactReportResponse(found=False, summary="该项目尚无统一图谱索引"),
                   request_id=_rid(request))
     try:
-        r = I.generate_impact_report(conn, project_id, body.nodeRef)
-    except sqlite3.Error:
+        r = I.generate_impact_report(store, project_id, body.nodeRef)
+    except GraphStoreUnreadable:
         r = {"found": False, "summary": "统一图谱 store 读取失败"}  # 损坏/锁 → graceful, 不 500
     finally:
-        conn.close()
+        store.close()
     return ok(
         S.ImpactReportResponse(
             found=r["found"], target=r.get("target"), impact=r.get("impact"),
@@ -77,15 +73,15 @@ def report_impact(request: Request, body: S.ImpactRequest,
 
 def _query(request: Request, project_id: str, fn, *args) -> CommonResult:
     """table-usage / page-deps / api-callers 共用: 开 store -> 调引擎 -> 包 GraphQueryResponse。"""
-    conn = _open_store_ro(project_id)
-    if conn is None:
+    store = _open_store_ro(project_id)
+    if store is None:
         return ok(S.GraphQueryResponse(found=False), request_id=_rid(request))
     try:
-        r = fn(conn, project_id, *args)
-    except sqlite3.Error:
+        r = fn(store, project_id, *args)
+    except GraphStoreUnreadable:
         r = {"found": False}  # 损坏/锁 → graceful, 不 500
     finally:
-        conn.close()
+        store.close()
     return ok(S.GraphQueryResponse(found=r.get("found", False), data=r), request_id=_rid(request))
 
 

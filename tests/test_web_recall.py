@@ -29,7 +29,7 @@ def _app():
 def test_recall_code_graph_only_fail_soft(tmp_path, monkeypatch):
     store = tmp_path / "g.sqlite"
     c = real_open_store(_PID, path=store)
-    upsert_result(c, _PID, AnalyzerResult(
+    c.upsert_result(_PID, AnalyzerResult(
         nodes=[GraphNode(id="fn:save_user", kind=NodeKind.BACKEND_FUNCTION.value,
                          name="save_user", project_id=_PID, file="repo.py"),
                GraphNode(id="t:orders", kind=NodeKind.DB_TABLE.value,

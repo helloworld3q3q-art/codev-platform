@@ -87,11 +87,9 @@ def _graph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult 
     try:
         from codev_platform.graph.impact import search_nodes
         from codev_platform.graph.store import open_store
-        conn = open_store(project_id)
-        try:
-            res = search_nodes(conn, project_id, query, limit=per_lane)
-        finally:
-            conn.close()
+        # 读 lane 走 mode='ro': 不创建/不迁移本地存储(缺/旧 store → GraphStoreUnreadable, 下面 except 兜)。
+        with open_store(project_id, mode="ro") as store:
+            res = search_nodes(store, project_id, query, limit=per_lane)
     except Exception as exc:  # noqa: BLE001 — 单 lane 失败不拖垮整体(高可用)
         logger.warning("[recall] graph lane failed: %r", exc)
         return None, {}

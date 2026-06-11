@@ -9,7 +9,7 @@
 ## 零、场景 → 规则/skill 对照表
 
 | 改动场景 | 必读规则 | 必走 skill |
-|---|---|---|
+| --- | --- | --- |
 | 新建组件 | `component-naming.md` + `architecture.md` §1-2 + `code-quality.md` | `/generate-component` + `/check-naming` |
 | 新建页面 | `architecture.md` | 平台 `/add-frontend-page`(含路由 + sys_menu Flyway SQL 模板) |
 | 远程数据下拉 | `component-patterns.md` §封装 Select 组件规范 | (无) |

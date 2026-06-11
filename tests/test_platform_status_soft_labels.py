@@ -11,7 +11,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
-from codev_platform.graph.store import open_store, upsert_result
+from codev_platform.graph.store import open_store
 from codev_platform.platform_status import _soft_quality_summary
 
 PID = "t-plstatus"
@@ -19,7 +19,7 @@ PID = "t-plstatus"
 
 def _seed(store, nodes, edges):
     c = open_store(PID, path=store)
-    upsert_result(c, PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    c.upsert_result(PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     c.close()
 
 

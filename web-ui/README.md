@@ -25,7 +25,7 @@ pnpm dev          # 前端 (默认 :8000), 代理 /api -> :18088
 ## 相对 stock-admin-web 的改动(仅这些,其余逐字保留)
 
 | 项 | 改动 |
-|---|---|
+| --- | --- |
 | `config/routes.ts` | 业务路由 → 本平台页面(projects/jobs/graph/enums + login/404) |
 | `src/menus.tsx` `MENU_ITEMS` | 同上(其余 helper 保留) |
 | `src/app.tsx` | `menu.request` 去掉业务 `postMenus`(改静态菜单);`/dashboard`→`/projects` redirect。其余架构不变 |
@@ -38,12 +38,12 @@ pnpm dev          # 前端 (默认 :8000), 代理 /api -> :18088
 
 ## 已落地页面
 
-| 页面 | 路由 | 后端 |
-|---|---|---|
-| 项目管理(ProTable) | `/projects` | `POST /api/v1/projects/list` |
-| 任务中心 | `/jobs` | `/api/v1/indexes/rebuild` + `/api/v1/jobs/detail` |
-| 图谱(force-graph-3d) | `/graph` | `POST /api/v1/graph/unified/graph` |
-| 枚举元数据演示 | `/enums` | `useModel('enum')` ← `/api/v1/enums/list` |
+| 页面                   | 路由          | 后端                                               |
+| ---------------------- | ------------- | -------------------------------------------------- |
+| 项目管理(ProTable)     | `/projects`   | `POST /api/v1/projects/list`                       |
+| 任务中心               | `/jobs`       | `/api/v1/indexes/rebuild` + `/api/v1/jobs/detail`  |
+| 图谱(force-graph-3d)   | `/graph`      | `POST /api/v1/graph/unified/graph`                 |
+| 枚举元数据演示         | `/enums`      | `useModel('enum')` ← `/api/v1/enums/list`          |
 | 登录(passthrough 占位) | `/user/login` | 写 localStorage(真 auth 波接 `/api/v1/auth/login`) |
 
 ## 待办(下一波)

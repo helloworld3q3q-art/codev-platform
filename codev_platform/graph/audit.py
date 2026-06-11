@@ -17,31 +17,21 @@ parser_version/index_manifest_id 落每条边)+ 冲突消解(同 endpoint 被多
 """
 from __future__ import annotations
 
-import sqlite3
 from collections import Counter, defaultdict
 
 from codev_platform.graph.schema import (
-    SOFT_EDGE_KINDS,
-    SOFT_NODE_KINDS,
     NodeKind,
     edge_provenance,
     is_soft_edge_kind,
     is_soft_node_kind,
 )
-from codev_platform.graph.store import load_graph
+from codev_platform.graph.store import GraphStore, GraphStoreUnreadable, open_store
 
 _LOW_CONF = 0.7
 _SAMPLE = 10
 # 这些 kind 的 name 在同一 file 内**合法重复**, 不当"重复节点"报:
 # db_column —— 同一文件多张表常有同名列 (id / meta_json / plugin ...), 各属不同表非重复。
 _DUP_EXEMPT_KINDS = frozenset({NodeKind.DB_COLUMN.value})
-
-
-def _distinct_project_ids(conn: sqlite3.Connection, table: str) -> list[str]:
-    try:
-        return [r[0] for r in conn.execute(f"SELECT DISTINCT project_id FROM {table}")]
-    except sqlite3.Error:
-        return []
 
 
 def _canonical_soft_plugin() -> str:
@@ -53,31 +43,14 @@ def _canonical_soft_plugin() -> str:
         return "builtin.analyzers"
 
 
-def _orphan_soft_plugins(conn: sqlite3.Connection, project_id: str,
-                         kinds: frozenset[str], table: str) -> list[str]:
-    """软 kind 的行里, plugin != 规范 analyzer plugin 的 = 孤儿(plugin 漂移残留, 致重复/陈旧)。
-
-    这正是 2026-06-08 抓到的 arch_layer 重复根因: analyzer 自名 plugin 直 upsert 的残留,
-    reindex 只清规范 plugin 故永不被清。soft 节点/边**只应**来自 _analyzers_pass 的统一 plugin。
-    """
-    if not kinds:
-        return []
-    canonical = _canonical_soft_plugin()
-    ph = ",".join("?" for _ in kinds)
-    try:
-        rows = conn.execute(
-            f"SELECT DISTINCT plugin FROM {table} WHERE project_id = ? AND kind IN ({ph})",
-            (project_id, *kinds),
-        ).fetchall()
-    except sqlite3.Error:
-        return []
-    return sorted({r[0] for r in rows if r[0] != canonical})
-
-
-def audit_graph(conn: sqlite3.Connection, project_id: str, *,
+def audit_graph(store: GraphStore, project_id: str, *,
                 low_conf: float = _LOW_CONF) -> dict:
-    """结构审计。返回分 errors/warnings 的报告 dict + clean 布尔(无 errors=clean)。"""
-    g = load_graph(conn, project_id)
+    """结构审计。返回分 errors/warnings 的报告 dict + clean 布尔(无 errors=clean)。
+
+    后端探查部分(串台行 / 软产物 plugin 漂移)走 store.audit_scan —— load_graph 按 pid 过滤后
+    看不见这些, 只有后端自查得到。canonical plugin 比对(域判定)留在本层, 不入 store。
+    """
+    g = store.load_graph(project_id)
     node_ids = {n.id for n in g.nodes}
 
     # --- errors ---
@@ -89,14 +62,16 @@ def audit_graph(conn: sqlite3.Connection, project_id: str, *,
             dangling.append({"source": e.source, "target": e.target, "kind": e.kind,
                              "missing": miss})
 
-    # cross-project: per-project 库里不该有别 project 的行 (load_graph 已按 pid 过滤,
-    # 故必须直接查原表才能发现串台)。
-    cross_nodes = [p for p in _distinct_project_ids(conn, "nodes") if p != project_id]
-    cross_edges = [p for p in _distinct_project_ids(conn, "edges") if p != project_id]
+    # cross-project + 软产物 plugin 漂移: load_graph 已按 pid 过滤看不见, 走后端探查。
+    scan = store.audit_scan(project_id)
+    cross_nodes = scan["foreign_project_ids"]["nodes"]
+    cross_edges = scan["foreign_project_ids"]["edges"]
 
     # 软产物 plugin 漂移残留(2026-06-08 arch_layer 重复根因): 软节点/边只应来自规范 analyzer plugin。
-    orphan_node_plugins = _orphan_soft_plugins(conn, project_id, SOFT_NODE_KINDS, "nodes")
-    orphan_edge_plugins = _orphan_soft_plugins(conn, project_id, SOFT_EDGE_KINDS, "edges")
+    # store 回所有出现在软 kind 行上的 plugin, 本层滤掉 canonical = 孤儿(漂移残留)。
+    canonical = _canonical_soft_plugin()
+    orphan_node_plugins = sorted(p for p in scan["soft_plugins"]["nodes"] if p != canonical)
+    orphan_edge_plugins = sorted(p for p in scan["soft_plugins"]["edges"] if p != canonical)
 
     # --- warnings ---
     by_key: dict[tuple, list[str]] = defaultdict(list)
@@ -204,35 +179,37 @@ def _unreadable_report(project_id: str, reason: str) -> dict:
     }
 
 
-def audit_all_stores(graph_store_dir) -> dict:
-    """门禁聚合: 审计某目录下所有 `<pid>.sqlite` graph store, 汇总结构 error。
+def audit_all_stores(graph_store_dir=None) -> dict:
+    """门禁聚合: 审计所有 project 的 graph store, 汇总结构 error。
 
-    **只读门禁**(2026-06-09 audit #10): 用 read-only 连接(`mode=ro`)打开每个 store, 绝不
-    建目录 / 设 WAL / 跑迁移 / 建表 —— audit 是纯读门禁, 不该顺手改本地 sqlite(schema 迁移
-    / 建表是写侧 ingest 的职责)。旧 schema(edges 缺 project_id 列)read-only 读不动 → 该
-    store 记一条 audit_error(不崩门禁, 但计 1 error 让操作者知道需 reindex 迁移到当前 schema)。
+    **只读门禁**(2026-06-09 audit #10): 用 `open_store(pid, mode='ro')` 打开, 绝不建目录 /
+    设 WAL / 跑迁移 / 建表 —— audit 是纯读门禁, 不顺手改本地存储(schema 迁移 / 建表是写侧
+    ingest 的职责)。旧 schema(缺列)/ 坏库读不动 → store 抛 GraphStoreUnreadable, 该 store
+    记一条 audit_error(不崩门禁, 但计 1 error 让操作者知道需 reindex 迁移)。后端中性: 不 import
+    sqlite3, 枚举走 list_project_ids(), 错误走中性 GraphStoreUnreadable。
 
-    返回 {projects: [pid...], reports: {pid: report}, total_errors: int}。
-    目录不存在 / 无 store → projects 空 + total_errors 0(调用方据此优雅跳过, 不阻断)。
-    pre-push / CI 门禁用: total_errors>0 即应非零退出。
+    graph_store_dir: 待扫目录(None → data_root/graph_store)。glob `<pid>.sqlite` 枚举, 经
+    open_store(path=db, mode='ro') 打开 —— 显式 path 支持测试用 tmp 目录隔离。
+    返回 {projects: [pid...], reports: {pid: report}, total_errors: int}。无 store → 空 + 0。
     """
     from pathlib import Path
 
-    d = Path(graph_store_dir)
+    from codev_platform.core.paths import data_root
+
+    d = Path(graph_store_dir) if graph_store_dir is not None else (data_root() / "graph_store")
     pids = sorted(p.stem for p in d.glob("*.sqlite")) if d.exists() else []
     reports: dict[str, dict] = {}
     total = 0
     for pid in pids:
         db = d / f"{pid}.sqlite"
         try:
-            # file: URI + mode=ro = 纯只读(不创建/不写 schema)。as_uri 处理路径转义(空格/反斜杠)。
-            conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True)
+            store = open_store(pid, mode="ro", path=db)
             try:
-                rep = audit_graph(conn, pid)
+                rep = audit_graph(store, pid)
             finally:
-                conn.close()
-        except sqlite3.Error as exc:
-            # 旧 schema / 坏库 read-only 读不动: 记 error, 不崩门禁(迁移留给写侧 ingest)。
+                store.close()
+        except GraphStoreUnreadable as exc:
+            # 旧 schema / 坏库读不动: 记 error, 不崩门禁(迁移留给写侧 ingest)。
             rep = _unreadable_report(
                 pid, f"只读审计失败({exc}); 该 store 可能需 reindex 迁移到当前 schema")
         reports[pid] = rep

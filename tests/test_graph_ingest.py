@@ -14,7 +14,7 @@ import pytest
 
 from codev_platform.graph.ingest import ingest_project
 from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode
-from codev_platform.graph.store import load_graph, open_store
+from codev_platform.graph.store import open_store
 from codev_platform.plugins import clear_registry, register_plugin
 from codev_platform.plugins.base import AnalyzerPlugin
 
@@ -74,7 +74,7 @@ def test_ingest_end_to_end(tmp_path: Path) -> None:
     assert report.summaries["fake.ok"]["nodes"] == 1
 
     conn = open_store("demo", path=store)
-    got = load_graph(conn, "demo", plugin="fake.ok")
+    got = conn.load_graph("demo", plugin="fake.ok")
     conn.close()
     assert len(got.nodes) == 1
     assert len(got.edges) == 1
@@ -107,7 +107,7 @@ def test_ingest_idempotent(tmp_path: Path) -> None:
     ingest_project(tmp_path, "demo", store_path=store)  # 重跑
 
     conn = open_store("demo", path=store)
-    got = load_graph(conn, "demo", plugin="fake.ok")
+    got = conn.load_graph("demo", plugin="fake.ok")
     conn.close()
     assert len(got.nodes) == 1  # 不翻倍
 
@@ -120,11 +120,11 @@ def test_ingest_project_isolation(tmp_path: Path) -> None:
     ingest_project(tmp_path, "proj-a", store_path=store_a)
 
     conn_b = open_store("proj-b", path=store_b)
-    got_b = load_graph(conn_b, "proj-b", plugin="fake.ok")
+    got_b = conn_b.load_graph("proj-b", plugin="fake.ok")
     conn_b.close()
     assert got_b.nodes == []  # b 的 store 空
 
     conn_a = open_store("proj-a", path=store_a)
-    got_a = load_graph(conn_a, "proj-a", plugin="fake.ok")
+    got_a = conn_a.load_graph("proj-a", plugin="fake.ok")
     conn_a.close()
     assert got_a.nodes[0].project_id == "proj-a"

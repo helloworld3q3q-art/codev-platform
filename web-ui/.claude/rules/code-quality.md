@@ -130,8 +130,7 @@ import { formatDateTime } from '@/utils/datetime';
 <span>{record.intradayDiagnosticUpdatedAt}</span>   // → 2026-05-22T22:16:30.504748 难读
 ```
 
-**接受的输入**:ISO 8601(含 / 不含微秒)/ 标准日期字符串 / Date / null / undefined / 空串。
-金额 / 数量格式化不属于本规则,可继续用 `Number(...).toLocaleString('zh-CN')`。
+**接受的输入**:ISO 8601(含 / 不含微秒)/ 标准日期字符串 / Date / null / undefined / 空串。金额 / 数量格式化不属于本规则,可继续用 `Number(...).toLocaleString('zh-CN')`。
 
 **grep 自检**:
 

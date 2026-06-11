@@ -35,7 +35,7 @@ def _seed(store, edges):
         GraphNode(id="fn2", kind=NodeKind.BACKEND_FUNCTION.value, name="b",
                   project_id=_PID, file="b.py"),
     ]
-    upsert_result(c, _PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    c.upsert_result(_PID, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
     c.close()
 
 

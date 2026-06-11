@@ -20,7 +20,6 @@ import contextvars
 import datetime
 import json
 import os
-import sqlite3
 import sys
 import traceback
 
@@ -31,7 +30,7 @@ from mcp.types import TextContent, Tool
 from codev_platform.core.errors import ErrorCode
 from codev_platform.core.project_id import ProjectIdError, resolve_local
 from codev_platform.graph import impact as _impact
-from codev_platform.graph.store import graph_store_path, open_store
+from codev_platform.graph.store import GraphStore, graph_store_path, open_store
 
 
 def _resolve_default_project() -> str | None:
@@ -50,7 +49,7 @@ def _flog(msg: str) -> None:
 
 
 # ---- per-project 连接(lazy, 多租户 contextvar 路由) ----
-_conns: dict[str, sqlite3.Connection] = {}
+_stores: dict[str, GraphStore] = {}
 _missing: dict[str, str] = {}
 _current_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_graph_project_id", default=None
@@ -78,21 +77,21 @@ def _log_usage(record: dict) -> None:
         pass
 
 
-def _conn_for(pid: str | None) -> sqlite3.Connection | None:
+def _store_for(pid: str | None) -> GraphStore | None:
     if pid is None:
         return None
-    c = _conns.get(pid)
-    if c is not None:
-        return c
+    s = _stores.get(pid)
+    if s is not None:
+        return s
     p = graph_store_path(pid)
     if not p.exists():
         _missing[pid] = f"graph store 不存在: {p}; 先跑 ingest(graph.ingest.ingest_project)"
         return None
     _missing.pop(pid, None)
     try:
-        c = open_store(pid)  # 含前向迁移 + schema
-        _conns[pid] = c
-        return c
+        s = open_store(pid)  # 含前向迁移 + schema
+        _stores[pid] = s
+        return s
     except Exception as exc:  # noqa: BLE001
         _flog(f"[init] pid={pid} open_store 失败: {exc!s}")
         return None
@@ -236,12 +235,12 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     pid = _active_pid()
     ok = True
     try:
-        conn = _conn_for(pid)
-        if conn is None:
+        store = _store_for(pid)
+        if store is None:
             ok = False
             return _err(_missing.get(pid, f"无 graph store(project_id={pid}); 先 ingest"))
         try:
-            return _ok(dispatch(name, args, conn, pid))
+            return _ok(dispatch(name, args, store, pid))
         except KeyError as exc:
             ok = False
             return _err(f"tool '{name}' 缺必填参数: {exc!s}")
@@ -375,10 +374,10 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
         return JSONResponse({"status": "ok", "service": "graph"})
 
     async def platform_status(_request):
-        seen = set(list(_conns) + list(_missing))
+        seen = set(list(_stores) + list(_missing))
         return JSONResponse({
             "status": "ok", "service": "graph", "default_project_id": PROJECT_ID,
-            "loaded_projects": {pid: (pid in _conns) for pid in seen},
+            "loaded_projects": {pid: (pid in _stores) for pid in seen},
             "missing_store": _missing,
         })
 

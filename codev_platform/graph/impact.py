@@ -24,7 +24,6 @@ from codev_platform.graph.schema import (
     is_soft_node_kind,
 )
 from codev_platform.graph.edge_resolve import resolve_duplicate_edges
-from codev_platform.graph.store import load_graph
 
 _MAX_DEPTH = 10
 
@@ -77,7 +76,7 @@ class ImpactGraph:
         ]
 
 
-def build_impact_graph(conn, project_id: str, *, include_soft: bool = False,
+def build_impact_graph(store, project_id: str, *, include_soft: bool = False,
                        certain_only: bool = False) -> ImpactGraph:
     """构建内存影响图。
 
@@ -89,7 +88,7 @@ def build_impact_graph(conn, project_id: str, *, include_soft: bool = False,
     等候选边)—— 高风险改动结论(Phase 3 Gate)只走确定依赖, 候选不参与遍历。单一过滤点,
     所有 BFS 自动尊重(与 include_soft 同处, 决定"哪些边在图里")。
     """
-    merged = load_graph(conn, project_id)
+    merged = store.load_graph(project_id)
     if include_soft:
         nodes, edges = merged.nodes, merged.edges
     else:
@@ -198,13 +197,13 @@ def _not_found(ref_key: str, ref: str, ambiguous: list[GraphNode]) -> dict:
 
 # ---------------------------------------------------------------- 4 个查询入口
 
-def find_impact(conn, project_id: str, node_ref: str, *,
+def find_impact(store, project_id: str, node_ref: str, *,
                 certain_only: bool = False) -> dict:
     """改 node_ref (id 或 name) → 跨层**被波及**集合 (反向 BFS, 谁依赖它)。
 
     certain_only=True: 只走确定依赖(滤低置信候选边), 供高风险改动结论用(Phase 3 Gate)。
     """
-    g = build_impact_graph(conn, project_id, certain_only=certain_only)
+    g = build_impact_graph(store, project_id, certain_only=certain_only)
     node, ambig = _resolve(g, node_ref, None)
     if node is None:
         return _not_found("ref", node_ref, ambig)
@@ -213,13 +212,13 @@ def find_impact(conn, project_id: str, node_ref: str, *,
             "certainOnly": certain_only}
 
 
-def find_table_usage(conn, project_id: str, table: str, *,
+def find_table_usage(store, project_id: str, table: str, *,
                      certain_only: bool = False) -> dict:
     """给表名 → 哪些函数/端点/前端用它 (反向 BFS, 从 db_table 出发)。
 
     certain_only=True: 只走确定依赖(滤低置信候选边)。
     """
-    g = build_impact_graph(conn, project_id, certain_only=certain_only)
+    g = build_impact_graph(store, project_id, certain_only=certain_only)
     node, ambig = _resolve(g, table, NodeKind.DB_TABLE.value)
     if node is None:
         return _not_found("table", table, ambig)
@@ -228,9 +227,9 @@ def find_table_usage(conn, project_id: str, table: str, *,
             "certainOnly": certain_only}
 
 
-def find_page_dependencies(conn, project_id: str, page_ref: str) -> dict:
+def find_page_dependencies(store, project_id: str, page_ref: str) -> dict:
     """给前端页/组件 → 它依赖的端点/函数/表 (正向 BFS)。"""
-    g = build_impact_graph(conn, project_id)
+    g = build_impact_graph(store, project_id)
     node, ambig = _resolve(g, page_ref, None)
     if node is None:
         return _not_found("page", page_ref, ambig)
@@ -238,13 +237,13 @@ def find_page_dependencies(conn, project_id: str, page_ref: str) -> dict:
     return {"found": True, "page": _node_brief(node), "dependsOn": _grouped(reached)}
 
 
-def find_impacted_pages(conn, project_id: str, component_ref: str) -> dict:
+def find_impacted_pages(store, project_id: str, component_ref: str) -> dict:
     """改前端组件 component_ref(id 或 name) → 哪些**页面**受影响。
 
     反向 BFS(谁 import 它, 含传递: 组件→barrel→页面), 只取 is_page 的 frontend_module 节点。
     解锁"改这个公共组件影响哪些页面"(codegraph 盲区, 数据由 dependency-cruiser 经 frontend_deps 产)。
     """
-    g = build_impact_graph(conn, project_id)
+    g = build_impact_graph(store, project_id)
     node, ambig = _resolve(g, component_ref, None)
     if node is None:
         return _not_found("component", component_ref, ambig)
@@ -258,13 +257,13 @@ def find_impacted_pages(conn, project_id: str, component_ref: str) -> dict:
             "pages": pages, "count": len(pages)}
 
 
-def find_api_callers(conn, project_id: str, endpoint_ref: str, *,
+def find_api_callers(store, project_id: str, endpoint_ref: str, *,
                      certain_only: bool = False) -> dict:
     """给端点 → 哪些前端调它 (反向 BFS, 仅取 frontend 层)。
 
     certain_only=True: 只走确定依赖(滤低置信候选边)。
     """
-    g = build_impact_graph(conn, project_id, certain_only=certain_only)
+    g = build_impact_graph(store, project_id, certain_only=certain_only)
     node, ambig = _resolve(g, endpoint_ref, NodeKind.BACKEND_ENDPOINT.value)
     if node is None:
         return _not_found("endpoint", endpoint_ref, ambig)
@@ -275,7 +274,7 @@ def find_api_callers(conn, project_id: str, endpoint_ref: str, *,
             "count": len(callers), "certainOnly": certain_only}
 
 
-def generate_impact_report(conn, project_id: str, node_ref: str, *,
+def generate_impact_report(store, project_id: str, node_ref: str, *,
                            certain_only: bool = False) -> dict:
     """改 node_ref → 一份可读跨层影响报告 (A5)。
 
@@ -283,7 +282,7 @@ def generate_impact_report(conn, project_id: str, node_ref: str, *,
     风险口径: 触及前端且跨 ≥2 层 = high;有下游 = medium;无下游 = low。
     certain_only=True: 只走确定依赖(滤低置信候选边), 给高风险结论更保守的影响面。
     """
-    r = find_impact(conn, project_id, node_ref, certain_only=certain_only)
+    r = find_impact(store, project_id, node_ref, certain_only=certain_only)
     if not r["found"]:
         ambig = r.get("ambiguous", [])
         if ambig:
@@ -378,14 +377,14 @@ def _best_paths(g: ImpactGraph, start_id: str, *, reverse: bool,
     return best
 
 
-def find_impact_paths(conn, project_id: str, node_ref: str, *,
+def find_impact_paths(store, project_id: str, node_ref: str, *,
                       top_n: int = 10, certain_only: bool = False) -> dict:
     """改 node_ref → **top-N 最强依赖路径**(评分 + 每跳证据 + 确定/候选)(Phase 5)。
 
     反向 BFS(谁依赖它)每节点取最优路径, 按 score=Π(confidence×src权重)降序取 top-N。
     每跳给 node + via_edge + src + confidence(可解释); 全跳确定边则 path certain。
     """
-    g = build_impact_graph(conn, project_id, certain_only=certain_only)
+    g = build_impact_graph(store, project_id, certain_only=certain_only)
     node, ambig = _resolve(g, node_ref, None)
     if node is None:
         return _not_found("ref", node_ref, ambig)
@@ -415,13 +414,13 @@ def find_impact_paths(conn, project_id: str, node_ref: str, *,
 
 # ---------------------------------------------------------------- 业务域查询(A1 软节点消费前门)
 
-def find_node_domain(conn, project_id: str, node_ref: str) -> dict:
+def find_node_domain(store, project_id: str, node_ref: str) -> dict:
     """查 endpoint/表属于哪个业务域(A1 软节点)。读已标好的软边, **不调 LLM**。
 
     放开软边(include_soft=True)—— 这是"查理解"类查询, 与"查依赖"(默认过滤软边)分开,
     互不污染: 查依赖走确定性硬骨架, 查理解才放开 LLM 标的软节点。
     """
-    g = build_impact_graph(conn, project_id, include_soft=True)
+    g = build_impact_graph(store, project_id, include_soft=True)
     node, ambig = _resolve(g, node_ref, None)
     if node is None:
         return _not_found("ref", node_ref, ambig)
@@ -459,7 +458,7 @@ def _name_relevance(name: str, terms: list[str], full: str) -> tuple | None:
     return (-matched, -whole, -quality, len(name))   # 升序排 → 越相关越靠前
 
 
-def search_nodes(conn, project_id: str, query: str, kind: str = "all",
+def search_nodes(store, project_id: str, query: str, kind: str = "all",
                  limit: int = 50) -> dict:
     """模糊搜节点(name 命中 query 词, 可选 kind 过滤)。读已落库, 不调 LLM。
 
@@ -468,7 +467,7 @@ def search_nodes(conn, project_id: str, query: str, kind: str = "all",
     命中行为兼容原版; 多词不再要求整串连续子串(原"impact analysis"整串匹配不到任何 name → 0
     命中的弱点), 让跨 lane 融合召回的 graph lane 出**有序**结果(相关项排前 → 融合质量↑)。
     """
-    g = build_impact_graph(conn, project_id, include_soft=True)
+    g = build_impact_graph(store, project_id, include_soft=True)
     terms = [t for t in (query or "").strip().lower().split() if t]
     if not terms:
         return {"query": query, "kind": kind, "hits": [], "count": 0}
@@ -485,9 +484,9 @@ def search_nodes(conn, project_id: str, query: str, kind: str = "all",
     return {"query": query, "kind": kind, "hits": hits, "count": len(hits)}
 
 
-def list_domain_members(conn, project_id: str, domain_name: str) -> dict:
+def list_domain_members(store, project_id: str, domain_name: str) -> dict:
     """查某业务域下有哪些 endpoint/表(反向软边)。读已标好的软节点, **不调 LLM**。"""
-    g = build_impact_graph(conn, project_id, include_soft=True)
+    g = build_impact_graph(store, project_id, include_soft=True)
     doms = g.find_nodes_by_name(domain_name, NodeKind.BUSINESS_DOMAIN.value)
     if not doms:
         return {"found": False, "domain": domain_name}
@@ -513,13 +512,13 @@ _LAYER_RANK: dict[str, int] = {
 _DEP_EDGES = frozenset({EdgeKind.CALLS.value, EdgeKind.IMPORTS.value})
 
 
-def find_arch_role(conn, project_id: str, node_ref: str) -> dict:
+def find_arch_role(store, project_id: str, node_ref: str) -> dict:
     """查某节点(function/endpoint/module)演哪个架构层角色(A2 软节点)。读 PLAYS_ROLE 软边, **不调 LLM**。
 
     graph 无 FILE kind 节点, 故角色落到**节点级**(同一 file 的节点共享其 file 的角色); 传 endpoint/
     function/module 的 name 或 id 均可。
     """
-    g = build_impact_graph(conn, project_id, include_soft=True)
+    g = build_impact_graph(store, project_id, include_soft=True)
     node, ambig = _resolve(g, node_ref, None)
     if node is None:
         return _not_found("node", node_ref, ambig)
@@ -530,9 +529,9 @@ def find_arch_role(conn, project_id: str, node_ref: str) -> dict:
     return {"found": True, "node": _node_brief(node), "roles": sorted(set(roles))}
 
 
-def list_layer_members(conn, project_id: str, role: str) -> dict:
+def list_layer_members(store, project_id: str, role: str) -> dict:
     """查某架构层角色下有哪些 file(反向 PLAYS_ROLE 软边)。读已标好的软节点, **不调 LLM**。"""
-    g = build_impact_graph(conn, project_id, include_soft=True)
+    g = build_impact_graph(store, project_id, include_soft=True)
     layers = g.find_nodes_by_name(role, NodeKind.ARCH_LAYER.value)
     if not layers:
         return {"found": False, "role": role}
@@ -545,13 +544,13 @@ def list_layer_members(conn, project_id: str, role: str) -> dict:
     return {"found": True, "role": layer.name, "members": members, "count": len(members)}
 
 
-def find_arch_violations(conn, project_id: str, limit: int = 200) -> dict:
+def find_arch_violations(store, project_id: str, limit: int = 200) -> dict:
     """跨层违规检测(**确定性**: layer 软标签 × calls/imports 硬边 × 偏序规则, 不调 LLM)。
 
     逆向依赖 = 下层角色(rank 大)经 calls/imports 依赖上层角色(rank 小), 如 repository→controller。
     LLM 只提供 layer 标签这一个软输入; 违规判定全确定性(硬边 + rank), 给 agent 重构/PR 自检用。
     """
-    g = build_impact_graph(conn, project_id, include_soft=True)
+    g = build_impact_graph(store, project_id, include_soft=True)
     # node id → role(直接从 PLAYS_ROLE 软边; A2 节点级, 同 file 的每个节点各带一条软边到其 layer)
     node_role: dict[str, str] = {}
     for src, nbrs in g.fwd.items():

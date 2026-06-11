@@ -325,18 +325,18 @@ def _check_rules_vs_incident(r: Report, repo: Path) -> None:
 
 def _check_graph_store(r: Report, project_id: str) -> None:
     """统一图谱 store (graph_store/<pid>.sqlite) 节点/边 + 新鲜度。替代退役的 cross_layer 检查。"""
-    from codev_platform.graph.store import graph_store_path
+    from codev_platform.graph.store import graph_store_path, open_store
     db = graph_store_path(project_id)
     if not db.is_file():
         r.line("graph store", "INFO", "未建 (跑 reindex --ingest 生成统一图谱)")
         return
     try:
-        conn = sqlite3.connect(str(db))
-        n = conn.execute("select count(*) from nodes").fetchone()[0]
-        e = conn.execute("select count(*) from edges").fetchone()[0]
-        row = conn.execute("select max(ingested_at) from ingest_meta").fetchone()
-        last = row[0] if row and row[0] else "?"
-        conn.close()
+        with open_store(project_id, mode="ro") as store:
+            data = store.stats(project_id)
+        t = data["totals"]
+        n, e = t["nodes"], t["edges"]
+        ings = [p["ingested_at"] for p in data["plugins"] if p.get("ingested_at")]
+        last = max(ings) if ings else "?"
     except Exception as exc:  # noqa: BLE001
         r.line("graph store", "FAIL", f"query failed: {exc!r}")
         return
