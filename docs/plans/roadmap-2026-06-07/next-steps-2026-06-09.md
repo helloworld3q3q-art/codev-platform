@@ -56,7 +56,7 @@ ai-health --all
 
 | 任务 | 估时 | 前置 |
 |---|---|---|
-| ✅🟡 Phase 6 vector lane(代码侧已落,06-11)| — | **代码完成**:`recall/code_vector_store.py`(对 codegraph 节点嵌入,ref 复用 node id→与 codegraph lane 同空间叠分)+ `service._vector_lane`(fail-soft)+ `weights` 概览/兜底偏 vector。测 `test_recall_vector_lane.py` 全绿(脱模型)。**剩 WSL 两步**:① 建库 `python -m codev_platform.recall.code_vector_store --project <pid>`(需嵌入模型,重型不自动跑)② `--suite recall` 复跑看 vector 是否在饱和 grounding 上加分(加分才保留偏好权重,否则回均衡) |
+| ✅ Phase 6 vector lane(已落+已验证+已上线,06-11)| — | **代码**:`recall/code_vector_store.py`(对 codegraph 节点嵌入,ref 复用 node id→与 codegraph lane 同空间叠分,每项目独立 persist 目录绕 chromadb 多 flush bug)+ `service._vector_lane`(fail-soft)+ `iter_nodes`。**建库**:两项目均建(codev 8926 / openclaw 19866 节点)。**eval 实证(大胜)**:等权 3-lane vs 2-lane,codev MRR 0.516→0.917(+0.40)/openclaw 0.347→0.857(+0.51),四个 CI 全正。**权重**:实测"偏好 vector 2x"显著更差(codev nDCG CI 全负)→ 已回均衡(commit `537046c`)。**上线**:重启 codev-mcp-graph/agent/web,`recall_code` 工具即用 vector lane。剩:接 reindex worker 让索引随提交自动刷新(现手动 CLI) |
 | Phase 6 bm25 lane | 0.5天 | recall 再加一 lane;同 fusion 接线模式 |
 | Phase 6 reranker | 1天 | reranker 模型;压缩候选精排,关闭时降级加权 RRF(plan Gate 已设计) |
 | Phase 6 memory lane | 0.5天 | PG(agent memory);把 agent/recall 接进 fusion |
