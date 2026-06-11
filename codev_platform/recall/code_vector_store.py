@@ -113,15 +113,18 @@ def build_code_vector_index(project_id: str) -> int:
     import chromadb
     from codev_platform.chroma import ensure_wal
 
+    import shutil
+
     persist = _code_vec_persist_dir(project_id)
+    # 全量重建 = **物理清空该项目目录**(truly fresh sqlite), 不用 delete_collection —— 后者残留
+    # 旧 hnsw segment, 多批 upsert 时 compaction 撞残留报 disk I/O (522)(incident 2026-06-05)。
+    # 全新单 collection 库多批 flush 才永远安全(实测 openclaw 10053 节点 3 批: delete_collection
+    # 路径第 2 批必崩, rmtree 路径全过)。
+    shutil.rmtree(persist, ignore_errors=True)
     persist.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(persist))
     ensure_wal(persist)
     name = code_vec_collection_name(project_id)
-    try:
-        client.delete_collection(name)
-    except Exception as exc:  # noqa: BLE001 — 不存在等, 重建路径正常
-        logger.debug("[code_vec] 删旧 collection %s 跳过: %s", name, exc)
     col = client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
 
     ids: list[str] = []
