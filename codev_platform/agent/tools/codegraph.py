@@ -45,6 +45,10 @@ def _find_db(project_id: str | None = None) -> Path | None:
             cand = repo / ".codegraph" / "codegraph.db"
             return cand if cand.is_file() else None
         return None
+    # 单项目兼容 cwd 走查; 先过 token 模式守卫(server 部署禁 cwd fallback —— 否则会静默命中
+    # 平台进程所在仓的 .codegraph = 越权读别项目, 与 _project.resolve_project_id 同一 Phase 0 底座)
+    from codev_platform.agent.tools._project import forbid_cwd_fallback_in_token_mode
+    forbid_cwd_fallback_in_token_mode()
     cur = Path.cwd().resolve()
     for d in (cur, *cur.parents):
         cand = d / ".codegraph" / "codegraph.db"

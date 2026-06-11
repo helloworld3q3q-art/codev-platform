@@ -69,6 +69,41 @@ def test_repo_path_of_missing_returns_none(tmp_path, monkeypatch):
     assert _project.repo_path_of("nope") is None
 
 
+def _set_token_mode(monkeypatch):
+    monkeypatch.setattr(
+        "codev_platform.core.config.load_config",
+        lambda: {"gateway": {"auth_mode": "token"}},
+    )
+    # resolve_local 若被调用即破坏隔离 —— sentinel 断言不触达
+    monkeypatch.setattr(
+        "codev_platform.core.project_id.resolve_local",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("token 模式不应触达 cwd 回退")),
+    )
+
+
+def test_impact_tool_token_mode_no_cwd_fallback(monkeypatch):
+    # impact 工具 None 分支同样禁 cwd fallback(此前裸 resolve_local 绕过守卫的回归)
+    _set_token_mode(monkeypatch)
+    from codev_platform.agent.tools.impact import TableUsageTool
+    r = TableUsageTool(None).run({"table": "t_demo"})
+    assert r.is_error and "token 模式" in r.content
+
+
+def test_recall_tool_token_mode_no_cwd_fallback(monkeypatch):
+    _set_token_mode(monkeypatch)
+    from codev_platform.agent.tools.recall import CodeRecallTool
+    r = CodeRecallTool(None).run({"query": "anything"})
+    assert r.is_error and "token 模式" in r.content
+
+
+def test_codegraph_tool_token_mode_no_cwd_fallback(monkeypatch):
+    # cwd 上溯找 .codegraph 的分支在 token 模式必须被守卫拦下(防命中平台进程所在仓)
+    _set_token_mode(monkeypatch)
+    from codev_platform.agent.tools.codegraph import CodegraphSearchTool
+    r = CodegraphSearchTool(None).run({"query": "anything"})
+    assert r.is_error and "token 模式" in r.content
+
+
 def test_build_registry_accepts_project_id():
     # project_id 透传不报错;工具实例带上 project_id
     reg = build_default_registry("some-project")

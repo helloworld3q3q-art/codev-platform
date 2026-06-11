@@ -13,15 +13,16 @@ import json
 from typing import Any
 
 from codev_platform.agent.brain import ToolResult
+from codev_platform.agent.tools._project import resolve_project_id
 from codev_platform.agent.tools.base import Tool
-from codev_platform.core.project_id import resolve_local
 from codev_platform.graph import impact as I
 
 
 def _open_store_ro(project_id: str | None):
-    """开只读统一图谱 store; 返回 (store, 实际 project_id)。不存在/读不动抛 FileNotFoundError。"""
+    """开只读统一图谱 store; 返回 (store, 实际 project_id)。不存在/读不动抛 FileNotFoundError。
+    None 经 resolve_project_id 解析(token 模式禁 cwd fallback, 与 fs/search_docs 同一守卫)。"""
     from codev_platform.graph.store import GraphStoreUnreadable, open_store
-    pid = project_id or resolve_local()
+    pid = resolve_project_id(project_id)
     try:
         return open_store(pid, mode="ro"), pid
     except GraphStoreUnreadable as exc:

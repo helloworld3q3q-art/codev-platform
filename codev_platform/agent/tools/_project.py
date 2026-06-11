@@ -12,25 +12,31 @@ import os
 from pathlib import Path
 
 
-def resolve_project_id(explicit: str | None) -> str:
-    """explicit 优先(同样走 validate 校验,防路径穿越);否则从 cwd 推导(单项目兼容)。
-
-    Phase 0 安全底座(token 模式禁 cwd fallback): server 部署(gateway.auth_mode == "token")下,
-    explicit 缺失时**不允许**回退 cwd —— 否则任何未显式带 project_id 的调用会静默命中平台进程
-    cwd 推导出的项目 = 越权扫盲。HTTP /chat 路由已在入口用 can_access 挡下 token 模式 None,
-    本处是 defense-in-depth: 任何直接调用工具层的路径(未来 CLI / service 直调)同样不漏。
-    passthrough(dev 单机)保留 cwd 回退,单项目兼容不破。
+def forbid_cwd_fallback_in_token_mode() -> None:
+    """Phase 0 安全底座(token 模式禁 cwd fallback): server 部署(gateway.auth_mode == "token")下,
+    explicit project_id 缺失时**不允许**回退 cwd —— 否则任何未显式带 project_id 的调用会静默命中
+    平台进程 cwd 推导出的项目 = 越权扫盲。HTTP /chat 路由已在入口用 can_access 挡下 token 模式
+    None, 本处是 defense-in-depth: 任何直接调用工具层的路径(未来 CLI / service 直调)同样不漏。
+    所有带 cwd 回退分支的工具(fs/search_docs/impact/recall/codegraph)统一过本守卫。
+    passthrough(dev 单机)放行,单项目兼容不破。
     """
-    if explicit:
-        from codev_platform.core.project_id import validate
-        return validate(explicit)
     from codev_platform.core.config import get as _cfg_get, load_config
-    from codev_platform.core.project_id import ProjectIdError, resolve_local
+    from codev_platform.core.project_id import ProjectIdError
     if _cfg_get(load_config(), "gateway.auth_mode", "passthrough") == "token":
         raise ProjectIdError(
             "token 模式(server 部署)禁止 cwd fallback: 必须显式提供 project_id "
             "(X-Project-Id header / body.project_id)。"
         )
+
+
+def resolve_project_id(explicit: str | None) -> str:
+    """explicit 优先(同样走 validate 校验,防路径穿越);否则从 cwd 推导(单项目兼容)。
+    token 模式禁 cwd 回退,见 forbid_cwd_fallback_in_token_mode。"""
+    if explicit:
+        from codev_platform.core.project_id import validate
+        return validate(explicit)
+    forbid_cwd_fallback_in_token_mode()
+    from codev_platform.core.project_id import resolve_local
     return resolve_local()
 
 

@@ -43,11 +43,10 @@ class CodeRecallTool(Tool):
         if not query:
             return ToolResult(call_id="", content="缺少 query 参数", is_error=True)
         limit = max(1, min(int((args or {}).get("limit") or _DEFAULT_LIMIT), _MAX_LIMIT))
-        pid = self.project_id
-        if pid is None:
-            from codev_platform.core.project_id import resolve_local
-            pid = resolve_local()
         try:
+            # None 经 resolve_project_id 解析(token 模式禁 cwd fallback, 与 fs/search_docs 同一守卫)
+            from codev_platform.agent.tools._project import resolve_project_id
+            pid = resolve_project_id(self.project_id)
             from codev_platform.recall import recall_code
             hits = recall_code(query, pid, limit=limit)
         except Exception as e:  # noqa: BLE001 — 工具边界: 异常转结果回灌模型, 不崩 loop
