@@ -498,47 +498,24 @@ def dry_run() -> tuple[int, int]:
 # Reindex mutex: 防多个 update-local-ai.ps1 并发跑 index_docs.py 撞坏 chroma。
 # 参考 scripts/codegraph/rebuild_index.ps1 的 .rebuild.lock 模式; reindex 并发
 # 无意义不必等, 后到者直接报错退出。stale lock (> 30 分钟) 抢占。
+# 锁协议已抽到 codev_platform.chroma._reindex_lock(参数化 lock_dir, recall 代码向量索引复用)。
+# 本处保留薄 wrapper 绑定 PERSIST_DIR, 行为与原实现一致。
+from codev_platform.chroma._reindex_lock import (  # noqa: E402
+    REINDEX_LOCK_STALE_SEC as _REINDEX_LOCK_STALE_SEC,  # noqa: F401
+)
+from codev_platform.chroma._reindex_lock import (
+    release_reindex_lock as _release_reindex_lock,
+)
+from codev_platform.chroma._reindex_lock import (
+    try_acquire_reindex_lock as _try_acquire_shared_lock,
+)
+
 _REINDEX_LOCK_PATH = PERSIST_DIR / ".reindex.lock"
-_REINDEX_LOCK_STALE_SEC = 30 * 60
 
 
 def _try_acquire_reindex_lock() -> tuple | None:
-    """原子创建 .reindex.lock; 返回 (fd, path) 表示拿到, None 表示拒绝。"""
-    PERSIST_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(str(_REINDEX_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_RDWR)
-        os.write(fd, f"{os.getpid()}\n{time.time()}\n".encode())
-        return (fd, _REINDEX_LOCK_PATH)
-    except FileExistsError:
-        # Stale lock 抢占
-        try:
-            age = time.time() - _REINDEX_LOCK_PATH.stat().st_mtime
-            if age > _REINDEX_LOCK_STALE_SEC:
-                logger.warning("removing stale reindex lock (age=%ds)", int(age))
-                _REINDEX_LOCK_PATH.unlink(missing_ok=True)
-                try:
-                    fd = os.open(str(_REINDEX_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_RDWR)
-                    os.write(fd, f"{os.getpid()}\n{time.time()}\n".encode())
-                    return (fd, _REINDEX_LOCK_PATH)
-                except FileExistsError:
-                    pass
-        except OSError:
-            pass
-        return None
-
-
-def _release_reindex_lock(lock) -> None:
-    if lock is None:
-        return
-    fd, path = lock
-    try:
-        os.close(fd)
-    except OSError:
-        pass
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    """原子创建 PERSIST_DIR/.reindex.lock; 委托共享实现。返回 (fd, path) 或 None。"""
+    return _try_acquire_shared_lock(PERSIST_DIR)
 
 
 def main() -> int:

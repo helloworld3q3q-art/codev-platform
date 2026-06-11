@@ -132,6 +132,50 @@ def test_build_rejects_malicious_project_id():
         build_code_vector_index("../../../etc")   # validate 在 embedder/rmtree 前就拦下
 
 
+# ---- R1: rmtree 残留 fail-fast + query client 缓存 ----
+
+def test_assert_persist_clean_raises_on_residue(tmp_path):
+    from codev_platform.recall.code_vector_store import _assert_persist_clean
+    import pytest
+    _assert_persist_clean(tmp_path)                      # 干净目录 → 不抛
+    (tmp_path / "chroma.sqlite3").write_text("x", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="残留"):       # rmtree 静默失败留 sqlite → 抛
+        _assert_persist_clean(tmp_path)
+
+
+def test_get_query_client_caches_per_path(monkeypatch):
+    import codev_platform.recall.code_vector_store as m
+    m._QUERY_CLIENTS.clear()
+    calls = []
+
+    class _FakeChroma:
+        def PersistentClient(self, path):
+            calls.append(path)
+            return object()
+    monkeypatch.setitem(__import__("sys").modules, "chromadb", _FakeChroma())
+    c1 = m._get_query_client("/p/a")
+    c2 = m._get_query_client("/p/a")
+    c3 = m._get_query_client("/p/b")
+    assert c1 is c2 and c1 is not c3          # 同 path 单例, 不同 path 各一
+    assert calls == ["/p/a", "/p/b"]          # 每 path 只建一次
+    m._QUERY_CLIENTS.clear()
+
+
+# ---- R3: 源码富化模式指纹(repo 翻转检测)----
+
+def test_read_enrich_mode(tmp_path):
+    import json
+    from codev_platform.recall.code_vector_store import _read_enrich_mode
+    meta = tmp_path / ".manifest.meta.json"
+    assert _read_enrich_mode(meta) is None                # 缺 → None(未知, 触发全量)
+    meta.write_text(json.dumps({"enrich": True}), encoding="utf-8")
+    assert _read_enrich_mode(meta) is True
+    meta.write_text(json.dumps({"enrich": False}), encoding="utf-8")
+    assert _read_enrich_mode(meta) is False
+    meta.write_text("{bad json", encoding="utf-8")
+    assert _read_enrich_mode(meta) is None                # 坏 → None
+
+
 # ---- lane 编排 (fail-soft / 降权) ----
 
 def test_vector_lane_fail_soft_when_store_missing(monkeypatch):

@@ -181,3 +181,77 @@ def test_dispatch_enqueues_code_vec_on_code_change(tmp_path, monkeypatch):
 def test_code_vec_runner_registered():
     from codev_platform.reindex.runners import kinds
     assert "code_vec" in kinds()
+
+
+# ---- R4: codegraph 锁忙(rc=2)处置 ----
+
+def test_decide_codegraph_lock_outcome_truth_table():
+    from codev_platform.ops.reindex.commands import decide_codegraph_lock_outcome as d
+    assert d(True, True, True) == (True, 2)     # 锁忙+要跑 code_vec+开关 → 跳过+重试
+    assert d(True, True, False) == (False, 0)   # 开关关 → 旧行为
+    assert d(True, False, True) == (False, 0)   # 本次不跑 code_vec → 不强制重试
+    assert d(False, True, True) == (False, 0)   # 没锁 → 正常
+    assert d(False, False, False) == (False, 0)
+
+
+def _run_codegraph_locked(monkeypatch):
+    """C.run: codegraph sync 返 rc=2(锁忙), 其它返 0。"""
+    class _CP:
+        def __init__(self, rc): self.returncode = rc
+    def _run(cmd, **kw):
+        s = " ".join(str(c) for c in cmd)
+        return _CP(2 if "codegraph" in s else 0)
+    monkeypatch.setattr(R.C, "run", _run)
+    monkeypatch.setattr(R.C, "chroma_python", lambda: __file__)
+    monkeypatch.setattr("codev_platform.graph.ingest.ingest_project",
+                        lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
+
+
+def test_codegraph_lock_skips_code_vec_and_rc2(_repo, monkeypatch):
+    _run_codegraph_locked(monkeypatch)
+    called = {"build": False}
+    monkeypatch.setattr("codev_platform.recall.code_vector_store.build_code_vector_index",
+                        lambda pid, **k: called.__setitem__("build", True) or 0)
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {})  # switch 默认 True
+    rc = R.cmd_reindex(_args(repo=str(_repo)))
+    assert rc == 2                      # 锁忙 → rc=2 让 worker 重试
+    assert called["build"] is False     # code_vec 被跳过, 不嵌陈旧 db
+
+
+def test_codegraph_lock_switch_off_legacy(_repo, monkeypatch):
+    _run_codegraph_locked(monkeypatch)
+    called = {"build": False}
+    monkeypatch.setattr("codev_platform.recall.code_vector_store.build_code_vector_index",
+                        lambda pid, **k: called.__setitem__("build", True) or 0)
+    # 开关关 → 回退旧行为: code_vec 照跑, rc=0
+    monkeypatch.setattr("codev_platform.core.config.load_config",
+                        lambda: {"reindex": {"codevec_block_on_codegraph_lock": False}})
+    rc = R.cmd_reindex(_args(repo=str(_repo)))
+    assert rc == 0 and called["build"] is True
+
+
+# ---- R2: code_vec 写侧锁忙 → rc=2 ----
+
+def test_code_vec_lock_busy_returns_rc2(_repo, monkeypatch):
+    _stub_stages(monkeypatch)
+    monkeypatch.setattr("codev_platform.graph.ingest.ingest_project",
+                        lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
+    from codev_platform.recall.code_vector_store import CodeVecLockBusy
+
+    def _busy(pid, **k):
+        raise CodeVecLockBusy("another build running")
+    monkeypatch.setattr("codev_platform.recall.code_vector_store.build_code_vector_index", _busy)
+    rc = R.cmd_reindex(_args(repo=str(_repo)))
+    assert rc == 2     # 锁忙 → worker 重试; 区别于普通异常的 fail-soft rc=0
+
+
+def test_code_vec_generic_failure_still_rc0(_repo, monkeypatch):
+    _stub_stages(monkeypatch)
+    monkeypatch.setattr("codev_platform.graph.ingest.ingest_project",
+                        lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
+
+    def _boom(pid, **k):
+        raise RuntimeError("embed daemon down")
+    monkeypatch.setattr("codev_platform.recall.code_vector_store.build_code_vector_index", _boom)
+    rc = R.cmd_reindex(_args(repo=str(_repo)))
+    assert rc == 0     # 普通失败仍 fail-soft 不污染基线

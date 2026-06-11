@@ -3,6 +3,14 @@
 加权(planner 自动)vs 等权, 比 MRR / nDCG@k + delta。落地 Phase 6 Gate「相比 baseline 可
 量化提升」+ 验 `_PREFER` 是否真有效。两 lane(graph + codegraph)直读本地 sqlite(免 daemon);
 任一 store 缺 → skip(单 lane 下加权无意义, 比较不成立)。
+
+⚠️ **本 suite 不测 vector lane 的净价值**(评估盲区, 非 prod bug): 两臂(weighted/uniform)都经
+recall_code 跑全部三 lane(含 vector), general 行三 lane 权重相等 → vector 对 paired delta 结构性
+不敏感, 关掉 vector 两臂等额变化、delta 仍 ≈0, 本 suite 测不到。**vector lane 价值由独立
+3-lane-vs-2-lane 消融实验佐证**(见 MEMORY [[phase6-vector-lane]]: codev MRR +0.43 / openclaw +0.57,
+CI 全正), 不在此 suite 重复。注: 不能用 weights={VECTOR:0} 做消融 —— weighted_rrf 对 weight=0 的
+lane 仍把候选 ref 计入排名(只是 0 贡献), 不会真正剔除该 lane, 故 weights 消融会给误导性近零 delta;
+真消融需 service 层跳过该 LaneResult(另一机制, 当前不做)。
 """
 from __future__ import annotations
 

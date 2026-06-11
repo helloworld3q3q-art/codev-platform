@@ -28,7 +28,9 @@ from codev_platform.core.paths import chroma_collection_name, chroma_dir
 
 logger = logging.getLogger(__name__)
 
-_MANIFEST_NAME = ".manifest.json"   # id -> text sha1, 增量重建用(在 per-project persist 目录内)
+_MANIFEST_NAME = ".manifest.json"        # id -> text sha1, 增量重建用(在 per-project persist 目录内)
+_MANIFEST_META_NAME = ".manifest.meta.json"   # build 参数指纹 {enrich: bool}(与 manifest 分离, 不进 _diff)
+_QUERY_CLIENTS: dict = {}                # path -> PersistentClient 进程内单例(chromadb 本就 per-path 单例, 显式化避免每查重 attach)
 
 # 节点文本拼接字段(语义意义从强到弱); file 只入 metadata 不入嵌入文本(路径噪声)。
 _TEXT_FIELDS = ("name", "qualifiedName", "signature", "docstring")
@@ -121,6 +123,37 @@ def _diff_manifest(old: dict, new: dict) -> tuple[list[str], list[str]]:
     return changed, deleted
 
 
+def _read_enrich_mode(meta_path) -> bool | None:
+    """读上次 build 的源码富化模式(enrich bool); 缺/坏 → None(视为未知, 触发一次全量)。"""
+    try:
+        if not meta_path.exists():
+            return None
+        return bool(json.loads(meta_path.read_text(encoding="utf-8")).get("enrich"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _assert_persist_clean(persist) -> None:
+    """全量重建 rmtree 后校验目录确已清空。rmtree(ignore_errors)在 Windows 被句柄占用会**静默失败**
+    留旧 chroma.sqlite3 + hnsw segment, 随后多批 upsert 落旧 segment = chromadb 522 触发条件。
+    残留 → 显式抛(被 stage-4 fail-soft 接住 warn), 把静默腐坏转成可见失败。"""
+    if (persist / "chroma.sqlite3").exists():
+        raise RuntimeError(
+            f"[code_vec] 全量重建 rmtree 后仍残留 sqlite: {persist} "
+            "(疑似有存活 chroma 句柄占用, Windows 静默失败); 拒绝在旧 segment 上 bulk upsert(防 522)。")
+
+
+def _get_query_client(persist_path: str):
+    """query 侧 PersistentClient 进程内单例(per path)。chromadb 本就 per-path 单例, 显式缓存避免
+    每次查询重建 client 反复 attach segment。"""
+    import chromadb
+    c = _QUERY_CLIENTS.get(persist_path)
+    if c is None:
+        c = chromadb.PersistentClient(path=persist_path)
+        _QUERY_CLIENTS[persist_path] = c
+    return c
+
+
 def _parse_query_result(res: dict) -> tuple[list[str], dict]:
     """chroma query 结果 → (按相似度降序的 node id 列表, ref → {name,kind,file} 富化)。纯函数。"""
     ids_outer = res.get("ids") or [[]]
@@ -142,9 +175,7 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     """
     if k <= 0:                 # chromadb 对 n_results<=0 抛 TypeError; 正常边界值直接空返
         return [], {}
-    import chromadb
-
-    client = chromadb.PersistentClient(path=str(_code_vec_persist_dir(project_id)))
+    client = _get_query_client(str(_code_vec_persist_dir(project_id)))   # 进程内单例(per path)
     col = client.get_collection(code_vec_collection_name(project_id))  # 缺 → 抛, 调用侧 fail-soft
     from codev_platform.agent.embed.registry import build_embedder
     from codev_platform.core.config import load_config
@@ -157,26 +188,44 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     return _parse_query_result(res)
 
 
+class CodeVecLockBusy(RuntimeError):
+    """另一个 code_vec 重建正占用同一 persist 目录(写侧互斥)。调用侧映射 rc=2 让 worker 重试。"""
+
+
 def build_code_vector_index(project_id: str, *, incremental: bool = False) -> int:
-    """构建/刷新该项目代码向量索引; 返回**本次 embed 的节点数**(增量=变更数, 全量=全部)。
+    """构建/刷新代码向量索引: 校验 pid → 取写侧锁 → 委托 _build_locked。返回本次 embed 节点数。
 
-    - `incremental=False`(或无 manifest)→ **全量**: 物理清空目录(truly fresh sqlite)重灌。
-      不用 delete_collection —— 后者残留旧 hnsw segment, 多批 upsert compaction 撞残留报
-      disk I/O (522)(incident 2026-06-05); 全新单 collection 库多批 flush 才永远安全。
-    - `incremental=True` 且有 manifest → **增量**: 只对 text 变更/新增节点重嵌 + 删除已不存在
-      节点。小 upsert 既便宜又安全(事故明确「增量小 upsert 是安全模式, 全量 bulk multi-flush
-      才触发 522」), 适合接 reindex worker 随提交刷新。manifest(id→text sha1)存目录内。
+    写侧锁(per-project persist 目录, 复用 indexer 同款 .reindex.lock): 防两个 code_vec build
+    进程(如手动 reindex --force 撞 worker 增量)同时 rmtree/upsert/写 manifest 同一目录。
+    锁忙 → CodeVecLockBusy(调用侧映射 rc=2 让 worker 重试, 不丢)。
+    """
+    from codev_platform.chroma._reindex_lock import release_reindex_lock, try_acquire_reindex_lock
+    from codev_platform.core.project_id import validate as _validate_pid
 
+    # 入口校验(纵深): rmtree(_code_vec_persist_dir(pid)) 用 pid 拼路径, 挡 '..'/分隔符删错目录
+    # (正常 enqueue/CLI 入口已各自 validate, 此处兜底)。
+    project_id = _validate_pid(project_id)
+    persist = _code_vec_persist_dir(project_id)
+    lock = try_acquire_reindex_lock(persist)
+    if lock is None:
+        raise CodeVecLockBusy(f"另一个 code_vec 重建正在跑, 跳过: {persist}")
+    try:
+        return _build_locked(project_id, persist, incremental=incremental)
+    finally:
+        release_reindex_lock(lock)
+
+
+def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
+    """实际构建(已持写侧锁)。
+
+    - incremental=False(或无 manifest / manifest 坏 / 富化模式翻转)→ **全量**: rmtree 物理清空
+      (truly fresh sqlite)重灌。不用 delete_collection(残留旧 hnsw segment, 多批 upsert 撞 522)。
+    - incremental=True 且 manifest 有效 → **增量**: 只重嵌变更/新增 + 删已不存在(小 upsert 安全便宜)。
     嵌入模型不可用直接抛(构建语境必须有模型, 不静默产空库)。
     """
     from codev_platform.agent.embed.registry import build_embedder
     from codev_platform.core.config import load_config
-    from codev_platform.core.project_id import validate as _validate_pid
     from codev_platform.web.integrations.codegraph_client import CodegraphClient
-
-    # 入口校验(纵深): rmtree(_code_vec_persist_dir(pid)) 用 pid 拼路径, 校验挡住 '..'/分隔符
-    # 经直接 API/main() 进来时删错目录(正常 enqueue/CLI 入口已各自 validate, 此处兜底)。
-    project_id = _validate_pid(project_id)
 
     embedder = build_embedder(load_config())
     if embedder is None:
@@ -190,10 +239,12 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
 
     from codev_platform.chroma import ensure_wal
 
-    persist = _code_vec_persist_dir(project_id)
     manifest_path = persist / _MANIFEST_NAME
-    # 先定 full(读 manifest 在 rmtree 前): 无 manifest 或 manifest 损坏都退全量 —— **必须 rmtree
-    # 拿干净库**, 否则"全量重嵌 onto 既有 segment"正是 chromadb 多 flush 522 触发条件(audit risk)。
+    meta_path = persist / _MANIFEST_META_NAME
+    repo = _resolve_repo(project_id)   # 读源码片段补语义; None → 退基础文本(降级不崩)
+    enrich_now = bool(repo)
+    # 定 full(读 manifest/meta 在 rmtree 前): 无 manifest / manifest 损坏 / 富化模式翻转 都退全量 ——
+    # **必须 rmtree 拿干净库**, 否则"全量重嵌 onto 既有 segment"正是 chromadb 多 flush 522 触发条件。
     full = (not incremental) or (not manifest_path.exists())
     old_manifest: dict = {}
     if not full:
@@ -202,8 +253,18 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
         except Exception as exc:  # noqa: BLE001 — manifest 损坏 → 转全量(rmtree), 不在旧 segment 上重灌
             logger.warning("[code_vec] manifest 损坏(%s), 转全量重建(rmtree)", exc)
             full = True
+    # R3: 源码富化模式(repo 是否可解析)是 build 参数, 非节点内容。模式翻转(on<->off)会让每个
+    # _embed_text 变化 → 当增量会把全部节点误标 changed + 谎报 incremental + 文本降级。检测翻转显式
+    # 转全量(诚实记录), _diff_manifest 仍是纯 id->hash 不被污染(指纹存独立 meta 文件)。
+    if not full and incremental:
+        old_enrich = _read_enrich_mode(meta_path)
+        if old_enrich is not None and old_enrich != enrich_now:
+            logger.warning("[code_vec] %s: 源码富化模式 %s->%s(repo 解析翻转), 强制全量重建"
+                           "(否则会误报 incremental 且检索文本降级)", project_id, old_enrich, enrich_now)
+            full = True
     if full:
         shutil.rmtree(persist, ignore_errors=True)
+        _assert_persist_clean(persist)   # R1: rmtree 静默失败留残留 → fail-fast, 不在旧 segment 上重灌
     persist.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(persist))
     ensure_wal(persist)
@@ -211,7 +272,6 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
     col = client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
 
     # 枚举节点 → 收 text/meta + 算新 manifest(跳过低价值 kind 与空文本)
-    repo = _resolve_repo(project_id)   # 读源码片段补语义; None → 退基础文本(降级不崩)
     logger.info("[code_vec] %s: repo=%s (源码富化 %s)", project_id, repo, "on" if repo else "off")
     new_manifest: dict = {}
     text_by_id: dict[str, str] = {}
@@ -251,6 +311,7 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
         logger.info("[code_vec] upserted %d/%d", min(i + _UPSERT_BATCH, len(changed)), len(changed))
 
     manifest_path.write_text(json.dumps(new_manifest, ensure_ascii=False), encoding="utf-8")
+    meta_path.write_text(json.dumps({"enrich": enrich_now}, ensure_ascii=False), encoding="utf-8")
     logger.info("[code_vec] %s: %s, 变更 %d / 删除 %d / 总 %d 节点 → %s",
                 project_id, "full" if full else "incremental",
                 len(changed), len(deleted), len(new_manifest), name)

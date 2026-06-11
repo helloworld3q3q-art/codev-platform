@@ -19,6 +19,19 @@ from .logs import _git_out, _reindex_log
 # ======================================================================
 # 1. reindex  (port of update-local-ai.ps1)
 # ======================================================================
+def decide_codegraph_lock_outcome(codegraph_locked: bool, do_codevec: bool,
+                                  switch_on: bool) -> tuple[bool, int]:
+    """codegraph sync 锁忙(rc=2, MCP 持 db 锁)时对 code_vec 的处置(纯函数, 真值表可测)。
+
+    返回 (skip_codevec, rc)。switch 开 + 锁忙 + 本次要跑 code_vec → (True, 2): **跳过 code_vec
+    避免嵌陈旧 codegraph.db** + rc=2 让 worker 重试整 job(下轮锁释放后 codegraph+code_vec 重跑);
+    lock-independent 的 chroma/ingest 仍照跑(幂等)。其余情况 (False, 0)=旧行为不变。
+    """
+    if codegraph_locked and switch_on and do_codevec:
+        return True, 2
+    return False, 0
+
+
 def cmd_reindex(args: argparse.Namespace) -> int:
     """Refresh local AI indexes. Default = run all stages.
 
@@ -46,6 +59,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
               "(post-commit handles incremental in background)")
 
     started = time.monotonic()
+    codegraph_locked = False   # codegraph sync 因 MCP 持锁(rc=2)未跑 → code_vec 须避开陈旧 db(R4)
 
     # --- stage 1/4: codegraph sync ---
     if do_codegraph:
@@ -58,8 +72,10 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             C.out("SKIP: 'codegraph' CLI not found on PATH; continuing other indexes")
             rc = 0
         if rc == 2:
-            # 2 = MCP holds the db lock; non-fatal (mirrors update-local-ai.ps1)
+            # 2 = MCP holds the db lock; non-fatal (mirrors update-local-ai.ps1)。codegraph.db 未更新,
+            # 标记 locked → 下方跳过 code_vec(否则嵌陈旧 db)+ 末尾 rc=2 让 worker 重试(R4)。
             C.out("WARN: codegraph sync skipped (MCP holds DB); continuing other indexes")
+            codegraph_locked = True
         elif rc != 0:
             C.err(f"FAIL: codegraph sync exit={rc}")
             return rc
@@ -114,7 +130,17 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     # 同 ingest: FAILURE-ISOLATED —— 向量 lane 是增强层, 异常只 warn 不改退出码。
     # 必在 codegraph sync 之后(读 codegraph.db)→ 置最后。reindex --force → 全量重建;
     # 否则增量(只重嵌变更节点, 接 worker 随提交刷新便宜)。
-    if do_codevec:
+    # R4: codegraph 锁忙时是否跳过 code_vec(避免嵌陈旧 db)+ 是否 rc=2 让 worker 重试。
+    # config 开关默认 True(安全); 设 False 回退旧行为(code_vec 照跑现有 db)。
+    from codev_platform.core.config import get as _cfg_get
+    from codev_platform.core.config import load_config as _load_cfg
+    _switch = bool(_cfg_get(_load_cfg(), "reindex.codevec_block_on_codegraph_lock", True))
+    skip_codevec, codevec_rc = decide_codegraph_lock_outcome(codegraph_locked, do_codevec, _switch)
+
+    if do_codevec and skip_codevec:
+        C.out("")
+        C.out("step 4/4: code vector      -- skipped (codegraph 锁忙未同步, 避免嵌陈旧 db; 本 job 将重试)")
+    elif do_codevec:
         C.out("")
         C.out("=== step 4/4: code vector index ===")
         pid = C.project_id_of(repo)
@@ -126,14 +152,20 @@ def cmd_reindex(args: argparse.Namespace) -> int:
                 n = build_code_vector_index(pid, incremental=not args.force)
                 C.out(f"code vector ok: {n} 节点 (re)embedded")
             except Exception as exc:  # noqa: BLE001 — 增强层失败隔离, 不污染基线退出码
-                C.err(f"WARN: code vector failed (non-fatal, baseline indexes unaffected): {exc}")
+                # 写侧锁忙(另一 build 在跑)→ rc=2 让 worker 重试(不丢); 其它异常仍 fail-soft 不改退出码。
+                from codev_platform.recall.code_vector_store import CodeVecLockBusy
+                if isinstance(exc, CodeVecLockBusy):
+                    C.out(f"step 4/4: code vector      -- 锁忙跳过, 本 job 将重试: {exc}")
+                    codevec_rc = 2
+                else:
+                    C.err(f"WARN: code vector failed (non-fatal, baseline indexes unaffected): {exc}")
     else:
         C.out("step 4/4: code vector      -- skipped")
 
     dur = int(time.monotonic() - started)
     C.out("")
-    C.out(f"total: {dur}s, reindex ok")
-    return 0
+    C.out(f"total: {dur}s, reindex {'ok' if codevec_rc == 0 else 'rc=2 (will retry)'}")
+    return codevec_rc
 
 
 # ======================================================================
