@@ -203,6 +203,39 @@ def cmd_gateway(args: argparse.Namespace) -> int:
             return 1
         data = json.loads(mcp_json.read_text(encoding="utf-8"))
         servers = data.get("mcpServers", {})
+
+        if getattr(args, "query_token", False):
+            # url `?token=` 形式: 给无法设 Authorization header 的 MCP 客户端(.mcp.json url 一定能填)。
+            # token **明文内联**进 url → 任何客户端可用, 代价=明文落 .mcp.json(务必 gitignore + 远程 TLS,
+            # 见服务端 auth._query_token 安全说明)。明文取 --token 或 export <env>。
+            import os
+            from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+            tokval = getattr(args, "token", None) or os.environ.get(args.env)
+            if not args.remove and not tokval:
+                _err(f"FATAL: --query-token 需 --token <明文> 或 export {args.env}=<明文>")
+                return 1
+
+            def _set_token(url: str) -> str:
+                parts = urlsplit(url)
+                q = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "token"]
+                if not args.remove and tokval:
+                    q.append(("token", tokval))
+                return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(q), parts.fragment))
+
+            changed = 0
+            for conf in servers.values():
+                if not isinstance(conf, dict) or conf.get("type") != "sse" or not conf.get("url"):
+                    continue
+                conf["url"] = _set_token(conf["url"])
+                changed += 1
+            mcp_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            act = "移除 ?token=" if args.remove else "内联 ?token=<明文>"
+            _out(f"OK: {mcp_json}  {act}  —— {changed} 个 sse server")
+            if not args.remove:
+                _out("  ⚠ token 明文已写进 .mcp.json url: 确保 .mcp.json 已 gitignore + 远程走 HTTPS")
+                _out("    (?token= 会进 URL/access log; header 形式更安全, 客户端支持则用默认 client-auth)")
+            return 0
+
         bearer = f"Bearer ${{{args.env}}}"
         changed = 0
         for conf in servers.values():
@@ -287,6 +320,9 @@ def register(subparsers) -> None:
                     help="token-add/rotate: 有效期 30d/12h/90m/45s; 缺省/空=永久")
     gw.add_argument("--repo", default=None, help="client-auth/client-url: 业务仓路径 (默认 cwd)")
     gw.add_argument("--base", default=None, help="client-url: 远程反代基地址 (https://host)")
-    gw.add_argument("--env", default="PLATFORM_TOKEN", help="client-auth: header 引用的 env 变量名")
-    gw.add_argument("--remove", action="store_true", help="client-auth: 移除 Authorization header")
+    gw.add_argument("--env", default="PLATFORM_TOKEN", help="client-auth: header 引用的 env 变量名 / query-token 明文来源 env")
+    gw.add_argument("--remove", action="store_true", help="client-auth: 移除 Authorization header / ?token=")
+    gw.add_argument("--query-token", action="store_true",
+                    help="client-auth: 改写为 url ?token=<明文> 形式(给无法设 header 的 MCP 客户端; 明文落 .mcp.json 须 gitignore)")
+    gw.add_argument("--token", default=None, help="client-auth --query-token: 内联的明文 token(缺省取 env)")
     gw.set_defaults(func=cmd_gateway)

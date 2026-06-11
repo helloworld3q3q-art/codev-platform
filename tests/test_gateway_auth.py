@@ -94,14 +94,14 @@ def test_build_authenticator_token_mode():
 # ---- middleware 拦截(直驱 ASGI,不经 httpx TestClient——本机 httpx 版本与
 #       starlette.testclient 不兼容,会对带 Request 参数的路由误报 422;直驱更稳)----
 
-def _run_asgi(app, path: str, headers: dict[str, str]) -> int:
-    """最小 ASGI GET 调用,返回响应状态码(避开 httpx/TestClient)。"""
+def _run_asgi(app, path: str, headers: dict[str, str], query: str = "") -> int:
+    """最小 ASGI GET 调用,返回响应状态码(避开 httpx/TestClient)。query=查询串(?后部分)。"""
     import asyncio
 
     async def _go() -> int:
         scope = {
             "type": "http", "http_version": "1.1", "method": "GET", "path": path,
-            "raw_path": path.encode(), "query_string": b"", "root_path": "", "scheme": "http",
+            "raw_path": path.encode(), "query_string": query.encode(), "root_path": "", "scheme": "http",
             "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
             "client": ("127.0.0.1", 0), "server": ("127.0.0.1", 80), "state": {},
         }
@@ -215,6 +215,17 @@ def test_middleware_token_mode_gates():
     assert _run_asgi(app, "/who", {"Authorization": "Bearer bad"}) == 401        # 错 token → 401
     assert _run_asgi(app, "/who", {"Authorization": "Bearer good"}) == 200       # 对 token(hash 命中)
     assert cap["identity"].user_id == "bob" and cap["identity"].via == "token"
+
+
+def test_middleware_token_via_query_param_end_to_end():
+    # 端到端(#2): SSE/MCP 客户端无 header 时, ?token= 经 middleware→authenticator 整链认证。
+    # 验真 AuthMiddleware 把 scope query_string 传给 authenticator + token 解析 + identity 挂上。
+    cfg = {"gateway": {"auth_mode": "token", "tokens": {token_hash("qgood"): {"user_id": "carol", "org_id": "acme"}}}}
+    app, cap = _starlette_app(cfg)
+    assert _run_asgi(app, "/who", {}, query="project_id=p1&token=qgood") == 200   # ?token= 认证通
+    assert cap["identity"].user_id == "carol" and cap["identity"].via == "token"
+    assert _run_asgi(app, "/who", {}, query="token=qbad") == 401                  # 错 token → 401
+    assert _run_asgi(app, "/who", {}, query="project_id=p1") == 401               # 无 token → 401
 
 
 # ---- #6 token projects 白名单格式校验(非法跳过, 合法保留)----
