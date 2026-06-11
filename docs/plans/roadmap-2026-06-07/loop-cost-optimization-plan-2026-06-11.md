@@ -95,7 +95,7 @@ codegraph_trace 建好后同套量尺前后对比(flash,5 类型各 1 例):
 - miss(真成本)= 调用链的新信息量,codegraph_trace 只是把它从"18 小块"变"几大块",**总量守恒** → 钱不降。
 - 故"砍步数=省钱"错;**真降成本只能动信息量**(terser 工具输出 / 小 recall / 压 context),全是质量权衡。
 
-**codegraph_trace 定位修正**:留用,价值在 **① 延迟/吞吐(少 LLM 往返,利 Phase 8 响应性能)② 多跳质量(不耗尽 max_steps)**,**不是省钱**。待补:grounding 非劣 CI(确认少步没掉答案质量)。
+**codegraph_trace 定位修正**:留用,价值在 **① 延迟/吞吐(少 LLM 往返,利 Phase 8 响应性能)② 多跳质量(不耗尽 max_steps)**,**不是省钱**。**grounding 非劣 ✅ 已验证**(quality + hard codev 两集 trace 上线后 grounding 均 1.0 保持,quality within_budget 0.833→1.0 改善;LoopPolicy 多跳例 15 步超预算→8 步内预算且 grounding 1.0)。
 
 **元教训**:本 plan 自己的 #1 假设("多跳工具省 60-70%")被自己的实测证伪——再次印证"先验证后下定论",连数据面板的推理都可能错在"把 input 当成本"(实际成本在 miss+output)。
 
