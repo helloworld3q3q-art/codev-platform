@@ -262,7 +262,7 @@ class AgentLoop:
                 steps.append(Step(n, turn.text, None, None, None))
                 if trace:
                     trace.step(n, _summarize(turn.text or ""), None, None, None)
-                    trace.done("answered", n)
+                    trace.done("answered", n, total_usage)  # token+cache 落 trace(Phase 8 计量地基)
                 return AgentResult(answer, steps, total_usage, "answered")
 
             # 有工具调用:记录 assistant 这轮,执行每个 call,把结果回灌
@@ -293,7 +293,7 @@ class AgentLoop:
         # 用尽 step 仍未收尾。读取充分性门:几乎没真读到文件 **且尾部在连续无效调用** → 判卡无效调用。
         # (加 consecutive_invalid 判据: 纯检索类任务可合法地从不 read_file, 不能仅凭"没读文件"误判空转。)
         if trace:
-            trace.done("max_steps", self.policy.max_steps)
+            trace.done("max_steps", self.policy.max_steps, total_usage)
         if len(guard.readonly_paths) < self.policy.min_read_for_finish and guard.consecutive_invalid > 0:
             answer = ("(达到 max_steps 上限仍未收尾;且几乎没读到文件、尾部在连续无效调用——疑似卡在参数错误。"
                       "建议核对工具参数:路径用 list_dir 确认、module 用 list_collections 看合法值,"

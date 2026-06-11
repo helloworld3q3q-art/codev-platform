@@ -52,5 +52,11 @@ class Trace:
             "tool": tool, "args": args, "result_summary": result_summary,
         })
 
-    def done(self, stop_reason: str, steps: int) -> None:
-        self._write({"event": "done", "stop_reason": stop_reason, "steps": steps})
+    def done(self, stop_reason: str, steps: int, usage: dict[str, int] | None = None) -> None:
+        """收尾事件。usage(input/output/cache_hit/miss tokens)落 trace —— 每查询 token+缓存
+        足迹进 jsonl(带 session_id)= per-租户成本计量 + 缓存率监控的地基(Phase 8 可观测)。
+        成本($)由下游按 provider/model 价表算, trace 只记中性 token, 不硬编单价。"""
+        rec = {"event": "done", "stop_reason": stop_reason, "steps": steps}
+        if usage:
+            rec["usage"] = usage
+        self._write(rec)
