@@ -99,6 +99,18 @@ codegraph_trace 建好后同套量尺前后对比(flash,5 类型各 1 例):
 
 **元教训**:本 plan 自己的 #1 假设("多跳工具省 60-70%")被自己的实测证伪——再次印证"先验证后下定论",连数据面板的推理都可能错在"把 input 当成本"(实际成本在 miss+output)。
 
+## 十、miss/output 真降成本(3 视角面板,2026-06-11)
+
+§九 证伪"砍步数省钱"后,面板分析"真省钱只能砍 miss/output 信息量,但是质量权衡"。结论分三档:
+
+**① 免费 win(零质量损失,免 A/B,已做 `8de5c29`)**:工具返回 JSON 去 `indent=2` → 紧凑 `separators`。缩进/换行是**纯格式零信息**,模型证据一字不差 → grounding 不可能掉。砍 recall/impact/codegraph 这类 tool-result 的 ~15-20% token。5 处(recall/impact/codegraph×3)。
+
+**② 真杠杆但需 A/B**:`read_file` 实测 `_MAX_BYTES=60000`≈15K token/次、**返整文件前 60KB 且无 offset/分窗**(读 600 行只用 30 行=最大浪费 + 产品缺口)。修=加 offset/窗口 + 收紧 cap。**风险**:窗口切坏→agent 续取→反增 miss/步数。A/B:grounding 非劣下界 + 监控 read_file 调用数/步数,多跳/读码例单列。**中等工程,留触发**。
+
+**③ 否决**:output 简洁化(prompt 促简短→省略证据链,grounding 掉,比啰嗦危险)、历史裁剪(改写缓存前缀→hit 暴跌成 miss 反贵 + 丢上下文,双输)。
+
+**战略裁决(ROI 专家)**:**per-query trim 不是主云成本杠杆**——量级仅 1-10% 且依赖"有浪费"。真杠杆 = **per-租户计量+配额**(限用量不碰质量,风险趋零 + 解决计费归属)。**但这是后期运营开发**(用户定),先做基础(免费 win 已做,read_file 留触发)。
+
 ## 关联
 
 - 数据:daily-summary-2026-06-11 §七 + `measure_loop_usage.py` / `measure_loop_multi.py`(成本量尺)。
