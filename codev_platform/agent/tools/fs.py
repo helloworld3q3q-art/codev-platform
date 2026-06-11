@@ -17,8 +17,10 @@ from codev_platform.agent.brain import ToolResult
 from codev_platform.agent.tools._project import repo_path_of, resolve_project_id
 from codev_platform.agent.tools.base import Tool
 
-_MAX_BYTES = 60_000  # 单次读全文上限, 防超大文件灌爆 context
-_LIST_CAP = 200      # list_dir 单次条目上限
+_MAX_BYTES = 60_000   # 单次读全文上限, 防超大文件灌爆 context
+_WINDOW_LINES = 200   # 行窗口读默认行数
+_WINDOW_MAX = 400     # 行窗口读单次上限(防大 limit 退化成全文)
+_LIST_CAP = 200       # list_dir 单次条目上限
 # 列目录时跳过的噪声目录(构建物 / 依赖 / 缓存 / 索引)
 _NOISE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "dist", ".umi",
                ".codegraph", "target", ".pytest_cache", ".mypy_cache"}
@@ -73,15 +75,17 @@ def _is_secret(p: Path) -> bool:
 class ReadFileTool(Tool):
     name = "read_file"
     description = (
-        "读项目仓内某文件的完整内容(codegraph 只给符号片段, 看完整实现 / 配置 / 文档用它)。"
-        "入参 path=相对仓根的路径(如 codev_platform/web/routes/projects.py)。只能读本项目仓内文件;"
-        "敏感文件(.env / 密钥)拒读。"
+        "读项目仓内某文件(codegraph 只给符号片段, 看完整实现 / 配置 / 文档用它)。入参 path=相对仓根路径。"
+        "**大文件优先按行窗口读**: 给 offset(起始行,1-based)+ limit(行数) 只取那一段(省 token, 返回带行号 +"
+        "'用 offset=N 继续'提示); 不给 offset/limit 则读全文(≤上限)。只能读本项目仓内文件; 敏感文件(.env/密钥)拒读。"
     )
     input_schema = {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "相对项目仓根的文件路径"},
-            "max_bytes": {"type": "integer", "description": f"读取字节上限(默认 {_MAX_BYTES})"},
+            "offset": {"type": "integer", "description": "起始行(1-based); 给了则按行窗口读, 配合 limit"},
+            "limit": {"type": "integer", "description": f"读取行数(配合 offset, 默认 {_WINDOW_LINES}, 上限 {_WINDOW_MAX})"},
+            "max_bytes": {"type": "integer", "description": f"全文读字节上限(默认 {_MAX_BYTES}; 仅不按行窗口时生效)"},
         },
         "required": ["path"],
     }
@@ -103,14 +107,36 @@ class ReadFileTool(Tool):
             return ToolResult(call_id="", content="拒绝: 敏感文件(.env / 密钥)不可读", is_error=True)
         if not target.is_file():
             return ToolResult(call_id="", content=f"文件不存在: {rel}", is_error=True)
-        cap = int((args or {}).get("max_bytes") or _MAX_BYTES)
         try:
             raw = target.read_bytes()
-            text = raw[:cap].decode("utf-8", errors="replace")
         except OSError as e:
             return ToolResult(call_id="", content=f"读失败: {e}", is_error=True)
-        trunc = f"\n…(已截断, 文件共 {len(raw)} 字节)" if len(raw) > cap else ""
+        a = args or {}
+        # 行窗口读(给了 offset/limit): 只取目标段, 省 token + 补"精准读片段"能力(read_file 原只能读全文)。
+        if a.get("offset") is not None or a.get("limit") is not None:
+            return self._read_window(rel, raw, a.get("offset"), a.get("limit"))
+        # 默认: 读全文(≤ max_bytes), 行为不变。
+        cap = int(a.get("max_bytes") or _MAX_BYTES)
+        text = raw[:cap].decode("utf-8", errors="replace")
+        trunc = f"\n…(已截断, 文件共 {len(raw)} 字节; 可用 offset/limit 按行窗口续读)" if len(raw) > cap else ""
         return ToolResult(call_id="", content=f"# {rel}\n{text}{trunc}")
+
+    @staticmethod
+    def _read_window(rel: str, raw: bytes, offset: Any, limit: Any) -> ToolResult:
+        """按行窗口读: 返回 [start, start+limit) 行, 带行号 + 续读提示。"""
+        lines = raw.decode("utf-8", errors="replace").splitlines()
+        total = len(lines)
+        try:
+            start = max(1, int(offset or 1))
+            n = max(1, min(int(limit or _WINDOW_LINES), _WINDOW_MAX))
+        except (TypeError, ValueError):
+            return ToolResult(call_id="", content="offset / limit 需为整数", is_error=True)
+        window = lines[start - 1: start - 1 + n]
+        end = start - 1 + len(window)
+        body = "\n".join(f"{start + i}\t{ln}" for i, ln in enumerate(window))
+        more = f"\n…(文件共 {total} 行; 用 offset={end + 1} 继续)" if end < total else ""
+        head = f"# {rel} (行 {start}-{end} / 共 {total})"
+        return ToolResult(call_id="", content=f"{head}\n{body}{more}")
 
 
 class ListDirTool(Tool):
