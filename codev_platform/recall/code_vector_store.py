@@ -89,7 +89,12 @@ def _source_snippet(repo, node: dict, max_chars: int = _SNIPPET_MAX_CHARS) -> st
         return ""
     from pathlib import Path
     try:
-        p = Path(repo) / fp
+        root = Path(repo).resolve()
+        p = (root / fp).resolve()
+        # 路径穿越防御: filePath 含 '..' / 绝对路径会逃出 repo, resolve 后必须仍在 repo 内才读。
+        if not p.is_relative_to(root):
+            logger.warning("[code_vec] 跳过越界 filePath(疑似路径穿越): %r", fp)
+            return ""
         if not p.exists():
             return ""
         lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -164,7 +169,12 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
     """
     from codev_platform.agent.embed.registry import build_embedder
     from codev_platform.core.config import load_config
+    from codev_platform.core.project_id import validate as _validate_pid
     from codev_platform.web.integrations.codegraph_client import CodegraphClient
+
+    # 入口校验(纵深): rmtree(_code_vec_persist_dir(pid)) 用 pid 拼路径, 校验挡住 '..'/分隔符
+    # 经直接 API/main() 进来时删错目录(正常 enqueue/CLI 入口已各自 validate, 此处兜底)。
+    project_id = _validate_pid(project_id)
 
     embedder = build_embedder(load_config())
     if embedder is None:

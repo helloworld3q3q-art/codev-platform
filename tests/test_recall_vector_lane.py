@@ -97,6 +97,33 @@ def test_embed_text_appends_source(tmp_path):
     assert _embed_text(node, None) == "foo"                # 无 repo 退基础
 
 
+# ---- 路径穿越防御(审计 B1)----
+
+def test_source_snippet_blocks_path_traversal(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    secret = tmp_path / "SECRET.txt"
+    secret.write_text("TOP SECRET\n" * 3, encoding="utf-8")
+    # 相对 .. 穿越 → 拒读
+    assert _source_snippet(repo, {"filePath": "../SECRET.txt", "startLine": 1, "endLine": 2}) == ""
+    # 绝对路径穿越 → 拒读
+    assert _source_snippet(repo, {"filePath": str(secret), "startLine": 1, "endLine": 2}) == ""
+    # repo 内正常文件 → 照读
+    (repo / "ok.py").write_text("line1\nline2\n", encoding="utf-8")
+    assert _source_snippet(repo, {"filePath": "ok.py", "startLine": 1, "endLine": 2}) == "line1\nline2"
+
+
+# ---- build 入口 pid 校验(审计 B3, rmtree 边界纵深)----
+
+def test_build_rejects_malicious_project_id():
+    from codev_platform.core.errors import PlatformError
+    from codev_platform.core.project_id import ProjectIdError
+    from codev_platform.recall.code_vector_store import build_code_vector_index
+    import pytest
+    with pytest.raises((ProjectIdError, PlatformError, ValueError)):
+        build_code_vector_index("../../../etc")   # validate 在 embedder/rmtree 前就拦下
+
+
 # ---- lane 编排 (fail-soft / 降权) ----
 
 def test_vector_lane_fail_soft_when_store_missing(monkeypatch):

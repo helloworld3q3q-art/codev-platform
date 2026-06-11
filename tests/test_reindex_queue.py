@@ -40,3 +40,20 @@ def test_complete_literal_dotdot_file_is_deleted(tmp_path):
     f.write_text("")
     assert q.complete(Job("..", "chroma", f.stat().st_mtime)) is True
     assert not f.exists()                   # 已删, 不再无限重处理
+
+
+def test_pending_orders_by_mtime_not_alphabetical(tmp_path):
+    """审计 B2: pending() 按入队时刻(mtime)= FIFO, 不是文件名字母序。
+
+    'code_vec' < 'codegraph'(_ < g)字母序会让 code_vec 先跑 → 读陈旧 codegraph.db。
+    dispatch/webhook 按依赖序入队的语义全靠 pending() 保 FIFO。
+    """
+    import os
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("demo-proj", "codegraph")
+    q.enqueue("demo-proj", "code_vec")
+    # 显式设 mtime: codegraph 先入队(旧), code_vec 后(新)
+    os.utime(tmp_path / "demo-proj__codegraph", (1000, 1000))
+    os.utime(tmp_path / "demo-proj__code_vec", (2000, 2000))
+    kinds = [j.kind for j in q.pending()]
+    assert kinds.index("codegraph") < kinds.index("code_vec")   # FIFO; 字母序会反过来

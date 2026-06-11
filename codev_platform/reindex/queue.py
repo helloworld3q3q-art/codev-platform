@@ -98,12 +98,15 @@ class FileSpoolQueue:
         self._path(project_id, kind).touch()
 
     def pending(self) -> list[Job]:
+        # 按 mtime(= 入队时刻)排 = FIFO, **不是文件名字母序**。字母序会让有依赖的 kind 乱序跑:
+        # 如 'code_vec' < 'codegraph'(_ < g)→ code_vec 先于 codegraph 跑 → 读到陈旧 codegraph.db
+        # (dispatch/webhook 按依赖序 append 入队的语义全靠这里保住)。mtime 平手(同 ms 入队,极罕见)
+        # 退文件名稳定序。
         jobs: list[Job] = []
         if not self._dir.is_dir():
             return jobs
-        for f in sorted(self._dir.iterdir()):
-            if not f.is_file() or _SEP not in f.name:
-                continue
+        entries = [f for f in self._dir.iterdir() if f.is_file() and _SEP in f.name]
+        for f in sorted(entries, key=lambda x: (x.stat().st_mtime, x.name)):
             pid, _, kind = f.name.partition(_SEP)
             if pid and kind:
                 jobs.append(Job(pid, kind, f.stat().st_mtime))
