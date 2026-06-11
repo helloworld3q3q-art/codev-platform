@@ -137,11 +137,16 @@ class ChatService:
              "args": s.args, "result_summary": s.result_summary}
             for s in result.steps
         ]
+        # extra 透传袋:steps(工具流回看)+ usage(token/缓存,Phase 8 历史可观测 + per-租户计量)。
+        assistant_extra: dict = {}
+        if steps_payload:
+            assistant_extra["steps"] = steps_payload
+        if result.usage:
+            assistant_extra["usage"] = result.usage
         self._sessions.append(
             sid, user_id,
             Message(role="user", content=question),
-            Message(role="assistant", content=result.answer,
-                    extra={"steps": steps_payload} if steps_payload else {}),
+            Message(role="assistant", content=result.answer, extra=assistant_extra),
             org_id=org_id,
         )
         return ChatOutcome(session_id=sid, result=result)

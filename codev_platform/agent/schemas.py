@@ -45,11 +45,12 @@ class SessionOut(BaseModel):
 
 
 class MessageOut(BaseModel):
-    """历史消息(GET /sessions/messages 单项)。assistant 携带工具调用流 steps(从 extra 还原)。"""
+    """历史消息(GET /sessions/messages 单项)。assistant 携带工具调用流 steps + usage(从 extra 还原)。"""
 
     role: str
     content: str
     steps: list[StepOut] = Field(default_factory=list)
+    usage: dict[str, Any] = Field(default_factory=dict)  # token/缓存(历史可观测,Phase 8)
 
 
 class ProviderOut(BaseModel):

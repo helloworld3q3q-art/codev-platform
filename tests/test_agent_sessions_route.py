@@ -84,6 +84,22 @@ def test_messages_surface_persisted_steps(monkeypatch):
     assert asst["steps"][0]["result_summary"] == "找到"
 
 
+def test_messages_surface_persisted_usage(monkeypatch):
+    # usage(token+缓存)从 extra 还原到历史消息(Phase 8 历史可观测 + per-租户计量)
+    store = InMemorySessionStore()
+    sid = store.new("alice")
+    store.append(sid, "alice",
+                 Message(role="user", content="查"),
+                 Message(role="assistant", content="答",
+                         extra={"usage": {"input_tokens": 6071, "output_tokens": 200,
+                                          "cache_hit_tokens": 5504, "cache_miss_tokens": 567}}))
+    c = _client(monkeypatch, store)
+    r = c.get("/sessions/messages", params={"session_id": sid}, headers={"X-User-Id": "alice"})
+    asst = r.json()[1]
+    assert asst["usage"]["input_tokens"] == 6071
+    assert asst["usage"]["cache_hit_tokens"] == 5504 and asst["usage"]["cache_miss_tokens"] == 567
+
+
 def test_org_user_isolation(monkeypatch):
     store = InMemorySessionStore()
     _seed(store, user="alice", org="orgA")

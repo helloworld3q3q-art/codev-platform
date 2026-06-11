@@ -67,7 +67,8 @@ def list_session_messages(
     msgs = deps.get_sessions().get(session_id, user_id, org_id=org_id, project_id=project_id)
     # 只回 UI 要渲染的对话轮:user / assistant 且有正文(中间纯 tool-call 轮 content 为空,过滤)。
     return [
-        MessageOut(role=m.role, content=m.content, steps=_steps_of(m))
+        MessageOut(role=m.role, content=m.content, steps=_steps_of(m),
+                   usage=(m.extra or {}).get("usage") or {})
         for m in msgs
         if m.role in ("user", "assistant") and (m.content or "").strip()
     ]
