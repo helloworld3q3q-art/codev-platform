@@ -10,6 +10,11 @@ on:
   push:
   pull_request:
 
+# pip 走国内镜像(直连 pypi 国内慢/卡 —— 首跑 ruff job 卡 9min 即此)。
+env:
+  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 jobs:
   lint:
     name: ruff (codev_platform)
