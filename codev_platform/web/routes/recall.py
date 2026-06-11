@@ -27,13 +27,13 @@ def _rid(request: Request) -> str | None:
 @router.post(
     "/api/v1/recall/code",
     tags=[_TAG],
-    summary="跨lane代码召回-融合 graph + codegraph",
+    summary="跨lane代码召回-融合 graph + codegraph + vector",
     operation_id="recallCode",
     response_model=CommonResult[S.RecallCodeResponse],
 )
 def recall_code_route(request: Request, body: S.RecallCodeRequest,
                       ctx=Depends(require_project_access)) -> CommonResult:
-    """融合 graph + codegraph 两 lane → 统一可解释排名。空 query / 无索引 → 空结果(非错误)。"""
+    """融合 graph + codegraph + vector(语义)三 lane → 统一可解释排名。空 query / 无索引 → 空结果(非错误)。"""
     _identity, project_id = ctx
     from codev_platform.recall import recall_code
     hits = recall_code(body.query, project_id, weights=body.weights, limit=body.limit)

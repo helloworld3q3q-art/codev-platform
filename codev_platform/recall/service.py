@@ -1,12 +1,14 @@
-"""跨 lane 代码召回服务 (Phase 6 MVP) —— 融合 graph + codegraph 两条**本地 sqlite** lane。
+"""跨 lane 代码召回服务 (Phase 6) —— 融合 graph + codegraph + vector(语义)三 lane。
 
 把 agent 现在要分别调的 `graph search_nodes`(架构/跨层节点)+ `codegraph search`(符号 FTS)
-合成**一路带来源解释的统一排名**: query 命中两 lane 的对象得分叠加上浮, 每条结果标出来自
-哪些 lane。query 类型驱动的权重(symbol 偏 codegraph / 架构偏 graph)由调用侧 / planner 传入。
++ **vector 语义召回**(对 codegraph 节点嵌入, 补「按行为描述找代码」盲区)合成**一路带来源
+解释的统一排名**: query 命中多 lane 的对象得分叠加上浮, 每条结果标出来自哪些 lane。query
+类型驱动的权重(symbol 偏 codegraph / 架构偏 graph; vector 均衡)由调用侧 / planner 传入。
 
-两条 lane 都直读 per-project 只读 sqlite(**不经 daemon**, 与 web routes/graph 同), 故本服务
-可脱 daemon 跑 + 单测。**每 lane fail-soft**: 某 lane(如 codegraph db 未建)失败仅记日志,
-另一 lane 仍出结果(高可用; 对齐 plan 'reranker 关闭仍稳定')。
+graph + codegraph 两 lane 直读 per-project 只读 sqlite(**不经 daemon**), vector lane 走 chroma
+向量库 + 嵌入(缺则降级)。三 lane 全 **fail-soft**: 某 lane(如 codegraph db / 向量索引未建)
+失败仅记日志, 其余 lane 仍出结果(高可用; 对齐 plan 'reranker 关闭仍稳定')。融合 + 富化纯函数
+可脱 IO 单测。vector lane 实证大幅加分(2026-06-11: 等权 3-lane vs 2-lane MRR +0.40~0.51, CI 全正)。
 
 融合数学在 recall/fusion(纯核心); 本文件只做"取数 → 建 LaneResult → 融合 → 富化"的编排,
 其中**融合 + 富化(_fuse_and_enrich)是纯函数**(脱 IO 单测), IO 取数是薄壳。
