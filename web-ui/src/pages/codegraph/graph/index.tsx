@@ -8,7 +8,8 @@ import { useLocation, useModel } from '@umijs/max';
 import { AutoComplete, Spin, Tag, Tooltip, message } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { fetchGraph, fetchNeighbors, fetchSearch } from '../common/services';
+import { postGraph, postNeighbors, postSearch } from '@/services/apis/graphapi';
+
 import type { NeighborsResponse, NodeDTO } from '../common/types';
 import { nodeColorOf } from '../common/utils';
 import Graph3DCanvas from './components/Graph3DCanvas';
@@ -52,12 +53,12 @@ const CodeGraphGraphPage: React.FC = () => {
     setCenterId(undefined);
     setOverviewMode(true);
     try {
-      const data = await fetchGraph({ limit: INITIAL_GRAPH_LIMIT });
+      const res = await postGraph({ limit: INITIAL_GRAPH_LIMIT });
       // 把 GraphResponse 适配成 NeighborsResponse 形状（center=undefined，Graph3DCanvas 已兼容）
       setGraphData({
         center: undefined,
-        nodes: data?.nodes ?? [],
-        edges: data?.edges ?? [],
+        nodes: res.data?.nodes ?? [],
+        edges: res.data?.edges ?? [],
       });
     } catch (err) {
       setGraphData(undefined);
@@ -73,8 +74,8 @@ const CodeGraphGraphPage: React.FC = () => {
     setCenterId(id);
     setOverviewMode(false);
     try {
-      const data = await fetchNeighbors({ id, direction: 'both', depth: 1 });
-      setGraphData(data);
+      const res = await postNeighbors({ id, direction: 'both', depth: 1 });
+      setGraphData(res.data);
     } catch (err) {
       setGraphData(undefined);
       message.error(`加载邻居失败: ${(err as Error).message}`);
@@ -91,8 +92,8 @@ const CodeGraphGraphPage: React.FC = () => {
       return;
     }
     try {
-      const data = await fetchSearch({ keyword: value, limit: 30 });
-      setSearchOpts(data?.items ?? []);
+      const res = await postSearch({ keyword: value, limit: 30 });
+      setSearchOpts(res.data?.items ?? []);
     } catch {
       setSearchOpts([]);
     }

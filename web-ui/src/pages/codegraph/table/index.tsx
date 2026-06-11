@@ -7,7 +7,8 @@ import { useModel } from '@umijs/max';
 import { Alert, Button, Card, Col, Input, Row, Select, Space } from 'antd';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { fetchSearch } from '../common/services';
+import { postSearch } from '@/services/apis/graphapi';
+
 import type { NodeDTO } from '../common/types';
 import { KIND_OPTIONS, LANG_OPTIONS } from '../common/utils';
 import { createColumns } from './components/Columns';
@@ -28,13 +29,13 @@ const CodeGraphTablePage: React.FC = () => {
     }
     setLoading(true);
     try {
-      const data = await fetchSearch({
+      const res = await postSearch({
         keyword: keyword.trim(),
         languages: languages.length ? languages : undefined,
         kinds: kinds.length ? kinds : undefined,
         limit: 200,
       });
-      setItems(data?.items ?? []);
+      setItems(res.data?.items ?? []);
     } catch {
       setItems([]);
     } finally {

@@ -1,4 +1,4 @@
-// CodeGraph 文件列表（表格视图）— 进页即调 fetchFileTree 加载全量已索引文件。
+// CodeGraph 文件列表（表格视图）— 进页即调 postFileTree 加载全量已索引文件。
 // 与 /codegraph/files 文件树视图互补：filelist 是扁平表格，支持排序 + 路径关键字 + 语言筛选。
 // codegraph-api file-tree 不需要关键字，prefix 为可选过滤。
 
@@ -8,7 +8,8 @@ import { useModel } from '@umijs/max';
 import { Alert, Button, Card, Col, Input, Row, Select, Space } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { fetchFileTree } from '../common/services';
+import { postFileTree } from '@/services/apis/graphapi';
+
 import type { FileDTO } from '../common/types';
 import { LANG_OPTIONS } from '../common/utils';
 import { createColumns } from './components/Columns';
@@ -26,8 +27,8 @@ const CodeGraphFileListPage: React.FC = () => {
     setLoading(true);
     setLoadFailed(false);
     try {
-      const data = await fetchFileTree(prefix.trim() || undefined);
-      setItems(data?.items ?? []);
+      const res = await postFileTree({ prefix: prefix.trim() || undefined });
+      setItems(res.data?.items ?? []);
     } catch {
       setItems([]);
       setLoadFailed(true);
@@ -60,7 +61,7 @@ const CodeGraphFileListPage: React.FC = () => {
 
   const columns = useMemo(() => createColumns(), []);
 
-  // 语言筛选纯客户端做（fetchFileTree 不接受 language 参数）
+  // 语言筛选纯客户端做（file-tree 接口不接受 language 参数）
   const filteredItems = useMemo(() => {
     if (!languages.length) return items;
     const set = new Set(languages);

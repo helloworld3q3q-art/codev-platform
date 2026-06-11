@@ -3,7 +3,7 @@
 // 左侧 Antd Tree 渲染已索引的项目文件层级；右侧选中文件后通过 'contains' 边
 // 列出该文件包含的代码节点（class / method / function / ...）。
 //
-// 数据源：common/services 的 fetchFileTree / fetchNode / fetchNeighbors。
+// 数据源：直调生成接口 graphapi 的 postFileTree / postCodegraphNode / postNeighbors。
 // codegraph 当前没有"按 file_path 列出所有节点"接口，所以右侧依赖文件节点
 // (id=file:<path>) 的 'contains' 出边来还原其内部节点列表。
 
@@ -24,7 +24,8 @@ import {
 import { useModel } from '@umijs/max';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { fetchFileTree } from '@/pages/codegraph/common/services';
+import { postFileTree } from '@/services/apis/graphapi';
+
 import type { FileDTO } from '@/pages/codegraph/common/types';
 
 import FileNodesPanel from './components/FileNodesPanel';
@@ -53,8 +54,8 @@ const FilesPage: React.FC = () => {
     setLoading(true);
     setLoadFailed(false);
     try {
-      const data = await fetchFileTree();
-      const items = data?.items ?? [];
+      const res = await postFileTree({});
+      const items = res.data?.items ?? [];
       setFiles(items);
       // 默认展开顶层 2 层（apps / python / docs 等大目录第二层）
       const tree = buildFileTree(items);

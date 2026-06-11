@@ -5,7 +5,8 @@ import { history } from '@umijs/max';
 import { Alert, Card, Descriptions, Empty, List, Skeleton, Space, Tag, Typography } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { fetchNeighbors, fetchNode } from '@/pages/codegraph/common/services';
+import { postCodegraphNode, postNeighbors } from '@/services/apis/graphapi';
+
 import type { FileDTO, NodeDTO } from '@/pages/codegraph/common/types';
 import { langColorOf, nodeColorOf } from '@/pages/codegraph/common/utils';
 
@@ -13,7 +14,7 @@ import { formatBytes } from '../utils';
 
 interface FileNodesPanelProps {
   filePath: string | undefined;
-  // 兜底：左侧已经查过的文件元信息，用于即使 fetchNode 失败也能显示
+  // 兜底：左侧已经查过的文件元信息，用于即使节点查询失败也能显示
   fileFallback: FileDTO | undefined;
 }
 
@@ -120,13 +121,17 @@ const FileNodesPanel: React.FC<FileNodesPanelProps> = ({ filePath, fileFallback 
     try {
       // 并行：1) 拿文件节点元信息  2) 拿该文件 contains 出去的内部节点
       const [fileNode, neighbors] = await Promise.all([
-        fetchNode(nodeId).catch(() => undefined),
-        fetchNeighbors({
+        postCodegraphNode({ id: nodeId })
+          .then((r) => r.data)
+          .catch(() => undefined),
+        postNeighbors({
           id: nodeId,
           direction: 'out',
           edgeKinds: ['contains'],
           depth: 1,
-        }).catch(() => undefined),
+        })
+          .then((r) => r.data)
+          .catch(() => undefined),
       ]);
       const allNodes = neighbors?.nodes ?? [];
       // 排除中心节点本身（API 行为不确定，保险过滤一次）
