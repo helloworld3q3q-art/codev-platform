@@ -22,3 +22,14 @@
 {"project_id": "openclaw-stock", "query": "signature of fetch_lhb_events function", "query_type": "symbol", "expect": "fetch_lhb_events", "note": "SYMBOL→codegraph; stock-pipeline fetchers/lhb.py:107 龙虎榜抓取"}
 {"project_id": "openclaw-stock", "query": "where is build_feature_frame defined", "query_type": "symbol", "expect": "build_feature_frame", "note": "SYMBOL→codegraph; stock-pipeline ml/features.py:206 特征帧构建"}
 {"project_id": "openclaw-stock", "query": "definition of fetch_forecasts", "query_type": "symbol", "expect": "fetch_forecasts", "note": "SYMBOL→codegraph; stock-pipeline fetchers/earnings_forecast.py:83 业绩预告抓取"}
+{"project_id": "codev-platform", "query": "把多路检索结果按排名倒数融合打分", "query_type": "general", "expect": "weighted_rrf", "note": "GENERAL/语义: 行为描述→weighted_rrf(无符号名, vector 主场)"}
+{"project_id": "codev-platform", "query": "对代码符号做向量嵌入支持语义召回", "query_type": "general", "expect": "code_vector", "note": "GENERAL/语义: →code_vector_store"}
+{"project_id": "codev-platform", "query": "从用户主目录加载配置环境变量优先", "query_type": "general", "expect": "load_config", "note": "GENERAL/语义: →load_config"}
+{"project_id": "codev-platform", "query": "只对内容变更的节点重新嵌入索引", "query_type": "general", "expect": "diff_manifest", "note": "GENERAL/语义: →_diff_manifest 增量"}
+{"project_id": "codev-platform", "query": "嵌入模型按配置选后端缺依赖时降级", "query_type": "general", "expect": "build_embedder", "note": "GENERAL/语义: →build_embedder"}
+{"project_id": "codev-platform", "query": "把记忆向量按作用域过滤防跨组织泄露", "query_type": "general", "expect": "build_scope_where", "note": "GENERAL/语义: →build_scope_where"}
+{"project_id": "codev-platform", "query": "开启写前日志让建索引时查询不被锁", "query_type": "general", "expect": "ensure_wal", "note": "GENERAL/语义: →ensure_wal"}
+{"project_id": "openclaw-stock", "query": "采集每只股票的收盘价序列", "query_type": "general", "expect": "closing", "note": "GENERAL/语义: →_collect_closing_prices"}
+{"project_id": "openclaw-stock", "query": "计算 MACD 技术指标", "query_type": "general", "expect": "macd", "note": "GENERAL/语义: →macd"}
+{"project_id": "openclaw-stock", "query": "校验日线行情数据有效性", "query_type": "general", "expect": "validate_quote", "note": "GENERAL/语义: →_validate_quote"}
+{"project_id": "openclaw-stock", "query": "按基准日期对齐每日净流入", "query_type": "general", "expect": "inflow", "note": "GENERAL/语义: →_extract_large_inflow"}
