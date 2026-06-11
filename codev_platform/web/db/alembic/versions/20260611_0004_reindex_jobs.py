@@ -30,6 +30,8 @@ def upgrade() -> None:
         sa.Column("status", sa.Text(), server_default=sa.text("'pending'"), nullable=False),
         sa.Column("claimed_by", sa.Text(), nullable=True),
         sa.Column("lease_expires_at", sa.Float(), nullable=True),
+        # claim_token: 每次认领的唯一戳, complete 据此精确删自己那次认领(防 lease 接管误删他人在跑行)。
+        sa.Column("claim_token", sa.Text(), nullable=True),
         sa.PrimaryKeyConstraint("project_id", "kind"),
     )
     # 认领扫描: status='pending' 或 租约过期的 running, 按 enqueued_at(FIFO)

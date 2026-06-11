@@ -23,10 +23,15 @@ _SEP = "__"
 
 @dataclass(frozen=True)
 class Job:
-    """一个 reindex 任务。enqueued_at = 认领时观察到的入队时刻 (mtime), 供 complete 判 dirty。"""
+    """一个 reindex 任务。enqueued_at = 认领时观察到的入队时刻 (mtime), 供 complete 判 dirty。
+
+    token: 本次认领的唯一戳(PgJobQueue 跨机租约用 —— complete 按 token 精确匹配自己那次认领,
+    防 lease 接管后旧 worker 误删新 worker 在跑的行)。FileSpoolQueue 单机无需, 留 None。
+    """
     project_id: str
     kind: str
     enqueued_at: float
+    token: str | None = None
 
     @property
     def key(self) -> str:
@@ -42,7 +47,12 @@ class JobQueue(Protocol):
         ...
 
     def pending(self) -> list[Job]:
-        """当前待办 (已按 key 合并)。"""
+        """认领并返回待办 (worker 专用)。**可能有副作用**: PG 实现会原子认领 + 打租约,
+        故只 worker 调; 仅"查看"用 peek()。"""
+        ...
+
+    def peek(self) -> list[Job]:
+        """只读列出待办 (无副作用, 不认领)。status / 诊断用, 绝不锁 job。"""
         ...
 
     def complete(self, job: Job) -> bool:
@@ -120,6 +130,10 @@ class FileSpoolQueue:
             if pid and kind:
                 jobs.append(Job(pid, kind, f.stat().st_mtime))
         return jobs
+
+    def peek(self) -> list[Job]:
+        """只读列出待办。FileSpool 的 pending() 本就无副作用(只列目录), 故 peek == pending。"""
+        return self.pending()
 
     def complete(self, job: Job) -> bool:
         # 不重做 runner 白名单校验 —— job 已从 spool 读出, worker 丢弃未知 kind 时也要能删掉它,

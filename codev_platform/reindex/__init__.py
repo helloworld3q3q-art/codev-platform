@@ -45,8 +45,9 @@ def open_default_queue() -> JobQueue:
         else:
             try:
                 from codev_platform.reindex.pg_queue import PgJobQueue
-                read_dsn = _os.environ.get("CODEV_PLATFORM_MEMORY_DSN_READ") or _get(cfg, "memory.pg_dsn_read")
-                return PgJobQueue(dsn, read_dsn)
-            except Exception as exc:  # noqa: BLE001 — psycopg 缺 / 构造失败 → 回退 file 不瘫
+                q = PgJobQueue(dsn)
+                q.probe()   # 探活(短超时): PG 不可达此处即失败 → 回退 file, 不让生产者首次 enqueue 卡死/丢
+                return q
+            except Exception as exc:  # noqa: BLE001 — psycopg 缺 / 连不上 / 构造失败 → 回退 file 不瘫
                 print(f"[reindex] PgJobQueue 不可用({exc!r}), 回退 file spool", flush=True)
     return FileSpoolQueue(spool_dir())

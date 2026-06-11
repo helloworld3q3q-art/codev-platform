@@ -1,17 +1,19 @@
 """PgJobQueue —— JobQueue 的 PostgreSQL 实现(多机共享 reindex 队列)。
 
 替代单机 FileSpoolQueue。语义对齐(worker 零改, 只依赖 JobQueue Protocol):
-- enqueue: UPSERT ON CONFLICT(project_id,kind) bump enqueued_at —— 同 key 合并(密集触发只跑最新态)。
+- enqueue: UPSERT ON CONFLICT(project_id,kind) bump enqueued_at + 清 claim_token —— 同 key 合并。
 - pending: 一条 SQL 用 **FOR UPDATE SKIP LOCKED** 原子认领 pending / 租约过期的 job, 写 lease
-  (claimed_by + lease_expires_at)→ 跨机多 worker 不会抢到同一 (project,kind)。返回前按 runner
-  注册依赖序(codegraph 先于 code_vec, 与 FileSpoolQueue 同 tie-break)排序。
-- complete: enqueued_at **行版本**比对 —— 运行期被重新 enqueue(enqueued_at 变新)则 DELETE 不命中
-  → 保留(回 pending 下轮重跑, dirty 重入不丢尾); 否则删除。跨机不靠 mtime/时钟。
-- watch: poll(复用 worker 周期兜底); LISTEN/NOTIFY 留后。
+  (claimed_by + lease_expires_at)+ 给每行打**唯一 claim_token**(gen_random_uuid)→ 跨机多 worker
+  不会抢到同一 (project,kind); 返回 Job 带 token。按 runner 注册依赖序排序。
+- complete: 按 **claim_token 精确匹配自己那次认领** DELETE —— lease 接管后旧 worker 的 token 与
+  新 worker 不同, 旧 complete 删不掉新 worker 在跑的行(修审计 P0); 运行期被重新 enqueue 会清
+  token, 旧 complete 也删不中 → 保留(dirty 重入)。不靠墙钟 float 比较(修审计 dirty-tie edge)。
+- peek: 只读 SELECT(不认领), status/诊断用(修审计 P1: status 误用 pending 锁全表 30min)。
+- watch: poll(复用 worker 周期兜底)。
 
-连接复用 memory 全栈 PG 范式(psycopg_pool ConnectionPool, open=False lazy; schema 首次操作幂等建,
-alembic 为权威)。lease 过期抢占替代 FileSpool 的文件锁 stale/PID-liveness —— 跨机原生。
-`table` 参数仅供测试隔离(默认 reindex_jobs); 表名是代码控制的标识符(非用户输入), 校验后内插。
+连接复用 memory 全栈 PG 范式(psycopg_pool ConnectionPool, open=False lazy)。pool timeout 设短,
+配合 open_default_queue 的探活 → PG 不可达时 fail-soft 回退 file(不让 hook 卡死/丢 enqueue)。
+`table` 参数仅供测试隔离; 表名经 _TABLE_RE 校验后内插(代码控制标识符, 非用户输入)。
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from codev_platform.reindex.queue import Job
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LEASE_TTL_SEC = 1800   # 认领租约: worker 崩 → 租约过期后另一 worker 接管(幂等重跑)
+_POOL_TIMEOUT_SEC = 5           # 取连接等待上限(短)—— PG 抖动时 enqueue 不卡满 30s(配合 fail-soft)
 _TABLE_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
@@ -38,14 +41,15 @@ def _kind_rank() -> dict[str, int]:
 class PgJobQueue:
     """JobQueue 的 PG 实现。缺 psycopg_pool → 构造期 ImportError(调用方回退 FileSpoolQueue)。"""
 
-    def __init__(self, dsn: str, read_dsn: str | None = None, *,
-                 lease_ttl_sec: int = _DEFAULT_LEASE_TTL_SEC, max_size: int = 4,
-                 table: str = "reindex_jobs") -> None:
+    def __init__(self, dsn: str, *, lease_ttl_sec: int = _DEFAULT_LEASE_TTL_SEC,
+                 max_size: int = 4, table: str = "reindex_jobs") -> None:
         from psycopg_pool import ConnectionPool  # 缺 → ImportError, 调用方回退
         if not _TABLE_RE.match(table):
             raise ValueError(f"非法表名: {table!r}")
         self._t = table
-        self._pool = ConnectionPool(dsn, min_size=1, max_size=max_size, open=False)
+        # timeout=短: 取连接(含首次建连)等待上限, PG 不可达时快速失败而非卡 30s。
+        self._pool = ConnectionPool(dsn, min_size=1, max_size=max_size, open=False,
+                                    timeout=_POOL_TIMEOUT_SEC)
         self._lease_ttl = lease_ttl_sec
         self._owner = f"{socket.gethostname()}:{os.getpid()}"   # 认领者标识(诊断 + 跨机区分)
         self._opened = False
@@ -60,13 +64,21 @@ class PgJobQueue:
                 "  project_id TEXT NOT NULL, kind TEXT NOT NULL, "
                 "  enqueued_at DOUBLE PRECISION NOT NULL, "
                 "  status TEXT NOT NULL DEFAULT 'pending', "
-                "  claimed_by TEXT, lease_expires_at DOUBLE PRECISION, "
+                "  claimed_by TEXT, lease_expires_at DOUBLE PRECISION, claim_token TEXT, "
                 "  PRIMARY KEY (project_id, kind))"
             )
+            # 旧表升级: claim_token 列可能不存在(0004 前建的)→ 幂等补列。
+            conn.execute(f"ALTER TABLE {self._t} ADD COLUMN IF NOT EXISTS claim_token TEXT")
             conn.execute(
                 f"CREATE INDEX IF NOT EXISTS ix_{self._t}_claim ON {self._t} (status, enqueued_at)"
             )
         self._opened = True
+
+    def probe(self) -> None:
+        """轻量探活(open_default_queue 用): 触发建连 + 建表; PG 不可达则在 _POOL_TIMEOUT_SEC 内抛。"""
+        self._ensure()
+        with self._pool.connection() as conn:
+            conn.execute("SELECT 1")
 
     # ---- 生产者 ----
 
@@ -76,46 +88,63 @@ class PgJobQueue:
         self._ensure()
         with self._pool.connection() as conn:
             conn.execute(
-                f"INSERT INTO {self._t} (project_id, kind, enqueued_at, status, claimed_by, lease_expires_at) "
-                "VALUES (%s, %s, %s, 'pending', NULL, NULL) "
+                f"INSERT INTO {self._t} (project_id, kind, enqueued_at, status, claimed_by, "
+                "  lease_expires_at, claim_token) VALUES (%s, %s, %s, 'pending', NULL, NULL, NULL) "
                 "ON CONFLICT (project_id, kind) DO UPDATE SET "
                 "  enqueued_at = EXCLUDED.enqueued_at, status = 'pending', "
-                "  claimed_by = NULL, lease_expires_at = NULL",
+                "  claimed_by = NULL, lease_expires_at = NULL, claim_token = NULL",
                 (pid, kind, time.time()),
             )
 
     # ---- 消费者(worker)----
 
     def pending(self) -> list[Job]:
+        """原子认领: 每行打唯一 claim_token, 返回 Job 带 token(complete 据此精确删自己那次认领)。"""
         self._ensure()
         now = time.time()
         with self._pool.connection() as conn:
             rows = conn.execute(
-                f"UPDATE {self._t} SET status = 'running', claimed_by = %s, lease_expires_at = %s "
+                f"UPDATE {self._t} SET status = 'running', claimed_by = %s, lease_expires_at = %s, "
+                # per-row 唯一 token: random()+clock_timestamp() volatile 逐行求值(不用 gen_random_uuid,
+                # 免 PG13+ 依赖); md5 hex。每行各得一个, complete 据此只删自己那次认领。
+                "  claim_token = md5(random()::text || clock_timestamp()::text) "
                 "WHERE (project_id, kind) IN ("
                 f"  SELECT project_id, kind FROM {self._t} "
                 "  WHERE status = 'pending' OR (status = 'running' AND lease_expires_at < %s) "
                 "  ORDER BY enqueued_at "
                 "  FOR UPDATE SKIP LOCKED"
                 ") "
-                "RETURNING project_id, kind, enqueued_at",
+                "RETURNING project_id, kind, enqueued_at, claim_token",
                 (self._owner, now + self._lease_ttl, now),
             ).fetchall()
         rank = _kind_rank()
         unknown = len(rank)
-        jobs = [Job(r[0], r[1], r[2]) for r in rows]
+        jobs = [Job(r[0], r[1], r[2], token=r[3]) for r in rows]
         # 依赖序 tie-break(codegraph 先于 code_vec); SQL 已按 enqueued_at FIFO, 这里稳定细排同时刻批。
         jobs.sort(key=lambda j: (j.enqueued_at, rank.get(j.kind, unknown)))
         return jobs
 
+    def peek(self) -> list[Job]:
+        """只读列出待办(不认领, 无副作用)。status/诊断用。"""
+        self._ensure()
+        now = time.time()
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                f"SELECT project_id, kind, enqueued_at FROM {self._t} "
+                "WHERE status = 'pending' OR (status = 'running' AND lease_expires_at < %s) "
+                "ORDER BY enqueued_at",
+                (now,),
+            ).fetchall()
+        return [Job(r[0], r[1], r[2]) for r in rows]
+
     def complete(self, job: Job) -> bool:
-        """enqueued_at 行版本比对: 未被重触发(enqueued_at <= 认领值)→ 删除返 True; 运行期被重新
-        enqueue(enqueued_at 变新)→ DELETE 不命中, 保留(已回 pending)返 False, 下轮重跑(dirty)。"""
+        """按 claim_token 精确匹配删自己那次认领。token 不匹配(lease 接管 / 运行期被重新 enqueue
+        清了 token)→ DELETE 不命中返 False(保留, dirty 重入 / 不误删他人在跑行)。"""
         self._ensure()
         with self._pool.connection() as conn:
             cur = conn.execute(
-                f"DELETE FROM {self._t} WHERE project_id = %s AND kind = %s AND enqueued_at <= %s",
-                (job.project_id, job.kind, job.enqueued_at),
+                f"DELETE FROM {self._t} WHERE project_id = %s AND kind = %s AND claim_token = %s",
+                (job.project_id, job.kind, job.token),
             )
             return cur.rowcount > 0
 

@@ -92,3 +92,30 @@ def test_expired_lease_reclaimable(q):
                   (time.time() - 1,))
     again = [j for j in q.pending() if j.project_id == "t-pgq-e"]
     assert len(again) == 1                    # 租约过期(worker 崩)→ 另一 worker 接管
+
+
+def test_lease_takeover_stale_complete_does_not_delete(q):
+    # 审计 P0 回归: A 认领 → 租约过期 → B 接管(新 token)→ A 迟到 complete 不能删 B 在跑的行。
+    q.enqueue("t-pgq-t", "chroma")
+    job_a = next(j for j in q.pending() if j.project_id == "t-pgq-t")   # A 认领, token A
+    with q._pool.connection() as c:                                    # A 卡住, 租约过期
+        c.execute(f"UPDATE {_TEST_TABLE} SET lease_expires_at = %s WHERE project_id='t-pgq-t'",
+                  (time.time() - 1,))
+    job_b = next(j for j in q.pending() if j.project_id == "t-pgq-t")  # B 接管, token B
+    assert job_b.token and job_b.token != job_a.token
+    assert q.complete(job_a) is False         # A 的 stale complete: token 不匹配 → 删不掉 B 在跑的行
+    with q._pool.connection() as c:           # B 的行仍在(没被 A 误删)
+        n = c.execute(f"SELECT count(*) FROM {_TEST_TABLE} WHERE project_id='t-pgq-t'").fetchone()[0]
+    assert n == 1
+    assert q.complete(job_b) is True          # B 正常完成自己那次认领
+
+
+def test_peek_no_side_effect(q):
+    q.enqueue("t-pgq-pk", "chroma")
+    p1 = [j for j in q.peek() if j.project_id == "t-pgq-pk"]
+    p2 = [j for j in q.peek() if j.project_id == "t-pgq-pk"]
+    assert len(p1) == 1 and len(p2) == 1      # peek 不消费, 多次都在
+    with q._pool.connection() as c:           # 仍是 pending(未被 peek 认领)
+        st = c.execute(f"SELECT status FROM {_TEST_TABLE} WHERE project_id='t-pgq-pk'").fetchone()[0]
+    assert st == "pending"
+    assert any(j.project_id == "t-pgq-pk" for j in q.pending())   # 之后 worker 仍能认领

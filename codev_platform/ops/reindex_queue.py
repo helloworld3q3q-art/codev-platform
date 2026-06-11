@@ -59,7 +59,7 @@ def cmd_reindex_queue(args: argparse.Namespace) -> int:
         return 0
 
     if args.action == "status":
-        jobs = q.pending()
+        jobs = q.peek()   # 只读, 不认领 —— pending() 在 PG 后端有副作用(原子认领+锁租约), status 不能用
         if not jobs:
             _out("队列空")
             return 0

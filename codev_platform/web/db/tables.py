@@ -136,6 +136,22 @@ sessions = Table(
     Column("refresh_expires_at", Float, nullable=False),
 )
 
+# 多机共享 reindex 队列 (PgJobQueue, alembic 0004)。per (project_id,kind) 合并(复合主键);
+# lease(claimed_by/lease_expires_at)+ claim_token 做跨机原子认领 + 防接管误删。must 进 metadata,
+# 否则 alembic autogenerate 会把它当"DB 有 metadata 无" → 提议 DROP 生产队列表(审计 P1)。
+reindex_jobs = Table(
+    "reindex_jobs",
+    metadata,
+    Column("project_id", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("enqueued_at", Float, nullable=False),
+    Column("status", Text, nullable=False, server_default=text("'pending'")),
+    Column("claimed_by", Text),
+    Column("lease_expires_at", Float),
+    Column("claim_token", Text),
+    PrimaryKeyConstraint("project_id", "kind"),
+)
+
 Index("ix_org_members_user", org_members.c.user_id)
 Index("ix_team_members_user", team_members.c.user_id)
 Index("ix_teams_org", teams.c.org_id)
@@ -143,6 +159,7 @@ Index("ix_jobs_project", jobs.c.project_id)
 Index("ix_sessions_access", sessions.c.access_hash)
 Index("ix_sessions_refresh", sessions.c.refresh_hash)
 Index("ix_sessions_username", sessions.c.username)
+Index("ix_reindex_jobs_claim", reindex_jobs.c.status, reindex_jobs.c.enqueued_at)
 
 
 __all__ = [
@@ -156,4 +173,5 @@ __all__ = [
     "project_access",
     "jobs",
     "sessions",
+    "reindex_jobs",
 ]
