@@ -40,7 +40,7 @@
 - **结论**: roadmap-2026-06-07 **基本做完或刻意不做**;真活只剩 trigger-gated 重型地基(Phase 2 IR/4 社区检测否/8 性能/9 多语言/10 治理)。代码智能层判定到平台期, 主线已转多机/多组织服务器 arc。
 
 ## commit 链(2026-06-12 段)
-`de801ea`(query-token 服务端+runbook)→`de10714`(client-auth --query-token + 端到端验)→`72365f8`(runbook 用真 CLI)→`9a103b6`(双 store 厘清 + org set-password)→`8f95ff7`(runbook 密码路径)。
+`de801ea`(query-token 服务端+runbook)→`de10714`(client-auth --query-token + 端到端验)→`72365f8`(runbook 用真 CLI)→`9a103b6`(双 store 厘清 + org set-password)→`8f95ff7`(runbook 密码路径)→`8c22eeb`(daily)→`967bbdd`(前端清 services.ts)→`19e77ef`(后端 loop-cost 残留)→`cff384e`(daily §八)。
 (承 06-11 段:graph→PG Stage A `0d51903` / Stage B `4c773ef` / 审计修 `679714b` / MCP authz `2f13c56`。)
 
 ## web 端
