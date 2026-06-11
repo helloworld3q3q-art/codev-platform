@@ -232,3 +232,68 @@ def test_list_project_ids_enumerates(store):
     # pg=共享库 DISTINCT。建库后必能枚举到本 pid。
     store.upsert_result(PID, _sample_result())
     assert PID in store.list_project_ids()
+
+
+# ---- 8. 同批重复 (id,plugin) 节点: 两后端都 last-wins(审计 #3 parity)----
+
+def test_same_batch_dup_node_id_last_wins(store):
+    # sqlite INSERT OR REPLACE / PG ON CONFLICT DO UPDATE → 后者赢; 不一个静默吞一个 IntegrityError。
+    store.upsert_result(PID, AnalyzerResult(plugin="builtin.dup", nodes=[
+        GraphNode(id=f"{PID}:db_table:x", kind="db_table", name="first", project_id=PID),
+        GraphNode(id=f"{PID}:db_table:x", kind="db_table", name="second", project_id=PID),
+    ]))
+    got = store.load_graph(PID, plugin="builtin.dup").nodes
+    assert len(got) == 1 and got[0].name == "second"
+
+
+# ---- 9. PG 读路径中性异常(审计 P1 #6): 坏 dsn 下四读方法均抛 GraphStoreUnreadable ----
+
+def test_pg_read_path_neutral_on_bad_dsn():
+    # 消费方(web/recall/audit)只 catch GraphStoreUnreadable 优雅降级 → 读失败绝不能泄漏裸 psycopg。
+    try:
+        from codev_platform.graph.pg_store import PgGraphStore
+    except ImportError:
+        pytest.skip("PgGraphStore 未落地")
+    from codev_platform.graph.store import GraphStoreUnreadable
+    bad = PgGraphStore("postgresql://nouser:nopass@127.0.0.1:5999/nodb")
+    for call in (lambda: bad.load_graph(PID), lambda: bad.stats(PID),
+                 lambda: bad.audit_scan(PID), lambda: bad.list_project_ids()):
+        with pytest.raises(GraphStoreUnreadable):
+            call()
+    bad.close()
+
+
+# ---- 10. 并发 upsert 同 (project,plugin) 经 advisory lock 串行(审计 P1 #2)----
+
+def test_pg_concurrent_upsert_same_key_serialized():
+    # 多机并发 upsert 同 key: evidences/findings 纯 INSERT 无 ON CONFLICT, 原会撞 PK UniqueViolation;
+    # advisory xact lock 串行化后双线程强制重叠也不抛(失败=advisory lock 未生效, 回归)。
+    try:
+        from codev_platform.graph.pg_store import PgGraphStore
+    except ImportError:
+        pytest.skip("PgGraphStore 未落地")
+    dsn = _pg_dsn()
+    if not dsn:
+        pytest.skip("无 memory.pg_dsn / CODEV_PLATFORM_MEMORY_DSN")
+    import threading
+    _pg_clean(dsn)
+    errors: list = []
+    barrier = threading.Barrier(2)
+
+    def _w():
+        try:
+            s = PgGraphStore(dsn)
+            barrier.wait()   # 强制两线程同时进入 upsert, 放大 race
+            for _ in range(5):
+                s.upsert_result(PID, _sample_result(plugin="builtin.shared"))
+            s.close()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_w) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    _pg_clean(dsn)
+    assert not errors, f"并发 upsert 同 key 抛异常(advisory lock 未生效?): {errors}"

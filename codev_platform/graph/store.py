@@ -399,7 +399,9 @@ class SqliteGraphStore:
         conn.execute("DELETE FROM ingest_meta WHERE plugin = ?", (plugin,))
 
         conn.executemany(
-            """INSERT INTO nodes
+            # INSERT OR REPLACE: 同批重复 (id,plugin) 后者赢 —— 对齐 edges 及 PG 后端 ON CONFLICT
+            # DO UPDATE(契约 parity: 同批 dup id 两后端都 last-wins, 不一个静默一个硬崩)。
+            """INSERT OR REPLACE INTO nodes
                  (id, plugin, kind, name, project_id, file, line, language, meta_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [

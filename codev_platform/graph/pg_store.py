@@ -104,13 +104,13 @@ class PgGraphStore:
     def load_graph(self, project_id: str, *, plugin: str | None = None) -> AnalyzerResult:
         from codev_platform.core.project_id import validate as _v
         project_id = _v(project_id)
-        self._ensure()
         where = "WHERE project_id = %s"
         params: tuple = (project_id,)
         if plugin:
             where += " AND plugin = %s"
             params = (project_id, plugin)
         try:
+            self._ensure()   # 连接/建表失败也走中性异常(原在 try 外会泄漏 PoolTimeout)
             with self._pool.connection() as conn:
                 nodes = [_row_to_node(r) for r in conn.execute(
                     f"SELECT {_NODE_COLS} FROM graph_nodes {where} ORDER BY id", params)]
@@ -144,6 +144,11 @@ class PgGraphStore:
         from datetime import datetime, timezone
         # 整体事务: 多表"先删后写"原子(PG pool 默认每句 autocommit, 不显式事务会留半写图谱)。
         with self._pool.connection() as conn, conn.transaction():
+            # 同 (project,plugin) 写串行(审计 P1): advisory xact lock 事务结束自动释放。多机并发
+            # upsert 同 key 时 evidences/findings/ingest_meta 是纯 INSERT(无 ON CONFLICT), READ
+            # COMMITTED 下两事务 delete-then-insert 互不可见 → 后提交者撞 PK 抛 UniqueViolation。
+            # 串行化让同 key upsert 排队(语义对齐"同 plugin 重灌本应串行"), 不同 key 不互斥。
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{project_id}/{plugin}",))
             for t in ("graph_nodes", "graph_edges", "graph_evidences", "graph_findings"):
                 conn.execute(f"DELETE FROM {t} WHERE plugin = %s AND project_id = %s",
                              (plugin, project_id))
@@ -194,24 +199,27 @@ class PgGraphStore:
     def stats(self, project_id: str) -> dict:
         from codev_platform.core.project_id import validate as _v
         project_id = _v(project_id)
-        self._ensure()
-        with self._pool.connection() as conn:
-            counts = {
-                short: int(conn.execute(
-                    f"SELECT COUNT(*) FROM graph_{tbl} WHERE project_id = %s", (project_id,)
-                ).fetchone()[0])
-                for short, tbl in (("nodes", "nodes"), ("edges", "edges"),
-                                   ("evidences", "evidences"), ("findings", "findings"))
-            }
-            plugins = [
-                {"plugin": r[0], "plugin_version": r[1], "node_count": r[2], "edge_count": r[3],
-                 "evidence_count": r[4], "finding_count": r[5], "ingested_at": r[6]}
-                for r in conn.execute(
-                    "SELECT plugin, plugin_version, node_count, edge_count, evidence_count, "
-                    "finding_count, ingested_at FROM graph_ingest_meta WHERE project_id = %s "
-                    "ORDER BY plugin", (project_id,))
-            ]
-        return {"totals": counts, "plugins": plugins}
+        try:
+            self._ensure()
+            with self._pool.connection() as conn:
+                counts = {
+                    short: int(conn.execute(
+                        f"SELECT COUNT(*) FROM graph_{tbl} WHERE project_id = %s", (project_id,)
+                    ).fetchone()[0])
+                    for short, tbl in (("nodes", "nodes"), ("edges", "edges"),
+                                       ("evidences", "evidences"), ("findings", "findings"))
+                }
+                plugins = [
+                    {"plugin": r[0], "plugin_version": r[1], "node_count": r[2], "edge_count": r[3],
+                     "evidence_count": r[4], "finding_count": r[5], "ingested_at": r[6]}
+                    for r in conn.execute(
+                        "SELECT plugin, plugin_version, node_count, edge_count, evidence_count, "
+                        "finding_count, ingested_at FROM graph_ingest_meta WHERE project_id = %s "
+                        "ORDER BY plugin", (project_id,))
+                ]
+            return {"totals": counts, "plugins": plugins}
+        except Exception as exc:  # noqa: BLE001 — 读失败中性化(契约: 消费方只 catch GraphStoreUnreadable)
+            raise GraphStoreUnreadable(str(exc)) from exc
 
     def audit_scan(self, project_id: str) -> dict:
         """后端探查。**foreign_project_ids 恒空**: "串台泄漏"是 sqlite **per-file** 隔离概念
@@ -220,7 +228,6 @@ class PgGraphStore:
         "project_id != pid"判会把每个别 project 都误报成串台。soft_plugins 漂移在两后端都成立。"""
         from codev_platform.core.project_id import validate as _v
         pid = _v(project_id)
-        self._ensure()
 
         def _soft_plugins(tbl: str, kinds, conn) -> list[str]:
             if not kinds:
@@ -230,18 +237,25 @@ class PgGraphStore:
                 (pid, list(kinds))).fetchall()
             return sorted({r[0] for r in rows})
 
-        with self._pool.connection() as conn:
-            return {
-                "foreign_project_ids": {"nodes": [], "edges": []},   # 共享库无 per-file 串台概念
-                "soft_plugins": {"nodes": _soft_plugins("nodes", SOFT_NODE_KINDS, conn),
-                                 "edges": _soft_plugins("edges", SOFT_EDGE_KINDS, conn)},
-            }
+        try:
+            self._ensure()
+            with self._pool.connection() as conn:
+                return {
+                    "foreign_project_ids": {"nodes": [], "edges": []},   # 共享库无 per-file 串台概念
+                    "soft_plugins": {"nodes": _soft_plugins("nodes", SOFT_NODE_KINDS, conn),
+                                     "edges": _soft_plugins("edges", SOFT_EDGE_KINDS, conn)},
+                }
+        except Exception as exc:  # noqa: BLE001 — 读失败中性化
+            raise GraphStoreUnreadable(str(exc)) from exc
 
     def list_project_ids(self) -> list[str]:
-        self._ensure()
-        with self._pool.connection() as conn:
-            rows = conn.execute("SELECT DISTINCT project_id FROM graph_nodes").fetchall()
-        return sorted(r[0] for r in rows)
+        try:
+            self._ensure()
+            with self._pool.connection() as conn:
+                rows = conn.execute("SELECT DISTINCT project_id FROM graph_nodes").fetchall()
+            return sorted(r[0] for r in rows)
+        except Exception as exc:  # noqa: BLE001 — 读失败中性化
+            raise GraphStoreUnreadable(str(exc)) from exc
 
     # ---- 生命周期 ----
 
