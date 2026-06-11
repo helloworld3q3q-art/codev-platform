@@ -78,7 +78,9 @@ class AuthMiddleware:
             # 服务间信物优先: web 前门已认证身份经 X-Identity 直接采信, 不破坏 passthrough/token 回退。
             identity = self._internal_identity(headers)
             if identity is None:
-                identity = self._auth.authenticate(headers)
+                # query 传给认证器: token 模式下 SSE/MCP 客户端无法设 header 时走 ?token= 兜底。
+                query = scope.get("query_string", b"").decode("latin-1")
+                identity = self._auth.authenticate(headers, query)
         except Unauthorized as exc:
             # 静态 401 body —— 不回显异常内文 (避免反射用户输入 / 泄漏内部校验规则);详情只落服务端日志
             _log.info("[gateway] 401 path=%s: %s", scope.get("path"), exc)

@@ -93,7 +93,7 @@ def identity_from_internal_claims(claims: Mapping[str, Any]) -> Identity:
 
 @runtime_checkable
 class Authenticator(Protocol):
-    def authenticate(self, headers: Mapping[str, str]) -> Identity:
+    def authenticate(self, headers: Mapping[str, str], query: str = "") -> Identity:
         ...
 
 
@@ -113,10 +113,26 @@ def _bearer(headers: Mapping[str, str]) -> str | None:
     return None
 
 
+def _query_token(query: str) -> str | None:
+    """从 query string 取 `?token=`(SSE/MCP 客户端无法设 Authorization header 时的兜底)。
+
+    **header(Bearer)优先且更安全**(不进 URL/access log);query token 仅给"只能设 SSE URL、
+    不能设 header"的 MCP 客户端用。部署侧建议: 远程走 HTTPS(TLS 终结于反代)+ 关 uvicorn access
+    log 或脱敏, 避免 ?token= 落日志。LAN/单机 sim 可接受。
+    """
+    if not query:
+        return None
+    from urllib.parse import parse_qs
+    vals = parse_qs(query).get("token")
+    if vals and vals[0].strip():
+        return vals[0].strip()
+    return None
+
+
 class PassthroughAuthenticator:
     """单人/开发期:信任明文头解析身份,不验签。是"身份解析+上下文",不是真鉴权。"""
 
-    def authenticate(self, headers: Mapping[str, str]) -> Identity:
+    def authenticate(self, headers: Mapping[str, str], query: str = "") -> Identity:
         try:
             user_id = _identity.resolve_from_request(headers)
             org_id = _identity.resolve_org_from_request(headers)
@@ -137,10 +153,10 @@ class TokenAuthenticator:
     def __init__(self, token_hashes: Mapping[str, Mapping[str, Any]]) -> None:
         self._by_hash = {str(k): dict(v) for k, v in (token_hashes or {}).items()}
 
-    def authenticate(self, headers: Mapping[str, str]) -> Identity:
-        tok = _bearer(headers)
+    def authenticate(self, headers: Mapping[str, str], query: str = "") -> Identity:
+        tok = _bearer(headers) or _query_token(query)   # header 优先, SSE 无 header 时 ?token= 兜底
         if not tok:
-            raise Unauthorized("缺少 Authorization: Bearer <token>")
+            raise Unauthorized("缺少 Authorization: Bearer <token> 或 ?token=<token>")
         presented = token_hash(tok)
         ident = None
         # 遍历 + 常量时间比对:不因命中/字符差异泄漏时序;hash 本身已使明文不可逆。

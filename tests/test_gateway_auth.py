@@ -38,6 +38,25 @@ def test_token_valid_by_hash():
     assert idt.user_id == "bob" and idt.org_id == "acme" and idt.via == "token"
 
 
+def test_token_via_query_param():
+    # SSE/MCP 客户端无法设 header 时, ?token= 兜底(header 优先, 这里只给 query)。
+    a = TokenAuthenticator({token_hash("tok-q"): {"user_id": "bob", "org_id": "acme"}})
+    idt = a.authenticate({}, query="project_id=p1&token=tok-q")
+    assert idt.user_id == "bob" and idt.org_id == "acme" and idt.via == "token"
+
+
+def test_token_header_preferred_over_query():
+    # header 与 query 都给时, header(Bearer)优先(更安全, 不进 URL)。
+    a = TokenAuthenticator({token_hash("hdr"): {"user_id": "h", "org_id": "o"}})
+    idt = a.authenticate({"Authorization": "Bearer hdr"}, query="token=ignored-bad")
+    assert idt.user_id == "h"
+
+
+def test_token_query_invalid_rejected():
+    with pytest.raises(Unauthorized):
+        TokenAuthenticator({token_hash("t"): {"user_id": "u"}}).authenticate({}, query="token=wrong")
+
+
 def test_token_plaintext_in_config_does_not_match():
     # 防回归:config 里若误存明文(非 hash),明文 token 不应认证通过(只认 hash)
     a = TokenAuthenticator({"tok-1": {"user_id": "bob"}})  # 明文当 key(错误用法)
