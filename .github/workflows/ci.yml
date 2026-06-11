@@ -10,6 +10,11 @@ on:
   push:
   pull_request:
 
+# 同分支新 push 自动取消进行中的旧 run, 防积压(host runner 单线程, 旧 task 卡队列)。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # pip 走国内镜像(直连 pypi 国内慢/卡 —— 首跑 ruff job 卡 9min 即此)。
 env:
   PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
