@@ -27,26 +27,29 @@ codev-platform gateway token-add <dev2>    --org <org> --projects 'openclaw-stoc
 ```
 > 切完 passthrough 失效:所有 client 必须带 token 才连得上(包括你自己,所以第 1 步先做)。
 
-### 3. 建第二个人的账号(web 登录 + RBAC 真值)
-- 首个 admin:web app 启动自动 bootstrap(`CODEV_PLATFORM_ADMIN_PASSWORD` / config.web.bootstrap_password / 默认 'admin')。
-- 第二个人:admin 登录后调 web API(或 web-ui orgs/users 页,若已做):
-  `POST /api/v1/orgs/<org>/members/add`(加成员)+ 给 project_access。
-- token 身份(第 1 步)与账号身份(org/user)要对齐(同 user_id/org_id),RBAC 才一致。
-
-### 4. 第二台 client 的 .mcp.json(带 token 连 SSE)
-每个平台 MCP 端点的 url 加 `&token=`(server IP 换成真服务器 IP;header 形式更安全,客户端支持则用 `client-auth`):
-```jsonc
-{
-  "mcpServers": {
-    "graph":        { "type": "sse", "url": "http://<server-ip>:19092/sse?project_id=openclaw-stock&token=<dev2-token>" },
-    "platform-docs":{ "type": "sse", "url": "http://<server-ip>:19083/sse?project_id=openclaw-stock&token=<dev2-token>" },
-    "codegraph":    { "type": "sse", "url": "http://<server-ip>:19091/sse?project_id=openclaw-stock&token=<dev2-token>" },
-    "agent-memory": { "type": "sse", "url": "http://<server-ip>:19087/sse?project_id=openclaw-stock&token=<dev2-token>" }
-  }
-}
+### 3. 建第二个人的账号 + RBAC(CLI 现成,走 RbacStore=隔离真值)
+```bash
+# 在服务器(WSL)上跑(memory.pg_dsn 已配 → 写 PG)。org 不存在先建。
+codev-platform org create <org> --name "<显示名>"          # 若 org 未建
+codev-platform org add-user  dev2 --name "Dev Two"          # 建 user
+codev-platform org add-member <org> dev2 --role member       # 加 org 成员
+codev-platform org project grant openclaw-stock dev2 --role member   # 授项目访问权
+codev-platform org list                                      # 核对
 ```
-> header 形式(支持的客户端):`codev-platform gateway client-auth --repo . --env PLATFORM_TOKEN` 写
-> `Authorization: Bearer ${PLATFORM_TOKEN}`,client 启动前 `export PLATFORM_TOKEN=<明文>`。
+> token 身份(第 1 步的 user_id/org_id)必须与上面账号(user/org)对齐,RBAC 才一致。
+> web 控制台登录(username+密码)是另一条路(account_store),当前仅 bootstrap admin 有密码;
+> 第二个人若要登 web-ui,密码-set CLI 是待补项(MCP token 接入不需要密码)。
+
+### 4. 第二台 client 的 .mcp.json(带 token 连 SSE)—— 一条命令搞定
+```bash
+# 在第二台仓里跑: 自动把 token 内联进各 sse url 的 ?token=(任何 MCP 客户端可用, url 一定能填)
+export PLATFORM_TOKEN='<dev2 明文 token>'
+codev-platform gateway client-auth --repo . --query-token        # 写 ?token=<明文> 进 url
+# 远程: 再 gateway client-url --base https://<server> 把 url 指向服务器反代
+```
+生成形如:`http://<server>:19092/sse?project_id=openclaw-stock&token=<dev2-token>`(4 端点)。
+> **header 形式更安全**(token 不进 URL/log):客户端支持 header 则用 `gateway client-auth`(不带
+> --query-token)写 `Authorization: Bearer ${PLATFORM_TOKEN}`。服务端两种都认(2026-06-12 加 ?token= 兜底)。
 
 ### 5. 网络可达 + 重启服务
 - WSL 服务绑到可被第二台访问的地址(WSL mirrored/NAT + 端口转发;见记忆 [[wsl-mirrored-fixes-clash-tun]] / [[wsl-forwarding-restart-and-win-services]])。真服务器:绑 0.0.0.0 + 防火墙开端口 + **HTTPS/TLS**(反代终结,远程必须;`?token=` 走明文会进 access log,远程务必 TLS + 关/脱敏 access log)。
@@ -64,8 +67,11 @@ codev-platform gateway token-add <dev2>    --org <org> --projects 'openclaw-stoc
 - org_id 防御纵深:闸已 org 隔离;存储层 org_id 留统一多组织-DB 加固阶段(见 [[multi-machine-platform-arc]])。
 
 ## 待补平台工作(我负责,按需排)
-- [ ] sqlite→pg graph 迁移命令(切 PG 不丢现有图谱)
-- [ ] health/status pg-aware(pg 模式不误报 "未建")
-- [ ] 用户创建 web-ui 页(现仅 API)/ `user-add` CLI(批量便捷)
-- [ ] `client-auth` 增 `--query-token` 选项(自动写 `&token=` url 形式,给 header-less 客户端)
-- [ ] token-mode MCP 客户端接入的端到端真机验证
+- [x] `client-auth --query-token`(2026-06-12,自动写 `?token=` url + 服务端 query 兜底)
+- [x] 账号 onboarding CLI(已现成 `org` 命令,走 RbacStore;deleted 重复 account.py)
+- [x] token-mode 端到端验证(in-process:AuthMiddleware→query_string→authenticator→identity 整链测过)
+- [ ] sqlite→pg graph 迁移命令(切 PG 不丢现有图谱)— Stage C,并发上来再做
+- [ ] health/status pg-aware(pg 模式不误报 "未建")— Stage C
+- [ ] web 控制台密码-set CLI(account_store 路径;MCP token 接入不需要,web-ui 登录才要;
+      需先理清 account_store vs RbacStore 双 store 关系,别造 fork)
+- [ ] 真机端到端(真 Claude Code 客户端连 token-mode 服务器)— 周末接入时验
