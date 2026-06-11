@@ -1,5 +1,11 @@
 name: CI
 
+# 适配自建 Gitea + act_runner(host 模式, WSL Linux)。彻底不依赖 github.com:
+#   - checkout: 手动 git fetch 本地 Gitea(用注入的 GITHUB_TOKEN), 不用 actions/checkout(它要从 github 下)
+#   - python:  用 runner 宿主现成的 python3(不用 actions/setup-python, 它会去 github 下 python)
+#   - runner:  只有 ubuntu-latest:host 一个, matrix 收成单 ubuntu(win/mac 无 runner 会永久 pending)
+# 注: GitHub 上不跑此 workflow(仅用 GitHub 备份代码; uses 完整 URL / 手动 checkout 是 Gitea 取向)。
+
 on:
   push:
   pull_request:
@@ -9,64 +15,54 @@ jobs:
     name: ruff (codev_platform)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install ruff
-        # 钉死版本: lint gate 须可复现, 防新版 ruff 在 select 的 B/UP 类加规则致意外变红。
-        run: pip install ruff==0.15.15
-
-      # Phase 1 逐步收敛: 先 gate 产品代码 codev_platform (规则/ignore 见 pyproject [tool.ruff])。
-      # tests/ + tools/ + scripts/ 留 Phase 2 (E501 行长全仓暂缓)。
-      - name: Ruff check
-        run: python -m ruff check codev_platform
+      - name: Checkout (本地 Gitea, 不碰 github)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q .
+          git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
+          git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+      - name: Ruff check (宿主 python3 临时 venv)
+        run: |
+          python3 -m venv /tmp/ci-ruff
+          /tmp/ci-ruff/bin/pip install -q ruff==0.15.15
+          /tmp/ci-ruff/bin/ruff check codev_platform
 
   test:
-    name: pytest (${{ matrix.os }} / py${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.13']
+    name: pytest (ubuntu / 宿主 python3)
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install package (editable, no runtime extras)
-        run: pip install -e .
-
-      - name: Install pytest
-        run: pip install pytest pytest-timeout
-
-      - name: Run tests
-        # --timeout: 单测墙钟上限, 防个别用例挂死 (如插件全仓扫描进大目录) 静默堵住整个 CI。
-        # thread 方法跨平台一致 (signal 仅 Unix; CI 含 windows/macos)。
-        # 套件含: provider 文件纪律 + 测试数地板 (防自挂盲区复发, 见对应 test_*.py)。
-        run: python -m pytest tests/ -q --timeout=120 --timeout-method=thread
+      - name: Checkout (本地 Gitea)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q .
+          git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
+          git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+      - name: pytest (宿主 python3 临时 venv)
+        # 含 provider 文件纪律 + 测试数地板(防自挂盲区复发, 见对应 test_*.py)。
+        run: |
+          python3 -m venv /tmp/ci-test
+          /tmp/ci-test/bin/pip install -q -e .
+          /tmp/ci-test/bin/pip install -q pytest pytest-timeout
+          /tmp/ci-test/bin/python -m pytest tests/ -q --timeout=120 --timeout-method=thread
 
   commit-lint:
     name: commit message (no AI traces)
     runs-on: ubuntu-latest
-    # 只在 PR 触发, 只扫本 PR 引入的 commit —— 不碰主历史 (已推送的不强求改写, 见
-    # commit-pr-conventions.md)。阻断型: PR 新 commit 带 AI 痕迹即拒。
+    # 只在 PR 触发, 只扫本 PR 引入的 commit(已推送的不强求改写, 见 commit-pr-conventions.md)。
     if: github.event_name == 'pull_request'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
+      - name: Checkout (本地 Gitea, 全历史)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q .
+          git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
+          git -c protocol.version=2 fetch -q origin
+          git checkout -q "${GITHUB_SHA}"
       - name: Scan PR commit messages
         run: |
           base='${{ github.event.pull_request.base.sha }}'
@@ -79,48 +75,45 @@ jobs:
           echo "OK: PR commit message 无 AI 痕迹"
 
   secrets:
-    name: secret scan (gitleaks)
+    name: secret scan (detect-secrets)
     runs-on: ubuntu-latest
-    # 报告型起步 (continue-on-error): 扫明文密码 / API key (security.md 自挂盲区)。
-    # allowlist 见 .gitleaks.toml。观察期确认无误报后, 去掉 continue-on-error 转阻断。
+    # 报告型起步(continue-on-error): host 无 docker, 用 pip detect-secrets 替代 gitleaks 做基本扫描。
     continue-on-error: true
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run gitleaks
+      - name: Checkout (本地 Gitea)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
-            detect --source /repo --config /repo/.gitleaks.toml --no-git --redact -v
+          git init -q .
+          git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
+          git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+      - name: detect-secrets scan
+        run: |
+          python3 -m venv /tmp/ci-sec
+          /tmp/ci-sec/bin/pip install -q detect-secrets
+          /tmp/ci-sec/bin/detect-secrets scan --exclude-files 'tests/|docs/audits/|.*\.lock$' > /tmp/ds.json
+          /tmp/ci-sec/bin/python -c "import json; d=json.load(open('/tmp/ds.json')); n=sum(len(v) for v in d.get('results',{}).values()); print('detect-secrets potential findings:', n); raise SystemExit(1 if n else 0)"
 
   web-ui:
     name: web-ui static checks (tsc + eslint)
     runs-on: ubuntu-latest
-    # 报告型起步 (continue-on-error): 前端不写单测 (见 frontend-no-unit-tests 偏好),
-    # 但 tsc/lint 静态门禁仍有价值 —— 防类型错误 / lint 不过直接进 main。
-    # 观察期清零后, 去掉 continue-on-error 转阻断。
+    # 报告型起步(continue-on-error): 前端不写单测(见偏好), tsc/lint 静态门禁仍有价值。
+    # 用宿主 node20 的 corepack 启 pnpm, 不用 setup-node(它去 github 下 node)。
     continue-on-error: true
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: web-ui/pnpm-lock.yaml
-
-      - name: Install deps
-        run: pnpm --dir web-ui install --frozen-lockfile
-
-      - name: tsc (type check)
-        run: pnpm --dir web-ui run tsc
-
-      - name: eslint
-        run: pnpm --dir web-ui run lint:js
+      - name: Checkout (本地 Gitea)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q .
+          git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
+          git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+      - name: tsc + eslint (宿主 node20 + corepack pnpm)
+        run: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm --dir web-ui install --frozen-lockfile
+          pnpm --dir web-ui run tsc
+          pnpm --dir web-ui run lint:js
