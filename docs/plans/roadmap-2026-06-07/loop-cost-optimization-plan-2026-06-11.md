@@ -105,7 +105,7 @@ codegraph_trace 建好后同套量尺前后对比(flash,5 类型各 1 例):
 
 **① 免费 win(零质量损失,免 A/B,已做 `8de5c29`)**:工具返回 JSON 去 `indent=2` → 紧凑 `separators`。缩进/换行是**纯格式零信息**,模型证据一字不差 → grounding 不可能掉。砍 recall/impact/codegraph 这类 tool-result 的 ~15-20% token。5 处(recall/impact/codegraph×3)。
 
-**② 真杠杆但需 A/B**:`read_file` 实测 `_MAX_BYTES=60000`≈15K token/次、**返整文件前 60KB 且无 offset/分窗**(读 600 行只用 30 行=最大浪费 + 产品缺口)。修=加 offset/窗口 + 收紧 cap。**风险**:窗口切坏→agent 续取→反增 miss/步数。A/B:grounding 非劣下界 + 监控 read_file 调用数/步数,多跳/读码例单列。**中等工程,留触发**。
+**② read_file 行窗口读(能力补全,已做 `58452bf`)**:原 `_MAX_BYTES=60000`≈15K token/次、返整文件前 60KB、**无 offset/分窗**(产品缺口)。加 `offset`(1-based 起始行)+ `limit`(行数,带行号 + "用 offset=N 继续"提示),agent 可精准读片段。**关键:做成增量,默认(不给 offset/limit)仍读全文 → 默认行为不变、零质量风险,故无需 A/B**(不像收紧默认 cap 那样改默认)。成本收益 = agent 是否采纳窗口读(description 已 nudge"大文件优先按行窗口读"),可经 trace usage 观察。**收紧默认 cap 才需 A/B,未做**。
 
 **③ 否决**:output 简洁化(prompt 促简短→省略证据链,grounding 掉,比啰嗦危险)、历史裁剪(改写缓存前缀→hit 暴跌成 miss 反贵 + 丢上下文,双输)。
 

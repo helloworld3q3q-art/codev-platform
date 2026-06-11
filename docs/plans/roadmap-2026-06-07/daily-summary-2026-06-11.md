@@ -67,5 +67,12 @@
 - **流程教训**:误跑 `pnpm run lint`(全 src prettier --write)churn 48 文件 → 已 git checkout 还原,只提交 feature 文件。验前端只跑 `pnpm run tsc` + 针对性 `eslint <file>`,不跑会 --write 全量的 lint。
 - **规范修正(用户两次纠正)**:Token 用量审计页初版照搬 dashboard 卡片(用了卡片版 `@/components/Table` + 列定义塞 index)→ 改对:① 用 **`ResizableTable`**(页面表格封装版,支持纯 dataSource)② 按**关注点分离**拆 `components/{Columns,utils,types}`,index 轻量。**根因 + 教训:新建页面要镜像同类「页面」模板(`system/audit`),不是镜像卡片组件**;component-patterns §Table 封装版 + architecture §2 关注点分离都指向这个。`f3b0298`/`6be5a9c`。
 
+## 十一、loop 成本基础优化(miss/output 面板 → 免费win + read_file 能力补全)
+"动 miss/output 真省钱"3 视角面板:**per-query trim 非主杠杆(量级 1-10% 且依赖有浪费),真杠杆=per-租户配额计量(后期运营)**;先做基础:
+- **免费win**(零质量损失,免 A/B,`8de5c29`):工具返回 JSON 去 `indent=2` → 紧凑 `separators`(recall/impact/codegraph×3)。缩进纯格式零信息 → 砍 ~15-20% 该工具 tool-result token,grounding 不可能掉。
+- **read_file 行窗口读**(`58452bf`):加 `offset/limit`(带行号+续读提示)补"精准读片段"能力,**默认全文行为不变 → 零质量风险无需 A/B**;agent 用窗口读则省 miss(原返整文件 60KB 是最大浪费源)。
+- **否决**:output 简洁化(省略证据链掉 grounding)、历史裁剪(破缓存前缀 hit→miss 反贵)。
+- 详见 [`loop-cost-optimization-plan-2026-06-11.md`](loop-cost-optimization-plan-2026-06-11.md) §十。
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
