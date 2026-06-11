@@ -161,4 +161,8 @@ def recall_code(query: str, project_id: str, *,
             lanes.append(lane)
             for ref, d in lane_details.items():
                 details.setdefault(ref, d)   # 同 ref 多 lane: 首见富化(graph 先)
-    return _fuse_and_enrich(lanes, details, weights=weights, limit=limit)
+    hits = _fuse_and_enrich(lanes, details, weights=weights, limit=limit)
+    # 精排(Phase 6 reranker): config `recall.rerank.enabled` 开则 cross-encoder 重排 top 候选,
+    # 关 / 不可用 / 失败 → 原序(加权 RRF), 绝不因精排丢结果(plan Gate「reranker 关仍稳定」)。
+    from codev_platform.recall.rerank import maybe_rerank_hits
+    return maybe_rerank_hits(query, project_id, hits)
