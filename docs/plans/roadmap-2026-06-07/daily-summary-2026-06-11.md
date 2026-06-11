@@ -53,5 +53,10 @@
 - **codegraph_trace 定位修正**:留用,价值=**延迟/吞吐(少往返,利 Phase 8)+ 多跳质量(不耗尽 max_steps)**,**非省钱**。详见 [`loop-cost-optimization-plan-2026-06-11.md`](loop-cost-optimization-plan-2026-06-11.md) §九。
 - **元教训**:连数据面板都错在"把 input 当成本"(成本在 miss+output);真降成本只能动信息量(全是质量权衡)。先验证后定论再次兑现。
 
+## 九、codegraph_trace grounding 非劣验证 + Phase 8 起步盘点(收尾)
+- **grounding 非劣 ✅**(commit `91220b7`):trace 上线后 quality(6,含多跳)+ hard codev(20)两集 grounding 均 **1.0 保持**;quality within_budget 0.833→**1.0 改善**;LoopPolicy 多跳例 15 步超预算→**8 步内预算且 grounding 1.0**(原始多跳弱点修了)。**今天所有 shipped 改动全部验证闭环。**
+- **Phase 8(响应性能/可观测)起步盘点**:本会话顺带把 Phase 8 推了几步——① **prompt 缓存 hit/miss 可观测**(provider+loop usage)② **loop token 成本量尺**(`measure_loop_multi.py`,实测成本结构 miss67%+out25%)③ **codegraph_trace 降延迟**(步数 −16%)。
+- **Phase 8 收尾 ✅ 完成**(commit `d24cc8d`):把可观测从"测量脚本"做成"生产可消费" —— `Trace.done` 落 per-query `usage`(input/output/cache_hit/miss)+ loop 两个收尾点传 total_usage;chat_service 已接 Trace 故生产即生效。E2E 实证:真查询的 trace done 记录带 `usage{cache_hit/miss}` + session_id + model → **per-租户成本/缓存率计量地基齐**(按 session→user→org 聚合,token × 模型价表算成本)。trace 只记中性 token,$ 由下游价表算(不硬编单价,多模型友好)。+2 单测。
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
