@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 GRAPH_LANE = "graph"
 CODEGRAPH_LANE = "codegraph"
+VECTOR_LANE = "vector"
 _PER_LANE = 30   # 每 lane 融合前取前 N(plan 'lane-specific top_k')
 _LIMIT = 20      # 最终返回上限
 
@@ -116,6 +117,25 @@ def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneRes
     return LaneResult(CODEGRAPH_LANE, ranked), details
 
 
+def _vector_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult | None, dict]:
+    """vector 语义 lane: 对 codegraph 节点嵌入做相似度召回(免 daemon, 复用平台 Embedder)。
+
+    ref 与 codegraph lane **同空间**(codegraph node id)→ 融合时同一对象叠分。嵌入模型 / collection
+    缺(未建索引 / 无 sentence-transformers / chromadb)→ (None, {}), 与其它 lane 同 fail-soft。
+    """
+    try:
+        from codev_platform.recall.code_vector_store import query_code_vectors
+        ranked_ids, details = query_code_vectors(project_id, query, per_lane)
+    except Exception as exc:  # noqa: BLE001 — collection 未建 / 依赖缺 → 跳过该 lane(高可用)
+        logger.warning("[recall] vector lane failed: %r", exc)
+        return None, {}
+    if not ranked_ids:
+        return None, {}
+    ranked = _deprioritize_tests(
+        [(nid, details.get(nid, {}).get("name"), details.get(nid, {}).get("file")) for nid in ranked_ids])
+    return LaneResult(VECTOR_LANE, ranked), details
+
+
 def recall_code(query: str, project_id: str, *,
                 weights: dict[str, float] | None = None,
                 limit: int = _LIMIT, per_lane: int = _PER_LANE) -> list[CodeRecallHit]:
@@ -133,7 +153,8 @@ def recall_code(query: str, project_id: str, *,
     lanes: list[LaneResult] = []
     details: dict[str, dict] = {}
     for lane, lane_details in (_graph_lane(project_id, query, per_lane),
-                               _codegraph_lane(project_id, query, per_lane)):
+                               _codegraph_lane(project_id, query, per_lane),
+                               _vector_lane(project_id, query, per_lane)):
         if lane is not None and lane.ranked:
             lanes.append(lane)
             for ref, d in lane_details.items():

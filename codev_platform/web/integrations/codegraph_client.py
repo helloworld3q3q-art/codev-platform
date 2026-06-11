@@ -199,6 +199,19 @@ class CodegraphClient:
         r = self.conn.execute(f"select {_NODE_COLS} from nodes where id = ?", (node_id,)).fetchone()
         return _node_dict(r) if r is not None else None
 
+    # --------------------------- iter-nodes --------------------------
+
+    def iter_nodes(self, *, kinds: list[str] | None = None):
+        """流式枚举全部节点(向量索引建库用)。只读, 不一次性载内存。
+
+        kinds 可限定节点种类(如 function/method/class); 缺省全取(语言差异大, 不硬筛 kind,
+        由建库侧按文本质量自然取舍)。逐行 yield 与单点 node()/search() 同形(camelCase 别名)。
+        """
+        kind_clause, kind_p = _in_clause("kind", _norm(kinds))
+        sql = f"select {_NODE_COLS} from nodes where 1=1{kind_clause}"
+        for r in self.conn.execute(sql, kind_p):
+            yield _node_dict(r)
+
     # --------------------------- neighbors ---------------------------
 
     def neighbors(self, node_id: str | None, direction: str | None,

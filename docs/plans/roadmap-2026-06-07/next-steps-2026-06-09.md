@@ -56,9 +56,11 @@ ai-health --all
 
 | 任务 | 估时 | 前置 |
 |---|---|---|
-| Phase 6 接 vector/bm25 lane | 1-2天 | chroma daemon(`serve-mcp start`);recall 再加两 lane,fusion 核心已支持 |
+| ✅🟡 Phase 6 vector lane(代码侧已落,06-11)| — | **代码完成**:`recall/code_vector_store.py`(对 codegraph 节点嵌入,ref 复用 node id→与 codegraph lane 同空间叠分)+ `service._vector_lane`(fail-soft)+ `weights` 概览/兜底偏 vector。测 `test_recall_vector_lane.py` 全绿(脱模型)。**剩 WSL 两步**:① 建库 `python -m codev_platform.recall.code_vector_store --project <pid>`(需嵌入模型,重型不自动跑)② `--suite recall` 复跑看 vector 是否在饱和 grounding 上加分(加分才保留偏好权重,否则回均衡) |
+| Phase 6 bm25 lane | 0.5天 | recall 再加一 lane;同 fusion 接线模式 |
 | Phase 6 reranker | 1天 | reranker 模型;压缩候选精排,关闭时降级加权 RRF(plan Gate 已设计) |
 | Phase 6 memory lane | 0.5天 | PG(agent memory);把 agent/recall 接进 fusion |
+| Phase 6 vector lane reindex 集成 | 0.5天 | 现为独立 CLI;接 reindex worker(`--kind code_vec` 或挂 codegraph 后)让索引随提交自动刷新 |
 
 ### 🔵 第三梯队:前端(需 pnpm/tsc,本机 3D 内存风险)
 

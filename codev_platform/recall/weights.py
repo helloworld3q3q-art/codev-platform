@@ -13,18 +13,20 @@ graph(架构血缘强)、概览/文档/兜底均衡。分类**确定性**(planne
 from __future__ import annotations
 
 from codev_platform.agent.planner import QueryType, classify_query
-from codev_platform.recall.service import CODEGRAPH_LANE, GRAPH_LANE
+from codev_platform.recall.service import CODEGRAPH_LANE, GRAPH_LANE, VECTOR_LANE
 
 _PREFER = 2.0   # topic lane 偏好倍数(prefer-not-exclude; 由 eval 调, 非定死)
 _BASE = 1.0
 
-# query 类型 → 各 lane 权重(数据驱动)。只列当前两 lane; 未列 lane 由 weighted_rrf 缺省 1.0。
+# query 类型 → 各 lane 权重(数据驱动)。未列 lane 由 weighted_rrf 缺省 1.0。
+# vector(语义)偏好放在**概览 / 兜底**类: 这两类常是「按行为描述找代码」, 无精确符号名, 正是
+# 向量 lane 的主场; 符号 / 影响类仍交 codegraph / graph(精确符号 FTS / 架构血缘更强)。
 _WEIGHTS_BY_TYPE: dict[str, dict[str, float]] = {
-    QueryType.SYMBOL:   {CODEGRAPH_LANE: _PREFER, GRAPH_LANE: _BASE},   # 符号: 谁定义/调用 → codegraph
-    QueryType.IMPACT:   {GRAPH_LANE: _PREFER, CODEGRAPH_LANE: _BASE},   # 影响/跨层 → graph
-    QueryType.OVERVIEW: {GRAPH_LANE: _BASE, CODEGRAPH_LANE: _BASE},     # 概览 → 均衡
-    QueryType.DOC_RULE: {GRAPH_LANE: _BASE, CODEGRAPH_LANE: _BASE},     # 文档(本 2 lane 无 doc lane)→ 均衡
-    QueryType.GENERAL:  {GRAPH_LANE: _BASE, CODEGRAPH_LANE: _BASE},     # 兜底 → 均衡
+    QueryType.SYMBOL:   {CODEGRAPH_LANE: _PREFER, GRAPH_LANE: _BASE, VECTOR_LANE: _BASE},   # 符号: 谁定义/调用 → codegraph
+    QueryType.IMPACT:   {GRAPH_LANE: _PREFER, CODEGRAPH_LANE: _BASE, VECTOR_LANE: _BASE},   # 影响/跨层 → graph
+    QueryType.OVERVIEW: {VECTOR_LANE: _PREFER, GRAPH_LANE: _BASE, CODEGRAPH_LANE: _BASE},   # 概览/语义 → vector
+    QueryType.DOC_RULE: {GRAPH_LANE: _BASE, CODEGRAPH_LANE: _BASE, VECTOR_LANE: _BASE},     # 文档(本组无 doc lane)→ 均衡
+    QueryType.GENERAL:  {VECTOR_LANE: _PREFER, GRAPH_LANE: _BASE, CODEGRAPH_LANE: _BASE},   # 兜底/行为描述 → vector
 }
 
 
