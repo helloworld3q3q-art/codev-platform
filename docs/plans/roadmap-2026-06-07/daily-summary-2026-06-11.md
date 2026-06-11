@@ -58,5 +58,13 @@
 - **Phase 8(响应性能/可观测)起步盘点**:本会话顺带把 Phase 8 推了几步——① **prompt 缓存 hit/miss 可观测**(provider+loop usage)② **loop token 成本量尺**(`measure_loop_multi.py`,实测成本结构 miss67%+out25%)③ **codegraph_trace 降延迟**(步数 −16%)。
 - **Phase 8 收尾 ✅ 完成**(commit `d24cc8d`):把可观测从"测量脚本"做成"生产可消费" —— `Trace.done` 落 per-query `usage`(input/output/cache_hit/miss)+ loop 两个收尾点传 total_usage;chat_service 已接 Trace 故生产即生效。E2E 实证:真查询的 trace done 记录带 `usage{cache_hit/miss}` + session_id + model → **per-租户成本/缓存率计量地基齐**(按 session→user→org 聚合,token × 模型价表算成本)。trace 只记中性 token,$ 由下游价表算(不硬编单价,多模型友好)。+2 单测。
 
+## 十、Phase 8 可观测消费层:token 用量看板 + 审计页(全栈)
+地基(§七/八 trace usage)之上做"人能看见"的消费层,**严格后端先行 → pnpm run api → 前端**(不手写 API 字段/方法):
+- **usage 持久化**:chat_service 存 usage 进会话 extra + MessageOut/SessionMessageItem schema 暴露 → 历史会话也带 token(`a2d321d`,+1 回放测试)。
+- **聚合端点** `/api/v1/reports/agent-usage`(admin,读 agent_trace,按 last7d/allTime × 模型聚合 token+缓存率+估算成本+最近明细,`_PRICES` 估价未知模型记 0)+ 4 测试(`c106c9d`)。
+- **首页看板卡** `TokenUsageCard`(总量 5 StatisticCard + 按模型表 + 窗口切换,`538f5e9`)。
+- **系统管理 Token 用量审计页** `/usage`(per-query 明细列表,复用 getAgentUsage().recent,`d9e607e`)。
+- **流程教训**:误跑 `pnpm run lint`(全 src prettier --write)churn 48 文件 → 已 git checkout 还原,只提交 feature 文件。验前端只跑 `pnpm run tsc` + 针对性 `eslint <file>`,不跑会 --write 全量的 lint。
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
