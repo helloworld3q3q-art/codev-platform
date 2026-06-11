@@ -61,6 +61,40 @@ _current_client: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 
+def authorize_graph_request(pid_raw, identity):
+    """graph MCP/SSE 边界统一鉴权(handle_sse 与 streamable bind_mcp_context **共用一处**, 防两处漂移)。
+
+    校验 project_id + can_access(org/项目隔离闸: token 身份 org 不符目标项目 org → 拒)。返回
+    (pid, None)=放行(pid 已落实, 缺省回 PROJECT_ID); (None, JSONResponse)=拒绝(400 非法 pid /
+    403 越权)。org 隔离的真实判定在 core.acl.can_access(test_acl 覆盖); 本函数把"graph 边界确实
+    调它 + 拒绝→403"的 wiring 收成可单测一处(test_graph_mcp_authz 锁死跨 org → 403)。
+    """
+    from starlette.responses import JSONResponse
+
+    from codev_platform.core.acl import can_access
+    from codev_platform.core.audit import audit_access
+    from codev_platform.core.config import load_config
+    from codev_platform.core.project_id import validate as _pid_validate
+
+    if pid_raw:
+        try:
+            pid = _pid_validate(pid_raw)
+        except Exception as exc:  # noqa: BLE001
+            _flog(f"[mcp] reject invalid project_id {pid_raw!r}: {exc!s}")
+            return None, JSONResponse(
+                {"error": "invalid project_id", "code": ErrorCode.INVALID_PARAMS.value},
+                status_code=400)
+    else:
+        pid = None
+    dec = can_access(load_config(), identity, pid)
+    audit_access("graph", identity, pid, dec)
+    if not dec.allowed:
+        _flog(f"[mcp] DENY project_id={pid} via={getattr(identity, 'via', None)}: {dec.reason}")
+        return None, JSONResponse(
+            {"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value}, status_code=403)
+    return (pid if pid is not None else PROJECT_ID), None
+
+
 def _active_pid() -> str | None:
     return _current_project_id.get() or PROJECT_ID
 
@@ -283,10 +317,7 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
     from starlette.routing import Mount, Route
     import uvicorn
 
-    from codev_platform.core.acl import can_access
-    from codev_platform.core.audit import audit_access
     from codev_platform.core.config import load_config
-    from codev_platform.core.project_id import validate as _pid_validate
     from codev_platform.gateway import (
         AuthMiddleware,
         build_authenticator,
@@ -300,29 +331,10 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
     sse_transport = SseServerTransport("/messages/")
 
     def bind_mcp_context(request):
-        pid_raw = request.query_params.get("project_id")
-        if pid_raw:
-            try:
-                pid = _pid_validate(pid_raw)
-            except Exception as exc:  # noqa: BLE001
-                _flog(f"[mcp] reject invalid project_id {pid_raw!r}: {exc!s}")
-                return JSONResponse(
-                    {"error": "invalid project_id", "code": ErrorCode.INVALID_PARAMS.value},
-                    status_code=400,
-                )
-        else:
-            pid = None
-        _ident = getattr(request.state, "identity", None)
-        _dec = can_access(load_config(), _ident, pid)
-        audit_access("graph", _ident, pid, _dec)
-        if not _dec.allowed:
-            _flog(f"[mcp] DENY project_id={pid} via={getattr(_ident,'via',None)}: {_dec.reason}")
-            return JSONResponse(
-                {"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value},
-                status_code=403,
-            )
-        if pid is None:
-            pid = PROJECT_ID
+        pid, denial = authorize_graph_request(
+            request.query_params.get("project_id"), getattr(request.state, "identity", None))
+        if denial is not None:
+            return denial
         client = request.query_params.get("client") or "dev"
         token = _current_project_id.set(pid)
         ctok = _current_client.set(client)
@@ -334,25 +346,10 @@ async def run_http(port: int = _GRAPH_SSE_PORT) -> None:
         return reset
 
     async def handle_sse(request):
-        pid_raw = request.query_params.get("project_id")
-        if pid_raw:
-            try:
-                pid = _pid_validate(pid_raw)
-            except Exception as exc:  # noqa: BLE001
-                _flog(f"[sse] reject invalid project_id {pid_raw!r}: {exc!s}")
-                return JSONResponse(
-                    {"error": "invalid project_id", "code": ErrorCode.INVALID_PARAMS.value},
-                    status_code=400)
-        else:
-            pid = None
-        _ident = getattr(request.state, "identity", None)
-        _dec = can_access(load_config(), _ident, pid)
-        audit_access("graph", _ident, pid, _dec)
-        if not _dec.allowed:
-            return JSONResponse({"error": "forbidden", "code": ErrorCode.ACCESS_DENIED.value},
-                                status_code=403)
-        if pid is None:
-            pid = PROJECT_ID
+        pid, denial = authorize_graph_request(
+            request.query_params.get("project_id"), getattr(request.state, "identity", None))
+        if denial is not None:
+            return denial
         client = request.query_params.get("client") or "dev"
         token = _current_project_id.set(pid)
         ctok = _current_client.set(client)

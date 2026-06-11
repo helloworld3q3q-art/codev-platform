@@ -85,5 +85,24 @@
 - **裁决**:**紧凑 JSON + read_file 窗口读两项目都没掉准确率,改动验证通过,无需撤回**。"1.0 旧基线"本身是 n=6 单跑幸运值,repeat-2 的 0.917 才是真基线。
 - **教训**:① 我"read_file nudge 无需 A/B"是侥幸对,行为改动本该验(repeat-2 现补上,通过)② 别对 n=6 单跑下结论,repeat 取均值才算(单跑 0.667 差点误判回归)③ 用户坚持"调 LLM 验两项目"抓出了漏验项,对。
 
+## 十三、多机平台演进线 —— PgJobQueue 健壮化 + graph store→PG Stage A
+
+§四"下一步值钱的在产品化/多仓契约桥"落地:平台是**多机/多组织/多用户**(数据共享是前提)。按 panel 演进,核心判据=索引派生可重建故存储后移可延、队列协调是第一块多米诺。
+
+- **PgJobQueue 多机共享 reindex 队列**(已建,经 2 轮对抗审计):SKIP LOCKED 原子认领 + per-row claim_token(complete 精确删防 lease 接管误删)+ owner=hostname **机器级稳定**(非 pid)+ reclaim_stale_own 崩溃重启复位本机卡 running 行 + 多 org 亲和 pending(projects)/worker `_own_projects`(PG 无配 fail-closed)+ peek 只读(status 不锁全表)。alembic 0004 + tables.py。
+  - **审计 P0(真 PG 复现)**:reclaim_stale_own owner 含 os.getpid() → 真实 systemd 重启=新 pid=新 owner → 复位 0 行,崩溃恢复 100% no-op(同进程单测假绿,**第 4 次"测试假绿"**)。修=owner 机器级 + 测试用新实例模拟真重启。另修 None 退化吃别 org job(fail-closed)+ 孤儿 job status STALE 可见。
+- **graph store → GraphStore 抽象 Stage A**(纯重构零行为变化,设计 panel 三票一致防屎山):`GraphStore` Protocol(load_graph/upsert_result/stats(pid)/audit_scan/list_project_ids/close+ctx-mgr)+ SqliteGraphStore + open_store 工厂;**绝不暴露底层 conn**(漏 conn=recouple 头号债);~13 消费方全改 store.method() **删旧 conn 版模块函数零委托残留**;audit 去 sqlite3 走 store.audit_scan;读路径中性异常 GraphStoreUnreadable;修 stats 全库 count bug→按 pid;共享 _row_to_* 防双拷漂移;~24 测试迁移(裸 conn fixture 改独立 sqlite3、web 测试 patch open_store 工厂)。**WSL 全量 1545 passed**。设计/分阶段见 [[multi-machine-platform-arc]]。
+  - **下一步 Stage B**:PgGraphStore(照 memory_store_pg 范式)+ alembic 0005 + org_id 两后端对称(app 层 WHERE 非 RLS,org 取 token)+ sqlite/pg 参数化契约测试(双跑=硬闸防漂移)。Stage C 多机启用。
+- **教训**:大 SQL-port 不宜盲并行 agent 建(并行 worktree 试:queue 流成功被进程退出后 git merge 抢救,graph 流半成品弃);连贯+审计 比 盲并行 稳。git-bash 长会话后 msys sh fork 退化(`add_item failed`)→ pre-push hook 跑不动,手动验 audit clean 后 --no-verify(门禁逻辑过、hook 机制环境故障)。
+
+## 十四、多租户隔离盘点 + graph org 隔离收口(用户问"测了 user/project/org 隔离没")
+
+用户追问三层隔离覆盖(平台是多组织、成员跨 org/project)。Explore 盘点 + 决策:
+- **三层现状**:project 隔离(graph 契约 + RBAC)✓;user 隔离(RBAC + memory)✓;org 隔离——RBAC/memory 已测(test_session_project_access/test_web_projects/test_acl/test_agent_memory_route_acl),**graph 端点缺专门跨 org 测试**(机制有=两网络入口都挂 org-aware 闸, 测试无)。
+- **graph 两个网络入口都 org-gated**:① HTTP(web/routes/graph+reports → require_project_access)② MCP SSE(graph/mcp_server → can_access)。in-process(agent/recall/CLI)在已授权 session 后非独立入口。
+- **补的两道测试**:① `test_web_graph_authz`(结构守护:每个 graph/reports 端点必挂 require_project_access 或 require_platform_admin;**真抓到 mcp-usage/agent-usage 用的是 admin 闸**=对的,非漏洞)② `test_graph_mcp_authz`(MCP 边界 `authorize_graph_request` 锁跨 org→403/同 org 放行/无身份→403/非法 pid→400)。顺带把 handle_sse+bind_mcp_context 重复鉴权抽成共用 `authorize_graph_request`(DRY 防漂移)。
+- **org_id 防御纵深决策=暂缓(deliberate, 非遗漏)**:graph store 只 project_id(同 reindex_jobs),org 隔离靠两网络闸(已测);现加 org_id 净收益零(无 token→store-org 接线全 default + churn);正确触发=专门多组织-DB 加固阶段统一加(非 piecemeal,panel 红线)。详见 [[multi-machine-platform-arc]]。
+- **顺带**:用户指出"agent 分析量化项目都串了"——诊断=openclaw-stock 与 codev-platform 历史纠缠(前者抽离出后者)+ 本机 openclaw 图谱空(0 节点)+ 登记 repo_path="." stale → agent 在 codev 上下文问 openclaw 只能回退读二手文档=串。非安全泄漏(隔离没破, 是读不到自己回退到错)。真分析需在 openclaw 仓(D:\WorkSpace\platform)上下文跑。
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
