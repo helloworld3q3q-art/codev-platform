@@ -183,6 +183,18 @@ def test_code_vec_runner_registered():
     assert "code_vec" in kinds()
 
 
+def test_code_vec_runner_syncs_codegraph_first(monkeypatch):
+    # R4 真修: code_vec runner 用 --codegraph --code-vec 同进程先同步再建, 保证读新鲜 db。
+    import codev_platform.reindex.runners as RU
+    cap = {}
+    monkeypatch.setattr(RU, "_venv_python", lambda cfg: "py")
+    monkeypatch.setattr(RU.subprocess, "run",
+                        lambda cmd, **k: cap.update(cmd=cmd) or type("C", (), {"returncode": 0})())
+    RU.get_runner("code_vec").run("demo-proj", Path("/repo"), {})
+    assert "--codegraph" in cap["cmd"] and "--code-vec" in cap["cmd"]
+    assert cap["cmd"].index("--codegraph") < cap["cmd"].index("--code-vec")   # 先 sync 后建
+
+
 # ---- R4: codegraph 锁忙(rc=2)处置 ----
 
 def test_decide_codegraph_lock_outcome_truth_table():

@@ -133,14 +133,15 @@ def _read_enrich_mode(meta_path) -> bool | None:
         return None
 
 
-def _assert_persist_clean(persist) -> None:
-    """全量重建 rmtree 后校验目录确已清空。rmtree(ignore_errors)在 Windows 被句柄占用会**静默失败**
-    留旧 chroma.sqlite3 + hnsw segment, 随后多批 upsert 落旧 segment = chromadb 522 触发条件。
-    残留 → 显式抛(被 stage-4 fail-soft 接住 warn), 把静默腐坏转成可见失败。"""
+def _warn_persist_residue(persist) -> None:
+    """全量重建 rmtree 后探测残留(诊断, 不阻断)。rmtree(ignore_errors)在 Windows 被句柄占用会
+    **静默失败**留旧 chroma.sqlite3。**只 warn 不抛**: code_vec 是每项目**单 collection** 库, 在
+    残留 collection 上 get_or_create + 多批 upsert 实测安全(522 仅多 collection 库触发, 见
+    incident 2026-06-05); 硬抛会把"同进程重复全量"这种 pre-fix 可正常 reopen 的场景误判为失败
+    (验证 panel 实证)。生产 worker 走 subprocess-per-job, 句柄随子进程死, 几乎不残留。"""
     if (persist / "chroma.sqlite3").exists():
-        raise RuntimeError(
-            f"[code_vec] 全量重建 rmtree 后仍残留 sqlite: {persist} "
-            "(疑似有存活 chroma 句柄占用, Windows 静默失败); 拒绝在旧 segment 上 bulk upsert(防 522)。")
+        logger.warning("[code_vec] rmtree 后仍残留 sqlite: %s(疑似存活句柄/Windows 静默失败); "
+                       "单 collection 库上重灌安全, 继续。", persist)
 
 
 def _get_query_client(persist_path: str):
@@ -264,7 +265,7 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
             full = True
     if full:
         shutil.rmtree(persist, ignore_errors=True)
-        _assert_persist_clean(persist)   # R1: rmtree 静默失败留残留 → fail-fast, 不在旧 segment 上重灌
+        _warn_persist_residue(persist)   # R1: rmtree 静默失败留残留 → 只 warn(单 collection 重灌安全)
     persist.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(persist))
     ensure_wal(persist)

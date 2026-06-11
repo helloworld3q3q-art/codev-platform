@@ -69,13 +69,15 @@ class CliReindexRunner:
     build) —— "怎么 reindex" 只此一处, 本 runner 不重复。
     """
 
-    def __init__(self, kind: str, flag: str) -> None:
+    def __init__(self, kind: str, flag) -> None:
         self.kind = kind
-        self._flag = flag
+        # flag 可为单个 str 或多个(list): code_vec 用 ['--codegraph','--code-vec'] 让同一子进程先
+        # sync codegraph 再建向量, 保证读新鲜 codegraph.db(纵深, 不靠跨 job 排序)+ 使 R4 锁忙逻辑生效。
+        self._flags = [flag] if isinstance(flag, str) else list(flag)
 
     def run(self, project_id: str, repo: Path, cfg: dict) -> int:
         py = _venv_python(cfg)
-        cmd = [py, "-m", "codev_platform.cli", "reindex", self._flag, "--repo", str(repo)]
+        cmd = [py, "-m", "codev_platform.cli", "reindex", *self._flags, "--repo", str(repo)]
         timeout = _runner_timeout(cfg)
         try:
             return subprocess.run(cmd, timeout=timeout).returncode
@@ -116,6 +118,9 @@ register(CodegraphReindexRunner())
 # 统一图谱 ingest: 跑 analyzer 插件 -> graph store。委托 reindex --ingest (失败隔离在
 # ops/reindex.py 内: 插件层异常只 warn 不改退出码, 不拖垮基线索引)。
 register(CliReindexRunner("ingest", "--ingest"))
-# 代码向量索引 (vector lane): 增量重嵌变更节点。委托 reindex --code-vec。**依赖 codegraph.db
-# 新鲜** → 入队侧(webhook / dispatch)须保证它排在 codegraph 之后(见 webhook append 逻辑)。
-register(CliReindexRunner("code_vec", "--code-vec"))
+# 代码向量索引 (vector lane): 增量重嵌变更节点。**依赖 codegraph.db 新鲜** —— runner 用
+# ['--codegraph','--code-vec'] 让同一子进程**先 sync codegraph 再建向量**, 故无论入队排序如何、
+# 即使 codegraph 是独立 job, code_vec 都读到刚同步的新鲜 db; 且 codegraph sync 锁忙(rc=2)时
+# commands 的 R4 逻辑(同进程 do_codegraph+do_codevec)跳过 code_vec + rc=2 让 worker 重试。
+# codegraph sync 增量近 noop, 双跑成本低。
+register(CliReindexRunner("code_vec", ["--codegraph", "--code-vec"]))
