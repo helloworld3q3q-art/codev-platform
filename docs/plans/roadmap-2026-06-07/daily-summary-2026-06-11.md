@@ -46,5 +46,12 @@
 - **真查询实测**(flash,多跳题,12 步):input **104,602** tokens / output 3,122 / **缓存命中 80.2%**(hit 83,840)→ 本次 $0.004,无缓存会 $0.0155,**缓存已省 74%**。
 - **结论**:① loop 的稳定前缀结构让 deepseek 自动缓存吃满(80%),**无需"修缓存"**;② 真成本驱动是**单查询 10 万 input(12 步 × 重发增长上下文)**,下一杠杆=收紧 recall top-N(现 8)/按档限 max_steps/裁历史,但是**成本↔质量权衡,须 eval 量后再砍**;③ 一个 chat 查询($0.004)≈/> 整个 A1 标注重建 → **实证"钱在 loop 不在标注"**,标注分档优化是小头(印证 §五搁置)。
 
+## 八、codegraph_trace 实现 + "省钱"假设被自己实测证伪(commit `5f2273d`)
+§七数据 + 面板指向"省钱第一刀=符号级多跳工具",于是建了 `codegraph_trace`(沿 codegraph 边表 BFS,一次返回 N 层调用链,默认 3/上限 6/防环)+ 进 planner SYMBOL/IMPACT lane + 7 单测(32 passed)。
+- **实测前后**(flash 5 类型):步数 45→38(−16%,impact 13→9/multihop 18→15)、input 309K→182K(−41%),**但总成本持平 $0.0088→$0.0089**。
+- **证伪**:cost = miss+output,**信息量绑定非步数绑定**。input 降的是免费的 hit(缓存重发,占成本 4%);miss(真成本)= 调用链新信息量,只是从"18 小块"变"几大块",总量守恒 → 钱不降。
+- **codegraph_trace 定位修正**:留用,价值=**延迟/吞吐(少往返,利 Phase 8)+ 多跳质量(不耗尽 max_steps)**,**非省钱**。详见 [`loop-cost-optimization-plan-2026-06-11.md`](loop-cost-optimization-plan-2026-06-11.md) §九。
+- **元教训**:连数据面板都错在"把 input 当成本"(成本在 miss+output);真降成本只能动信息量(全是质量权衡)。先验证后定论再次兑现。
+
 ## commit 链(2026-06-11 段)
 `b346e3c`(flash daily-summary)→ WSL config 迁 flash + 重启 → `739269c`(硬集 16→25 codev 20)→ flash A/B n=20(planner 收口)→ `ff667e5`(§二十三 收口沉淀)→ `4a28f03`(impact_paths lane 修)→ `7b86997`(§二十四 多跳诊断沉淀)。记忆更新:[[phase7-llm-planner-and-e2e-eval]](收口)、[[recall-weight-ab-finding]](CI 精确化)。
