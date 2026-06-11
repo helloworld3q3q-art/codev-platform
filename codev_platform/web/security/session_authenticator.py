@@ -35,11 +35,12 @@ class SessionAwareAuthenticator:
     def __init__(self, inner: Authenticator) -> None:
         self._inner = inner
 
-    def authenticate(self, headers: Mapping[str, str]) -> Identity:
+    def authenticate(self, headers: Mapping[str, str], query: str = "") -> Identity:
         tok = _bearer(headers)
         if tok:
             sess = get_session_store().resolve(tok)
             if sess is not None:
                 # session 身份仅用于过中间件; 逐项目授权由 current_session + service 闸判。
                 return Identity(user_id=sess.username, org_id=sess.org_id, via="session")
-        return self._inner.authenticate(headers)
+        # session token 走 header(web 控制台); query(?token=)透传给内层 gateway 认证器兜底。
+        return self._inner.authenticate(headers, query)
