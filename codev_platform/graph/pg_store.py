@@ -214,13 +214,13 @@ class PgGraphStore:
         return {"totals": counts, "plugins": plugins}
 
     def audit_scan(self, project_id: str) -> dict:
+        """后端探查。**foreign_project_ids 恒空**: "串台泄漏"是 sqlite **per-file** 隔离概念
+        (每个 .sqlite 本应只装一个 project, 出现别 project_id 行 = 写错文件的 bug)。共享 PG 库
+        所有 project 合法共表、隔离靠 WHERE project_id —— 别 project 的行是正常邻居非泄漏, 若按
+        "project_id != pid"判会把每个别 project 都误报成串台。soft_plugins 漂移在两后端都成立。"""
         from codev_platform.core.project_id import validate as _v
         pid = _v(project_id)
         self._ensure()
-
-        def _foreign(tbl: str, conn) -> list[str]:
-            return [r[0] for r in conn.execute(
-                f"SELECT DISTINCT project_id FROM graph_{tbl}") if r[0] != pid]
 
         def _soft_plugins(tbl: str, kinds, conn) -> list[str]:
             if not kinds:
@@ -232,8 +232,7 @@ class PgGraphStore:
 
         with self._pool.connection() as conn:
             return {
-                "foreign_project_ids": {"nodes": _foreign("nodes", conn),
-                                        "edges": _foreign("edges", conn)},
+                "foreign_project_ids": {"nodes": [], "edges": []},   # 共享库无 per-file 串台概念
                 "soft_plugins": {"nodes": _soft_plugins("nodes", SOFT_NODE_KINDS, conn),
                                  "edges": _soft_plugins("edges", SOFT_EDGE_KINDS, conn)},
             }

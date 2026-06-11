@@ -214,8 +214,15 @@ def test_audit_scan_foreign_and_soft(store, tmp_path, request):
             conn.commit()
 
     scan = store.audit_scan(PID)
-    assert "OTHER-PID" in scan["foreign_project_ids"]["nodes"]
+    # soft 产物 plugin 漂移: 两后端都查得到。
     assert "arch_layer" in scan["soft_plugins"]["nodes"]
+    if backend == "sqlite":
+        # cross-project 串台 = sqlite per-file 隔离概念(文件本应只一个 project)→ 检出 OTHER-PID。
+        assert "OTHER-PID" in scan["foreign_project_ids"]["nodes"]
+    else:
+        # 共享 PG 无 per-file 隔离, 所有 project 合法共表 → 无"串台"概念, foreign 恒空(注入的
+        # OTHER-PID 行只是另一 project 的合法邻居, 不误报)。
+        assert scan["foreign_project_ids"]["nodes"] == []
 
 
 # ---- 7. list_project_ids: 建库后能枚举到本 pid ----
