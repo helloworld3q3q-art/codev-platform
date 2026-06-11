@@ -17,10 +17,16 @@ pytest.importorskip("fastapi")
 from codev_platform.core.httpkit.permissions import require_project_access  # noqa: E402
 from codev_platform.web.routes import graph as graph_routes  # noqa: E402
 from codev_platform.web.routes import reports as reports_routes  # noqa: E402
+from codev_platform.web.security.deps import require_platform_admin  # noqa: E402
+
+# 两类合法租户闸: require_project_access = 项目级(org/project 隔离, 跨 org 拒绝);
+# require_platform_admin = 平台管理员级(跨项目全局报表如 token/mcp 用量, 非 project-scoped, 更严)。
+# 端点挂任一即合规; 都没挂 = 裸奔隔离漏洞。
+_TENANCY_GATES = {require_project_access, require_platform_admin}
 
 
 def _gate_in_dependants(route) -> bool:
-    """递归 route 依赖树, 查 require_project_access 是否在内(Depends 链任意层)。"""
+    """递归 route 依赖树, 查是否挂了任一租户闸(Depends 链任意层)。"""
     seen: list = []
 
     def _walk(dep):
@@ -32,18 +38,18 @@ def _gate_in_dependants(route) -> bool:
     if dependant is None:
         return False
     _walk(dependant)
-    return require_project_access in seen
+    return any(g in seen for g in _TENANCY_GATES)
 
 
 @pytest.mark.parametrize("router,label", [
     (graph_routes.router, "graph"),
     (reports_routes.router, "reports"),
 ])
-def test_all_endpoints_require_project_access(router, label):
-    """每个 graph/reports API 路由都必须挂 require_project_access(org/project 隔离闸)。"""
+def test_all_endpoints_have_tenancy_gate(router, label):
+    """每个 graph/reports API 路由都必须挂租户闸(项目级 require_project_access 或管理员级
+    require_platform_admin); 都没挂 = org/project 隔离裸奔漏洞。"""
     api_routes = [r for r in router.routes if getattr(r, "path", "").startswith("/api/")]
     assert api_routes, f"{label} router 没有 /api 路由(测试前提失效)"
     ungated = [r.path for r in api_routes if not _gate_in_dependants(r)]
     assert not ungated, (
-        f"{label} 端点未挂 require_project_access(org/project 隔离漏洞, "
-        f"org A 用户可裸读 org B 项目): {ungated}")
+        f"{label} 端点未挂任何租户闸(org/project 隔离漏洞, org A 用户可裸读 org B 项目): {ungated}")
