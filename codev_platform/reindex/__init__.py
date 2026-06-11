@@ -25,6 +25,28 @@ def spool_dir() -> Path:
     return data_root() / "reindex_queue"
 
 
-def open_default_queue() -> FileSpoolQueue:
-    """单机默认队列 (file spool)。多机共享时此工厂改返 PgQueue, 上层不动。"""
+def open_default_queue() -> JobQueue:
+    """按 config 选队列后端, 上层(worker / 生产者)只依赖 JobQueue Protocol 不动。
+
+    `reindex.queue_backend`: "file"(默认, 单机 FileSpoolQueue)| "pg"(多机共享 PgJobQueue)。
+    pg 需 memory.pg_dsn(env CODEV_PLATFORM_MEMORY_DSN)+ psycopg_pool; 缺任一 → 告警回退 file
+    (fail-soft: 配错不至于让 reindex 整个瘫掉)。
+    """
+    from codev_platform.core.config import get as _get
+    from codev_platform.core.config import load_config
+    cfg = load_config()
+    backend = (_get(cfg, "reindex.queue_backend", "file") or "file").lower()
+    if backend == "pg":
+        import os as _os
+        dsn = _os.environ.get("CODEV_PLATFORM_MEMORY_DSN") or _get(cfg, "memory.pg_dsn")
+        if not dsn:
+            print("[reindex] queue_backend=pg 但 memory.pg_dsn / CODEV_PLATFORM_MEMORY_DSN 未配, 回退 file",
+                  flush=True)
+        else:
+            try:
+                from codev_platform.reindex.pg_queue import PgJobQueue
+                read_dsn = _os.environ.get("CODEV_PLATFORM_MEMORY_DSN_READ") or _get(cfg, "memory.pg_dsn_read")
+                return PgJobQueue(dsn, read_dsn)
+            except Exception as exc:  # noqa: BLE001 — psycopg 缺 / 构造失败 → 回退 file 不瘫
+                print(f"[reindex] PgJobQueue 不可用({exc!r}), 回退 file spool", flush=True)
     return FileSpoolQueue(spool_dir())
