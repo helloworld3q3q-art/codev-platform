@@ -110,9 +110,12 @@ class CodegraphReindexRunner(CliReindexRunner):
         return super().run(project_id, repo, cfg)
 
 
-# 内置三类 (与 ops/reindex.py 的 --chroma / --codegraph / --ingest 对齐)
+# 内置四类 (与 ops/reindex.py 的 --chroma / --codegraph / --ingest / --code-vec 对齐)
 register(CliReindexRunner("chroma", "--chroma"))
 register(CodegraphReindexRunner())
 # 统一图谱 ingest: 跑 analyzer 插件 -> graph store。委托 reindex --ingest (失败隔离在
 # ops/reindex.py 内: 插件层异常只 warn 不改退出码, 不拖垮基线索引)。
 register(CliReindexRunner("ingest", "--ingest"))
+# 代码向量索引 (vector lane): 增量重嵌变更节点。委托 reindex --code-vec。**依赖 codegraph.db
+# 新鲜** → 入队侧(webhook / dispatch)须保证它排在 codegraph 之后(见 webhook append 逻辑)。
+register(CliReindexRunner("code_vec", "--code-vec"))

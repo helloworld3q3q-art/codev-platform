@@ -126,9 +126,13 @@ def build_app(middleware=None):
         if not scopes:
             _log(f"[{name}] {event.repo} -> {pid}: {len(event.changed_files)} 文件改动但无 reindex scope 命中, 跳过")
             return JSONResponse({"ok": True, "project_id": pid, "skipped": "no scope match"})
-        # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest (与本地 hook 同源)。
-        if "codegraph" in scopes and "ingest" not in scopes:
-            scopes.append("ingest")
+        # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest + 代码向量 lane (与本地 hook 同源)。
+        # append 在 codegraph 之后入队 → 串行 worker 保证 ingest/code_vec 读到新鲜 codegraph.db。
+        if "codegraph" in scopes:
+            if "ingest" not in scopes:
+                scopes.append("ingest")
+            if "code_vec" not in scopes:
+                scopes.append("code_vec")
         q = open_default_queue()
         for kind in scopes:
             q.enqueue(pid, kind)

@@ -6,7 +6,11 @@
 from __future__ import annotations
 
 from codev_platform.recall import service
-from codev_platform.recall.code_vector_store import _parse_query_result, build_text
+from codev_platform.recall.code_vector_store import (
+    _diff_manifest,
+    _parse_query_result,
+    build_text,
+)
 from codev_platform.recall.fusion import LaneResult
 from codev_platform.recall.service import VECTOR_LANE, recall_code
 
@@ -50,6 +54,21 @@ def test_build_text_joins_meaningful_fields():
 def test_build_text_skips_empty_fields():
     assert build_text({"name": "x"}).strip() == "x"
     assert build_text({}) == ""
+
+
+# ---- 增量 diff (manifest) ----
+
+def test_diff_manifest_detects_changed_new_deleted():
+    old = {"a": "h1", "b": "h2", "gone": "h9"}
+    new = {"a": "h1", "b": "h2new", "c": "h3"}   # a 不变, b 变, c 新增, gone 删
+    changed, deleted = _diff_manifest(old, new)
+    assert set(changed) == {"b", "c"}            # 不变的 a 不重嵌
+    assert deleted == ["gone"]
+
+
+def test_diff_manifest_empty_old_is_full():
+    changed, deleted = _diff_manifest({}, {"a": "h1", "b": "h2"})
+    assert set(changed) == {"a", "b"} and deleted == []
 
 
 # ---- lane 编排 (fail-soft / 降权) ----

@@ -34,10 +34,12 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         return 1
 
     do_ingest_flag = getattr(args, "ingest", False)
-    selected = bool(args.chroma or args.codegraph or do_ingest_flag)
+    do_codevec_flag = getattr(args, "code_vec", False)
+    selected = bool(args.chroma or args.codegraph or do_ingest_flag or do_codevec_flag)
     do_codegraph = args.codegraph if selected else True
     do_chroma = args.chroma if selected else True
     do_ingest = do_ingest_flag if selected else True
+    do_codevec = do_codevec_flag if selected else True
 
     if args.force or (do_codegraph and do_chroma and not selected):
         C.out("[reindex] full rebuild: run in foreground to watch progress "
@@ -45,10 +47,10 @@ def cmd_reindex(args: argparse.Namespace) -> int:
 
     started = time.monotonic()
 
-    # --- stage 1/3: codegraph sync ---
+    # --- stage 1/4: codegraph sync ---
     if do_codegraph:
         C.out("")
-        C.out("=== step 1/3: codegraph sync ===")
+        C.out("=== step 1/4: codegraph sync ===")
         try:
             cp = C.run(["codegraph", "sync"], cwd=str(repo))
             rc = cp.returncode
@@ -62,12 +64,12 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             C.err(f"FAIL: codegraph sync exit={rc}")
             return rc
     else:
-        C.out("step 1/3: codegraph sync   -- skipped")
+        C.out("step 1/4: codegraph sync   -- skipped")
 
-    # --- stage 2/3: chroma reindex ---
+    # --- stage 2/4: chroma reindex ---
     if do_chroma:
         C.out("")
-        C.out("=== step 2/3: chroma reindex ===")
+        C.out("=== step 2/4: chroma reindex ===")
         chroma_py = C.chroma_python()
         if not chroma_py or not Path(chroma_py).exists():
             C.err(f"FAIL: chroma python not found ({chroma_py}); set runtime.chroma_venv in config")
@@ -82,18 +84,18 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             C.err(f"FAIL: chroma reindex exit={rc}")
             return rc
     else:
-        C.out("step 2/3: chroma reindex   -- skipped")
+        C.out("step 2/4: chroma reindex   -- skipped")
 
-    # --- stage 3/3: unified graph ingest (plugins -> graph store) ---
+    # --- stage 3/4: unified graph ingest (plugins -> graph store) ---
     # 跑所有适用 analyzer 插件, 把产出灌进 per-project 统一图谱 store。与上面三个
     # stage 并列, 但 FAILURE-ISOLATED: 这是 Phase 3 聚合层, 任何异常只 warn 不
     # 改 reindex 退出码 —— 绝不让插件层拖垮已稳定的 codegraph/chroma 基线。
     if do_ingest:
         C.out("")
-        C.out("=== step 3/3: unified graph ingest ===")
+        C.out("=== step 3/4: unified graph ingest ===")
         pid = C.project_id_of(repo)
         if not pid:
-            C.out("step 3/3: graph ingest     -- skipped (repo 无 .claude/project.json project_id)")
+            C.out("step 3/4: graph ingest     -- skipped (repo 无 .claude/project.json project_id)")
         else:
             try:
                 from codev_platform.graph.ingest import ingest_project
@@ -106,7 +108,27 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             except Exception as exc:  # noqa: BLE001 — 聚合层失败隔离, 不污染基线退出码
                 C.err(f"WARN: graph ingest failed (non-fatal, baseline indexes unaffected): {exc}")
     else:
-        C.out("step 3/3: graph ingest     -- skipped")
+        C.out("step 3/4: graph ingest     -- skipped")
+
+    # --- stage 4/4: code vector index (vector lane) ---
+    # 同 ingest: FAILURE-ISOLATED —— 向量 lane 是增强层, 异常只 warn 不改退出码。
+    # 必在 codegraph sync 之后(读 codegraph.db)→ 置最后。reindex --force → 全量重建;
+    # 否则增量(只重嵌变更节点, 接 worker 随提交刷新便宜)。
+    if do_codevec:
+        C.out("")
+        C.out("=== step 4/4: code vector index ===")
+        pid = C.project_id_of(repo)
+        if not pid:
+            C.out("step 4/4: code vector      -- skipped (repo 无 .claude/project.json project_id)")
+        else:
+            try:
+                from codev_platform.recall.code_vector_store import build_code_vector_index
+                n = build_code_vector_index(pid, incremental=not args.force)
+                C.out(f"code vector ok: {n} 节点 (re)embedded")
+            except Exception as exc:  # noqa: BLE001 — 增强层失败隔离, 不污染基线退出码
+                C.err(f"WARN: code vector failed (non-fatal, baseline indexes unaffected): {exc}")
+    else:
+        C.out("step 4/4: code vector      -- skipped")
 
     dur = int(time.monotonic() - started)
     C.out("")
@@ -377,6 +399,8 @@ def register(subparsers) -> None:
     sp.add_argument("--chroma", action="store_true", help="只跑 chroma (与其它 flag 组合则只跑选中的)")
     sp.add_argument("--codegraph", action="store_true", help="只跑 codegraph sync")
     sp.add_argument("--ingest", action="store_true", help="只跑统一图谱 ingest (plugins -> graph store)")
+    sp.add_argument("--code-vec", dest="code_vec", action="store_true",
+                    help="只跑代码向量索引刷新 (vector lane; 增量重嵌变更节点)")
     sp.add_argument("--force", action="store_true", help="chroma indexer 传 --force (drop + rebuild)")
     sp.set_defaults(func=cmd_reindex)
 

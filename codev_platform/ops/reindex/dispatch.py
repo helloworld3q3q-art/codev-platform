@@ -36,10 +36,14 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
     if not scoped:
         return 0  # silent no-op
     scopes = list(scoped)
-    # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest (插件重跑落 store)。
-    # ingest 失败隔离在 reindex --ingest 内, 不影响 codegraph 自身索引。
-    if "codegraph" in scoped and "ingest" not in scopes:
-        scopes.append("ingest")
+    # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest + 代码向量 lane (插件/嵌入重跑落库)。
+    # 二者失败隔离在 reindex --ingest / --code-vec 内, 不影响 codegraph 自身索引。
+    # append 在 codegraph 之后 → 串行 worker 保证读到新鲜 codegraph.db(code_vec 依赖它)。
+    if "codegraph" in scoped:
+        if "ingest" not in scopes:
+            scopes.append("ingest")
+        if "code_vec" not in scopes:
+            scopes.append("code_vec")
     log_file = _reindex_log(repo)
     all_matched = sorted({p for paths in scoped.values() for p in paths})
     header = "\n".join(

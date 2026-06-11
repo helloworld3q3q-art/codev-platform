@@ -20,11 +20,15 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 
 from codev_platform.core.paths import chroma_collection_name, chroma_dir
 
 logger = logging.getLogger(__name__)
+
+_MANIFEST_NAME = ".manifest.json"   # id -> text sha1, 增量重建用(在 per-project persist 目录内)
 
 # 节点文本拼接字段(语义意义从强到弱); file 只入 metadata 不入嵌入文本(路径噪声)。
 _TEXT_FIELDS = ("name", "qualifiedName", "signature", "docstring")
@@ -57,6 +61,17 @@ def _code_vec_persist_dir(project_id: str):
 def build_text(node: dict) -> str:
     """codegraph 节点 → 嵌入文本(name + qualifiedName + signature + docstring, 跳空字段)。"""
     return "\n".join(str(node[f]) for f in _TEXT_FIELDS if node.get(f))
+
+
+def _node_hash(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _diff_manifest(old: dict, new: dict) -> tuple[list[str], list[str]]:
+    """增量 diff(纯函数): old/new = id→hash → (变更或新增 id 列表, 已删除 id 列表)。"""
+    changed = [nid for nid, h in new.items() if old.get(nid) != h]
+    deleted = [nid for nid in old if nid not in new]
+    return changed, deleted
 
 
 def _parse_query_result(res: dict) -> tuple[list[str], dict]:
@@ -93,11 +108,16 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     return _parse_query_result(res)
 
 
-def build_code_vector_index(project_id: str) -> int:
-    """全量重建该项目代码向量索引(MVP: 删旧 collection 重灌); 返回索引节点数。
+def build_code_vector_index(project_id: str, *, incremental: bool = False) -> int:
+    """构建/刷新该项目代码向量索引; 返回**本次 embed 的节点数**(增量=变更数, 全量=全部)。
 
-    枚举 codegraph 全节点 → 逐节点嵌入 name/sig/docstring → 单次 upsert(避开 chromadb 多 flush
-    compaction bug, 见 docs/incidents/2026-06-05-chromadb-multiflush-compaction.md)。
+    - `incremental=False`(或无 manifest)→ **全量**: 物理清空目录(truly fresh sqlite)重灌。
+      不用 delete_collection —— 后者残留旧 hnsw segment, 多批 upsert compaction 撞残留报
+      disk I/O (522)(incident 2026-06-05); 全新单 collection 库多批 flush 才永远安全。
+    - `incremental=True` 且有 manifest → **增量**: 只对 text 变更/新增节点重嵌 + 删除已不存在
+      节点。小 upsert 既便宜又安全(事故明确「增量小 upsert 是安全模式, 全量 bulk multi-flush
+      才触发 522」), 适合接 reindex worker 随提交刷新。manifest(id→text sha1)存目录内。
+
     嵌入模型不可用直接抛(构建语境必须有模型, 不静默产空库)。
     """
     from codev_platform.agent.embed.registry import build_embedder
@@ -110,27 +130,34 @@ def build_code_vector_index(project_id: str) -> int:
             "embedder 不可用: 装 sentence-transformers + 配 models.embed_path(qwen-local), "
             "或设 memory.embed.backend=remote 接 chroma daemon /embed。")
 
-    import chromadb
-    from codev_platform.chroma import ensure_wal
-
     import shutil
 
+    import chromadb
+
+    from codev_platform.chroma import ensure_wal
+
     persist = _code_vec_persist_dir(project_id)
-    # 全量重建 = **物理清空该项目目录**(truly fresh sqlite), 不用 delete_collection —— 后者残留
-    # 旧 hnsw segment, 多批 upsert 时 compaction 撞残留报 disk I/O (522)(incident 2026-06-05)。
-    # 全新单 collection 库多批 flush 才永远安全(实测 openclaw 10053 节点 3 批: delete_collection
-    # 路径第 2 批必崩, rmtree 路径全过)。
-    shutil.rmtree(persist, ignore_errors=True)
+    manifest_path = persist / _MANIFEST_NAME
+    full = (not incremental) or (not manifest_path.exists())   # 无 manifest 不可信增量 → 退全量
+    if full:
+        shutil.rmtree(persist, ignore_errors=True)
     persist.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(persist))
     ensure_wal(persist)
     name = code_vec_collection_name(project_id)
     col = client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
 
-    ids: list[str] = []
-    embs: list[list[float]] = []
-    docs: list[str] = []
-    metas: list[dict] = []
+    old_manifest: dict = {}
+    if not full:
+        try:
+            old_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 — manifest 坏 → 当空(全量重嵌, 但不 rmtree)
+            logger.warning("[code_vec] manifest 损坏(%s), 本次全量重嵌", exc)
+
+    # 枚举节点 → 收 text/meta + 算新 manifest(跳过低价值 kind 与空文本)
+    new_manifest: dict = {}
+    text_by_id: dict[str, str] = {}
+    meta_by_id: dict[str, dict] = {}
     with CodegraphClient(project_id) as cg:
         for node in cg.iter_nodes():
             nid = node.get("id")
@@ -139,24 +166,37 @@ def build_code_vector_index(project_id: str) -> int:
             text = build_text(node)
             if not nid or not text.strip():
                 continue
-            ids.append(str(nid))
-            embs.append(embedder.encode(text))
-            docs.append(text)
-            metas.append({
+            nid = str(nid)
+            new_manifest[nid] = _node_hash(text)
+            text_by_id[nid] = text
+            meta_by_id[nid] = {
                 "name": node.get("name") or "",
                 "kind": node.get("kind") or "",
                 "file": node.get("filePath") or "",
-            })
-            if len(ids) % 200 == 0:
-                logger.info("[code_vec] embedded %d nodes ...", len(ids))
+            }
 
-    # 分批 upsert(每批 < 5461 硬上限)。独立 persist 目录 = 单 collection 库, 多批 flush 安全。
-    for i in range(0, len(ids), _UPSERT_BATCH):
-        sl = slice(i, i + _UPSERT_BATCH)
-        col.upsert(ids=ids[sl], embeddings=embs[sl], documents=docs[sl], metadatas=metas[sl])
-        logger.info("[code_vec] upserted %d/%d", min(i + _UPSERT_BATCH, len(ids)), len(ids))
-    logger.info("[code_vec] %s: 索引 %d 节点 → collection %s", project_id, len(ids), name)
-    return len(ids)
+    changed, deleted = _diff_manifest(old_manifest, new_manifest)
+
+    if deleted:
+        try:
+            col.delete(ids=deleted)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[code_vec] 删除 %d 旧节点失败(忽略): %s", len(deleted), exc)
+
+    # 分批 embed + upsert 变更节点(每批 < 5461 硬上限; 单 collection 库多批 flush 安全)
+    for i in range(0, len(changed), _UPSERT_BATCH):
+        chunk = changed[i:i + _UPSERT_BATCH]
+        embs = [embedder.encode(text_by_id[nid]) for nid in chunk]
+        col.upsert(ids=chunk, embeddings=embs,
+                   documents=[text_by_id[nid] for nid in chunk],
+                   metadatas=[meta_by_id[nid] for nid in chunk])
+        logger.info("[code_vec] upserted %d/%d", min(i + _UPSERT_BATCH, len(changed)), len(changed))
+
+    manifest_path.write_text(json.dumps(new_manifest, ensure_ascii=False), encoding="utf-8")
+    logger.info("[code_vec] %s: %s, 变更 %d / 删除 %d / 总 %d 节点 → %s",
+                project_id, "full" if full else "incremental",
+                len(changed), len(deleted), len(new_manifest), name)
+    return len(changed)
 
 
 def main() -> int:
@@ -167,6 +207,8 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="构建代码向量索引 (Phase 6 vector lane)")
     parser.add_argument("--project", help="project_id(缺省从 cwd .claude/project.json 解析)")
+    parser.add_argument("--incremental", action="store_true",
+                        help="增量(只重嵌变更节点; 无 manifest 自动退全量)。缺省=全量重建")
     args = parser.parse_args()
 
     pid = args.project
@@ -176,8 +218,8 @@ def main() -> int:
         except ProjectIdError as exc:
             print(f"[code_vec] FATAL: 无法解析 project_id: {exc}", flush=True)
             return 1
-    n = build_code_vector_index(pid)
-    print(f"[code_vec] done: {n} nodes indexed for {pid}", flush=True)
+    n = build_code_vector_index(pid, incremental=args.incremental)
+    print(f"[code_vec] done: {n} nodes (re)embedded for {pid}", flush=True)
     return 0
 
 

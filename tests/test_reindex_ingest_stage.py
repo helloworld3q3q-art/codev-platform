@@ -20,7 +20,7 @@ from codev_platform.ops import reindex as R
 
 def _args(**kw) -> argparse.Namespace:
     base = dict(repo=None, chroma=False, codegraph=False,
-                ingest=False, force=False)
+                ingest=False, code_vec=False, force=False)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -40,6 +40,10 @@ def _stub_stages(monkeypatch):
     monkeypatch.setattr(R.C, "run", lambda *a, **k: _CP())
     # chroma python 存在性检查: 指向任意存在文件 → 跳过 FAIL, 走 C.run (已被 stub)
     monkeypatch.setattr(R.C, "chroma_python", lambda: __file__)
+    # code_vec stage 默认 reindex 也跑 → stub 成 no-op, 避免真去建嵌入 (隔离 ingest 测试)
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store.build_code_vector_index",
+        lambda pid, **k: 0)
 
 
 def test_default_runs_ingest_stage(_repo, monkeypatch):
@@ -111,3 +115,69 @@ def test_dispatch_enqueues_ingest_on_code_change(tmp_path, monkeypatch):
 def test_ingest_runner_registered():
     from codev_platform.reindex.runners import kinds
     assert "ingest" in kinds()
+
+
+# ---- code_vec stage (vector lane 随提交刷新) ----
+
+def test_default_runs_code_vec_stage(_repo, monkeypatch):
+    _stub_stages(monkeypatch)
+    called = {}
+    monkeypatch.setattr("codev_platform.graph.ingest.ingest_project",
+                        lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store.build_code_vector_index",
+        lambda pid, **k: called.update(pid=pid, incremental=k.get("incremental")) or 3)
+    rc = R.cmd_reindex(_args(repo=str(_repo)))   # 默认全跑
+    assert rc == 0
+    assert called["pid"] == "demo-proj"
+    assert called["incremental"] is True   # 非 --force → 增量
+
+
+def test_code_vec_force_is_full(_repo, monkeypatch):
+    _stub_stages(monkeypatch)
+    seen = {}
+    monkeypatch.setattr("codev_platform.graph.ingest.ingest_project",
+                        lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store.build_code_vector_index",
+        lambda pid, **k: seen.update(incremental=k.get("incremental")) or 0)
+    rc = R.cmd_reindex(_args(repo=str(_repo), force=True))
+    assert rc == 0
+    assert seen["incremental"] is False   # --force → 全量
+
+
+def test_code_vec_failure_isolated(_repo, monkeypatch):
+    _stub_stages(monkeypatch)
+    monkeypatch.setattr("codev_platform.graph.ingest.ingest_project",
+                        lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
+
+    def boom(pid, **k):
+        raise RuntimeError("embed daemon down")
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store.build_code_vector_index", boom)
+    rc = R.cmd_reindex(_args(repo=str(_repo)))
+    assert rc == 0   # code_vec 崩了, 基线退出码不受影响
+
+
+def test_dispatch_enqueues_code_vec_on_code_change(tmp_path, monkeypatch):
+    enq: list[tuple[str, str]] = []
+
+    class _Q:
+        def enqueue(self, pid, kind):
+            enq.append((pid, kind))
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+    monkeypatch.setattr(R.C, "project_id_of", lambda repo: "demo-proj")
+    monkeypatch.setattr(R.C, "meta_health", lambda pid: {})
+    rc = R._dispatch_reindex(tmp_path, ["apps/web/src/Foo.java"],
+                             foreground=False, trigger_line="t", banner="test")
+    assert rc == 0
+    order = [k for _, k in enq]
+    assert "code_vec" in order
+    # code_vec 必须排在 codegraph 之后(读新鲜 codegraph.db)
+    assert order.index("code_vec") > order.index("codegraph")
+
+
+def test_code_vec_runner_registered():
+    from codev_platform.reindex.runners import kinds
+    assert "code_vec" in kinds()
