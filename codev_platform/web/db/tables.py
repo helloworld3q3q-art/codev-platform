@@ -21,6 +21,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     MetaData,
     PrimaryKeyConstraint,
     Table,
@@ -152,6 +153,83 @@ reindex_jobs = Table(
     PrimaryKeyConstraint("project_id", "kind"),
 )
 
+# 统一图谱 PG 后端 5 表(PgGraphStore, 2026-06-11)。与 graph/store.py sqlite schema 同构;
+# 唯一差异: ingest_meta 加 project_id 入 PK(共享 PG 库按 project_id 隔离, sqlite per-file 无需)。
+# 真值源仍是 PgGraphStore._SCHEMA_DDL(运行期 CREATE IF NOT EXISTS 自足); 这里登记进 metadata
+# 是为 alembic autogenerate 不误 DROP(同 reindex_jobs 教训)+ parity 守护 + 受管迁移。
+graph_nodes = Table(
+    "graph_nodes",
+    metadata,
+    Column("id", Text, nullable=False),
+    Column("plugin", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
+    Column("file", Text),
+    Column("line", Integer),
+    Column("language", Text),
+    Column("meta_json", Text),
+    PrimaryKeyConstraint("id", "plugin"),
+)
+
+graph_edges = Table(
+    "graph_edges",
+    metadata,
+    Column("project_id", Text, nullable=False),
+    Column("plugin", Text, nullable=False),
+    Column("source", Text, nullable=False),
+    Column("target", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("confidence", Float, server_default=text("1.0")),
+    Column("meta_json", Text),
+    PrimaryKeyConstraint("project_id", "plugin", "source", "target", "kind"),
+)
+
+graph_evidences = Table(
+    "graph_evidences",
+    metadata,
+    Column("project_id", Text, nullable=False),
+    Column("plugin", Text, nullable=False),
+    Column("seq", Integer, nullable=False),
+    Column("source", Text, nullable=False),
+    Column("detail", Text, nullable=False),
+    Column("file", Text),
+    Column("line", Integer),
+    Column("confidence", Float, server_default=text("1.0")),
+    Column("meta_json", Text),
+    PrimaryKeyConstraint("project_id", "plugin", "seq"),
+)
+
+graph_findings = Table(
+    "graph_findings",
+    metadata,
+    Column("project_id", Text, nullable=False),
+    Column("plugin", Text, nullable=False),
+    Column("seq", Integer, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("severity", Text, nullable=False),
+    Column("title", Text, nullable=False),
+    Column("detail", Text),
+    Column("node_ids_json", Text),
+    Column("evidence_ids_json", Text),
+    Column("meta_json", Text),
+    PrimaryKeyConstraint("project_id", "plugin", "seq"),
+)
+
+graph_ingest_meta = Table(
+    "graph_ingest_meta",
+    metadata,
+    Column("project_id", Text, nullable=False),
+    Column("plugin", Text, nullable=False),
+    Column("plugin_version", Text),
+    Column("node_count", Integer),
+    Column("edge_count", Integer),
+    Column("evidence_count", Integer),
+    Column("finding_count", Integer),
+    Column("ingested_at", Text),
+    PrimaryKeyConstraint("project_id", "plugin"),
+)
+
 Index("ix_org_members_user", org_members.c.user_id)
 Index("ix_team_members_user", team_members.c.user_id)
 Index("ix_teams_org", teams.c.org_id)
@@ -160,6 +238,10 @@ Index("ix_sessions_access", sessions.c.access_hash)
 Index("ix_sessions_refresh", sessions.c.refresh_hash)
 Index("ix_sessions_username", sessions.c.username)
 Index("ix_reindex_jobs_claim", reindex_jobs.c.status, reindex_jobs.c.enqueued_at)
+Index("ix_graph_nodes_kind", graph_nodes.c.project_id, graph_nodes.c.kind)
+Index("ix_graph_nodes_name", graph_nodes.c.project_id, graph_nodes.c.name)
+Index("ix_graph_edges_source", graph_edges.c.project_id, graph_edges.c.source)
+Index("ix_graph_edges_target", graph_edges.c.project_id, graph_edges.c.target)
 
 
 __all__ = [
@@ -174,4 +256,9 @@ __all__ = [
     "jobs",
     "sessions",
     "reindex_jobs",
+    "graph_nodes",
+    "graph_edges",
+    "graph_evidences",
+    "graph_findings",
+    "graph_ingest_meta",
 ]

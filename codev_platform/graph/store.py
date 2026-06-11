@@ -231,6 +231,10 @@ class GraphStore(Protocol):
         """
         ...
 
+    def list_project_ids(self) -> list[str]:
+        """枚举本 store 里出现过的 project_id(sqlite per-file 通常 [pid] + 串台残留; pg 共享库 = 全部)。"""
+        ...
+
     def close(self) -> None:
         """释放底层资源(sqlite 关 conn / PG 归还池)。"""
         ...
@@ -517,6 +521,11 @@ class SqliteGraphStore:
             },
         }
 
+    def list_project_ids(self) -> list[str]:
+        """本 sqlite store 里出现过的 project_id(per-file 通常 = [本 pid], 串台时多)。"""
+        rows = self._conn.execute("SELECT DISTINCT project_id FROM nodes").fetchall()
+        return sorted(r[0] for r in rows)
+
     # ---- 生命周期 ----
 
     def close(self) -> None:
@@ -531,15 +540,52 @@ class SqliteGraphStore:
 
 # ---- 工厂 + 枚举(后端选择的唯一边界; Stage B 在此接 PG 分派)----
 
-def open_store(project_id: str, *, mode: str = "rw", path: Path | None = None) -> GraphStore:
+def _graph_backend(cfg=None) -> str:
+    """选 graph store 后端: config graph.store_backend(env > config > 'sqlite')。"""
+    import os
+    env = os.environ.get("CODEV_PLATFORM_GRAPH_BACKEND")
+    if env:
+        return env.strip().lower()
+    from codev_platform.core.config import get, load_config
+    cfg = cfg if cfg is not None else load_config()
+    return (get(cfg, "graph.store_backend", default="sqlite") or "sqlite").strip().lower()
+
+
+def _graph_pg_dsn(cfg=None) -> str | None:
+    """PG dsn(复用 memory 全栈 PG 连接, env > config.memory.pg_dsn)。"""
+    import os
+    from codev_platform.core.config import get, load_config
+    cfg = cfg if cfg is not None else load_config()
+    return os.environ.get("CODEV_PLATFORM_MEMORY_DSN") or get(cfg, "memory.pg_dsn")
+
+
+def open_store(project_id: str, *, mode: str = "rw", path: Path | None = None, cfg=None) -> GraphStore:
     """打开某 project 的统一图谱 store, 返回 GraphStore(消费方只认协议, 不碰底层连接)。
 
+    后端选择只在此工厂一处(零 if-else 散落): config graph.store_backend(sqlite 默认 | pg)。
+    - **显式 path → 必走 sqlite**(测试 / audit_all_stores 按文件路径开特定 .sqlite, 与后端配置无关)。
+    - 未知 backend → **响亮硬失败**(数据进错库是静默腐败, 绝不默默降级 pg→sqlite)。
+    - backend=pg 但缺 dsn / 缺 psycopg → 报错(operator 显式开了 pg, 要知道坏在哪, 不偷偷回 sqlite)。
+
     Args:
-        project_id: 项目隔离键 (决定默认文件名)。
-        mode:       'rw'(默认, 建/迁移/可写) | 'ro'(纯只读门禁, 不改本地)。
-        path:       显式覆盖 DB 路径 (测试用);None 走 graph_store_path。
+        project_id: 项目隔离键。
+        mode:       'rw'(默认, 建/迁移/可写) | 'ro'(纯只读门禁)。pg 后端无 per-open 迁移, mode 仅 sqlite 用。
+        path:       显式覆盖 DB 路径(测试 / 按文件审计);给了就走 sqlite。
+        cfg:        显式 config(默认 load_config)。
     """
-    return SqliteGraphStore(project_id, mode=mode, path=path)
+    if path is not None:
+        return SqliteGraphStore(project_id, mode=mode, path=path)
+    backend = _graph_backend(cfg)
+    if backend == "sqlite":
+        return SqliteGraphStore(project_id, mode=mode)
+    if backend == "pg":
+        from codev_platform.graph.pg_store import PgGraphStore
+        dsn = _graph_pg_dsn(cfg)
+        if not dsn:
+            raise ValueError(
+                "graph.store_backend=pg 但未配 memory.pg_dsn / CODEV_PLATFORM_MEMORY_DSN")
+        return PgGraphStore(dsn)
+    raise ValueError(f"未知 graph.store_backend: {backend!r} (sqlite | pg)")
 
 
 def list_project_ids() -> list[str]:

@@ -29,6 +29,17 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     # reindex_jobs: 2026-06-11 新增(PgJobQueue 多机共享 reindex 队列), 守护扩展到 10 表。
     "reindex_jobs": {"project_id", "kind", "enqueued_at", "status", "claimed_by",
                      "lease_expires_at", "claim_token"},
+    # graph_*: 2026-06-11 新增(PgGraphStore 统一图谱 PG 后端), 守护扩展到 15 表。
+    "graph_nodes": {"id", "plugin", "kind", "name", "project_id", "file", "line",
+                    "language", "meta_json"},
+    "graph_edges": {"project_id", "plugin", "source", "target", "kind", "confidence",
+                    "meta_json"},
+    "graph_evidences": {"project_id", "plugin", "seq", "source", "detail", "file",
+                        "line", "confidence", "meta_json"},
+    "graph_findings": {"project_id", "plugin", "seq", "kind", "severity", "title",
+                       "detail", "node_ids_json", "evidence_ids_json", "meta_json"},
+    "graph_ingest_meta": {"project_id", "plugin", "plugin_version", "node_count",
+                          "edge_count", "evidence_count", "finding_count", "ingested_at"},
 }
 
 # 原 _SCHEMA 的主键列(PRIMARY KEY / PRIMARY KEY(...) 复合) + jobs。
@@ -43,6 +54,11 @@ EXPECTED_PK: dict[str, set[str]] = {
     "jobs": {"job_id"},
     "sessions": {"session_id"},
     "reindex_jobs": {"project_id", "kind"},
+    "graph_nodes": {"id", "plugin"},
+    "graph_edges": {"project_id", "plugin", "source", "target", "kind"},
+    "graph_evidences": {"project_id", "plugin", "seq"},
+    "graph_findings": {"project_id", "plugin", "seq"},
+    "graph_ingest_meta": {"project_id", "plugin"},
 }
 
 # 原 _SCHEMA 的 NOT NULL 列(PK 列在 PG 隐含 NOT NULL,这里只列显式声明 / 业务约束列)。
@@ -58,12 +74,20 @@ EXPECTED_NOT_NULL: dict[str, set[str]] = {
     "sessions": {"session_id", "username", "org_id", "access_hash", "refresh_hash",
                  "access_expires_at", "refresh_expires_at"},
     "reindex_jobs": {"project_id", "kind", "enqueued_at", "status"},
+    # graph_*: PK 列(PG 隐含 NOT NULL) + 显式 NOT NULL 业务列。
+    "graph_nodes": {"id", "plugin", "kind", "name", "project_id"},
+    "graph_edges": {"project_id", "plugin", "source", "target", "kind"},
+    "graph_evidences": {"project_id", "plugin", "seq", "source", "detail"},
+    "graph_findings": {"project_id", "plugin", "seq", "kind", "severity", "title"},
+    "graph_ingest_meta": {"project_id", "plugin"},
 }
 
 # 索引名(原 _SCHEMA 3 个 + jobs 1 + sessions 3 + reindex_jobs 1, 2026-06-11)。
 EXPECTED_INDEXES = {"ix_org_members_user", "ix_team_members_user", "ix_teams_org",
                     "ix_jobs_project", "ix_sessions_access", "ix_sessions_refresh",
-                    "ix_sessions_username", "ix_reindex_jobs_claim"}
+                    "ix_sessions_username", "ix_reindex_jobs_claim",
+                    "ix_graph_nodes_kind", "ix_graph_nodes_name",
+                    "ix_graph_edges_source", "ix_graph_edges_target"}
 
 
 def test_table_names_match():
