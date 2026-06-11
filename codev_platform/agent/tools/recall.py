@@ -58,7 +58,9 @@ class CodeRecallTool(Tool):
             "lanes": sorted({lane for h in hits for lane in h.lanes}),
             "hits": [asdict(h) for h in hits],
         }
-        return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
+        # 紧凑 JSON(去缩进/分隔空格): tool-result 每步计入 miss, 缩进是纯格式零信息 → 压扁省
+        # ~15-20% 该工具 token, grounding 不受影响(免费 win, 2026-06-11 成本面板; impact/codegraph 同)。
+        return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 
 
 def register_into(registry, project_id: str | None = None) -> None:

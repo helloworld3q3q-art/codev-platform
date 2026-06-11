@@ -124,7 +124,7 @@ class CodegraphSearchTool(Tool):
 
         rows = sorted(rows, key=_score)
         out = [_node_brief(r) for r in rows]
-        return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
+        return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 
 
 def _relations(name: str, incoming: bool, project_id: str | None = None) -> ToolResult:
@@ -162,7 +162,7 @@ def _relations(name: str, incoming: bool, project_id: str | None = None) -> Tool
         return ToolResult(call_id="", content=f"{name} 无{rel}记录。")
     out = [{"name": r["name"], "kind": r["kind"], "loc": f"{r['file_path']}:{r['start_line']}", "edge": r["edge"]}
            for r in rows]
-    return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
+    return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 
 
 def _trace(name: str, incoming: bool, depth: int, project_id: str | None = None) -> ToolResult:
@@ -219,7 +219,7 @@ def _trace(name: str, incoming: bool, depth: int, project_id: str | None = None)
         return ToolResult(call_id="", content=f"{name} 无{rel}记录。")
     out = {"symbol": name, "direction": "callers" if incoming else "callees",
            "depth": len(levels), "levels": {f"hop{i + 1}": lv for i, lv in enumerate(levels)}}
-    return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, indent=2))
+    return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 
 
 class CodegraphTraceTool(Tool):

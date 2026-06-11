@@ -41,7 +41,8 @@ def _run_query(project_id: str | None, fn, *args) -> ToolResult:
         return ToolResult(call_id="", content=f"影响分析查询失败: {e}", is_error=True)
     finally:
         conn.close()
-    return ToolResult(call_id="", content=json.dumps(r, ensure_ascii=False, indent=2))
+    # 紧凑 JSON(去缩进/分隔空格): tool-result 计入 miss, 缩进纯格式零信息 → 压扁省 token, grounding 不变(免费 win)。
+    return ToolResult(call_id="", content=json.dumps(r, ensure_ascii=False, separators=(",", ":")))
 
 
 class ImpactAnalysisTool(Tool):
