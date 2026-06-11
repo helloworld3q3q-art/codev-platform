@@ -1,10 +1,12 @@
 name: CI
 
-# 适配自建 Gitea + act_runner(host 模式, WSL Linux)。彻底不依赖 github.com:
-#   - checkout: 手动 git fetch 本地 Gitea(用注入的 GITHUB_TOKEN), 不用 actions/checkout(它要从 github 下)
-#   - python:  用 runner 宿主现成的 python3(不用 actions/setup-python, 它会去 github 下 python)
-#   - runner:  只有 ubuntu-latest:host 一个, matrix 收成单 ubuntu(win/mac 无 runner 会永久 pending)
-# 注: GitHub 上不跑此 workflow(仅用 GitHub 备份代码; uses 完整 URL / 手动 checkout 是 Gitea 取向)。
+# 适配自建 Gitea + act_runner(host 模式, WSL Linux)。不碰 github.com + 不每次下载工具:
+#   - checkout: 手动 git fetch 本地 Gitea(注入 GITHUB_TOKEN), 不用 actions/checkout
+#   - 工具:    用 WSL 预装的 ~/ci-venv(ruff/pytest/detect-secrets, 一次装好零下载)
+#   - 代码:    PYTHONPATH 指向 checkout, 不装包(base 零依赖)
+#   - runner:  单 ubuntu-latest:host(win/mac 无 runner)
+# 注: GitHub 上不跑此 workflow(仅 GitHub 备份代码)。
+# 维护: 工具升级时在 WSL 重建 ~/ci-venv(pip install -i 清华镜像 ruff==x pytest pytest-timeout detect-secrets)。
 
 on:
   push:
@@ -14,11 +16,6 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-# pip 走国内镜像(直连 pypi 国内慢/卡 —— 首跑 ruff job 卡 9min 即此)。
-env:
-  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
-  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
   lint:
@@ -33,14 +30,12 @@ jobs:
           git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
           git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
           git checkout -q FETCH_HEAD
-      - name: Ruff check (宿主 python3 临时 venv)
+      - name: Ruff check (预装 ci-venv, 零下载)
         run: |
-          python3 -m venv /tmp/ci-ruff
-          /tmp/ci-ruff/bin/pip install -q ruff==0.15.15
-          /tmp/ci-ruff/bin/ruff check codev_platform
+          "$HOME/ci-venv/bin/ruff" check codev_platform
 
   test:
-    name: pytest (ubuntu / 宿主 python3)
+    name: pytest (ubuntu / 预装 ci-venv)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (本地 Gitea)
@@ -51,18 +46,14 @@ jobs:
           git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
           git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
           git checkout -q FETCH_HEAD
-      - name: pytest (宿主 python3 临时 venv)
-        # 含 provider 文件纪律 + 测试数地板(防自挂盲区复发, 见对应 test_*.py)。
+      - name: pytest (预装 ci-venv + PYTHONPATH, 零下载)
+        # 含 provider 文件纪律 + 测试数地板(防自挂盲区复发)。codev_platform base 零依赖, 走 PYTHONPATH 不装包。
         run: |
-          python3 -m venv /tmp/ci-test
-          /tmp/ci-test/bin/pip install -q -e .
-          /tmp/ci-test/bin/pip install -q pytest pytest-timeout
-          /tmp/ci-test/bin/python -m pytest tests/ -q --timeout=120 --timeout-method=thread
+          PYTHONPATH="$PWD" "$HOME/ci-venv/bin/python" -m pytest tests/ -q --timeout=120 --timeout-method=thread
 
   commit-lint:
     name: commit message (no AI traces)
     runs-on: ubuntu-latest
-    # 只在 PR 触发, 只扫本 PR 引入的 commit(已推送的不强求改写, 见 commit-pr-conventions.md)。
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout (本地 Gitea, 全历史)
@@ -87,7 +78,7 @@ jobs:
   secrets:
     name: secret scan (detect-secrets)
     runs-on: ubuntu-latest
-    # 报告型起步(continue-on-error): host 无 docker, 用 pip detect-secrets 替代 gitleaks 做基本扫描。
+    # 报告型起步(continue-on-error): host 无 docker, 用预装 detect-secrets 替代 gitleaks。
     continue-on-error: true
     steps:
       - name: Checkout (本地 Gitea)
@@ -98,32 +89,9 @@ jobs:
           git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
           git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
           git checkout -q FETCH_HEAD
-      - name: detect-secrets scan
+      - name: detect-secrets scan (预装 ci-venv)
         run: |
-          python3 -m venv /tmp/ci-sec
-          /tmp/ci-sec/bin/pip install -q detect-secrets
-          /tmp/ci-sec/bin/detect-secrets scan --exclude-files 'tests/|docs/audits/|.*\.lock$' > /tmp/ds.json
-          /tmp/ci-sec/bin/python -c "import json; d=json.load(open('/tmp/ds.json')); n=sum(len(v) for v in d.get('results',{}).values()); print('detect-secrets potential findings:', n); raise SystemExit(1 if n else 0)"
+          "$HOME/ci-venv/bin/detect-secrets" scan --exclude-files 'tests/|docs/audits/|.*\.lock$' > /tmp/ds.json
+          "$HOME/ci-venv/bin/python" -c "import json; d=json.load(open('/tmp/ds.json')); n=sum(len(v) for v in d.get('results',{}).values()); print('detect-secrets potential findings:', n); raise SystemExit(1 if n else 0)"
 
-  web-ui:
-    name: web-ui static checks (tsc + eslint)
-    runs-on: ubuntu-latest
-    # 报告型起步(continue-on-error): 前端不写单测(见偏好), tsc/lint 静态门禁仍有价值。
-    # 用宿主 node20 的 corepack 启 pnpm, 不用 setup-node(它去 github 下 node)。
-    continue-on-error: true
-    steps:
-      - name: Checkout (本地 Gitea)
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git init -q .
-          git remote add origin "http://x-access-token:${TOKEN}@localhost:3000/${GITHUB_REPOSITORY}.git"
-          git -c protocol.version=2 fetch -q --depth=1 origin "${GITHUB_SHA}"
-          git checkout -q FETCH_HEAD
-      - name: tsc + eslint (宿主 node20 + corepack pnpm)
-        run: |
-          corepack enable
-          corepack prepare pnpm@9 --activate
-          pnpm --dir web-ui install --frozen-lockfile
-          pnpm --dir web-ui run tsc
-          pnpm --dir web-ui run lint:js
+  # web-ui 前端不进 CI: 前端不写测试用例, tsc/lint 静态检查由本地/IDE 负责(用户决定不在 CI 跑)。
