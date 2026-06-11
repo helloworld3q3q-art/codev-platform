@@ -59,8 +59,50 @@ def _code_vec_persist_dir(project_id: str):
 
 
 def build_text(node: dict) -> str:
-    """codegraph 节点 → 嵌入文本(name + qualifiedName + signature + docstring, 跳空字段)。"""
+    """codegraph 节点 → 基础嵌入文本(name + qualifiedName + signature + docstring, 跳空字段)。"""
     return "\n".join(str(node[f]) for f in _TEXT_FIELDS if node.get(f))
+
+
+_SNIPPET_MAX_CHARS = 1500   # 源码片段截断(够含 docstring + 函数体, 不撑爆嵌入)
+
+
+def _resolve_repo(project_id: str):
+    """从 config.projects.<pid>.repo_path 解析仓 checkout 路径(读源码用)。缺/不存在 → None。"""
+    from pathlib import Path
+
+    from codev_platform.core.config import get as _get
+    from codev_platform.core.config import load_config
+    rp = _get(load_config(), f"projects.{project_id}.repo_path")
+    if not rp:
+        return None
+    p = Path(rp).expanduser()
+    return p if p.exists() else None
+
+
+def _source_snippet(repo, node: dict, max_chars: int = _SNIPPET_MAX_CHARS) -> str:
+    """读节点源码片段(start_line..end_line, 截断)—— 含 docstring + 函数体, 补 codegraph 未抽取的
+    语义(实测 docstring 覆盖仅 ~7-11%)。repo/文件/行号缺或读失败 → ''(降级, 不崩)。"""
+    if repo is None:
+        return ""
+    fp, s, e = node.get("filePath"), node.get("startLine"), node.get("endLine")
+    if not fp or not s:
+        return ""
+    from pathlib import Path
+    try:
+        p = Path(repo) / fp
+        if not p.exists():
+            return ""
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        return "\n".join(lines[max(0, int(s) - 1):int(e or s)])[:max_chars]
+    except Exception:  # noqa: BLE001 — 读源码失败仅降级
+        return ""
+
+
+def _embed_text(node: dict, repo) -> str:
+    """索引侧嵌入文本 = 基础(名/签名/docstring)+ 源码片段(补语义)。无源码退基础。"""
+    base = build_text(node)
+    snip = _source_snippet(repo, node)
+    return f"{base}\n{snip}" if snip else base
 
 
 def _node_hash(text: str) -> str:
@@ -155,6 +197,8 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
             logger.warning("[code_vec] manifest 损坏(%s), 本次全量重嵌", exc)
 
     # 枚举节点 → 收 text/meta + 算新 manifest(跳过低价值 kind 与空文本)
+    repo = _resolve_repo(project_id)   # 读源码片段补语义; None → 退基础文本(降级不崩)
+    logger.info("[code_vec] %s: repo=%s (源码富化 %s)", project_id, repo, "on" if repo else "off")
     new_manifest: dict = {}
     text_by_id: dict[str, str] = {}
     meta_by_id: dict[str, dict] = {}
@@ -163,7 +207,7 @@ def build_code_vector_index(project_id: str, *, incremental: bool = False) -> in
             nid = node.get("id")
             if node.get("kind") in _SKIP_KINDS:   # 低价值 kind 不入向量库(import/file/variable)
                 continue
-            text = build_text(node)
+            text = _embed_text(node, repo)         # 名/签名/docstring + 源码片段
             if not nid or not text.strip():
                 continue
             nid = str(nid)

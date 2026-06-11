@@ -8,7 +8,9 @@ from __future__ import annotations
 from codev_platform.recall import service
 from codev_platform.recall.code_vector_store import (
     _diff_manifest,
+    _embed_text,
     _parse_query_result,
+    _source_snippet,
     build_text,
 )
 from codev_platform.recall.fusion import LaneResult
@@ -69,6 +71,30 @@ def test_diff_manifest_detects_changed_new_deleted():
 def test_diff_manifest_empty_old_is_full():
     changed, deleted = _diff_manifest({}, {"a": "h1", "b": "h2"})
     assert set(changed) == {"a", "b"} and deleted == []
+
+
+# ---- 源码片段富化(补 codegraph 未抽取的 docstring 语义)----
+
+def test_source_snippet_reads_line_range(tmp_path):
+    f = tmp_path / "m.py"
+    f.write_text("a\nb\nc\nd\n", encoding="utf-8")
+    node = {"filePath": "m.py", "startLine": 2, "endLine": 3}
+    assert _source_snippet(tmp_path, node) == "b\nc"
+
+
+def test_source_snippet_degrades_fail_soft(tmp_path):
+    assert _source_snippet(None, {"filePath": "x", "startLine": 1, "endLine": 2}) == ""
+    assert _source_snippet(tmp_path, {"filePath": "missing.py", "startLine": 1, "endLine": 2}) == ""
+    assert _source_snippet(tmp_path, {"name": "n"}) == ""   # 无行号
+
+
+def test_embed_text_appends_source(tmp_path):
+    f = tmp_path / "m.py"
+    f.write_text("def foo():\n    '''does the X thing'''\n", encoding="utf-8")
+    node = {"name": "foo", "filePath": "m.py", "startLine": 1, "endLine": 2}
+    t = _embed_text(node, tmp_path)
+    assert "foo" in t and "does the X thing" in t          # 源码 docstring 进了嵌入文本
+    assert _embed_text(node, None) == "foo"                # 无 repo 退基础
 
 
 # ---- lane 编排 (fail-soft / 降权) ----
