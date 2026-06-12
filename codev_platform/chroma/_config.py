@@ -52,6 +52,9 @@ _CFG = load_config()
 _LOG_MODE = logging_mode(_CFG)
 EMBED_MODEL = str(Path(env_or_config("PLATFORM_EMBED_MODEL_PATH", _CFG, "models.embed_path")).expanduser().resolve())
 EMBED_DEVICE = env_or_config("PLATFORM_EMBED_DEVICE", _CFG, "models.embed_device", "cuda")
+# 单次 encode 的内部分批大小 = encode 激活显存峰值的上界(模型保持 fp32 不降精度)。小显存(8GB)
+# 跑大项目 code_vec 时调小(8/16)把 fp32 的激活峰值压进显存防 OOM; 默认 8(对 8GB 卡保守安全)。
+EMBED_ENCODE_BATCH = int(env_or_config("PLATFORM_EMBED_ENCODE_BATCH", _CFG, "models.embed_encode_batch", 8))
 
 # ---------- Reranker config (Qwen3-Reranker-0.6B chat-template + yes/no logits) ----------
 RERANKER_MODEL = env_or_config("PLATFORM_RERANKER_MODEL_PATH", _CFG, "models.reranker_path", "")

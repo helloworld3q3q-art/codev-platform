@@ -131,4 +131,7 @@ def build_code_vec_embedder(cfg: dict) -> Embedder | None:
     from codev_platform.agent.embed.qwen import QwenLocalEmbedder
     path = _get(cfg, "models.embed_path", str(Path.home() / "models" / "Qwen3-Embedding-0.6B"))
     device = _get(cfg, "recall.code_vec.embed_device") or _cuda_or_cpu()
-    return QwenLocalEmbedder(path, device)
+    # encode batch 与 chroma daemon /embed 共用同一 config 键(models.embed_encode_batch), 单一真值源:
+    # 小显存(8GB)调小防 fp32 激活峰值 OOM, 不降精度。默认 8(对 8GB 卡保守, 大显存可在 config 调大)。
+    batch = int(_get(cfg, "models.embed_encode_batch", 8))
+    return QwenLocalEmbedder(path, device, batch_size=batch)

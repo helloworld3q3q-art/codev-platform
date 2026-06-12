@@ -39,7 +39,21 @@ _TEXT_FIELDS = ("name", "qualifiedName", "signature", "docstring")
 # (与 file metadata 冗余)/ variable=多为局部·模块杂项。实测占两项目近半节点且污染语义召回
 # (query「load config」召回的全是 import 节点而非 load_config 函数)。**blocklist 非 allowlist**:
 # 跨语言 kind 词汇不同, 排除已证噪声的 3 类即可, 不漏 function/method/class/field/route 等有用 kind。
-_SKIP_KINDS = frozenset({"import", "file", "variable"})
+# 这是**默认值**; 各项目可经 config `recall.code_vec.skip_kinds` 覆盖(如 Java 重仓项目想再排
+# field), 默认不变 → 平台与现存项目行为零改动。详见 _resolve_skip_kinds。
+_DEFAULT_SKIP_KINDS = frozenset({"import", "file", "variable"})
+
+
+def _resolve_skip_kinds(cfg: dict) -> frozenset:
+    """解析索引排除 kind: config 未设 → 默认 3 类(import/file/variable); 设了 → 按 config(可为
+    空 list = 不排除任何 kind = 全量嵌)。数据进 config 不写死, 单项目可调而不动平台默认与他项目。"""
+    from codev_platform.core.config import get as _get
+    raw = _get(cfg, "recall.code_vec.skip_kinds", None)
+    if raw is None:
+        return _DEFAULT_SKIP_KINDS
+    if isinstance(raw, (list, tuple, set)):
+        return frozenset(str(k).strip().lower() for k in raw if str(k).strip())
+    return _DEFAULT_SKIP_KINDS
 
 
 def code_vec_collection_name(project_id: str) -> str:
@@ -349,7 +363,9 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
 
     # 索引侧用专用 embedder(默认本机 qwen-local + GPU 直跑), 不经共享 daemon /embed —— 大批量
     # 打 daemon 会长占其串行 GPU 信号量甚至死锁(连带打挂在线 search_docs)。build 与服务解耦。
-    embedder = build_code_vec_embedder(load_config())
+    _cfg = load_config()
+    skip_kinds = _resolve_skip_kinds(_cfg)   # 默认 import/file/variable; config 可覆盖, 不写死
+    embedder = build_code_vec_embedder(_cfg)
     if embedder is None:
         raise RuntimeError(
             "embedder 不可用: 装 sentence-transformers + 配 models.embed_path(qwen-local), "
@@ -401,7 +417,7 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     with CodegraphClient(project_id) as cg:
         for node in cg.iter_nodes():
             nid = node.get("id")
-            if node.get("kind") in _SKIP_KINDS:   # 低价值 kind 不入向量库(import/file/variable)
+            if node.get("kind") in skip_kinds:   # 低价值 kind 不入向量库(默认 import/file/variable)
                 continue
             if not nid:
                 continue

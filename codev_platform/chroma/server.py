@@ -59,7 +59,7 @@ from codev_platform.chroma._config import (  # noqa: E402
     _CFG, _LOG_MODE, EMBED_MODEL, EMBED_DEVICE,
     RERANKER_MODEL, RERANKER_DEVICE, RERANKER_DTYPE, RERANKER_ENABLED, RERANKER_TOP_K,
     DEFAULT_RETURN_K, BM25_TOP_K, BM25_ENABLED, RRF_K_CONST, GPU_CONCURRENCY, _BM25_IMPORT_OK,
-    GPU_OP_TIMEOUT,
+    GPU_OP_TIMEOUT, EMBED_ENCODE_BATCH,
 )
 # load_config 仍在 server 用 (handle_sse / platform_status 的 ACL + 中间件构建)。
 from codev_platform.core.config import load_config  # noqa: E402
@@ -462,7 +462,8 @@ async def _run_http(port: int) -> None:
             # 整个 /embed(连带在线 search_docs)。云上大批量 remote 索引时这是稳定性硬前提。
             async with _get_gpu_sem():
                 vecs = await _gpu_call(
-                    lambda: m.encode(texts, normalize_embeddings=True, convert_to_numpy=True))
+                    lambda: m.encode(texts, batch_size=EMBED_ENCODE_BATCH,
+                                     normalize_embeddings=True, convert_to_numpy=True))
                 if len(texts) >= _GPU_CACHE_RELEASE_MIN_BATCH:   # 索引大批后清缓存防膨胀 OOM
                     await asyncio.to_thread(_release_cuda_cache)
             return JSONResponse({"vectors": [v.tolist() for v in vecs]})
