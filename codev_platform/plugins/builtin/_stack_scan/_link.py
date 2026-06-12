@@ -77,6 +77,9 @@ def _resolve_by_url(
 
     - 唯一候选 method 一致 → conf=1.0(exact);
     - 唯一候选 method 不一致 → conf=0.7(method_mismatch, 仍建边便于发现);
+    - **url_registry 节点 method 未知**(常量只有路径, 动词在调用点): 不按假 method 过滤/惩罚,
+      纯按 url 匹配 —— 唯一候选 → conf=1.0(url_only), 不误标 method_mismatch。覆盖 GET/PUT/
+      DELETE/PATCH 等所有动词(否则默认 POST 一律对不上非 POST 端点, 漏掉大量真链路)。
     - 多候选: 先按 method 收窄, 仍 >1 → 候选不确定。跨多个 service → conf=0.5 + ambiguous_service
       (多服务串台高危, 标到最低可信); 同一 service 内多候选 → conf=0.6 + ambiguous_endpoint。
     """
@@ -86,10 +89,15 @@ def _resolve_by_url(
     candidates = by_url.get(url)
     if not candidates:
         return None
+    # url_registry: True = 该前端节点来自 URL 常量注册表, http_method 是占位默认(POST), 非真实动词。
+    method_unknown = bool((fn.meta or {}).get("url_registry"))
     method = _meta_str(fn, "http_method", "POST").upper()
-    pool = [c for c in candidates if c[1] == method] or candidates
+    # method 已知才按 method 收窄候选; 未知则纯按 url(收全部候选, 不用假 method 过滤)。
+    pool = candidates if method_unknown else ([c for c in candidates if c[1] == method] or candidates)
     if len(pool) == 1:
         ep_id, ep_method, _svc = pool[0]
+        if method_unknown:
+            return ep_id, 1.0, f"url_only url={url} method=unknown(url_registry) back={ep_method}"
         if ep_method == method:
             return ep_id, 1.0, f"exact url={url}"
         return ep_id, 0.7, f"method_mismatch front={method} back={ep_method} url={url}"

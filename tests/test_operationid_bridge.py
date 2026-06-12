@@ -58,6 +58,43 @@ def test_no_backend_no_edge():
     assert link_api_calls([_fe("fe1", "/api/nope")], [_ep("ep1", "/api/users")]) == []
 
 
+# ---- url_registry 节点 method 未知: 纯按 url 匹配, 不被假 POST 默认坑掉非 POST 端点 ----
+
+def _fe_reg(node_id: str, url: str) -> GraphNode:
+    """url 常量注册表来源的前端节点: http_method 是占位默认(POST), url_registry=True。"""
+    return GraphNode(id=node_id, kind=NodeKind.FRONTEND_API_CALL.value, name=url, project_id=_PID,
+                     file="URL.js", meta={"url": url, "http_method": "POST", "url_registry": True})
+
+
+def test_url_registry_matches_get_endpoint_conf_1_not_mismatch():
+    """复刻 PICK_CHECK_TURN: url 常量(默认 POST)→ GET 端点, 应 conf=1.0 url_only, 不误标 0.7 mismatch。"""
+    edges = link_api_calls([_fe_reg("fe1", "/pda/task/check/container")],
+                           [_ep("ep1", "/pda/task/check/container", method="GET")])
+    assert len(edges) == 1
+    assert edges[0].confidence == 1.0
+    assert "url_only" in (edges[0].meta or {}).get("evidence", "")
+
+
+def test_url_registry_matches_put_and_delete():
+    """method 不止 GET/POST: url_registry 节点也要连上 PUT / DELETE 端点(默认 POST 会全漏)。"""
+    for verb in ("PUT", "DELETE", "PATCH"):
+        edges = link_api_calls([_fe_reg("fe1", "/api/x")], [_ep("ep1", "/api/x", method=verb)])
+        assert len(edges) == 1 and edges[0].confidence == 1.0, f"{verb} 应连上"
+
+
+def test_url_registry_multi_method_same_url_still_ambiguous():
+    """同 url 多动词(REST 资源)且前端无 method → 无法消歧, 仍降为候选(不静默连错一个)。"""
+    backend = [_ep("get1", "/api/r", method="GET", svc="s"), _ep("post1", "/api/r", method="POST", svc="s")]
+    edges = link_api_calls([_fe_reg("fe1", "/api/r")], backend)
+    assert len(edges) == 1 and edges[0].confidence == 0.6   # ambiguous_endpoint
+
+
+def test_non_registry_method_mismatch_still_penalized():
+    """非 url_registry(真有 method 的前端)method 不一致仍 conf=0.7 —— 不放松真实 mismatch。"""
+    edges = link_api_calls([_fe("fe1", "/api/u", method="GET")], [_ep("ep1", "/api/u", method="POST")])
+    assert len(edges) == 1 and edges[0].confidence == 0.7
+
+
 # ---- URL 桥: 多服务消歧(修潜伏 bug)----
 
 def test_same_url_two_services_url_only_is_ambiguous():
