@@ -19,6 +19,11 @@ def test_gpu_call_returns_result_normally():
     assert asyncio.run(go()) == 2
 
 
+def test_release_cuda_cache_never_raises():
+    # torch 缺 / 无 cuda 都不得抛(防御性: 清缓存失败不致命)
+    srv._release_cuda_cache()   # 直接调一次, 不崩即通过
+
+
 def test_gpu_call_times_out(monkeypatch):
     import time
     monkeypatch.setattr(srv, "GPU_OP_TIMEOUT", 0.2)

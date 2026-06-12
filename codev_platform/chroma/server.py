@@ -157,6 +157,24 @@ async def _run_stdio() -> None:
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
+def _release_cuda_cache() -> None:
+    """把 PyTorch CUDA 缓存分配器持有的**空闲**块还给驱动。
+
+    缓存分配器为复用会留着 free 块不还系统; 大批量 + 变长 encode 累积碎片 → 显存涨满(实测
+    daemon 涨到 7.7/8GB 后新 encode OOM 'AcceleratorError')。大 batch(索引)后 empty_cache
+    去碎片, 防长跑膨胀。交互单条查询不触发(见调用处批大小门槛), 不增其延迟。"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001 — 清缓存失败不致命
+        pass
+
+
+# 触发 empty_cache 的最小批大小: 索引批(≥此值)清, 交互单/小查询不清(省其延迟)。
+_GPU_CACHE_RELEASE_MIN_BATCH = 16
+
+
 async def _gpu_call(fn):
     """在线程跑同步 GPU 算子 (encode/rerank), 受 GPU_OP_TIMEOUT 收口。
 
@@ -445,6 +463,8 @@ async def _run_http(port: int) -> None:
             async with _get_gpu_sem():
                 vecs = await _gpu_call(
                     lambda: m.encode(texts, normalize_embeddings=True, convert_to_numpy=True))
+                if len(texts) >= _GPU_CACHE_RELEASE_MIN_BATCH:   # 索引大批后清缓存防膨胀 OOM
+                    await asyncio.to_thread(_release_cuda_cache)
             return JSONResponse({"vectors": [v.tolist() for v in vecs]})
         except asyncio.TimeoutError:
             _flog(f"[embed] GPU op 超时 (>{GPU_OP_TIMEOUT}s, texts={len(texts)}); 释放信号量返 503")
@@ -467,6 +487,8 @@ async def _run_http(port: int) -> None:
         try:
             async with _get_gpu_sem():
                 scores = await _gpu_call(lambda: _rerank_scores(query, docs))
+                if len(docs) >= _GPU_CACHE_RELEASE_MIN_BATCH:   # 大候选集重排后清缓存防膨胀
+                    await asyncio.to_thread(_release_cuda_cache)
         except asyncio.TimeoutError:
             _flog(f"[rerank] GPU op 超时 (>{GPU_OP_TIMEOUT}s, docs={len(docs)}); 释放信号量返 503")
             return JSONResponse({"error": "rerank timeout"}, status_code=503)
