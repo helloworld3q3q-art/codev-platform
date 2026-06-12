@@ -44,20 +44,39 @@ def _path_is_public(path: str, public_exact: set[str]) -> bool:
     return any(norm == p or norm.startswith(p + "/") for p in public_exact)
 
 
+def _client_is_loopback(scope) -> bool:
+    """请求的真实 TCP 对端是否本机 loopback。
+
+    取 ASGI scope["client"] = (host, port) 的实际对端 (不信任 X-Forwarded-For 等可伪造头),
+    故远程经代理转发也只会看到代理的真实地址。用于"纯算力接口本机免 token"判定。"""
+    client = scope.get("client")
+    if not client:
+        return False
+    host = client[0] or ""
+    return host == "::1" or host == "localhost" or host.startswith("127.")
+
+
 class AuthMiddleware:
     """纯 ASGI 认证拦截。挂载方式同普通中间件;对 SSE/流式安全,高并发轻量。"""
 
     def __init__(self, app, authenticator: Authenticator, public_paths: Iterable[str] = (),
-                 internal_secret: str | None = None) -> None:
+                 internal_secret: str | None = None,
+                 loopback_exempt_paths: Iterable[str] = ()) -> None:
         self.app = app
         self._auth = authenticator
         # 服务间信物密钥 (web 前门 → agent 后端)。配了才启 X-Identity 通道; 空=维持原行为。
         self._internal_secret = internal_secret or None
         # 规整 public 前缀: 统一去尾斜杠, 按 path 段边界匹配 (防 startswith 子串/穿越绕过)
         self._public_exact = _normalize_public_paths(public_paths)
+        # 纯算力接口 (/embed /rerank): 无租户数据, **仅本机 loopback** 调用免 token (内部索引/
+        # 记忆写复用 daemon 的 GPU 模型); 远程访问仍按正常鉴权 (防外部白嫖 GPU)。
+        self._loopback_exempt = _normalize_public_paths(loopback_exempt_paths)
 
     def _is_public(self, path: str) -> bool:
         return _path_is_public(path, self._public_exact)
+
+    def _is_loopback_exempt(self, path: str) -> bool:
+        return bool(self._loopback_exempt) and _path_is_public(path, self._loopback_exempt)
 
     def _internal_identity(self, headers: Headers):
         """X-Identity 验签通过 → Identity; 无 header / 未配 secret / 验签失败 → None (回退原认证)。"""
@@ -71,6 +90,10 @@ class AuthMiddleware:
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or self._is_public(scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+        # 纯算力接口本机免 token: 仅当路径在豁免集 **且** 真实对端是 loopback 时放行。
+        if self._is_loopback_exempt(scope.get("path", "")) and _client_is_loopback(scope):
             await self.app(scope, receive, send)
             return
         headers = Headers(scope=scope)

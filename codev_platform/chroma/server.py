@@ -467,6 +467,9 @@ async def _run_http(port: int) -> None:
             AuthMiddleware,
             authenticator=build_authenticator(_cfg),
             public_paths={"/healthz", "/health"},
+            # /embed /rerank 是无租户数据的纯算力接口: 本机 loopback 内部调用 (code_vec 索引 /
+            # agent-memory 写 复用 daemon GPU 模型) 免 token; 远程访问仍按 token 鉴权 (审计 R: 防白嫖)。
+            loopback_exempt_paths={"/embed", "/rerank"},
         ),
     ]
     # 限流挂在 Auth 之后 (内层读 identity); dev 默认关 (工厂返回 None)。
