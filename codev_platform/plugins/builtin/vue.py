@@ -16,6 +16,7 @@ linker pass 跨所有后端插件 (fastapi/spring/node) 产, 单一 owner builti
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from codev_platform.graph.schema import AnalyzerResult, ProvSource
@@ -23,6 +24,20 @@ from codev_platform.plugins.base import AnalyzerPlugin
 from codev_platform.plugins.builtin import _stack_scan
 
 PLUGIN_NAME = "builtin.vue"
+
+
+def _declared_url_sources(repo: Path) -> list[str] | None:
+    """读 <repo>/.claude/project.json 的 frontend_url_sources(项目声明的 URL 注册文件, 相对 repo)。
+    无声明返 None → scan_url_registry 走启发式自动识别。低耦合: 声明式扩展点, 不硬编码文件名。"""
+    pj = repo / ".claude" / "project.json"
+    if not pj.is_file():
+        return None
+    try:
+        data = json.loads(pj.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    v = data.get("frontend_url_sources")
+    return [str(x) for x in v] if isinstance(v, list) and v else None
 
 
 class VuePlugin(AnalyzerPlugin):
@@ -43,6 +58,12 @@ class VuePlugin(AnalyzerPlugin):
         # 1) SFC 组件 + 内联 api 调用 (JS/TS 基座复用)。
         scan_nodes = _stack_scan.scan_vue(repo, project_id)
         result.nodes.extend(scan_nodes)
+
+        # 1b) URL 注册文件提取 (代码基础层): 企业前端常把 API 路径集中声明成常量, 业务代码引用
+        # 常量名调用 → 内联扫描漏掉。从注册文件抽路径产 frontend_api_call, _link 据此连后端。
+        # 项目可在 .claude/project.json 声明 frontend_url_sources; 无则启发式自动识别。
+        result.nodes.extend(_stack_scan.scan_url_registry(
+            repo, project_id, declared_files=_declared_url_sources(repo)))
 
         # 2) Vue Router 路由 + renders 边 (route -> SFC 组件)。
         route_nodes, route_edges = _stack_scan.scan_vue_routes(

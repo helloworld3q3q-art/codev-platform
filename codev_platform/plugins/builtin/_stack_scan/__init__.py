@@ -78,6 +78,7 @@ from .vue import (
     scan_vue_routes,
     vue_detect,
 )
+from .url_registry import scan_url_registry
 
 __all__ = [
     # common helpers
@@ -95,6 +96,8 @@ __all__ = [
     "link_api_calls",
     # frontend component dep graph (via dependency-cruiser)
     "scan_frontend_deps",
+    # frontend API url 注册文件提取(代码基础层, 通用)
+    "scan_url_registry",
     # react
     "react_detect",
     "scan_react",
