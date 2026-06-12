@@ -129,6 +129,14 @@ class CodegraphGraphResponse(BaseModel):
 # reads_table / writes_table / calls_api ...) 直出。cross_link 组已于 2026-06-03 退场。
 
 
+class UnifiedGraphRequest(BaseModel):
+    # includeSoft=False(默认): 过滤软节点(arch_layer / business_domain)+ 软边(plays_role /
+    # belongs_to_domain)—— 它们是"架构层/业务域"的角色标注(枢纽状, 一节点连进百余条), 在
+    # "看依赖关系"的图里是噪声且易误读(如 thorn6 组件"连到" arch_layer:component)。默认给干净
+    # 依赖图; 要看架构层/业务域叠加层时显式传 true。
+    includeSoft: bool = False
+
+
 class UnifiedGraphNode(BaseModel):
     id: str | None = None
     kind: str | None = None

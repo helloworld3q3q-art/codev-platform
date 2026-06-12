@@ -113,6 +113,22 @@ def is_soft_edge_kind(kind: Any) -> bool:
     return _kind_str(kind) in SOFT_EDGE_KINDS
 
 
+def dedup_nodes_by_id(nodes: list) -> list:
+    """同 id 多节点去重 —— 不同插件描述同一文件会撞同一 id(如 builtin.vue 的 frontend_component
+    与 builtin.frontend_deps 的 frontend_module 对同一 .vue: id 全同 kind 不同, 实测 129 文件双份)。
+    合一保留语义更强的(frontend_module 是 import 依赖图的弱视图, 让位给 frontend_component)。
+    边按 id 引用, 去重后 imports/renders 边仍正确解析。"""
+    by_id: dict = {}
+    for n in nodes:
+        ex = by_id.get(n.id)
+        if ex is None:
+            by_id[n.id] = n
+        elif (_kind_str(ex.kind) == NodeKind.FRONTEND_MODULE.value
+              and _kind_str(n.kind) != NodeKind.FRONTEND_MODULE.value):
+            by_id[n.id] = n   # 弱 kind(frontend_module)让位给更强的
+    return list(by_id.values())
+
+
 # ---------------------------------------------------------------- provenance (Phase 3)
 # 让影响分析的每条边**可追溯到来源**: 是 AST 精确解析来的, 还是框架语义/结构桥接/名称
 # 启发式/LLM 推断来的。高风险影响结论应只采信确定来源 + 高置信边, 低置信/启发式边作候选提示。

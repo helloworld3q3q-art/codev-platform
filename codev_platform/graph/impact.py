@@ -19,6 +19,7 @@ from codev_platform.graph.schema import (
     EdgeKind,
     GraphNode,
     NodeKind,
+    dedup_nodes_by_id,
     edge_provenance,
     is_soft_edge_kind,
     is_soft_node_kind,
@@ -94,6 +95,7 @@ def build_impact_graph(store, project_id: str, *, include_soft: bool = False,
     else:
         nodes = [n for n in merged.nodes if not is_soft_node_kind(n.kind)]
         edges = [e for e in merged.edges if not is_soft_edge_kind(e.kind)]
+    nodes = dedup_nodes_by_id(nodes)   # 同 id 多插件节点去重(优先级让位, 非 dict last-wins 看顺序)
     if certain_only:
         edges = [e for e in edges if _is_certain(e.confidence)]
     edges = resolve_duplicate_edges(edges)   # 冲突消解: 同边多 plugin 重复 → 保最优 provenance
