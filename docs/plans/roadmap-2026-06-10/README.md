@@ -7,8 +7,8 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [multi-repo-contract-bridge-plan-2026-06-10.md](multi-repo-contract-bridge-plan-2026-06-10.md) | **多仓跨层链路**:4 专家面板收敛 = Phase 1 operationId 契约桥 + 契约漂移立即做(不分仓也受益,顺修多服务 URL 串台 bug);Phase 2 多根索引冻结到 Gate(≥2 真实多仓项目被卡)。 | 计划(待起 Phase 1) |
-| [multi-org-server-identity-plan-2026-06-10.md](multi-org-server-identity-plan-2026-06-10.md) | **多组织 server IDE agent 身份/认证**:4 高级开发面板收敛 = 选 A(IDE 带 token 直连,否决 web 前置 B);认证用 token、授权用共享 PG RBAC 实时查;Phase 1 最小(bind_host+护栏+config token runbook)立即做,Phase 2 PG token 子系统冻结到 Gate(≥2 org / ≥3 dev)。含数据模型对齐(org/项目/token/memory 同一 PG 真值源)。 | 计划(待起 Phase 1) |
+| [multi-repo-contract-bridge-plan-2026-06-10.md](multi-repo-contract-bridge-plan-2026-06-10.md) | **多仓跨层链路**:4 专家面板收敛 = Phase 1 operationId 契约桥 + 契约漂移立即做(不分仓也受益,顺修多服务 URL 串台 bug);Phase 2 多根索引冻结到 Gate(≥2 真实多仓项目被卡)。 | ✅ **Phase 1 已落地(2026-06-12)**: `_link.py` operationId 精确桥(语言/仓库无关)+ URL 多服务消歧(修 candidates[0] 静默串台)+ spring/fastapi operation_id meta + `find_contract_drift`(graph MCP 第14工具 + agent contract_drift 工具,真机抓到 openclaw 1 处悬空调用)。Phase 2 多根索引仍 Gate 冻结 |
+| [multi-org-server-identity-plan-2026-06-10.md](multi-org-server-identity-plan-2026-06-10.md) | **多组织 server IDE agent 身份/认证**:4 高级开发面板收敛 = 选 A(IDE 带 token 直连,否决 web 前置 B);认证用 token、授权用共享 PG RBAC 实时查;Phase 1 最小(bind_host+护栏+config token runbook)立即做,Phase 2 PG token 子系统冻结到 Gate(≥2 org / ≥3 dev)。含数据模型对齐(org/项目/token/memory 同一 PG 真值源)。 | ✅ **Phase 1 + Phase 2 核心已落地(2026-06-12)**: P1.1 `mcp.bind_host` 配置化 + P1.2 非 loopback bind 启动硬拒(`startup_policy_error` 聚合三闸接 graph/codegraph/memory);**Phase 2 安全洞已闭合**: `agent_tokens` PG 表 + `PgTokenResolver` join users.status 实时校验(web 禁用用户 token 即失效)+ `TokenAuthenticator` 策略化(config/PG/composite)+ `gateway pg-token-*` CLI。剩:web 签发 UI + 项目→org 入 PG(仍 Gate) |
 
 ## 背景一句话
 
