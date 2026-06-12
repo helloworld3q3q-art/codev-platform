@@ -24,6 +24,10 @@ _MAX_SEARCH_LIMIT = 500
 _DEFAULT_GRAPH_LIMIT = 2000
 _MAX_GRAPH_LIMIT = 20000
 _MAX_EDGE_LIMIT = 50000
+# 图谱可读密度上限: 返回边数 ∝ 节点数。防超大稠密项目(如 ideas-v2 的 Java 核心)在 overview
+# 里返回"发丝团": 实测 limit=2000 时 ideas-v2 11106 边(5.6 边/节点)vs openclaw 5814(2.9)/
+# codev 4526(2.3)。取 3 边/节点 → 只把过密项目压到与其它项目同量级, 本就稀疏的不受影响。
+_EDGE_PER_NODE_CAP = 3
 
 # nodes 列 -> camelCase 别名, 对齐 Java mapper (start_line as "startLine" 等)。
 _NODE_COLS = (
@@ -292,6 +296,8 @@ class CodegraphClient:
         c = self.conn
         node_cap = _clamp(limit, _DEFAULT_GRAPH_LIMIT, _MAX_GRAPH_LIMIT)
         edge_cap = _clamp(edge_limit, _MAX_EDGE_LIMIT, _MAX_EDGE_LIMIT)
+        # 按节点数比例收口边总量, 保证可读密度(避免超大稠密项目返回发丝团; 见 _EDGE_PER_NODE_CAP)。
+        edge_cap = min(edge_cap, node_cap * _EDGE_PER_NODE_CAP)
 
         # 节点候选: 受 languages/kinds 过滤的 id 集合(供边筛选, kinds=None 时不限)。
         lang_clause, lang_p = _in_clause("language", _norm(languages))
