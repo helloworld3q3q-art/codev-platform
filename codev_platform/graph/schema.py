@@ -55,6 +55,11 @@ class NodeKind(str, Enum):
     # 软节点(A2 综合理解层): 架构分层角色(controller/service/repository/...)。与 BUSINESS_DOMAIN
     # 同样软隔离(confidence<1.0 + impact 默认过滤), 但维度正交: 一个 file 既属某域又演某层。
     ARCH_LAYER = "arch_layer"
+    # 软节点(A3 综合理解层): LLM 推断的前端 API 调用。当静态层(url_registry / 内联扫描)抓不到
+    # 业务封装的 request({url}) 调用时, A3 读前端源码语义推断"该前端文件调哪个后端端点"。与硬的
+    # FRONTEND_API_CALL(确定性字面量/常量解析)物理可分辨: confidence<1.0 + impact 默认过滤, 防
+    # LLM 推断污染"查依赖"。grounding: 必须 resolve 回真实后端 endpoint, 否则丢。
+    INFERRED_API_CALL = "inferred_api_call"
 
 
 class EdgeKind(str, Enum):
@@ -77,6 +82,10 @@ class EdgeKind(str, Enum):
     BELONGS_TO_DOMAIN = "belongs_to_domain"
     # 软边(A2): file 硬节点 --plays_role--> ARCH_LAYER 软节点(该文件演哪个架构层角色)。
     PLAYS_ROLE = "plays_role"
+    # 软边(A3): INFERRED_API_CALL 软节点 --calls_api_inferred--> backend_endpoint 硬节点。
+    # 语义同 CALLS_API(前端调后端)但来源是 LLM 推断而非静态解析 → 软隔离(confidence<1.0 +
+    # impact 默认过滤), 与确定性 CALLS_API 区分: 查依赖默认只信静态边, 推断边作候选提示。
+    CALLS_API_INFERRED = "calls_api_inferred"
 
 
 def _kind_str(value: Any) -> str:
@@ -89,9 +98,11 @@ def _kind_str(value: Any) -> str:
 #       ② ingest referential-integrity 校验 (软边端点必须指向真实硬节点, 悬空即丢)。
 # 软节点判据不止 kind (还有 confidence<1.0 + meta.derived_by), 但 kind 是最直接的物理标记。
 SOFT_NODE_KINDS: frozenset[str] = frozenset(
-    {NodeKind.BUSINESS_DOMAIN.value, NodeKind.ARCH_LAYER.value})
+    {NodeKind.BUSINESS_DOMAIN.value, NodeKind.ARCH_LAYER.value,
+     NodeKind.INFERRED_API_CALL.value})
 SOFT_EDGE_KINDS: frozenset[str] = frozenset(
-    {EdgeKind.BELONGS_TO_DOMAIN.value, EdgeKind.PLAYS_ROLE.value})
+    {EdgeKind.BELONGS_TO_DOMAIN.value, EdgeKind.PLAYS_ROLE.value,
+     EdgeKind.CALLS_API_INFERRED.value})
 
 
 def is_soft_node_kind(kind: Any) -> bool:

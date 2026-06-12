@@ -142,7 +142,8 @@ def ingest_project(
         # 综合分析 second post-pass: 硬骨架全部落库且连通后, analyzer 在其上归纳软节点/软边
         # (业务域等)。软产物 confidence<1.0 + referential-integrity 校验, 与硬骨架物理隔离。
         # 无注册 analyzer 时 no-op(A1-1 框架先行, LLM business_domain analyzer 待 A1-2)。
-        _analyzers_pass(store, project_id, report)
+        # main_repo 传入: 需读源码的 analyzer(A3 前端 API 链接)经 set_context 拿主仓根。
+        _analyzers_pass(store, project_id, report, main_repo)
     finally:
         store.close()
     return report
@@ -274,7 +275,8 @@ def _link_pass(store, project_id: str, report: IngestReport) -> None:
     report.summaries[LINKER_PLUGIN] = {"calls_api_edges": len(edges)}
 
 
-def _analyzers_pass(store, project_id: str, report: IngestReport) -> None:
+def _analyzers_pass(store, project_id: str, report: IngestReport,
+                    repo_path: Path | None = None) -> None:
     """综合分析 second post-pass: 在连通硬骨架上跑 analyzer, 产软节点/软边(业务域等)。
 
     硬骨架(plugins + calls + frontend_deps)全部落库后才跑 —— analyzer 归纳需完整骨架。
@@ -284,6 +286,7 @@ def _analyzers_pass(store, project_id: str, report: IngestReport) -> None:
     """
     from codev_platform.graph.analyzers import (
         applicable_analyzers,
+        registered_analyzers,
         validate_soft_result,
     )
 
@@ -293,6 +296,16 @@ def _analyzers_pass(store, project_id: str, report: IngestReport) -> None:
     soft_nodes: list[GraphNode] = []
     soft_edges: list[GraphEdge] = []
     by_analyzer: dict[str, int] = {}
+    # 需读源码的 analyzer(A3)经 set_context 拿 repo_path(其他 analyzer 无此方法, 跳过)。
+    # 必须在 applicable_analyzers(它 applies 里查 repo)之前注入。
+    if repo_path is not None:
+        for a in registered_analyzers():
+            setter = getattr(a, "set_context", None)
+            if callable(setter):
+                try:
+                    setter(repo_path)
+                except Exception:  # noqa: BLE001 — 注入失败不拖垮 pass
+                    pass
     for a in applicable_analyzers(hard_nodes):
         by_analyzer.setdefault(a.name, 0)  # 跑过即登记(哪怕 0 产出 / 抛错), 审计可见
         try:

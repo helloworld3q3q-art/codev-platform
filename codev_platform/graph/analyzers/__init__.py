@@ -40,6 +40,13 @@ def _register_configured(cfg: dict | None = None) -> int:
         from codev_platform.graph.analyzers.brain_layer_labeler import BrainLayerLabeler
         register_analyzer(ArchLayerAnalyzer(BrainLayerLabeler()))
         n += 1
+    # A3 前端 API 链接(LLM 补静态层盲区): 需 repo_path 读源码, 经 _analyzers_pass 的
+    # set_context 注入(注册时 repo 未知, applies 在无 repo 时返 False = no-op)。
+    if get(cfg, "analyzers.frontend_api_link.enabled", False):
+        from codev_platform.graph.analyzers.brain_api_link_labeler import BrainApiLinkLabeler
+        from codev_platform.graph.analyzers.frontend_api_link import FrontendApiLinkAnalyzer
+        register_analyzer(FrontendApiLinkAnalyzer(BrainApiLinkLabeler()))
+        n += 1
     return n
 
 
