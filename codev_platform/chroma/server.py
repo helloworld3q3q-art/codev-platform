@@ -460,10 +460,20 @@ async def _run_http(port: int) -> None:
         try:
             # wait_for 收口: 一次 encode 卡住时 **释放 GPU 信号量** 返 503, 不让它永久持锁拖死
             # 整个 /embed(连带在线 search_docs)。云上大批量 remote 索引时这是稳定性硬前提。
+            def _encode():
+                return m.encode(texts, batch_size=EMBED_ENCODE_BATCH,
+                                normalize_embeddings=True, convert_to_numpy=True)
             async with _get_gpu_sem():
-                vecs = await _gpu_call(
-                    lambda: m.encode(texts, batch_size=EMBED_ENCODE_BATCH,
-                                     normalize_embeddings=True, convert_to_numpy=True))
+                try:
+                    vecs = await _gpu_call(_encode)
+                except Exception as enc_exc:  # noqa: BLE001
+                    # 反应式 OOM 回收: 撞 GPU OOM 时回收空闲块后**重试一次** —— 并发 search_docs 瞬时
+                    # 挤占常一次即缓解(batch_size 已封顶峰值, 这是叠加的尖峰兜底)。非 GPU 错原样上抛。
+                    if not _is_gpu_error(enc_exc):
+                        raise
+                    _flog(f"[embed] GPU OOM (texts={len(texts)}); empty_cache 后重试一次")
+                    await asyncio.to_thread(_release_cuda_cache)
+                    vecs = await _gpu_call(_encode)
                 if len(texts) >= _GPU_CACHE_RELEASE_MIN_BATCH:   # 索引大批后清缓存防膨胀 OOM
                     await asyncio.to_thread(_release_cuda_cache)
             return JSONResponse({"vectors": [v.tolist() for v in vecs]})
@@ -471,6 +481,12 @@ async def _run_http(port: int) -> None:
             _flog(f"[embed] GPU op 超时 (>{GPU_OP_TIMEOUT}s, texts={len(texts)}); 释放信号量返 503")
             return JSONResponse({"error": "embed timeout"}, status_code=503)
         except Exception as exc:  # noqa: BLE001
+            # GPU OOM(含重试后仍 OOM)→ 回收空闲块 + 503 可重试: 让 RemoteEmbedder/worker 重发,
+            # 不把一次瞬时显存尖峰升级成整个 code_vec build 失败(500 不可重试)。非 GPU 错才 500。
+            if _is_gpu_error(exc):
+                await asyncio.to_thread(_release_cuda_cache)
+                _flog(f"[embed] GPU OOM 重试后仍失败 (texts={len(texts)}); empty_cache 后返 503 可重试")
+                return JSONResponse({"error": "embed oom, retry"}, status_code=503)
             return JSONResponse({"error": f"embed failed: {type(exc).__name__}"}, status_code=500)
 
     async def rerank(request):
