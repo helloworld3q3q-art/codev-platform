@@ -23,6 +23,11 @@ def _post_json(url: str, payload: dict, timeout: float, token: str | None) -> di
         return json.loads(resp.read().decode("utf-8"))
 
 
+# 单次 /embed 请求最多带多少文本: 既省 HTTP 往返(code_vec 大项目索引), 又把 daemon 那次
+# GPU encode + 持锁时间收口 (太大批会长占共享 GPU 信号量, 拖慢并发 search_docs)。
+_EMBED_HTTP_BATCH = 256
+
+
 class RemoteEmbedder(Embedder):
     def __init__(self, url: str, *, timeout: float = 30.0, token: str | None = None) -> None:
         self._url = url
@@ -35,6 +40,19 @@ class RemoteEmbedder(Embedder):
         if not vecs:
             raise ValueError(f"remote embed 返回无 vectors: {data}")
         return vecs[0]
+
+    def encode_batch(self, texts: list[str]) -> list[list[float]]:
+        """一次 /embed 带一子批文本 → daemon 一次 GPU encode 返回整批向量。
+        子批 _EMBED_HTTP_BATCH 收口单请求大小, 不 N 次往返也不长占 GPU。"""
+        out: list[list[float]] = []
+        for i in range(0, len(texts), _EMBED_HTTP_BATCH):
+            chunk = texts[i:i + _EMBED_HTTP_BATCH]
+            data = _post_json(self._url, {"texts": chunk}, self._timeout, self._token)
+            vecs = data.get("vectors")
+            if not vecs or len(vecs) != len(chunk):
+                raise ValueError(f"remote embed 批量返回向量数不符: 期望 {len(chunk)} 得 {len(vecs) if vecs else 0}")
+            out.extend(vecs)
+        return out
 
 
 class RemoteRerankModel(RerankModel):

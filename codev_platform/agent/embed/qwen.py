@@ -23,3 +23,10 @@ class QwenLocalEmbedder(Embedder):
     def encode(self, text: str) -> list[float]:
         vec = self._ensure().encode([text], normalize_embeddings=True)[0]
         return vec.tolist()
+
+    def encode_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        # sentence-transformers 原生分批 (默认 batch_size=32) → 一次调用吃整批。
+        arr = self._ensure().encode(texts, normalize_embeddings=True)
+        return [v.tolist() for v in arr]

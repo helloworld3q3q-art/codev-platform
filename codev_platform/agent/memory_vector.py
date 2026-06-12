@@ -23,6 +23,11 @@ class Embedder(ABC):
     def encode(self, text: str) -> list[float]:
         ...
 
+    def encode_batch(self, texts: list[str]) -> list[list[float]]:
+        """批量 embed。默认逐条(向后兼容任意实现);remote/local adapter 覆写为真批量
+        (一次 HTTP / 一次 GPU encode),给 code_vec 大项目索引省掉 N 次往返。"""
+        return [self.encode(t) for t in texts]
+
 
 class RerankModel(ABC):
     """(query, docs) → 每 doc 的相关性分(越高越相关)。reranker 精排用。

@@ -305,7 +305,9 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     # 分批 embed + upsert 变更节点(每批 < 5461 硬上限; 单 collection 库多批 flush 安全)
     for i in range(0, len(changed), _UPSERT_BATCH):
         chunk = changed[i:i + _UPSERT_BATCH]
-        embs = [embedder.encode(text_by_id[nid]) for nid in chunk]
+        # 批量 embed: remote adapter 一次 /embed 带一子批 (省掉每节点一次 HTTP 往返),
+        # 大项目 (ideas-v2 ~19万节点) 索引从小时级降到分钟级。
+        embs = embedder.encode_batch([text_by_id[nid] for nid in chunk])
         col.upsert(ids=chunk, embeddings=embs,
                    documents=[text_by_id[nid] for nid in chunk],
                    metadatas=[meta_by_id[nid] for nid in chunk])
