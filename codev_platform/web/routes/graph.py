@@ -14,12 +14,7 @@ from fastapi import APIRouter, Depends, Request
 from codev_platform.core.errors import ErrorCode, PlatformError
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
-from codev_platform.graph.schema import (
-    AnalyzerResult,
-    dedup_nodes_by_id,
-    is_soft_edge_kind,
-    is_soft_node_kind,
-)
+from codev_platform.graph.schema import AnalyzerResult
 from codev_platform.graph.store import GraphStore, GraphStoreUnreadable, open_store
 from codev_platform.web.integrations.codegraph_client import CodegraphClient
 from codev_platform.web.schemas import graph as S
@@ -198,29 +193,19 @@ def _load_unified_from_store(project_id: str) -> AnalyzerResult:
     operation_id="graphUnifiedGraph",
     response_model=CommonResult[S.UnifiedGraphResponse],
 )
-def unified_graph(request: Request, body: S.UnifiedGraphRequest | None = None,
-                  ctx=Depends(require_project_access)) -> CommonResult:
+def unified_graph(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    # 默认含软节点/软边(连通结构, 软边占全图 ~77% 连接, 滤掉会散成孤点)。显式 includeSoft=false
-    # 才给"纯依赖图"(只硬边)。软边非依赖(kind=plays_role 等), 前端可据 kind 配色区分避免误读。
-    include_soft = bool(body.includeSoft) if body is not None else True
     result = _load_unified_from_store(project_id)
-    # 同 id 多插件节点去重(vue frontend_component 与 frontend_deps frontend_module 撞同一 .vue id)。
-    src_nodes = dedup_nodes_by_id(result.nodes)
-    src_edges = result.edges
-    if not include_soft:
-        src_nodes = [n for n in src_nodes if not is_soft_node_kind(n.kind)]
-        src_edges = [e for e in src_edges if not is_soft_edge_kind(e.kind)]
     nodes = [
         S.UnifiedGraphNode(
             id=n.id, kind=n.kind, name=n.name, filePath=n.file,
             startLine=n.line, language=n.language, meta=n.meta,
         )
-        for n in src_nodes
+        for n in result.nodes
     ]
     edges = [
         S.UnifiedGraphEdge(source=e.source, target=e.target, kind=e.kind)
-        for e in src_edges
+        for e in result.edges
     ]
     resp = S.UnifiedGraphResponse(
         nodes=nodes, edges=edges, nodeCount=len(nodes), edgeCount=len(edges)
