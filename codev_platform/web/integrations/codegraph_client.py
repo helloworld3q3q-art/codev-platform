@@ -274,36 +274,84 @@ class CodegraphClient:
     # ----------------------------- graph -----------------------------
 
     def graph(self, limit: int | None, languages: list[str] | None,
-              kinds: list[str] | None, edge_kinds: list[str] | None) -> dict:
+              kinds: list[str] | None, edge_kinds: list[str] | None,
+              *, edge_limit: int | None = None) -> dict:
+        """返回**连通**子图: 边优先选取, 节点由所选边的端点派生 → 每条边两端必在节点集。
+
+        旧做法是节点优先(按 degree 取 top-N 节点, 再只留两端都在 N 内的边): N 小时
+        (默认 limit)绝大多数边被滤光 → 前端图全是散点无连线(ideas-v2 limit=50 实测
+        edges=0; openclaw 可见边 669/35546)。
+
+        新做法 "先选边再带节点":
+        1. 按边重要性排 top 边 —— `calls` 边优先(调用关系是图谱主信息), 再按两端 degree
+           之和降序(挑连接最密的核心区域)。
+        2. 把这些边的端点收成节点集, 受 `limit`(节点上限)裁剪; 被裁掉节点关联的边一并丢弃,
+           保证返回的 edges 两端都在 nodes 内(真连通)。
+        languages/kinds 过滤节点候选, edge_kinds 过滤边; `edge_limit` 可选限边总量。
+        """
         c = self.conn
-        lim = _clamp(limit, _DEFAULT_GRAPH_LIMIT, _MAX_GRAPH_LIMIT)
-        # 节点按 degree(连接数)取 top, 而非 file/class 优先。原 kind 排序(file>class>...>method>
-        # function)会让 file+class 塞满 limit 名额、把 method/function 全挤出, 而 calls 边几乎都在
-        # method 之间 → 边两端不在节点集被过滤光, 图谱稀疏(实测 openclaw 可见边 669/35546)。
-        # 改 degree 优先: 高连接的调用主体进图, 边可见(同库实测 4254, 6 倍)。
-        node_sql = (
-            "with deg as (select nid, count(*) c from "
-            "(select source nid from edges union all select target from edges) group by nid) "
-            f"select {_NODE_COLS} from nodes left join deg on nodes.id = deg.nid where 1=1"
-        )
-        params: list = []
+        node_cap = _clamp(limit, _DEFAULT_GRAPH_LIMIT, _MAX_GRAPH_LIMIT)
+        edge_cap = _clamp(edge_limit, _MAX_EDGE_LIMIT, _MAX_EDGE_LIMIT)
+
+        # 节点候选: 受 languages/kinds 过滤的 id 集合(供边筛选, kinds=None 时不限)。
         lang_clause, lang_p = _in_clause("language", _norm(languages))
         kind_clause, kind_p = _in_clause("kind", _norm(kinds))
-        node_sql += lang_clause + kind_clause + " order by coalesce(deg.c, 0) desc, id limit ?"
-        params += lang_p + kind_p + [lim]
-        node_rows = c.execute(node_sql, params).fetchall()
-        nodes = [_node_dict(r) for r in node_rows]
-        node_ids = {n["id"] for n in nodes if n.get("id") is not None}
+        node_filter_active = bool(lang_clause or kind_clause)
+        allowed_ids: set[str] | None = None
+        if node_filter_active:
+            id_rows = c.execute(
+                f"select id from nodes where 1=1{lang_clause}{kind_clause}",
+                lang_p + kind_p).fetchall()
+            allowed_ids = {r[0] for r in id_rows}
+            if not allowed_ids:
+                total_nodes = c.execute("select count(*) from nodes").fetchone()[0]
+                total_edges = c.execute("select count(*) from edges").fetchone()[0]
+                return {"nodes": [], "edges": [], "totalNodes": total_nodes, "totalEdges": total_edges}
 
-        ek_clause, ek_p = _in_clause("kind", _norm(edge_kinds))
-        edge_rows = c.execute(
-            f"select id, source, target, kind, line, col from edges where 1=1{ek_clause} limit ?",
-            ek_p + [_MAX_EDGE_LIMIT]).fetchall()
-        edges = []
+        # 边优先: calls 边优先, 再按两端 degree 之和降序 → 取图谱最密核心。
+        ek_clause, ek_p = _in_clause("e.kind", _norm(edge_kinds))
+        edge_sql = (
+            "with deg as (select nid, count(*) c from "
+            "(select source nid from edges union all select target from edges) group by nid) "
+            "select e.id, e.source, e.target, e.kind, e.line, e.col "
+            "from edges e "
+            "left join deg ds on ds.nid = e.source "
+            "left join deg dt on dt.nid = e.target "
+            f"where 1=1{ek_clause} "
+            "order by (case when e.kind = 'calls' then 1 else 0 end) desc, "
+            "(coalesce(ds.c,0) + coalesce(dt.c,0)) desc, e.id limit ?"
+        )
+        # 多取一些候选边(node_cap 个节点最多承载远多于 node_cap 条边), 再受 edge_cap 收口。
+        edge_rows = c.execute(edge_sql, ek_p + [edge_cap]).fetchall()
+
+        # 逐边纳入: 端点满足节点过滤才计, 节点集到 node_cap 后只接纳"两端均已在集内"的边。
+        node_ids: set[str] = set()
+        edges: list[dict] = []
         for r in edge_rows:
             e = dict(r)
-            if e.get("source") in node_ids and e.get("target") in node_ids:
-                edges.append(e)
+            s, t = e.get("source"), e.get("target")
+            if s is None or t is None:
+                continue
+            if allowed_ids is not None and (s not in allowed_ids or t not in allowed_ids):
+                continue
+            new_endpoints = {x for x in (s, t) if x not in node_ids}
+            if len(node_ids) + len(new_endpoints) > node_cap:
+                # 节点已满: 仅当这条边两端都已在集内才保留(不再扩节点)。
+                if s in node_ids and t in node_ids:
+                    edges.append(e)
+                continue
+            node_ids.update(new_endpoints)
+            edges.append(e)
+            if len(edges) >= edge_cap:
+                break
+
+        nodes: list[dict] = []
+        if node_ids:
+            ids = list(node_ids)
+            ph = ",".join("?" for _ in ids)
+            node_rows = c.execute(
+                f"select {_NODE_COLS} from nodes where id in ({ph})", ids).fetchall()
+            nodes = [_node_dict(r) for r in node_rows]
 
         total_nodes = c.execute("select count(*) from nodes").fetchone()[0]
         total_edges = c.execute("select count(*) from edges").fetchone()[0]
