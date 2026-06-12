@@ -40,6 +40,9 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
                        "detail", "node_ids_json", "evidence_ids_json", "meta_json"},
     "graph_ingest_meta": {"project_id", "plugin", "plugin_version", "node_count",
                           "edge_count", "evidence_count", "finding_count", "ingested_at"},
+    # agent_tokens: 2026-06-12 新增(multi-org server Phase 2: IDE agent PG token), 守护扩展到 16 表。
+    "agent_tokens": {"token_hash", "user_id", "org_id", "projects", "label",
+                     "status", "expires_at", "created_at"},
 }
 
 # 原 _SCHEMA 的主键列(PRIMARY KEY / PRIMARY KEY(...) 复合) + jobs。
@@ -59,6 +62,7 @@ EXPECTED_PK: dict[str, set[str]] = {
     "graph_evidences": {"project_id", "plugin", "seq"},
     "graph_findings": {"project_id", "plugin", "seq"},
     "graph_ingest_meta": {"project_id", "plugin"},
+    "agent_tokens": {"token_hash"},
 }
 
 # 原 _SCHEMA 的 NOT NULL 列(PK 列在 PG 隐含 NOT NULL,这里只列显式声明 / 业务约束列)。
@@ -80,14 +84,17 @@ EXPECTED_NOT_NULL: dict[str, set[str]] = {
     "graph_evidences": {"project_id", "plugin", "seq", "source", "detail"},
     "graph_findings": {"project_id", "plugin", "seq", "kind", "severity", "title"},
     "graph_ingest_meta": {"project_id", "plugin"},
+    # agent_tokens: PK token_hash(隐含 NOT NULL) + 显式 NOT NULL 业务列。
+    "agent_tokens": {"token_hash", "user_id", "org_id", "status", "created_at"},
 }
 
-# 索引名(原 _SCHEMA 3 个 + jobs 1 + sessions 3 + reindex_jobs 1, 2026-06-11)。
+# 索引名(原 _SCHEMA 3 个 + jobs 1 + sessions 3 + reindex_jobs 1 + graph 4 + agent_tokens 1)。
 EXPECTED_INDEXES = {"ix_org_members_user", "ix_team_members_user", "ix_teams_org",
                     "ix_jobs_project", "ix_sessions_access", "ix_sessions_refresh",
                     "ix_sessions_username", "ix_reindex_jobs_claim",
                     "ix_graph_nodes_kind", "ix_graph_nodes_name",
-                    "ix_graph_edges_source", "ix_graph_edges_target"}
+                    "ix_graph_edges_source", "ix_graph_edges_target",
+                    "ix_agent_tokens_user"}
 
 
 def test_table_names_match():
