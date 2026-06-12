@@ -137,6 +137,62 @@ def test_ambiguous_name_returns_candidates(tmp_path):
     assert find_api_callers(c, "p2", n1.id)["found"] is True
 
 
+def test_find_api_callers_resolves_by_url_path(tmp_path):
+    # 真实形态(ideas-v2 PDA 实证): 端点 id 带 method 前缀、name 是 handler 名, URL 在 meta.url。
+    # agent/人 用裸 URL 路径查 → 旧 _resolve(只认 id/name)返 found:false。补 meta.url 路径匹配。
+    pid = "u"
+    c = open_store(pid, path=tmp_path / "u.sqlite")
+    ep = f"{pid}:backend_endpoint:GET:/pda/task/check/container"
+    fe = f"{pid}:frontend_api_call:common/js/URL.js:PICK_CHECK_TURN"
+    nodes = [
+        GraphNode(id=ep, kind=NodeKind.BACKEND_ENDPOINT.value, name="checkContainer",
+                  project_id=pid, file="TaskController.java",
+                  meta={"url": "/pda/task/check/container", "http_method": "GET"}),
+        GraphNode(id=fe, kind=NodeKind.FRONTEND_API_CALL.value, name="PICK_CHECK_TURN",
+                  project_id=pid, file="common/js/URL.js",
+                  meta={"url": "/pda/task/check/container", "url_registry": True}),
+    ]
+    edges = [GraphEdge(source=fe, target=ep, kind=EdgeKind.CALLS_API.value)]
+    c.upsert_result(pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    # 裸 URL 路径(name/id 都不等于它)→ 现在能解析到端点并返回调用方
+    r = find_api_callers(c, pid, "/pda/task/check/container")
+    assert r["found"] and r["count"] == 1 and r["callers"][0]["id"] == fe
+    # 带 method 前缀 / 尾斜杠 也归一命中
+    assert find_api_callers(c, pid, "GET /pda/task/check/container")["found"]
+    assert find_api_callers(c, pid, "GET:/pda/task/check/container/")["found"]
+    # handler name 仍可解析(旧路径不破)
+    assert find_api_callers(c, pid, "checkContainer")["found"]
+    c.close()
+
+
+def test_find_api_callers_url_aggregates_methods(tmp_path):
+    # 同 URL 路径多 method(GET+POST)→ 按 URL 查应聚合两端点的前端调用方, 不被 method 切碎。
+    pid = "um"
+    c = open_store(pid, path=tmp_path / "um.sqlite")
+    epg = f"{pid}:backend_endpoint:GET:/x/item"
+    epp = f"{pid}:backend_endpoint:POST:/x/item"
+    fe1 = f"{pid}:frontend_api_call:URL.js:GET_ITEM"
+    fe2 = f"{pid}:frontend_api_call:URL.js:SAVE_ITEM"
+    nodes = [
+        GraphNode(id=epg, kind=NodeKind.BACKEND_ENDPOINT.value, name="getItem", project_id=pid,
+                  file="C.java", meta={"url": "/x/item", "http_method": "GET"}),
+        GraphNode(id=epp, kind=NodeKind.BACKEND_ENDPOINT.value, name="saveItem", project_id=pid,
+                  file="C.java", meta={"url": "/x/item", "http_method": "POST"}),
+        GraphNode(id=fe1, kind=NodeKind.FRONTEND_API_CALL.value, name="GET_ITEM", project_id=pid,
+                  file="URL.js", meta={"url": "/x/item", "url_registry": True}),
+        GraphNode(id=fe2, kind=NodeKind.FRONTEND_API_CALL.value, name="SAVE_ITEM", project_id=pid,
+                  file="URL.js", meta={"url": "/x/item", "url_registry": True}),
+    ]
+    edges = [GraphEdge(source=fe1, target=epg, kind=EdgeKind.CALLS_API.value),
+             GraphEdge(source=fe2, target=epp, kind=EdgeKind.CALLS_API.value)]
+    c.upsert_result(pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    r = find_api_callers(c, pid, "/x/item")
+    assert r["found"] and r["count"] == 2
+    assert {x["id"] for x in r["callers"]} == {fe1, fe2}
+    assert len(r["matchedEndpoints"]) == 2     # 标出聚合了两个 method
+    c.close()
+
+
 def test_search_nodes_multiword_ranks_by_term_hits(conn):
     # 多词 query: 整串"save user"匹配不到任何 name(旧行为 0 命中); 分词后 save_user 命中
     # save+user 两词排第一, 修复 graph lane 多词检索弱点(直接提升融合召回质量)。

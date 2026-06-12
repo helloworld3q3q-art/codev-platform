@@ -13,6 +13,7 @@ A1 桥接后 store 连通 (边向 = 消费方→提供方):
 from __future__ import annotations
 
 import heapq
+import re
 from dataclasses import dataclass, field
 
 from codev_platform.graph.schema import (
@@ -197,6 +198,40 @@ def _not_found(ref_key: str, ref: str, ambiguous: list[GraphNode]) -> dict:
     return out
 
 
+_METHOD_PREFIX = re.compile(r"^(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)[\s:]+", re.I)
+
+
+def _norm_endpoint_path(ref: str) -> str:
+    """端点 ref 归一成可比裸路径: 剥 'GET '/'GET:' 等 method 前缀 + ?query/#frag + 尾斜杠。
+    让 '/pda/x' / 'GET /pda/x' / 'GET:/pda/x' 都归到同一形, 与 meta.url 同形可比。"""
+    s = _METHOD_PREFIX.sub("", ref.strip())
+    s = s.split("?", 1)[0].split("#", 1)[0].strip()
+    return s.rstrip("/")
+
+
+def _resolve_endpoint(g: ImpactGraph, ref: str) -> tuple[list[GraphNode], list[GraphNode]]:
+    """端点解析: 先按 id/name(_resolve), 再按 **URL 路径** 匹配 meta.url。返回 (命中列表, 歧义候选)。
+
+    人 / agent 自然用 URL 路径(`/pda/task/check/container`)指端点, 而端点 id 带 method 前缀
+    (`...:GET:/pda/...`)、name 是 handler 名(`checkContainer`)→ 旧 _resolve 两招都不命中 →
+    found:false(本次 ideas-v2 PDA 实证)。补 meta.url 路径匹配填这洞。同路径多 method(GET/POST)
+    全返回, 调用方聚合其前端调用方(问"谁调这个 URL"不该被 method 切碎)。"""
+    node, ambig = _resolve(g, ref, NodeKind.BACKEND_ENDPOINT.value)
+    if node is not None:
+        return [node], []
+    if ambig:
+        return [], ambig
+    path = _norm_endpoint_path(ref)
+    if not path:
+        return [], []
+    matches = [
+        n for n in g.nodes.values()
+        if n.kind == NodeKind.BACKEND_ENDPOINT.value
+        and _norm_endpoint_path((n.meta or {}).get("url") or "") == path
+    ]
+    return matches, []
+
+
 # ---------------------------------------------------------------- 4 个查询入口
 
 def find_impact(store, project_id: str, node_ref: str, *,
@@ -266,14 +301,25 @@ def find_api_callers(store, project_id: str, endpoint_ref: str, *,
     certain_only=True: 只走确定依赖(滤低置信候选边)。
     """
     g = build_impact_graph(store, project_id, certain_only=certain_only)
-    node, ambig = _resolve(g, endpoint_ref, NodeKind.BACKEND_ENDPOINT.value)
-    if node is None:
+    eps, ambig = _resolve_endpoint(g, endpoint_ref)
+    if not eps:
         return _not_found("endpoint", endpoint_ref, ambig)
-    reached = _traverse(g, node.id, reverse=True)
-    callers = [(n, d, v, a) for (n, d, v, a) in reached if layer_of(n.kind) == "frontend"]
-    return {"found": True, "endpoint": _node_brief(node),
-            "callers": [_node_brief(n, d, v, a) for (n, d, v, a) in callers],
-            "count": len(callers), "certainOnly": certain_only}
+    # 同 URL 路径多 method(GET/POST) → 聚合各端点的前端调用方, 按 id 去重(取最近距离那条 brief)。
+    agg: dict[str, tuple] = {}
+    for ep in eps:
+        for (n, d, v, a) in _traverse(g, ep.id, reverse=True):
+            if layer_of(n.kind) != "frontend":
+                continue
+            cur = agg.get(n.id)
+            if cur is None or d < cur[1]:
+                agg[n.id] = (n, d, v, a)
+    callers = list(agg.values())
+    out = {"found": True, "endpoint": _node_brief(eps[0]),
+           "callers": [_node_brief(n, d, v, a) for (n, d, v, a) in callers],
+           "count": len(callers), "certainOnly": certain_only}
+    if len(eps) > 1:   # 按 URL 命中多 method, 标出全部让调用方知道聚合范围
+        out["matchedEndpoints"] = [_node_brief(e) for e in eps]
+    return out
 
 
 def generate_impact_report(store, project_id: str, node_ref: str, *,
