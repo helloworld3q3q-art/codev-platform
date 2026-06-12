@@ -222,6 +222,10 @@ async def list_tools() -> list[Tool]:
              description="跨层违规检测(确定性: 逆向依赖如 repository→controller; 重构/PR 自检用)",
              inputSchema={"type": "object", "properties": {
                  "limit": {"type": "integer", "description": "返回上限(默认 200)"}}}),
+        Tool(name="find_contract_drift",
+             description="契约漂移: 列悬空前端调用(调了后端不暴露的接口=接口删/改签名/operationId漂移); 前后端分离/多服务自检",
+             inputSchema={"type": "object", "properties": {
+                 "limit": {"type": "integer", "description": "返回上限(默认 200)"}}}),
         Tool(name="recall_code",
              description="跨 lane 代码召回: 融合 graph(架构/跨层节点)+ codegraph(符号 FTS)→ 统一可解释排名; 按 query 类型自动调权。一次拿最相关代码实体, 不必分调两工具",
              inputSchema={"type": "object", "properties": {
@@ -251,6 +255,8 @@ _DISPATCH = {
     "list_layer_members": lambda c, p, a: _impact.list_layer_members(c, p, a["role"]),
     "find_arch_violations": lambda c, p, a: _impact.find_arch_violations(
         c, p, int(a.get("limit", 200))),
+    "find_contract_drift": lambda c, p, a: _impact.find_contract_drift(
+        c, p, limit=int(a.get("limit", 200))),
     # recall_code 自开 graph+codegraph store(融合), 忽略传入的 graph conn。
     "recall_code": lambda c, p, a: _recall_code_tool(p, a),
 }

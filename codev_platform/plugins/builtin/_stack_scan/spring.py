@@ -166,6 +166,10 @@ def scan_spring(repo: Path, project_id: str) -> list[GraphNode]:
                         "http_method": method,
                         "base_path": base,
                         "handler": handler,
+                        # operation_id 派生: springdoc 默认 operationId = handler 方法名(前端经
+                        # OpenAPI 生成客户端时用的就是它)→ 供 _link operationId 精确桥, repo 无关。
+                        # handler 未解析到则不写(桥退 URL 匹配)。service 单仓缺省 ""(多服务才填)。
+                        **({"operation_id": handler} if handler else {}),
                     },
                 )
             )

@@ -157,9 +157,25 @@ class ImpactPathsTool(Tool):
         return _run_query(self.project_id, I.find_impact_paths, ref)
 
 
+class ContractDriftTool(Tool):
+    name = "contract_drift"
+    description = (
+        "契约漂移自检: 列出悬空前端调用 —— 前端调了后端不暴露的接口(接口被删/改签名/operationId 漂移/"
+        "URL 写错)。前后端分离 / 多服务 / 多仓项目改后端接口后查这个, 确认没留断头调用。无入参。"
+    )
+    input_schema = {"type": "object", "properties": {}}
+
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        return _run_query(self.project_id, I.find_contract_drift)
+
+
 def register_into(registry, project_id: str | None = None) -> None:
     registry.register(ImpactAnalysisTool(project_id))
     registry.register(TableUsageTool(project_id))
     registry.register(PageDependenciesTool(project_id))
     registry.register(ApiCallersTool(project_id))
     registry.register(ImpactPathsTool(project_id))
+    registry.register(ContractDriftTool(project_id))

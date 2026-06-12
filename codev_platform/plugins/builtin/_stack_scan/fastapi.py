@@ -99,6 +99,9 @@ def scan_fastapi(repo: Path, project_id: str) -> list[GraphNode]:
                             "url": url,
                             "http_method": method,
                             "handler": node.name,
+                            # operation_id: 显式标注则带上(供 _link operationId 精确桥, repo 无关);
+                            # 未标注则不写(桥优雅退 URL 匹配)。service 单仓缺省 ""(多服务才填)。
+                            **({"operation_id": op_id} if op_id else {}),
                         },
                     )
                 )
