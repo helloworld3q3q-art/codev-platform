@@ -187,26 +187,25 @@ def test_remote_rerank_failure_swallowed_by_qwen_reranker(monkeypatch):
 
 # ---- code_vec 专用 embedder: 索引侧用本机 GPU, 不经共享 daemon(防大批量死锁 daemon) ----
 
-@_needs_st
-def test_code_vec_embedder_defaults_local():
-    """默认走本机 qwen-local(不经 daemon /embed), 与 agent-memory 默认 remote 区分。"""
-    from codev_platform.agent.embed.registry import build_code_vec_embedder
-    from codev_platform.agent.embed.qwen import QwenLocalEmbedder
-    emb = build_code_vec_embedder({})
-    assert isinstance(emb, QwenLocalEmbedder)
-
-
-def test_code_vec_embedder_remote_override():
-    """显式配 remote 仍可回退共享 daemon(单机省显存等场景)。"""
+def test_code_vec_embedder_defaults_remote():
+    """默认走 remote(复用共享 daemon GPU, 不在 worker 塞第二份模型; 死锁已由 daemon wait_for 根治)。"""
     from codev_platform.agent.embed.registry import build_code_vec_embedder
     from codev_platform.agent.embed.remote import RemoteEmbedder
-    emb = build_code_vec_embedder({"recall": {"code_vec": {"embed_backend": "remote"}}})
-    assert isinstance(emb, RemoteEmbedder)
+    assert isinstance(build_code_vec_embedder({}), RemoteEmbedder)
+
+
+@_needs_st
+def test_code_vec_embedder_local_optin():
+    """专用 GPU 索引节点 opt-in qwen-local: 本机直跑、与服务隔离。"""
+    from codev_platform.agent.embed.registry import build_code_vec_embedder
+    from codev_platform.agent.embed.qwen import QwenLocalEmbedder
+    emb = build_code_vec_embedder({"recall": {"code_vec": {"embed_backend": "qwen-local"}}})
+    assert isinstance(emb, QwenLocalEmbedder)
 
 
 @_needs_st
 def test_code_vec_embedder_device_override():
-    """recall.code_vec.embed_device 显式覆盖自动 cuda/cpu 探测。"""
+    """qwen-local opt-in 下 recall.code_vec.embed_device 覆盖自动 cuda/cpu 探测。"""
     from codev_platform.agent.embed.registry import build_code_vec_embedder
-    emb = build_code_vec_embedder({"recall": {"code_vec": {"embed_device": "cpu"}}})
+    emb = build_code_vec_embedder({"recall": {"code_vec": {"embed_backend": "qwen-local", "embed_device": "cpu"}}})
     assert emb._device == "cpu"

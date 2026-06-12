@@ -111,17 +111,18 @@ def _cuda_or_cpu() -> str:
 
 
 def build_code_vec_embedder(cfg: dict) -> Embedder | None:
-    """code_vec 索引专用 embedder —— 与 agent-memory(低频, 默认 remote 复用 daemon GPU)不同。
+    """code_vec 索引专用 embedder。
 
-    索引是**高吞吐批量**(大项目 ~19万节点): 用本机 qwen-local 直跑 GPU, **不经共享 daemon /embed**。
-    原因: 大批量串行打 daemon 会把它那把串行 GPU 信号量长占, 一旦某次 encode 卡住(CUDA 偶发)
-    sem 永不释放 → daemon /embed 整体死锁, 连带打挂 live search_docs。本机直跑则 build 与服务
-    解耦: build 自己的 CUDA 上下文出问题只失败自己(checkpoint 保进度), 不波及在线服务; 且省 HTTP。
+    默认 **remote** —— 复用共享 daemon 那份 GPU 模型, 不在 worker 里再 load 第二份。
+    (曾因 daemon /embed 死锁短暂改默认本机; 死锁已由 server `_gpu_call` wait_for 根治 —— 卡死
+    算子超时释放信号量, 不再永久死锁。故 remote 重新安全, 且: 单机 8GB 不必塞两份模型挤爆显存,
+    云上无 GPU 的 worker 也只能走 remote → remote 是两端都成立的默认。)
 
-    config `recall.code_vec.embed_{backend,device}` 可覆盖; 默认 qwen-local + 自动 cuda/cpu。"""
+    `recall.code_vec.embed_backend=qwen-local` 为**专用 GPU 索引节点**的 opt-in: 该节点不跑在线
+    服务、GPU 独占, 本机直跑省 HTTP 更快, 与服务彻底隔离。device 默认自动 cuda/cpu。"""
     from codev_platform.core.config import get as _get
-    backend = _get(cfg, "recall.code_vec.embed_backend", "qwen-local")
-    if backend == "remote":
+    backend = _get(cfg, "recall.code_vec.embed_backend", "remote")
+    if backend != "qwen-local":
         return _build_remote(cfg)
     import importlib.util
     if importlib.util.find_spec("sentence_transformers") is None:
