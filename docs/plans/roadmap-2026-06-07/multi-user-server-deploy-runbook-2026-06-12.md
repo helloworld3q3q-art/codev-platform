@@ -83,4 +83,7 @@ codev-platform gateway client-auth --repo . --query-token        # 写 ?token=<�
 - [ ] health/status pg-aware(pg 模式不误报 "未建")— Stage C
 - [x] web 控制台密码-set CLI(2026-06-12 `org set-password`;厘清双 store=同表互补非 fork,
       密码定向 UPDATE users.password_hash 不覆盖 B 的 display_name)
-- [ ] 真机端到端(真 Claude Code 客户端连 token-mode 服务器)— 周末接入时验
+- [x] **live HTTP 冒烟**(2026-06-12,一次性端口 token 模式, 真 uvicorn+AuthMiddleware+PgTokenResolver):
+      healthz 公开 200 / 无 token 401 / 错 token 401 / org mismatch(闸1) 403 / 不在白名单(闸2) 403 /
+      授权项目(org+白名单双过) 200。运行中 4 守护进程零干扰(throwaway 端口 + config 用完即恢复 passthrough)。
+- [ ] 真机跨网络端到端(真 Claude Code 客户端从第二台机连 token-mode 服务器)— 周末接入时验(本机 loopback 已全验)
