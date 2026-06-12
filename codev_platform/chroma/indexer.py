@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -95,8 +96,29 @@ from codev_platform.chroma._discover import (  # noqa: E402
 # ---- 索引主流程 ----
 
 
+def _strip_html(html: str) -> str:
+    """html → 可索引纯文本(剥 script/style/注释/标签 + 解 HTML 实体)。无外部依赖, 正则够用于检索。"""
+    from html import unescape
+    html = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html)  # 整块去脚本/样式
+    html = re.sub(r"(?s)<!--.*?-->", " ", html)                  # 注释
+    html = re.sub(r"(?s)<[^>]+>", " ", html)                     # 标签
+    text = unescape(html)
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n[ \t\n]*\n", "\n\n", text).strip()
+
+
+def _doc_text(rel: str, raw: str) -> str:
+    """文档原文 → 可索引文本。html/htm 剥标签(否则标签是噪声); md/txt/rule 等纯文本原样。
+    支持任何**文本类**文档(不止 markdown), 类型由 doc_patterns 决定(.claude/index.json 可声明)。"""
+    return _strip_html(raw) if rel.lower().endswith((".html", ".htm")) else raw
+
+
 def iter_chunks(files: list[Path]) -> Iterable[tuple[str, int, str, dict]]:
-    """逐文件 → 逐 chunk 产出 (id, idx, content, metadata)"""
+    """逐文件 → 逐 chunk 产出 (id, idx, content, metadata)。
+
+    文档类型不限 markdown: md/txt/rule/html 等文本类都吃(chunk_text 对无标题文本走段落/字符切分;
+    html 经 _doc_text 剥标签)。文件集由 discover_files(doc_patterns)决定。
+    """
     for f in files:
         rel = _rel_path(f)
         try:
@@ -111,7 +133,7 @@ def iter_chunks(files: list[Path]) -> Iterable[tuple[str, int, str, dict]]:
             logger.warning("跳过读取失败文件 %s: %s", rel, exc)
             continue
 
-        chunks = chunk_text(text)
+        chunks = chunk_text(_doc_text(rel, text))
         category = infer_category(rel)
         module = infer_module(rel)
 
