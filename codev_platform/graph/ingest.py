@@ -52,49 +52,86 @@ class IngestReport:
     summaries: dict[str, dict] = field(default_factory=dict)
 
 
+def _resolve_repos(repo_path: Path | str, project_id: str,
+                   extra_repos: list[str] | None) -> list[Path]:
+    """多根仓列表: 主仓 + config `projects.<pid>.extra_repos`(或显式 extra_repos)。
+
+    前后端分离 / N 前端 M 后端的**同一逻辑项目**跨仓: 声明额外仓(如 PDA 前端仓), 一起 ingest
+    进同一 store, _link_pass 据此跨仓连前端→后端。声明式(config), 单仓项目零影响(无声明=只主仓)。
+    去重 + 仅保留存在的目录。
+    """
+    main = Path(repo_path).resolve()
+    repos = [main]
+    if extra_repos is None:
+        from codev_platform.core.config import get as _cfg_get, load_config
+        extra_repos = _cfg_get(load_config(), f"projects.{project_id}.extra_repos", []) or []
+    for r in extra_repos:
+        p = Path(r).expanduser()
+        if p.is_dir() and p.resolve() not in {x.resolve() for x in repos}:
+            repos.append(p.resolve())
+    return repos
+
+
 def ingest_project(
     repo_path: Path | str,
     project_id: str,
     *,
     store_path: Path | None = None,
+    extra_repos: list[str] | None = None,
 ) -> IngestReport:
-    """对 repo 跑所有适用插件, 把成功产出灌进 project 的统一图谱 store。
+    """对 repo(+ 多根 extra_repos)跑所有适用插件, 把产出灌进 project 的统一图谱 store。
 
     Args:
-        repo_path:   被分析的仓库根路径。
+        repo_path:   主仓根路径。
         project_id:  图谱隔离键 (决定 store 文件)。
         store_path:  显式覆盖 store sqlite 路径 (测试用);None 走默认布局。
+        extra_repos: 额外仓(多根; None=读 config projects.<pid>.extra_repos)。跨仓前后端连用。
+
+    多根关键: upsert 按 plugin 删了再插 → 同插件跑多仓会互相覆盖。故**按 plugin 合并跨仓
+    AnalyzerResult**(节点/边按 id 去重 concat)后再 upsert 一次。
 
     Returns:
         IngestReport — 哪些插件成功入库 + 各自计数。
     """
-    results = run_applicable(repo_path, project_id)
+    repos = _resolve_repos(repo_path, project_id, extra_repos)
     report = IngestReport(project_id=project_id)
     store = open_store(project_id, path=store_path)
     try:
-        for exec_result in results:
-            analyzer_result = exec_result.result
-            if analyzer_result is None:  # run_applicable 只回 ok=True, 兜底保险
-                continue
-            store.upsert_result(project_id, analyzer_result)
-            report.ingested.append(exec_result.plugin)
-            report.summaries[exec_result.plugin] = exec_result.summary
+        # 按 plugin 合并跨仓产出(防 upsert 删插互相覆盖)。
+        merged: dict[str, AnalyzerResult] = {}
+        node_seen: dict[str, set[str]] = {}
+        for repo in repos:
+            for exec_result in run_applicable(repo, project_id):
+                ar = exec_result.result
+                if ar is None:
+                    continue
+                plug = exec_result.plugin
+                if plug not in merged:
+                    merged[plug] = AnalyzerResult(plugin=plug)
+                    node_seen[plug] = set()
+                acc = merged[plug]
+                for n in ar.nodes:
+                    if n.id not in node_seen[plug]:
+                        node_seen[plug].add(n.id)
+                        acc.nodes.append(n)
+                acc.edges.extend(ar.edges)
+                s = report.summaries.setdefault(plug, {"nodes": 0, "edges": 0})
+                s["nodes"] += (exec_result.summary or {}).get("nodes", len(ar.nodes))
+                s["edges"] += (exec_result.summary or {}).get("edges", len(ar.edges))
+        for plug, ar in merged.items():
+            store.upsert_result(project_id, ar)
+            report.ingested.append(plug)
 
         # 核心 cross-plugin linker pass: 各插件落库后, 读回全量节点, 跨**所有**后端插件
         # (fastapi/spring/node) 把 frontend_api_call --calls_api--> backend_endpoint 连起来。
-        # 这是 calls_api 的**唯一** owner (前端插件不再各自只链同仓 FastAPI), 解决前端
-        # 链不到 Java/Spring 端点的缺口。挂 builtin.linker, upsert 幂等可重跑。
+        # **多根关键**: 读 store 全量节点 → 自动跨仓连(extra_repo 前端 → 主仓后端)。
         _link_pass(store, project_id, report)
 
-        # 调用边 post-pass: 跑所有适用 CallResolver(codegraph 兜底 + 未来各语言栈 resolver)把
-        # endpoint→function / 函数→函数 calls 边物化, store 自成连通解锁影响分析。按语言栈
-        # 可扩展(graph/call_resolvers/), 全局去重, fail-soft。
-        _calls_pass(store, project_id, report, Path(repo_path))
-
-        # 前端组件依赖 post-pass: 接 dependency-cruiser(读 tsconfig paths 解 @/ alias)产
-        # frontend_component 节点 + renders 边, 解锁"改组件→影响哪些页面"(codegraph 盲区)。
-        # 框架无关(react .tsx + vue .vue 都吃), 自 detect, fail-soft 无 node/前端则空。
-        _frontend_deps_pass(store, project_id, report, Path(repo_path))
+        # 调用边 + 前端依赖 post-pass: 仅主仓跑(这两个 pass 也按 plugin 删插 upsert, 每仓调会
+        # 互相覆盖)。extra 仓多为前端, 调用边产出少; 前后端跨仓链接已由 _link_pass(读全量节点)覆盖。
+        main_repo = repos[0]
+        _calls_pass(store, project_id, report, main_repo)
+        _frontend_deps_pass(store, project_id, report, main_repo)
 
         # 前端内部桥接 post-pass: 两个前端插件(frontend_deps 建 module / react 建 api_call/route)
         # 为同批文件建节点但 id 不相交、无边相连 → frontend_module 成孤岛(impact 滤软边后到不了

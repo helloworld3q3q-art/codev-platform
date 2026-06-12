@@ -128,3 +128,53 @@ def test_ingest_project_isolation(tmp_path: Path) -> None:
     got_a = conn_a.load_graph("proj-a", plugin="fake.ok")
     conn_a.close()
     assert got_a.nodes[0].project_id == "proj-a"
+
+
+# ---- 多根 ingest (前后端分离/N前端M后端 同一逻辑项目跨仓) ----
+
+class _RepoNodePlugin(AnalyzerPlugin):
+    """按 repo basename 产唯一节点 —— 验多仓合并不互相覆盖。"""
+    name = "fake.reponode"
+    version = "1.0.0"
+
+    def detect(self, repo_path: Path) -> bool:
+        return True
+
+    def analyze(self, repo_path: Path, project_id: str) -> AnalyzerResult:
+        base = Path(repo_path).name
+        return AnalyzerResult(
+            plugin="fake.reponode",
+            nodes=[GraphNode(id=f"{project_id}:project:{base}", kind="project",
+                             name=base, project_id=project_id)],
+        )
+
+
+def test_resolve_repos_config_and_dedup(tmp_path, monkeypatch):
+    from codev_platform.graph.ingest import _resolve_repos
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    # 显式 extra_repos
+    assert _resolve_repos(main, "p", [str(extra)]) == [main.resolve(), extra.resolve()]
+    # config 驱动 (extra_repos=None 读 config)
+    monkeypatch.setattr("codev_platform.core.config.load_config",
+                        lambda: {"projects": {"p": {"extra_repos": [str(extra)]}}})
+    assert extra.resolve() in _resolve_repos(main, "p", None)
+    # 不存在的目录被丢弃
+    assert _resolve_repos(main, "p", [str(tmp_path / "nope")]) == [main.resolve()]
+    # 去重 (extra == main)
+    assert _resolve_repos(main, "p", [str(main)]) == [main.resolve()]
+
+
+def test_multiroot_merges_both_repos_no_overwrite(tmp_path):
+    clear_registry()
+    register_plugin(_RepoNodePlugin())
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    store = tmp_path / "g.sqlite"
+    ingest_project(main, "demo", store_path=store, extra_repos=[str(extra)])
+    s = open_store("demo", path=store)
+    m = s.load_graph("demo")
+    s.close()
+    ids = {n.id for n in m.nodes}
+    # 两仓节点都在 store(同插件跑两仓未互相 upsert 覆盖)
+    assert "demo:project:main" in ids and "demo:project:extra" in ids
