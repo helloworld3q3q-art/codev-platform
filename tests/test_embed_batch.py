@@ -74,3 +74,30 @@ def test_remote_encode_batch_mismatch_raises(monkeypatch):
     import pytest
     with pytest.raises(ValueError):
         RemoteEmbedder("http://x/embed").encode_batch(["a", "b", "c"])
+
+
+def test_remote_encode_batch_retries_transient_timeout(monkeypatch):
+    """前两次 /embed 超时, 第三次成功 → 重试吃掉瞬时卡顿, 不让整个索引失败。"""
+    monkeypatch.setattr(remote_mod.time, "sleep", lambda *_: None)  # 不真睡
+    calls = {"n": 0}
+
+    def flaky(url, payload, timeout, token):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("timed out")
+        return {"vectors": [[9.0]] * len(payload["texts"])}
+
+    monkeypatch.setattr(remote_mod, "_post_json", flaky)
+    out = RemoteEmbedder("http://x/embed").encode_batch(["a", "b"])
+    assert out == [[9.0], [9.0]]
+    assert calls["n"] == 3  # 失败2次 + 成功1次
+
+
+def test_remote_encode_batch_raises_after_exhausting_retries(monkeypatch):
+    """持续超时 → 重试用尽后上抛 (由上层 checkpoint 保住已完成进度)。"""
+    monkeypatch.setattr(remote_mod.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(remote_mod, "_post_json",
+                        lambda *a, **k: (_ for _ in ()).throw(TimeoutError("timed out")))
+    import pytest
+    with pytest.raises(RuntimeError):
+        RemoteEmbedder("http://x/embed").encode_batch(["a"])
