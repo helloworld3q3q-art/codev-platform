@@ -71,6 +71,10 @@ class EdgeKind(str, Enum):
     RENDERS = "renders"
     DEFINES_API = "defines_api"
     CALLS_API = "calls_api"
+    # 页面/组件 --uses_api--> url_registry 型 frontend_api_call 常量(页面源码静态引用了该常量名)。
+    # 集中声明 API 常量(URL.js)的项目里, "页面 import 整个注册模块"≠"调用其每个接口" → 用本边
+    # 精确归因到真正引用了某常量的页面, 取代"经共享模块 contains 泛连"的过报(见 impact 注释)。
+    USES_API = "uses_api"
     IMPLEMENTS = "implements"
     READS_TABLE = "reads_table"
     WRITES_TABLE = "writes_table"

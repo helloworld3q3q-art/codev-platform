@@ -100,8 +100,19 @@ def build_impact_graph(store, project_id: str, *, include_soft: bool = False,
     if certain_only:
         edges = [e for e in edges if _is_certain(e.confidence)]
     edges = resolve_duplicate_edges(edges)   # 冲突消解: 同边多 plugin 重复 → 保最优 provenance
+    # url_registry 常量(共享 URL.js 集中声明)的 contains 入边: 在影响图里**丢弃** —— 否则
+    # "页面 import 整个注册模块"会经 contains 泛连成"调用其每个接口"(实测一端点假命中 97 页)。
+    # 这些常量的精确调用方改由 builtin.frontend_api_usage 的 uses_api 边承载。**只对 url_registry
+    # 生效**(内联 api_call 的 contains 父组件=真调用方, 不动 → 量化等纯内联项目零影响)。store 仍
+    # 保留 contains(显示/其它消费方不变), 只是 impact 内存图不走它。
+    _registry_api = {
+        n.id for n in nodes
+        if n.kind == NodeKind.FRONTEND_API_CALL.value and (n.meta or {}).get("url_registry")
+    }
     g = ImpactGraph(nodes={n.id: n for n in nodes})
     for e in edges:
+        if e.kind == EdgeKind.CONTAINS.value and e.target in _registry_api:
+            continue
         g.fwd.setdefault(e.source, []).append((e.target, e.kind))
         g.rev.setdefault(e.target, []).append((e.source, e.kind))
         prov = edge_provenance(e.meta)

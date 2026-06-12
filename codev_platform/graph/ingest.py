@@ -35,6 +35,7 @@ LINKER_PLUGIN = "builtin.linker"
 CALLS_PLUGIN = "builtin.call_resolvers"  # 调用边(CALLS)统一归属: 多 resolver 去重后合并入此 plugin
 FRONTEND_DEPS_PLUGIN = "builtin.frontend_deps"  # 前端组件依赖图(接 dependency-cruiser)
 FRONTEND_BRIDGE_PLUGIN = "builtin.frontend_bridge"  # 前端内部桥: module(文件) -> 同文件 api_call/route
+FRONTEND_API_USAGE_PLUGIN = "builtin.frontend_api_usage"  # 页面 -> url_registry 常量 精确 uses_api 边
 ANALYZERS_PLUGIN = "builtin.analyzers"  # 综合分析器(软节点/软边: 业务域等)统一归属
 
 
@@ -138,6 +139,11 @@ def ingest_project(
         # 后端)。按**文件**缝: module --contains--> 同文件 api_call/route(硬边, impact 也走), 打通
         # 前端页→api→endpoint→表 跨层链。必须在 _frontend_deps_pass(产 module)之后跑。
         _frontend_bridge_pass(store, project_id, report)
+
+        # 前端 API 使用精确归因 post-pass: 页面 --uses_api--> 它源码真正引用的 url_registry 常量。
+        # 必须在 url_registry(api_call)+ frontend_deps(component)+ bridge 之后。取代"页面 import
+        # 共享注册模块 → 算调用其每个接口"的过报(impact 据 uses_api 精确, 见 build_impact_graph)。
+        _frontend_api_usage_pass(store, project_id, report, repos)
 
         # 综合分析 second post-pass: 硬骨架全部落库且连通后, analyzer 在其上归纳软节点/软边
         # (业务域等)。软产物 confidence<1.0 + referential-integrity 校验, 与硬骨架物理隔离。
@@ -261,6 +267,38 @@ def _frontend_bridge_pass(store, project_id: str, report: IngestReport) -> None:
     )
     report.ingested.append(FRONTEND_BRIDGE_PLUGIN)
     report.summaries[FRONTEND_BRIDGE_PLUGIN] = {"contains_edges": len(edges)}
+
+
+def _frontend_api_usage_pass(store, project_id: str, report: IngestReport,
+                             repos: list[Path]) -> None:
+    """页面→api_call 精确 uses_api 边 post-pass —— 薄编排: 注入跨仓源码读取 + 委托解析引擎。
+
+    解析逻辑在 `_stack_scan.api_usage`(策略式, 可扩展不同"使用模式": 当前 url_registry 常量引用;
+    量化式服务方法调用是后续策略)。必须在 url_registry(产 api_call)+ frontend_deps(产 component/
+    module)之后跑。无适用 api_call(纯内联项目)→ no-op。fail-soft: 解析异常只 warn 不拖垮 ingest。"""
+    from codev_platform.plugins.builtin._stack_scan.api_usage import resolve_api_usage_edges
+
+    def _read(rel: str) -> str:
+        for r in repos:
+            p = r / rel
+            if p.is_file():
+                try:
+                    return p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    return ""
+        return ""
+
+    try:
+        merged = store.load_graph(project_id)
+        edges = resolve_api_usage_edges(merged.nodes, _read)
+    except Exception as exc:  # noqa: BLE001 — 精确归因失败不拖垮基线 ingest
+        logger.warning("[frontend_api_usage] pass failed (fail-soft): %r", exc)
+        return
+    stamp_unprovenanced(edges, ProvSource.REGEX, parser=FRONTEND_API_USAGE_PLUGIN)
+    store.upsert_result(
+        project_id, AnalyzerResult(edges=edges, plugin=FRONTEND_API_USAGE_PLUGIN))
+    report.ingested.append(FRONTEND_API_USAGE_PLUGIN)
+    report.summaries[FRONTEND_API_USAGE_PLUGIN] = {"uses_api_edges": len(edges)}
 
 
 def _link_pass(store, project_id: str, report: IngestReport) -> None:

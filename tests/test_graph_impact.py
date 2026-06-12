@@ -165,6 +165,43 @@ def test_find_api_callers_resolves_by_url_path(tmp_path):
     c.close()
 
 
+def test_find_api_callers_registry_precise_via_uses_api(tmp_path):
+    # url_registry 常量: 共享 URL.js 被两页 import, 但只 scan.vue 真引用了常量(uses_api)。
+    # 期望: find_api_callers 只返 scan.vue(精确), 不返 other.vue(只 import 不用)+ 不返 URL.js。
+    # 机制: build_impact_graph 丢弃 contains→registry常量 的泛连边, 只走 uses_api 精确边。
+    pid = "reg"
+    c = open_store(pid, path=tmp_path / "reg.sqlite")
+    ep = f"{pid}:backend_endpoint:GET:/pda/task/check/container"
+    api = f"{pid}:frontend_api_call:URL.js:PICK_CHECK_TURN"
+    urljs = f"{pid}:frontend_component:URL.js"
+    scan = f"{pid}:frontend_component:pages/scan.vue"
+    other = f"{pid}:frontend_component:pages/other.vue"
+    nodes = [
+        GraphNode(id=ep, kind=NodeKind.BACKEND_ENDPOINT.value, name="checkContainer", project_id=pid,
+                  file="T.java", meta={"url": "/pda/task/check/container", "http_method": "GET"}),
+        GraphNode(id=api, kind=NodeKind.FRONTEND_API_CALL.value, name="PICK_CHECK_TURN", project_id=pid,
+                  file="URL.js", meta={"url": "/pda/task/check/container", "url_registry": True}),
+        GraphNode(id=urljs, kind=NodeKind.FRONTEND_COMPONENT.value, name="URL.js", project_id=pid, file="URL.js"),
+        GraphNode(id=scan, kind=NodeKind.FRONTEND_COMPONENT.value, name="scan.vue", project_id=pid, file="pages/scan.vue"),
+        GraphNode(id=other, kind=NodeKind.FRONTEND_COMPONENT.value, name="other.vue", project_id=pid, file="pages/other.vue"),
+    ]
+    edges = [
+        GraphEdge(source=api, target=ep, kind=EdgeKind.CALLS_API.value),
+        GraphEdge(source=urljs, target=api, kind=EdgeKind.CONTAINS.value),   # 共享注册模块声明常量
+        GraphEdge(source=scan, target=urljs, kind=EdgeKind.IMPORTS.value),   # 两页都 import URL.js
+        GraphEdge(source=other, target=urljs, kind=EdgeKind.IMPORTS.value),
+        GraphEdge(source=scan, target=api, kind=EdgeKind.USES_API.value),    # 但只 scan 真引用常量
+    ]
+    c.upsert_result(pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    r = find_api_callers(c, pid, "/pda/task/check/container")
+    assert r["found"]
+    ids = {x["id"] for x in r["callers"]}
+    assert scan in ids                       # 精确命中真正引用常量的页面
+    assert other not in ids                  # 只 import 不引用 → 不算调用方(不再泛连)
+    assert urljs not in ids                  # 共享声明模块本身不算调用方
+    c.close()
+
+
 def test_find_api_callers_url_aggregates_methods(tmp_path):
     # 同 URL 路径多 method(GET+POST)→ 按 URL 查应聚合两端点的前端调用方, 不被 method 切碎。
     pid = "um"

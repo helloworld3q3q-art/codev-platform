@@ -37,6 +37,7 @@ def test_edge_kind_covers_plan_list():
         "mentions", "relates_to", "changed_by", "belongs_to_domain",
         "plays_role",   # A2 软边: file --plays_role--> arch_layer(2026-06-08)
         "calls_api_inferred",   # A3 软边: inferred_api_call --> backend_endpoint(2026-06-12)
+        "uses_api",   # page/组件 --uses_api--> url_registry 常量(精确归因, 2026-06-13)
     }
     assert {k.value for k in EdgeKind} == expected
 
