@@ -323,19 +323,22 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
     from codev_platform.core.project_id import validate as _pid_validate
     from codev_platform.gateway import (
         AuthMiddleware, build_authenticator, maybe_rate_limit_middleware,
-        deploy_policy_error, multi_user_policy_error,
+        startup_policy_error,
     )
+    from codev_platform.mcp_serve import mcp_bind_host
     from codev_platform.mcp_streamable import (
         ContextualStreamableHTTPASGIApp,
         streamable_lifespan,
     )
 
-    # P3 护栏:多 dev 共用却仍 passthrough → 拒绝启动(personal 会串号);prod/对外同样 fail-fast。
+    # 启动统一认证策略闸(多 dev 串号 / prod 暴露 / 非 loopback bind 未认证)→ 任一命中硬拒。
+    # 用真实 bind host(不再传死值 127.0.0.1, 否则绑 0.0.0.0 时 bind 暴露漏判)。
     _cfg0 = load_config()
-    for _err_msg in (multi_user_policy_error(_cfg0), deploy_policy_error(_cfg0, "127.0.0.1")):
-        if _err_msg:
-            _flog(f"[startup] REFUSE: {_err_msg}")
-            raise SystemExit(f"agent-memory 拒绝启动:{_err_msg}")
+    _host = mcp_bind_host(_cfg0)
+    _err_msg = startup_policy_error(_cfg0, _host)
+    if _err_msg:
+        _flog(f"[startup] REFUSE: {_err_msg}")
+        raise SystemExit(f"agent-memory 拒绝启动:{_err_msg}")
 
     sse_transport = SseServerTransport("/messages/")
 
@@ -452,8 +455,8 @@ async def run_http(port: int = _MEM_SSE_PORT) -> None:
         middleware=_mw,
         lifespan=streamable_lifespan(mcp_session_manager),
     )
-    _flog(f"[http] agent-memory SSE/MCP server starting on 127.0.0.1:{port}")
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
+    _flog(f"[http] agent-memory SSE/MCP server starting on {_host}:{port}")
+    config = uvicorn.Config(app, host=_host, port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()
 
 

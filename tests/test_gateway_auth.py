@@ -207,6 +207,49 @@ def test_deploy_policy_localhost_url_ok():
     assert deploy_policy_error({"platform": {"url": "http://localhost:8848"}}, "127.0.0.1") is None
 
 
+# ---- bind_policy_error(非 loopback bind 硬拒, multi-org P1.2)----
+
+def test_bind_policy_nonloopback_passthrough_rejected():
+    from codev_platform.gateway.auth import bind_policy_error
+    err = bind_policy_error({"gateway": {"auth_mode": "passthrough"}}, "0.0.0.0")
+    assert err and "auth_mode=token" in err
+
+
+def test_bind_policy_nonloopback_token_ok():
+    from codev_platform.gateway.auth import bind_policy_error
+    assert bind_policy_error({"gateway": {"auth_mode": "token"}}, "0.0.0.0") is None
+
+
+def test_bind_policy_loopback_passthrough_ok():
+    from codev_platform.gateway.auth import bind_policy_error
+    # 单机默认: loopback bind + passthrough 放行(不破单机)
+    assert bind_policy_error({}, "127.0.0.1") is None
+    assert bind_policy_error({}, "localhost") is None
+    assert bind_policy_error({}, "::1") is None
+
+
+# ---- startup_policy_error(聚合三条, 单一入口)----
+
+def test_startup_policy_aggregates_all_three():
+    from codev_platform.gateway.auth import startup_policy_error
+    # 多 dev passthrough → 命中 multi_user(第一条)
+    assert startup_policy_error({"gateway": {"auth_mode": "passthrough", "multi_user": True}}, "127.0.0.1")
+    # prod passthrough → 命中 deploy(第二条)
+    assert startup_policy_error({"deployment": {"mode": "prod"}}, "127.0.0.1")
+    # 非 loopback bind passthrough → 命中 bind(第三条)
+    assert startup_policy_error({}, "0.0.0.0")
+    # 单机默认全放行
+    assert startup_policy_error({}, "127.0.0.1") is None
+    # token 模式三条全放行(对外暴露安全)
+    assert startup_policy_error({"gateway": {"auth_mode": "token"}, "deployment": {"mode": "prod"}}, "0.0.0.0") is None
+
+
+def test_mcp_bind_host_single_source():
+    from codev_platform.mcp_serve import mcp_bind_host
+    assert mcp_bind_host({}) == "127.0.0.1"                          # 默认 loopback
+    assert mcp_bind_host({"mcp": {"bind_host": "0.0.0.0"}}) == "0.0.0.0"  # config 覆盖
+
+
 def test_middleware_token_mode_gates():
     cfg = {"gateway": {"auth_mode": "token", "tokens": {token_hash("good"): {"user_id": "bob", "org_id": "acme"}}}}
     app, cap = _starlette_app(cfg)

@@ -67,6 +67,16 @@ def _warn_deprecated(old_key: str, canonical: str) -> None:
                      old_key, canonical)
 
 
+def mcp_bind_host(cfg: dict) -> str:
+    """MCP 服务端 uvicorn **bind host** 单一真值源: config `mcp.bind_host` > 默认 loopback。
+
+    单机(默认): 127.0.0.1 仅本机可达。多机部署改 `mcp.bind_host=0.0.0.0`(配合 token 模式,
+    否则 startup_policy_error 硬拒)。**注意**与 MCPEndpoint.host 区分: 后者是**本机探活**用
+    (probe 永远打 loopback, 即使 bind 0.0.0.0 也从 127.0.0.1 可达), bind host 才是对外监听面。
+    """
+    return str(_cfg_get(cfg, "mcp.bind_host", "127.0.0.1"))
+
+
 def _bind_port(cfg: dict, kind: str) -> int:
     """服务端 bind 端口: canonical 键 > deprecated 别名(带一次性 warn)> 默认。端口真值单一入口。"""
     canonical, aliases, default = _SERVICE_PORTS[kind]

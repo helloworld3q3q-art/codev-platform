@@ -16,9 +16,11 @@ from codev_platform.gateway.auth import (
     PassthroughAuthenticator,
     TokenAuthenticator,
     Unauthorized,
+    bind_policy_error,
     build_authenticator,
     deploy_policy_error,
     multi_user_policy_error,
+    startup_policy_error,
 )
 from codev_platform.gateway.middleware import (
     AuthMiddleware,
@@ -32,9 +34,11 @@ __all__ = [
     "PassthroughAuthenticator",
     "TokenAuthenticator",
     "Unauthorized",
+    "bind_policy_error",
     "build_authenticator",
     "deploy_policy_error",
     "multi_user_policy_error",
+    "startup_policy_error",
     "AuthMiddleware",
     "RateLimitMiddleware",
     "maybe_rate_limit_middleware",

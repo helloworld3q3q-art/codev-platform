@@ -262,6 +262,40 @@ def multi_user_policy_error(cfg: dict | None) -> str | None:
     return None
 
 
+def bind_policy_error(cfg: dict | None, host: str) -> str | None:
+    """bind host 安全策略(纯函数, 可测)—— warn_if_insecure 的**硬拒升级版**(multi-org P1.2)。
+
+    passthrough 不验签: 绑 loopback 仅本机可达可接受, 一旦绑 0.0.0.0 / 实 IP 暴露到网络 =
+    未认证对外开放。原 warn_if_insecure 只 loud WARN(靠人记得切), 多机部署下不够 —— 这里
+    升级成启动硬拒(不靠人自觉)。token 模式放行(已验签, 对外暴露安全)。
+
+    返回错误串 = 必须拒绝启动; None = 放行。
+    """
+    c = cfg or {}
+    if _cfg_get(c, "gateway.auth_mode", "passthrough") == "token":
+        return None
+    if not _is_loopback(host):
+        return (f"bind host={host} 非 loopback 但 gateway.auth_mode=passthrough —— "
+                "未认证对外开放, 必须 auth_mode=token (见 config.example.json)。")
+    return None
+
+
+def startup_policy_error(cfg: dict | None, host: str) -> str | None:
+    """MCP / web 启动统一认证策略闸: 聚合三条 policy_error, 返回**首个**命中(None=放行)。
+
+    单一入口 —— 各 HTTP server 启动调一次即可, 不再各自拼 policy 列表(消重 + 防"漏挂某条")。
+    顺序 = 多 dev 串号 > prod/远程暴露 > bind 暴露, 任一命中即拒绝启动。
+    """
+    for err in (
+        multi_user_policy_error(cfg),
+        deploy_policy_error(cfg, host),
+        bind_policy_error(cfg, host),
+    ):
+        if err:
+            return err
+    return None
+
+
 def _url_is_loopback(url: str) -> bool:
     """从 platform.url 抽 host 判断是否 loopback。容错: 解析失败按非 loopback(更安全, 倾向拒绝)。"""
     from urllib.parse import urlparse

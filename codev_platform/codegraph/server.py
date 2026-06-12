@@ -308,7 +308,10 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
     import uvicorn
 
     from codev_platform.core.project_id import validate as _pid_validate
-    from codev_platform.gateway import AuthMiddleware, build_authenticator, maybe_rate_limit_middleware
+    from codev_platform.gateway import (
+        AuthMiddleware, build_authenticator, maybe_rate_limit_middleware, startup_policy_error,
+    )
+    from codev_platform.mcp_serve import mcp_bind_host
     from codev_platform.mcp_streamable import (
         ContextualStreamableHTTPASGIApp,
         streamable_lifespan,
@@ -403,6 +406,12 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
         })
 
     _cfg = load_config()
+    _host = mcp_bind_host(_cfg)
+    # 启动统一认证策略闸(多 dev 串号 / prod 暴露 / 非 loopback bind 未认证)→ 任一命中硬拒。
+    _policy_err = startup_policy_error(_cfg, _host)
+    if _policy_err:
+        _flog(f"[startup] REFUSE: {_policy_err}")
+        raise SystemExit(f"codegraph MCP 拒绝启动:{_policy_err}")
     _mw = [
         Middleware(
             AuthMiddleware,
@@ -432,8 +441,8 @@ async def run_http(port: int = _CG_SSE_PORT) -> None:
         middleware=_mw,
         lifespan=streamable_lifespan(mcp_session_manager),
     )
-    _flog(f"[http] codegraph multi-tenant SSE/MCP server starting on 127.0.0.1:{port}")
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
+    _flog(f"[http] codegraph multi-tenant SSE/MCP server starting on {_host}:{port}")
+    config = uvicorn.Config(app, host=_host, port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()
 
 
