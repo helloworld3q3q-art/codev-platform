@@ -201,10 +201,10 @@ def _load_unified_from_store(project_id: str) -> AnalyzerResult:
 def unified_graph(request: Request, body: S.UnifiedGraphRequest | None = None,
                   ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    include_soft = bool(body.includeSoft) if body is not None else False
+    # 默认含软节点/软边(连通结构, 软边占全图 ~77% 连接, 滤掉会散成孤点)。显式 includeSoft=false
+    # 才给"纯依赖图"(只硬边)。软边非依赖(kind=plays_role 等), 前端可据 kind 配色区分避免误读。
+    include_soft = bool(body.includeSoft) if body is not None else True
     result = _load_unified_from_store(project_id)
-    # 默认过滤软节点/软边(arch_layer/business_domain + plays_role/belongs_to_domain): 它们是角色
-    # 标注非依赖, 枢纽状会让图看着"什么都连什么"且易误读。显式 includeSoft=true 才叠加架构层/业务域。
     # 同 id 多插件节点去重(vue frontend_component 与 frontend_deps frontend_module 撞同一 .vue id)。
     src_nodes = dedup_nodes_by_id(result.nodes)
     src_edges = result.edges

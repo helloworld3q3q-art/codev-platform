@@ -130,11 +130,12 @@ class CodegraphGraphResponse(BaseModel):
 
 
 class UnifiedGraphRequest(BaseModel):
-    # includeSoft=False(默认): 过滤软节点(arch_layer / business_domain)+ 软边(plays_role /
-    # belongs_to_domain)—— 它们是"架构层/业务域"的角色标注(枢纽状, 一节点连进百余条), 在
-    # "看依赖关系"的图里是噪声且易误读(如 thorn6 组件"连到" arch_layer:component)。默认给干净
-    # 依赖图; 要看架构层/业务域叠加层时显式传 true。
-    includeSoft: bool = False
+    # includeSoft=True(默认): 含软节点(arch_layer/business_domain)+ 软边(plays_role/
+    # belongs_to_domain)。这些是"架构层/业务域"的分组标注 —— **不是依赖**, 但提供图的连通结构
+    # (实测软边占全图 ~77% 连接), 默认滤掉会让节点散成孤点。要纯依赖图(只 imports/renders/
+    # calls_api 等硬边)时显式传 false。软边 kind 不同(plays_role 等), 前端可据 kind 配色区分,
+    # 避免误读为依赖(如 thorn6 组件"连到" arch_layer:component 实为"它是组件层"的分组标注)。
+    includeSoft: bool = True
 
 
 class UnifiedGraphNode(BaseModel):
