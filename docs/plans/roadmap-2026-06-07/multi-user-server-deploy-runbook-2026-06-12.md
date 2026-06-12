@@ -74,6 +74,11 @@ codev-platform gateway client-auth --repo . --query-token        # 写 ?token=<�
 - [x] `client-auth --query-token`(2026-06-12,自动写 `?token=` url + 服务端 query 兜底)
 - [x] 账号 onboarding CLI(已现成 `org` 命令,走 RbacStore;deleted 重复 account.py)
 - [x] token-mode 端到端验证(in-process:AuthMiddleware→query_string→authenticator→identity 整链测过)
+- [x] **PG token 路径端到端验证**(2026-06-12,真 PG 9/9 通):build_authenticator→PgTokenResolver→
+      PgTokenStore.lookup(join users/orgs status)→TokenAuthenticator→can_access 全栈。验:对 token
+      解析身份 / 授权项目 ALLOW / 越权项目 DENY(闸1 org + 闸2 白名单)/ 错·无 token 401 / `?token=`
+      兜底 / **禁用用户即失效 / 禁用 org 即失效**。token-add(config)与 pg-token-issue(PG 实时禁用)二选一,
+      多人服务器用 PG token(web 禁用即生效); config token 是 break-glass(不受 web 控,启动会告警)。
 - [ ] sqlite→pg graph 迁移命令(切 PG 不丢现有图谱)— Stage C,并发上来再做
 - [ ] health/status pg-aware(pg 模式不误报 "未建")— Stage C
 - [x] web 控制台密码-set CLI(2026-06-12 `org set-password`;厘清双 store=同表互补非 fork,
