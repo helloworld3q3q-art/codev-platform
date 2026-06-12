@@ -45,3 +45,13 @@
 
 ## web 端
 本会话改动**不需前端同步**:只 `0d51903`(graph Stage A)碰 web/routes 且是纯内部重构(端点/schema 零变),其余在 gateway/auth/store/CLI 层 → OpenAPI 未变,`pnpm run api` 不用跑。token 模式下 web-ui 登录走 session token(已建+wrapper 已修)照常。**多人 web 控制台管理(浏览器建用户/设密码)是 net-new 前端缺口**(现走 CLI),要做再挂 user 路由 + users 页表单 + run api。
+
+## 九、下午段:roadmap-2026-06-10 两 plan Phase 1 + 对抗审计 + token 端到端验证
+承用户"1/2/3 挨着做"。三块独立改动各自 commit + WSL 全量验证(1631→1636 passed),工程化守"语言/仓库无关 + 策略模式 + 单一聚合 + 超行数拆分":
+- **Item1 多组织 Phase 1**(`2a6ac3c`):`mcp.bind_host` 配置化 + `startup_policy_error` 聚合三闸(multi_user/deploy/**bind**)接 graph/codegraph/memory 三 run_http,非 loopback bind 启动硬拒。
+- **Item2 PG token 闭合脱节洞**(`0be3d21`/`793e971`):`agent_tokens` PG 表(alembic 0006)+ `PgTokenStore.lookup` join users/orgs.status 实时校验 → web 禁用即失效;`TokenAuthenticator` 策略化(`TokenResolver` + Mapping/Pg/Composite,向后兼容 dict);`gateway pg-token-*` CLI。
+- **Item3 多仓 operationId 契约桥**(`85857e5`/`71ea071`):`_link.py` 重写——operationId 精确桥 + URL 多服务消歧(修 `candidates[0]` 静默串台);spring/fastapi operation_id meta;`find_contract_drift`(graph MCP 第14工具 + agent 工具,真机抓 openclaw 1 处悬空 `/v1/config/system-status/summary`)。impact.py 超 600 行拆出 `contract_drift.py`。
+- **对抗审计**(`d2874ce`):派 3 个 general-purpose agent 默认怀疑 + 自跑攻击用例。抓 4 真漏洞全修 + 测试:R1 org 禁用不失效(lookup 加 join orgs)/ P1 `bind_host=""` 绕闸绑 0.0.0.0(空串回落 loopback + 闸拒空串)/ V1 operationId 碰撞 conf=1.0 错连(降 0.5 让 certain_only 滤)/ V2 `meta=None` 崩(防御 or {})。审计也证真:跨项目隔离红线守住(`load_graph` 上游按 pid 过滤)、token 过期 authenticator 拦、明文不落库、auth_mode 拼错 fail-closed。R2/R5 config 兜底 break-glass → 启动告警 + 文档红线。
+- **token 模式端到端验证**:① in-process 真 PG 9/9(身份/授权/越权/401/`?token=`/**禁用用户·禁用 org 即失效**);② live HTTP 真 uvicorn 6 状态码全对(throwaway 端口, 运行 4 守护零干扰, config 用完即恢复)。runbook 标注 `[x]`。**剩**:真跨网络第二台机客户端(周末接入验)。
+- commit 链下午段:`2a6ac3c`→`0be3d21`→`793e971`→`85857e5`→`71ea071`→`d2874ce`→`1d0c084`→`0baf67e`(+ roadmap/runbook docs)。
+- **隔离泄漏修复**(此前):agent chat 跨项目读文档根因 = 业务仓 `index.json` external_doc_paths 灌平台 docs 进 openclaw collection(非路由串台),已删 + 重建 chroma + 真机 e2e CLEAN(见记忆 [[agent-project-isolation-chroma-leak]])。
