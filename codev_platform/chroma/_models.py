@@ -19,7 +19,8 @@ from codev_platform.chroma._obslog import _flog
 from codev_platform.chroma._stats import _record_stat, _record_stat_error
 
 
-_client = None
+_client = None  # deprecated 单实例 (无 project_id 的 legacy 调用回退根库; 见 _get_client)
+_clients: dict[str, object] = {}  # persist_path -> PersistentClient; platform_docs 每项目独立库
 _model = None  # shared embedding model (multi-tenant: 同模型服务所有 project)
 _use_query_prompt = False
 _global_init_error: str | None = None  # model load failure (跨 project 共享)
@@ -70,15 +71,31 @@ def _ensure_model():
         return None
 
 
-def _get_client():
-    """Lazy chroma client (跨 project 共享单实例)."""
-    global _client
-    if _client is None:
-        import chromadb  # lazy: heavy runtime 依赖, 顶层不 import (见 server 头注释)
-        _client = chromadb.PersistentClient(path=str(DATA_DIR))
-        from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁 (默认 delete 模式会独占)
-        ensure_wal(DATA_DIR)
-    return _client
+def _get_client(project_id: str | None = None):
+    """Lazy chroma client。
+
+    platform_docs 每项目独立库 (`chroma_docs_dir(project_id)`) —— 隔离 chromadb 1.5.9 多 collection
+    compaction 损坏。传 project_id 走该项目库; 不传 (legacy / verify 等) 回退根库 DATA_DIR。
+    每库进程内单 client (chromadb 本就 per-path 单例, 显式缓存避免重 attach)。"""
+    import chromadb  # lazy: heavy runtime 依赖, 顶层不 import (见 server 头注释)
+    from pathlib import Path
+    from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁 (默认 delete 模式会独占)
+    if project_id is None:
+        global _client
+        if _client is None:
+            _client = chromadb.PersistentClient(path=str(DATA_DIR))
+            ensure_wal(DATA_DIR)
+        return _client
+    from codev_platform.core.paths import chroma_docs_dir
+    path = chroma_docs_dir(project_id)
+    key = str(path)
+    cl = _clients.get(key)
+    if cl is None:
+        Path(path).mkdir(parents=True, exist_ok=True)
+        cl = chromadb.PersistentClient(path=str(path))
+        ensure_wal(path)
+        _clients[key] = cl
+    return cl
 
 
 def _encode_query(query: str):

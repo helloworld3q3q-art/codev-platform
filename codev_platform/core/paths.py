@@ -80,8 +80,22 @@ def logs_dir() -> Path:
 
 
 def chroma_dir() -> Path:
-    """chroma 持久化目录 (单 DB 多 collection)。"""
+    """chroma 持久化根目录。
+
+    历史上 platform_docs 是"单 DB 多 collection"(各项目 collection 同住根库),但 chromadb 1.5.9
+    的 compaction 在"库里已存在别 collection 时给另一 collection 做 upsert"会损坏整库
+    (见 chromadb-multiflush-compaction)。故 platform_docs 改为每项目独立库 `docs/<pid>/`
+    (见 chroma_docs_dir),与 code_vec(`code_vec/<pid>`)一致。根库现仅余 agent-memory 单 collection。"""
     return data_root() / "chroma"
+
+
+def chroma_docs_dir(project_id: str) -> Path:
+    """platform_docs 每项目独立 chroma 库目录 (`data/chroma/docs/<pid>/`)。
+
+    每库只含该项目一个 collection → 永不触发 chromadb 1.5.9 多 collection compaction 损坏。
+    DB / manifest / .last_build 戳都落这里; 全局 .reindex.lock 仍在 chroma_dir() 根做 GPU 串行化。"""
+    project_id = _validate_project_id(project_id)  # 防路径穿越 (../outside 等)
+    return chroma_dir() / "docs" / project_id
 
 
 def chroma_collection_name(project_id: str, base: str) -> str:

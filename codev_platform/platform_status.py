@@ -228,14 +228,26 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
     reg = repo_root / "platform_meta" / "projects"
     registered = sorted(p.name for p in reg.iterdir() if p.is_dir()) if reg.is_dir() else []
 
-    # chroma: 列所有 on-disk collection -> per pid chunks
+    # chroma: platform_docs 每项目独立库 docs/<pid>/ (隔离 compaction 损坏) -> per pid chunks。
+    # 逐项目库打开 (一库一 collection); 兼容回退根库的 legacy 多 collection 布局。
     chroma_pid: dict[str, int] = {}
     try:
         import chromadb
-        cl = chromadb.PersistentClient(path=str(chroma_data))
-        for col in cl.list_collections():
-            if col.name.endswith("__platform_docs"):
-                chroma_pid[col.name[: -len("__platform_docs")]] = col.count()
+        docs_root = chroma_data / "docs"
+        if docs_root.is_dir():
+            for pdir in sorted(p for p in docs_root.iterdir() if p.is_dir()):
+                try:
+                    cl = chromadb.PersistentClient(path=str(pdir))
+                    for col in cl.list_collections():
+                        if col.name.endswith("__platform_docs"):
+                            chroma_pid[col.name[: -len("__platform_docs")]] = col.count()
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"chroma[{pdir.name}]:" + repr(e))
+        else:  # legacy 根库布局
+            cl = chromadb.PersistentClient(path=str(chroma_data))
+            for col in cl.list_collections():
+                if col.name.endswith("__platform_docs"):
+                    chroma_pid[col.name[: -len("__platform_docs")]] = col.count()
     except Exception as e:  # noqa: BLE001
         errors.append("chroma:" + repr(e))
 

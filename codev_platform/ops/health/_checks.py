@@ -138,14 +138,20 @@ def _check_chroma_data(
     if not chroma_data.is_dir():
         r.line("chroma data dir", "FAIL", f"missing: {chroma_data} (run index_docs)")
         return
+    # platform_docs 每项目独立库 docs/<pid>/ (隔离 chromadb 多 collection compaction 损坏);
+    # 回退根库兼容尚未迁移的 legacy 布局。
+    proj_data = (chroma_data / "docs" / project_id) if project_id else chroma_data
+    if not proj_data.is_dir():
+        proj_data = chroma_data
+    chroma_data = proj_data
     seg = sum(1 for d in chroma_data.iterdir() if d.is_dir())
     r.line("chroma data dir", "OK", f"{chroma_data} ({seg} segments)")
     coll = f"{project_id}__platform_docs" if project_id else "platform_docs"
 
     if light:
-        stamp = chroma_data / f".last_build.{project_id}.json"
+        stamp = chroma_data / ".last_build.json"
         if not stamp.is_file():
-            stamp = chroma_data / ".last_build.json"
+            stamp = chroma_data / f".last_build.{project_id}.json"
         if stamp.is_file():
             try:
                 s = json.loads(stamp.read_text(encoding="utf-8"))

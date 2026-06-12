@@ -32,7 +32,7 @@ from codev_platform.chroma._index_config import PLATFORM_ROOT, logger  # noqa: E
 # PERSIST_DIR 走 codev_platform.core.paths.chroma_dir() — 它读 PLATFORM_DATA_DIR env,
 # 确保多 project 写到 SHARED chroma DB, 而非各自 PLATFORM_ROOT/data/chroma.
 from codev_platform.core.project_id import ProjectIdError, resolve_local
-from codev_platform.core.paths import chroma_collection_name, chroma_dir
+from codev_platform.core.paths import chroma_collection_name, chroma_dir, chroma_docs_dir
 
 try:
     PROJECT_ID = resolve_local(PLATFORM_ROOT)
@@ -43,7 +43,9 @@ except ProjectIdError as _pid_exc:
 # chroma_dir() 内部走 _business_repo_root() (从 cwd 向上找 .claude/project.json),
 # 但 cwd 此时可能是 platform/tools/chroma/ (post-commit hook 起点), 不是业务仓根.
 # 因此 PLATFORM_DATA_DIR env 必须设, 让 data_root() 直接吃 env, 跳过 cwd 推导.
-PERSIST_DIR = chroma_dir()
+# PERSIST_DIR 每项目独立库 docs/<pid>/ (隔离 chromadb 多 collection compaction 损坏);
+# DB / manifest / .last_build 戳都落这; 全局 .reindex.lock 仍在 chroma_dir() 根 (GPU 串行化)。
+PERSIST_DIR = chroma_docs_dir(PROJECT_ID)
 COLLECTION_NAME = chroma_collection_name(PROJECT_ID, "platform_docs")
 # 模型路径优先级: env > config(models.embed_path) > ~/models 共享 > 仓内 MiniLM fallback.
 # 不 hardcode 盘符: 实际路径写 ~/.codev-platform/config.json (跨平台/跨机器)。
@@ -532,12 +534,15 @@ from codev_platform.chroma._reindex_lock import (
     try_acquire_reindex_lock as _try_acquire_shared_lock,
 )
 
-_REINDEX_LOCK_PATH = PERSIST_DIR / ".reindex.lock"
+# 锁落 chroma_dir() 根 (全局), 非 per-project PERSIST_DIR: 每项目库虽已隔离不会互相损坏,
+# 但 indexer 各自加载 GPU embedding 模型, 并发跑会 OOM。全局锁串行化所有项目的 chroma 重建。
+_REINDEX_LOCK_DIR = chroma_dir()
+_REINDEX_LOCK_PATH = _REINDEX_LOCK_DIR / ".reindex.lock"
 
 
 def _try_acquire_reindex_lock() -> tuple | None:
-    """原子创建 PERSIST_DIR/.reindex.lock; 委托共享实现。返回 (fd, path) 或 None。"""
-    return _try_acquire_shared_lock(PERSIST_DIR)
+    """原子创建 chroma_dir()/.reindex.lock (全局 GPU 串行化); 委托共享实现。返回 (fd, path) 或 None。"""
+    return _try_acquire_shared_lock(_REINDEX_LOCK_DIR)
 
 
 def main() -> int:
