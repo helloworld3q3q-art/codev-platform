@@ -302,7 +302,8 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         if not mcp_json.is_file():
             _err(f"FATAL: 未找到 {mcp_json}")
             return 1
-        data = json.loads(mcp_json.read_text(encoding="utf-8"))
+        # utf-8-sig 透明吃 BOM(部分 .mcp.json 带 UTF-8 BOM, 纯 utf-8 json.loads 会 Unexpected BOM 崩)
+        data = json.loads(mcp_json.read_text(encoding="utf-8-sig"))
         servers = data.get("mcpServers", {})
 
         if getattr(args, "query_token", False):
@@ -374,7 +375,8 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         if not mcp_json.is_file():
             _err(f"FATAL: 未找到 {mcp_json}")
             return 1
-        data = json.loads(mcp_json.read_text(encoding="utf-8"))
+        # utf-8-sig 透明吃 BOM(部分 .mcp.json 带 UTF-8 BOM, 纯 utf-8 json.loads 会 Unexpected BOM 崩)
+        data = json.loads(mcp_json.read_text(encoding="utf-8-sig"))
         servers = data.get("mcpServers", {})
         changed = 0
         for name, conf in servers.items():
