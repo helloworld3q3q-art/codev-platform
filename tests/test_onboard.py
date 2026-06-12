@@ -41,6 +41,39 @@ def test_onboard_no_index_writes_all_registration(tmp_path, monkeypatch):
     assert meta["repo_path"] == str(repo.resolve())
 
 
+def test_onboard_generates_codegraph_config_and_gitignore(tmp_path, monkeypatch):
+    """codegraph config.json(带排除)+ gitignore db 规则在仓里生成(可提交, 随 git 走)。"""
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr("codev_platform.core.config.save_config", lambda c: None)
+    monkeypatch.setattr("codev_platform.cli.PLATFORM_META_PROJECTS", tmp_path / "meta")
+
+    rc = cmd_onboard(_args("p", repo))
+    assert rc == 0
+    # .codegraph/config.json 生成 + 含关键排除(min.js / vendored / public 噪声)
+    cg = json.loads((repo / ".codegraph" / "config.json").read_text(encoding="utf-8"))
+    assert "**/*.min.js" in cg["exclude"] and "**/public/**" in cg["exclude"]
+    assert "**/*.java" in cg["include"]
+    # .gitignore 追加 db 忽略(保留原有 node_modules)
+    gi = (repo / ".gitignore").read_text(encoding="utf-8")
+    assert "node_modules/" in gi and ".codegraph/codegraph.db" in gi
+
+
+def test_onboard_preserves_existing_codegraph_config(tmp_path, monkeypatch):
+    """已有 .codegraph/config.json 不覆盖(保用户自定义)。"""
+    repo = tmp_path / "r"
+    (repo / ".codegraph").mkdir(parents=True)
+    (repo / ".codegraph" / "config.json").write_text('{"custom": true}', encoding="utf-8")
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr("codev_platform.core.config.save_config", lambda c: None)
+    monkeypatch.setattr("codev_platform.cli.PLATFORM_META_PROJECTS", tmp_path / "meta")
+    rc = cmd_onboard(_args("p", repo))
+    assert rc == 0
+    assert json.loads((repo / ".codegraph" / "config.json").read_text(encoding="utf-8")) == {"custom": True}
+
+
 def test_onboard_rejects_missing_repo(tmp_path, monkeypatch):
     monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
     monkeypatch.setattr("codev_platform.core.config.save_config", lambda c: None)

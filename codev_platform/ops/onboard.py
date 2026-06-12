@@ -36,6 +36,54 @@ def _git_remote_url(repo: Path) -> str | None:
         return None
 
 
+# codegraph .codegraph/config.json 默认: 只索引代码语言 + 排噪声(min.js/vendored/dist/target/
+# public/static 等)。**真实大仓必备**: 缺 config 时 codegraph 默认扫 min.js/vendored → 符号索引
+# 病态膨胀(实测 31773 文件仓 → 828MB 卡死)。生成进仓 → 随 git 走, 不靠手动塞。
+_CODEGRAPH_CONFIG = {
+    "version": 1,
+    "include": ["**/*.java", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.vue",
+                "**/*.py", "**/*.go", "**/*.rs", "**/*.kt", "**/*.scala", "**/*.cs"],
+    "exclude": [
+        "**/.git/**", "**/node_modules/**", "**/vendor/**", "**/dist/**", "**/build/**",
+        "**/out/**", "**/bin/**", "**/target/**", "**/generated-sources/**",
+        "**/*.min.js", "**/*.min.css", "**/*.bundle.*", "**/*.umd.js",
+        "**/public/**", "**/static/**", "**/assets/**",
+        "**/.gradle/**", "**/.m2/**", "**/__pycache__/**", "**/.venv/**",
+        "**/.idea/**", "**/logs/**", "**/tmp/**", "**/temp/**", "**/coverage/**",
+    ],
+    "languages": [], "frameworks": [],
+    "maxFileSize": 1048576, "extractDocstrings": True, "trackCallSites": True,
+}
+
+_CG_GITIGNORE_LINES = [
+    "# codegraph 索引产物(平台代码智能): 只提交 .codegraph/config.json, 不提交 db/lock",
+    ".codegraph/codegraph.db",
+    ".codegraph/codegraph.db-*",
+    ".codegraph/*.lock",
+]
+
+
+def _write_codegraph_config(repo: Path) -> bool:
+    """写 <repo>/.codegraph/config.json(已存在不覆盖, 保用户自定义)。返回是否新写。"""
+    cfg_path = repo / ".codegraph" / "config.json"
+    if cfg_path.exists():
+        return False
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps(_CODEGRAPH_CONFIG, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8")
+    return True
+
+
+def _ensure_gitignore(repo: Path) -> None:
+    """幂等追加 codegraph db 忽略规则(只提交 config.json, 不提交大 db)。"""
+    gi = repo / ".gitignore"
+    existing = gi.read_text(encoding="utf-8") if gi.is_file() else ""
+    if ".codegraph/codegraph.db" in existing:
+        return
+    sep = "" if existing.endswith("\n") or not existing else "\n"
+    gi.write_text(existing + sep + "\n" + "\n".join(_CG_GITIGNORE_LINES) + "\n", encoding="utf-8")
+
+
 def cmd_onboard(args: argparse.Namespace) -> int:
     from codev_platform.core.config import load_config, save_config
     from codev_platform.core.project_id import ProjectIdError, validate
@@ -91,22 +139,22 @@ def cmd_onboard(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001 — RBAC 不可用不阻断基础接入
         _out(f"[4/6] RBAC: 跳过 (不可用: {type(exc).__name__})")
 
-    # --- 5. codegraph init(软步: 未初始化才 init; 未装 codegraph 跳过)---
+    # --- 5. codegraph: 写 config.json(排噪声, 可提交进仓) + gitignore db + init ---
+    wrote_cfg = _write_codegraph_config(repo)
+    _ensure_gitignore(repo)
+    cfg_note = "config.json 已生成" if wrote_cfg else "config.json 已存在(保留)"
     if (repo / ".codegraph" / "codegraph.db").exists():
-        _out("[5/6] codegraph: 已初始化 (跳过 init)")
+        _out(f"[5/6] codegraph: {cfg_note}; 已初始化 (跳过 init)")
     else:
         try:
             r = subprocess.run(["codegraph", "init"], cwd=str(repo),
                                capture_output=True, text=True, timeout=60)
-            if r.returncode == 0:
-                _out("[5/6] codegraph init OK (reindex codegraph 方可建符号索引)")
-            else:
-                _out(f"[5/6] codegraph init 失败 (手动 `cd {repo} && codegraph init`): "
-                     f"{r.stderr.strip()[:120]}")
+            ok = "init OK" if r.returncode == 0 else f"init 失败({r.stderr.strip()[:80]})"
+            _out(f"[5/6] codegraph: {cfg_note}; {ok}")
         except FileNotFoundError:
-            _out("[5/6] codegraph: 命令未装, 跳过 (装 codegraph 后手动 init; 不影响 graph/chroma)")
+            _out(f"[5/6] codegraph: {cfg_note}; 命令未装跳过 init (不影响 graph/chroma)")
         except Exception as exc:  # noqa: BLE001
-            _out(f"[5/6] codegraph init 跳过: {type(exc).__name__}")
+            _out(f"[5/6] codegraph: {cfg_note}; init 跳过 ({type(exc).__name__})")
 
     # --- 6. reindex 入队(graph ingest + codegraph + code_vec + chroma)---
     if args.no_index:
@@ -126,6 +174,8 @@ def cmd_onboard(args: argparse.Namespace) -> int:
     _out("")
     _out(f"OK: {code} 接入完成。")
     _out("  下一步:")
+    _out("  - **把 .claude/project.json + .codegraph/config.json + .gitignore 提交进仓**"
+         "(配置随 git 走, 别人/重 clone 也带得上)")
     _out("  - `reindex-queue status` 看索引进度")
     _out("  - codegraph 索引完后让端点认新项目: `serve-mcp start`(或重启 codegraph 端点)")
     _out("  - token 模式: 给该项目仓 .mcp.json 配 token(header 形式)")
