@@ -302,17 +302,27 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
         except Exception as exc:  # noqa: BLE001
             logger.warning("[code_vec] 删除 %d 旧节点失败(忽略): %s", len(deleted), exc)
 
+    # 增量 checkpoint manifest: 从旧 manifest 去掉已删, 每 upsert 一批就把这批已嵌入节点追加进去
+    # 立即落盘。大项目 (ideas-v2 ~19万节点, GPU 算力约 1h) 即便中途超时/重启, 已完成进度不丢,
+    # 下次只补剩余节点 (resume), 不再从零重嵌。
+    _deleted_set = set(deleted)
+    persisted = {k: v for k, v in old_manifest.items() if k not in _deleted_set}
+
     # 分批 embed + upsert 变更节点(每批 < 5461 硬上限; 单 collection 库多批 flush 安全)
     for i in range(0, len(changed), _UPSERT_BATCH):
         chunk = changed[i:i + _UPSERT_BATCH]
-        # 批量 embed: remote adapter 一次 /embed 带一子批 (省掉每节点一次 HTTP 往返),
-        # 大项目 (ideas-v2 ~19万节点) 索引从小时级降到分钟级。
+        # 批量 embed: remote adapter 一次 /embed 带一子批 (省掉每节点一次 HTTP 往返)。
         embs = embedder.encode_batch([text_by_id[nid] for nid in chunk])
         col.upsert(ids=chunk, embeddings=embs,
                    documents=[text_by_id[nid] for nid in chunk],
                    metadatas=[meta_by_id[nid] for nid in chunk])
-        logger.info("[code_vec] upserted %d/%d", min(i + _UPSERT_BATCH, len(changed)), len(changed))
+        for nid in chunk:
+            persisted[nid] = new_manifest[nid]
+        manifest_path.write_text(json.dumps(persisted, ensure_ascii=False), encoding="utf-8")  # checkpoint
+        logger.info("[code_vec] upserted %d/%d (manifest checkpointed)",
+                    min(i + _UPSERT_BATCH, len(changed)), len(changed))
 
+    # 收尾: 写完整 manifest (= 当前全部节点; persisted 此时已等同, 这步是精确兜底)。
     manifest_path.write_text(json.dumps(new_manifest, ensure_ascii=False), encoding="utf-8")
     meta_path.write_text(json.dumps({"enrich": enrich_now}, ensure_ascii=False), encoding="utf-8")
     logger.info("[code_vec] %s: %s, 变更 %d / 删除 %d / 总 %d 节点 → %s",

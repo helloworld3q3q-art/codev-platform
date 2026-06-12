@@ -24,8 +24,9 @@ def _post_json(url: str, payload: dict, timeout: float, token: str | None) -> di
 
 
 # 单次 /embed 请求最多带多少文本: 既省 HTTP 往返(code_vec 大项目索引), 又把 daemon 那次
-# GPU encode + 持锁时间收口 (太大批会长占共享 GPU 信号量, 拖慢并发 search_docs)。
-_EMBED_HTTP_BATCH = 256
+# GPU encode + 持锁时间收口。64 平衡: 省掉绝大多数往返, 单次 GPU encode 仍快(<默认超时),
+# 且频繁释放共享 GPU 信号量不长时间饿死并发 search_docs。(256 实测会撞 30s HTTP 超时。)
+_EMBED_HTTP_BATCH = 64
 
 
 class RemoteEmbedder(Embedder):
@@ -47,7 +48,10 @@ class RemoteEmbedder(Embedder):
         out: list[list[float]] = []
         for i in range(0, len(texts), _EMBED_HTTP_BATCH):
             chunk = texts[i:i + _EMBED_HTTP_BATCH]
-            data = _post_json(self._url, {"texts": chunk}, self._timeout, self._token)
+            # 批量 GPU encode 比单条慢, 超时按批大小放宽 (索引后台任务, 非交互延迟敏感);
+            # GPU 信号量被并发 search_docs 占用时也给足排队余量, 不误判超时。
+            batch_timeout = max(self._timeout, len(chunk) * 1.5)
+            data = _post_json(self._url, {"texts": chunk}, batch_timeout, self._token)
             vecs = data.get("vectors")
             if not vecs or len(vecs) != len(chunk):
                 raise ValueError(f"remote embed 批量返回向量数不符: 期望 {len(chunk)} 得 {len(vecs) if vecs else 0}")
