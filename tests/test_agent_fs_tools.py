@@ -18,7 +18,7 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / "deploy.pem").write_text("-----BEGIN KEY-----\n", encoding="utf-8")
     (tmp_path / "node_modules").mkdir()
     # 仓根解析 + project_id 解析都打桩到 tmp_path(不连真 config / platform_meta)
-    monkeypatch.setattr(fs, "_repo_root", lambda pid: tmp_path.resolve())
+    monkeypatch.setattr(fs, "project_repo_roots", lambda pid: [tmp_path.resolve()])
     monkeypatch.setattr(fs, "resolve_project_id", lambda explicit: "codev-platform")
     return tmp_path
 
@@ -88,7 +88,54 @@ def test_list_dir_traversal_blocked(repo):
 
 
 def test_repo_root_unknown_is_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(fs, "_repo_root", lambda pid: None)
+    monkeypatch.setattr(fs, "project_repo_roots", lambda pid: [])
     monkeypatch.setattr(fs, "resolve_project_id", lambda explicit: "x")
     r = fs.ReadFileTool("x").run({"path": "a.py"})
     assert r.is_error and "仓根未知" in r.content
+
+
+# ---- 多仓: 同一项目跨主仓 + extra_repo(如 PDA 前端独立仓), agent 能读关联仓文件 ----
+
+@pytest.fixture()
+def multirepo(tmp_path, monkeypatch):
+    main = tmp_path / "main"; (main / "ideas-private").mkdir(parents=True)
+    (main / "ideas-private" / "Ctrl.java").write_text("class Ctrl {}\n", encoding="utf-8")
+    pda = tmp_path / "pda"; (pda / "pages" / "pick").mkdir(parents=True)
+    (pda / "pages" / "pick" / "scan.vue").write_text("<template>scan</template>\n", encoding="utf-8")
+    monkeypatch.setattr(fs, "project_repo_roots", lambda pid: [main.resolve(), pda.resolve()])
+    monkeypatch.setattr(fs, "resolve_project_id", lambda explicit: "ideas-v2")
+    return main, pda
+
+
+def test_read_file_finds_in_extra_repo(multirepo):
+    # 文件只在 extra_repo(PDA 仓)→ 仍能读到(关联仓可读)。
+    r = fs.ReadFileTool("ideas-v2").run({"path": "pages/pick/scan.vue"})
+    assert not r.is_error and "scan" in r.content
+
+
+def test_read_file_finds_in_main_repo(multirepo):
+    r = fs.ReadFileTool("ideas-v2").run({"path": "ideas-private/Ctrl.java"})
+    assert not r.is_error and "class Ctrl" in r.content
+
+
+def test_read_file_missing_across_all_repos(multirepo):
+    r = fs.ReadFileTool("ideas-v2").run({"path": "pages/pick/nope.vue"})
+    assert r.is_error and "不存在" in r.content
+
+
+def test_list_dir_root_merges_all_repos(multirepo):
+    # 列根目录合并展示所有仓根 → agent 看得到 PDA 的 pages/(不再误判"前端不在本项目")。
+    r = fs.ListDirTool("ideas-v2").run({})
+    assert not r.is_error
+    assert "d ideas-private" in r.content and "d pages" in r.content
+    assert "# main/" in r.content and "# pda/" in r.content
+
+
+def test_list_dir_subpath_in_extra_repo(multirepo):
+    r = fs.ListDirTool("ideas-v2").run({"path": "pages/pick"})
+    assert not r.is_error and "f scan.vue" in r.content
+
+
+def test_multirepo_traversal_still_blocked(multirepo):
+    r = fs.ReadFileTool("ideas-v2").run({"path": "../../../etc/passwd"})
+    assert r.is_error and "穿越" in r.content

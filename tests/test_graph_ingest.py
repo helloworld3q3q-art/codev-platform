@@ -155,8 +155,8 @@ def test_resolve_repos_config_and_dedup(tmp_path, monkeypatch):
     extra = tmp_path / "extra"; extra.mkdir()
     # 显式 extra_repos
     assert _resolve_repos(main, "p", [str(extra)]) == [main.resolve(), extra.resolve()]
-    # config 驱动 (extra_repos=None 读 config)
-    monkeypatch.setattr("codev_platform.core.config.load_config",
+    # config 驱动 (extra_repos=None 读 config; 解析在 core.repos)
+    monkeypatch.setattr("codev_platform.core.repos.load_config",
                         lambda: {"projects": {"p": {"extra_repos": [str(extra)]}}})
     assert extra.resolve() in _resolve_repos(main, "p", None)
     # 不存在的目录被丢弃
@@ -186,8 +186,8 @@ def test_resolve_repos_merges_meta_extra(tmp_path, monkeypatch):
     from codev_platform.graph import ingest as _ing
     main = tmp_path / "main"; main.mkdir()
     pda = tmp_path / "pda"; pda.mkdir()
-    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
-    monkeypatch.setattr(_ing, "_meta_extra_repos", lambda pid, cfg: [str(pda)])
+    monkeypatch.setattr("codev_platform.core.repos.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr("codev_platform.core.repos.meta_extra_repos", lambda pid, cfg: [str(pda)])
     assert pda.resolve() in _ing._resolve_repos(main, "ideas-v2", None)
 
 

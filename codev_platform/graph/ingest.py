@@ -28,6 +28,13 @@ from codev_platform.graph.schema import (
 from codev_platform.graph.store import open_store
 from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.registry import run_applicable
+# "项目→仓根集合"解析在 core.repos 单一真值源(graph ingest 与 agent 文件工具共用)。
+# 旧名 re-export 保持向后兼容(既有调用/测试不破)。
+from codev_platform.core.repos import (
+    meta_extra_repos as _meta_extra_repos,
+    project_repo_roots,
+    resolve_meta_extra_entries as _resolve_meta_extra_entries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,61 +62,21 @@ class IngestReport:
 
 def _resolve_repos(repo_path: Path | str, project_id: str,
                    extra_repos: list[str] | None) -> list[Path]:
-    """多根仓列表: 主仓 + config `projects.<pid>.extra_repos`(或显式 extra_repos)。
+    """多根仓列表: 主仓 + extra_repos。**同一逻辑项目**跨仓(前后端分离 / PDA 前端独立仓)一起
+    ingest 进同一 store, _link_pass 据此跨仓连前端→后端。单仓项目零影响(无声明=只主仓)。
 
-    前后端分离 / N 前端 M 后端的**同一逻辑项目**跨仓: 声明额外仓(如 PDA 前端仓), 一起 ingest
-    进同一 store, _link_pass 据此跨仓连前端→后端。声明式(config), 单仓项目零影响(无声明=只主仓)。
-    去重 + 仅保留存在的目录。
+    extra_repos=None → 走 core.project_repo_roots(config 绝对路径 + meta.json 可移植声明合并);
+    显式给 list → 仅用之(测试/直调), 去重 + 仅保留存在目录。
     """
     main = Path(repo_path).resolve()
-    repos = [main]
     if extra_repos is None:
-        from codev_platform.core.config import get as _cfg_get, load_config
-        cfg = load_config()
-        # 两个来源合并: ① 用户 config(机器相关绝对路径, 不进 git) ② meta.json(git 版本化的可移植
-        # 跨仓声明)。换机/重建 WSL 后, meta.json 的声明仍在 → 跨仓关系不丢(见 _meta_extra_repos)。
-        from_cfg = _cfg_get(cfg, f"projects.{project_id}.extra_repos", []) or []
-        from_meta = _meta_extra_repos(project_id, cfg)
-        extra_repos = list(from_cfg) + [r for r in from_meta if r not in from_cfg]
+        return project_repo_roots(project_id, main_repo=main)
+    repos = [main]
     for r in extra_repos:
         p = Path(r).expanduser()
         if p.is_dir() and p.resolve() not in {x.resolve() for x in repos}:
             repos.append(p.resolve())
     return repos
-
-
-def _resolve_meta_extra_entries(entries: list, cfg: dict) -> list[str]:
-    """纯解析: meta.json extra_repos 条目 → 路径列表。每项可为已登记 project-id(解析成其
-    repo_path, 可移植)或字面路径。空项跳过。无 IO → 可单测。"""
-    from codev_platform.core.config import get as _cfg_get
-    out: list[str] = []
-    for e in entries or []:
-        e = str(e).strip()
-        if not e:
-            continue
-        rp = _cfg_get(cfg, f"projects.{e}.repo_path")   # project-id ref → 该 project repo_path
-        out.append(rp if rp else e)                      # 否则当字面路径
-    return out
-
-
-def _meta_extra_repos(project_id: str, cfg: dict) -> list[str]:
-    """读 platform_meta/projects/<pid>/meta.json 的 extra_repos(git 版本化的可移植跨仓声明)。
-
-    为什么进 meta.json: 机器相关绝对路径只能放用户 config(不进 git), 换机/重建 WSL 即丢。把"哪些
-    仓属于同一逻辑项目"(如 ideas-v2 含 ideas-pda-app 前端仓)以 **project-id 引用**写进 git 化的
-    meta.json → 跨仓关系版本化、可移植; 各机的绝对 repo_path 仍由本机 config 提供(换机零改 meta)。
-    非 editable 安装(wheel)无 platform_meta → is_file False → 返 [], 回退用户 config(优雅降级)。
-    """
-    import json
-    root = Path(__file__).resolve().parents[2]   # codev_platform/graph/ingest.py -> 仓根
-    meta_f = root / "platform_meta" / "projects" / project_id / "meta.json"
-    if not meta_f.is_file():
-        return []
-    try:
-        entries = json.loads(meta_f.read_text(encoding="utf-8")).get("extra_repos") or []
-    except (json.JSONDecodeError, OSError):
-        return []
-    return _resolve_meta_extra_entries(entries, cfg)
 
 
 def ingest_project(
