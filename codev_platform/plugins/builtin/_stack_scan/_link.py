@@ -20,7 +20,8 @@ from codev_platform.graph.schema import (
 
 
 def _meta_str(n: GraphNode, key: str, default: str = "") -> str:
-    return str(n.meta.get(key) or default).strip()
+    # 审计 V2: meta 防御性 or {}(store 加载已 coerce None→{}, 但直接构造的节点可能 None)。
+    return str((n.meta or {}).get(key) or default).strip()
 
 
 def _index_by_operation(backend_nodes: list[GraphNode]) -> dict[tuple[str, str], list[str]]:
@@ -51,16 +52,22 @@ def _index_by_url(backend_nodes: list[GraphNode]) -> dict[str, list[tuple[str, s
 def _resolve_by_operation(
     fn: GraphNode, by_op: dict[tuple[str, str], list[str]],
 ) -> tuple[str, float, str] | None:
-    """前端节点带 operation_id(+service)→ 精确命中后端端点。缺 operation_id / 未命中 → None。"""
+    """前端节点带 operation_id(+service)→ 精确命中后端端点。缺 operation_id / 未命中 → None。
+
+    审计 V1: 同 (service, operation_id) 命中**多个**端点 = operation_id 非全局唯一(常见: spring
+    两 Controller 同名 handler `list()` → 同 operation_id; 或多模块后端 service 都缺省 "")。此时
+    取确定性首个但**降 conf=0.5 + ambiguous**(对齐 URL 桥消歧), 让 certain_only 滤掉, 不当确定依赖
+    —— 否则会以 conf=1.0 静默连错端点(正是本重写要消灭的失败模式, 不能在 op 桥里复发)。
+    """
     op = _meta_str(fn, "operation_id")
     if not op:
         return None
     targets = by_op.get((_meta_str(fn, "service"), op))
     if not targets:
         return None
-    # 同 (service, operation_id) 理应唯一; 多个取确定性首个(已排序), evidence 标注。
-    tag = "operation_id" if len(targets) == 1 else "operation_id ambiguous(同 opid 多端点)"
-    return sorted(targets)[0], 1.0, f"{tag} op={op}"
+    if len(targets) == 1:
+        return targets[0], 1.0, f"operation_id op={op}"
+    return sorted(targets)[0], 0.5, f"operation_id_ambiguous op={op} candidates={len(targets)}"
 
 
 def _resolve_by_url(

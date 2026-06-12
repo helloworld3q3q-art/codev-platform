@@ -58,6 +58,17 @@ def test_disabled_user_token_fails_lookup(engine):
     assert store.lookup(token_hash("bob-tok")) is None           # DISABLED → 立即失效
 
 
+def test_disabled_org_token_fails_lookup(engine):
+    """审计 R1: org 被停用(orgs.status=DISABLED)→ 该 org 下 token 即失效, 即便 user 仍 ACTIVE。"""
+    _seed_user(engine, "frank", org="acme")
+    store = PgTokenStore(engine=engine)
+    store.issue(token_hash("frank-tok"), "frank", "acme", projects="*")
+    assert store.lookup(token_hash("frank-tok")) is not None       # org+user ACTIVE → 通
+    with engine.begin() as conn:
+        conn.execute(tables.orgs.update().where(tables.orgs.c.org_id == "acme").values(status="DISABLED"))
+    assert store.lookup(token_hash("frank-tok")) is None           # org DISABLED → 失效(user 还 ACTIVE)
+
+
 def test_revoke_and_revoke_user(engine):
     _seed_user(engine, "carol")
     store = PgTokenStore(engine=engine)

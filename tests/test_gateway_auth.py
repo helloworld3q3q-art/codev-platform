@@ -250,6 +250,22 @@ def test_mcp_bind_host_single_source():
     assert mcp_bind_host({"mcp": {"bind_host": "0.0.0.0"}}) == "0.0.0.0"  # config 覆盖
 
 
+def test_mcp_bind_host_empty_falls_back_loopback():
+    # 审计 P1: 显式空串 / 纯空白 → 回落 127.0.0.1(否则 uvicorn 绑 0.0.0.0 + 闸误放行)
+    from codev_platform.mcp_serve import mcp_bind_host
+    assert mcp_bind_host({"mcp": {"bind_host": ""}}) == "127.0.0.1"
+    assert mcp_bind_host({"mcp": {"bind_host": "   "}}) == "127.0.0.1"
+
+
+def test_bind_policy_empty_host_rejected_in_passthrough():
+    # 审计 P1 defense-in-depth: bind 闸直接收到空串(= INADDR_ANY)也当非 loopback 拒绝
+    from codev_platform.gateway.auth import bind_policy_error
+    assert bind_policy_error({}, "") is not None
+    assert bind_policy_error({}, "   ") is not None
+    # token 模式仍放行(已验签)
+    assert bind_policy_error({"gateway": {"auth_mode": "token"}}, "") is None
+
+
 def test_middleware_token_mode_gates():
     cfg = {"gateway": {"auth_mode": "token", "tokens": {token_hash("good"): {"user_id": "bob", "org_id": "acme"}}}}
     app, cap = _starlette_app(cfg)

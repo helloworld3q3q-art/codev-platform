@@ -105,6 +105,29 @@ def test_operation_id_absent_falls_back_to_url():
     assert len(edges) == 1 and edges[0].confidence == 1.0
 
 
+# ---- operationId 碰撞消歧(审计 V1)----
+
+def test_operation_id_collision_downgraded_not_conf_1():
+    """同 (service, operation_id) 多端点(spring 跨 Controller 同名 handler / 多模块 service 缺省"")→
+    不再 conf=1.0 静默连错, 降 0.5 + ambiguous, certain_only 可滤。"""
+    backend = [
+        _ep("ctrlA:list", "/users", op="list", svc=""),
+        _ep("ctrlB:list", "/orders", op="list", svc=""),
+    ]
+    fe = _fe("fe1", "/orders", op="list", svc="")
+    edges = link_api_calls([fe], backend)
+    assert len(edges) == 1
+    assert edges[0].confidence == 0.5                       # 不是 1.0(否则 certain_only 滤不掉)
+    assert "operation_id_ambiguous" in edges[0].meta["evidence"]
+
+
+def test_meta_none_no_crash():
+    """审计 V2: 直接构造的节点 meta=None 不崩(store 已 coerce, 但防御性)。"""
+    fn = GraphNode(id="fe", kind=NodeKind.FRONTEND_API_CALL.value, name="x", project_id=_PID, meta=None)
+    ep = GraphNode(id="ep", kind=NodeKind.BACKEND_ENDPOINT.value, name="y", project_id=_PID, meta=None)
+    assert link_api_calls([fn], [ep]) == []                 # 无 url/op → 无边, 不抛异常
+
+
 # ---- 契约漂移: 悬空前端调用 ----
 
 def test_find_contract_drift_flags_dangling_call(tmp_path):

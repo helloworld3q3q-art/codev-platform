@@ -109,20 +109,26 @@ class PgTokenStore:
     # ---- 读路径(副本)----
 
     def lookup(self, token_hash: str) -> dict[str, Any] | None:
-        """按 hash 查 token meta, **join users 实时校验**: token.status=ACTIVE 且 user.status=ACTIVE
-        才返回 {user_id, org_id, projects, expires_at}; 否则 None(= 认证失败)。
+        """按 hash 查 token meta, **join users + orgs 实时校验**: token.status=ACTIVE 且
+        user.status=ACTIVE 且 token 所属 org.status=ACTIVE 才返回; 否则 None(= 认证失败)。
 
-        这是"禁用即失效"的关键: web 置 users.status=DISABLED → 此处 join 过滤掉 → 返回 None。
-        过期(expires_at)不在此判 —— 交给 gateway.token_expired 纯函数(与 config token 同一判定路径)。
+        "禁用即失效"的关键: web 置 users.status=DISABLED(停人)或 orgs.status=DISABLED(停整个
+        组织)→ 此处 join 过滤掉 → 返回 None。两层都校验(审计 R1: 只 join users 会漏"停 org 但人还
+        ACTIVE"→ 该 org 下 token 仍有效)。过期(expires_at)不在此判 —— 交给 gateway.token_expired
+        纯函数(与 config token 同一判定路径)。
         """
         self.ensure_schema()
         t = tables.agent_tokens
         u = tables.users
+        o = tables.orgs
         with self._read_engine.connect() as conn:
             row = conn.execute(
                 select(t.c.user_id, t.c.org_id, t.c.projects, t.c.expires_at)
-                .select_from(t.join(u, u.c.user_id == t.c.user_id))
-                .where(t.c.token_hash == token_hash, t.c.status == "ACTIVE", u.c.status == "ACTIVE")
+                .select_from(
+                    t.join(u, u.c.user_id == t.c.user_id).join(o, o.c.org_id == t.c.org_id)
+                )
+                .where(t.c.token_hash == token_hash, t.c.status == "ACTIVE",
+                       u.c.status == "ACTIVE", o.c.status == "ACTIVE")
             ).first()
         if row is None:
             return None

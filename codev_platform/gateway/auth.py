@@ -269,13 +269,24 @@ def _build_token_resolver(cfg: dict) -> TokenResolver:
     config_tokens = _cfg_get(cfg, "gateway.tokens", {}) or {}
     resolvers: list[TokenResolver] = []
     dsn = _cfg_get(cfg, "memory.pg_dsn", None) or os.environ.get("CODEV_PLATFORM_MEMORY_DSN")
+    pg_active = False
     if dsn:
         try:
             from codev_platform.gateway.token_store_pg import PgTokenStore
             read_dsn = _cfg_get(cfg, "memory.pg_dsn_read", None)
             resolvers.append(PgTokenResolver(PgTokenStore(dsn, read_dsn=read_dsn)))
+            pg_active = True
         except Exception as exc:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 降级 config-only, 不挂服务
             _log.warning("[gateway] PG token store 不可用, 降级 config-only token: %s", exc)
+    # 审计 R2: PG 启用时 config token 是**break-glass 绕过面** —— 它无 users.status 实时校验,
+    # web 禁用对它无效。config token 只该放 bootstrap admin, 绝不与 web 管理的 PG 用户共享同一
+    # token / user_id(否则禁用被 config 兜底悄悄回滚)。两者并存即告警, 让管理员知道有未受控通道。
+    if pg_active and config_tokens:
+        _log.warning(
+            "[gateway] PG token 已启用但 config.gateway.tokens 仍有 %d 个 token: 这些是 break-glass, "
+            "不受 web 禁用/吊销控制。生产请只保留 bootstrap admin, 勿与 web 用户共享 token。",
+            len(config_tokens),
+        )
     resolvers.append(MappingTokenResolver(config_tokens))  # config 始终兜底(bootstrap)
     return resolvers[0] if len(resolvers) == 1 else CompositeTokenResolver(resolvers)
 
@@ -354,8 +365,11 @@ def bind_policy_error(cfg: dict | None, host: str) -> str | None:
     c = cfg or {}
     if _cfg_get(c, "gateway.auth_mode", "passthrough") == "token":
         return None
-    if not _is_loopback(host):
-        return (f"bind host={host} 非 loopback 但 gateway.auth_mode=passthrough —— "
+    # 审计 P1: bind 上下文里空串 = INADDR_ANY = 0.0.0.0(uvicorn 绑全网)。_is_loopback("") 为
+    # True 是给 host header 缺省语义用的, 在 bind 闸里必须当**非 loopback**拒绝(防显式 "" 穿透)。
+    bind_host = (host or "").strip()
+    if not bind_host or not _is_loopback(bind_host):
+        return (f"bind host={host!r} 非 loopback 但 gateway.auth_mode=passthrough —— "
                 "未认证对外开放, 必须 auth_mode=token (见 config.example.json)。")
     return None
 

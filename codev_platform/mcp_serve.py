@@ -73,8 +73,12 @@ def mcp_bind_host(cfg: dict) -> str:
     单机(默认): 127.0.0.1 仅本机可达。多机部署改 `mcp.bind_host=0.0.0.0`(配合 token 模式,
     否则 startup_policy_error 硬拒)。**注意**与 MCPEndpoint.host 区分: 后者是**本机探活**用
     (probe 永远打 loopback, 即使 bind 0.0.0.0 也从 127.0.0.1 可达), bind host 才是对外监听面。
+
+    审计 P1: 显式空串 / 纯空白 → 回落 127.0.0.1(不放行)。否则 uvicorn 把 "" 当 INADDR_ANY
+    绑成 0.0.0.0 全网, 而 _is_loopback("") 判 loopback 会让 startup 闸误放行 = 静默暴露未认证服务。
     """
-    return str(_cfg_get(cfg, "mcp.bind_host", "127.0.0.1"))
+    raw = str(_cfg_get(cfg, "mcp.bind_host", "127.0.0.1")).strip()
+    return raw or "127.0.0.1"
 
 
 def _bind_port(cfg: dict, kind: str) -> int:
