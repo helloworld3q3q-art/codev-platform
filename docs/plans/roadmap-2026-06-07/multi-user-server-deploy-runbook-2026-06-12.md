@@ -44,16 +44,24 @@ codev-platform org list                                      # 核对
 > 双 store 厘清:orgs/users/org_members 同表单一真值源;`org add-user/add-member/grant`(RbacStore=授权)
 > 与 `org set-password`(account_store=身份+密码)**同表互补不冲突**(详见 [[account-rbac-two-store-model]])。
 
-### 4. 第二台 client 的 .mcp.json(带 token 连 SSE)—— 一条命令搞定
-```bash
-# 在第二台仓里跑: 自动把 token 内联进各 sse url 的 ?token=(任何 MCP 客户端可用, url 一定能填)
-export PLATFORM_TOKEN='<dev2 明文 token>'
-codev-platform gateway client-auth --repo . --query-token        # 写 ?token=<明文> 进 url
-# 远程: 再 gateway client-url --base https://<server> 把 url 指向服务器反代
+### 4. 第二台 client 的 .mcp.json(带 token 连 SSE)—— **必须用 header, 不要用 ?token=**
+
+🚨 **2026-06-12 实测教训**:`?token=` query 形式对 **MCP SSE 客户端不工作** —— SSE 握手(GET)
+能读到 token 通过,但握手返回的 `/messages/` POST 端点 URL **不带 token** → 后续 tool 调用 401 →
+`/mcp` 全红。Claude Code 必须用 **Authorization header**(对该 server 每个请求都带, 含 /messages/ POST)。
+
+每个 server 加 `headers` 字段(内联明文最可靠, 不依赖 env):
+```jsonc
+"platform-docs": {
+  "type": "sse",
+  "url": "http://<server>:19083/sse?project_id=<pid>",
+  "headers": { "Authorization": "Bearer <明文 token>" }
+}
 ```
-生成形如:`http://<server>:19092/sse?project_id=openclaw-stock&token=<dev2-token>`(4 端点)。
-> **header 形式更安全**(token 不进 URL/log):客户端支持 header 则用 `gateway client-auth`(不带
-> --query-token)写 `Authorization: Bearer ${PLATFORM_TOKEN}`。服务端两种都认(2026-06-12 加 ?token= 兜底)。
+或用 CLI(写 `Bearer ${PLATFORM_TOKEN}` env 引用, 需 export):`gateway client-auth --repo .`(**不带** --query-token)。
+> ⚠️ **验通必须真重启 IDE + 实调一个 tool**(如 codegraph_status): curl `/sse?token=` 单测只测握手第一跳,
+> 看似通实则 /messages/ POST 会 401。`?token=` / `--query-token` 对真 MCP 客户端基本无用, 已不推荐。
+> 远程: 再 `gateway client-url --base https://<server>` 指向反代 + TLS(header token 不进 URL/log, 更安全)。
 
 ### 5. 网络可达 + 重启服务
 - WSL 服务绑到可被第二台访问的地址(WSL mirrored/NAT + 端口转发;见记忆 [[wsl-mirrored-fixes-clash-tun]] / [[wsl-forwarding-restart-and-win-services]])。真服务器:绑 0.0.0.0 + 防火墙开端口 + **HTTPS/TLS**(反代终结,远程必须;`?token=` 走明文会进 access log,远程务必 TLS + 关/脱敏 access log)。
