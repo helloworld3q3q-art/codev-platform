@@ -127,11 +127,11 @@ def ingest_project(
         # **多根关键**: 读 store 全量节点 → 自动跨仓连(extra_repo 前端 → 主仓后端)。
         _link_pass(store, project_id, report)
 
-        # 调用边 + 前端依赖 post-pass: 仅主仓跑(这两个 pass 也按 plugin 删插 upsert, 每仓调会
-        # 互相覆盖)。extra 仓多为前端, 调用边产出少; 前后端跨仓链接已由 _link_pass(读全量节点)覆盖。
+        # 调用边 post-pass: 仅主仓跑(call 边主要在后端=主仓; 按 plugin 删插 upsert 每仓调会互相
+        # 覆盖)。前端依赖 post-pass: **所有根**跑(多前端各在不同仓, 内部累积一次写, 见函数注释)。
         main_repo = repos[0]
         _calls_pass(store, project_id, report, main_repo)
-        _frontend_deps_pass(store, project_id, report, main_repo)
+        _frontend_deps_pass(store, project_id, report, repos)
 
         # 前端内部桥接 post-pass: 两个前端插件(frontend_deps 建 module / react 建 api_call/route)
         # 为同批文件建节点但 id 不相交、无边相连 → frontend_module 成孤岛(impact 滤软边后到不了
@@ -194,24 +194,31 @@ def _calls_pass(store, project_id: str, report: IngestReport, repo_path: Path) -
     report.summaries[CALLS_PLUGIN] = {"calls_edges": len(all_edges), "by_resolver": by_resolver}
 
 
-def _frontend_deps_pass(store, project_id: str, report: IngestReport, repo_path: Path) -> None:
-    """前端组件依赖 post-pass: 接 dependency-cruiser 产 frontend_component 节点 + renders 边。
+def _frontend_deps_pass(store, project_id: str, report: IngestReport, repos: list[Path]) -> None:
+    """前端组件依赖 post-pass: 接 dependency-cruiser 产 frontend_component 节点 + imports 边。
 
-    框架无关(react .tsx / vue .vue 都吃, 自 detect 前端子目录)。fail-soft: 无 node/npx 或无
-    前端 => 空, 不拖垮 ingest。详见 plugins/builtin/_stack_scan/frontend_deps.py。
+    **对所有根(主仓 + extra_repos)各扫一遍, 合并后一次写入** —— 一个项目可挂多个独立前端
+    (如 thorn6 web 在主仓 + PDA uni-app 在 extra 仓), 每个前端的内部组件依赖都要扫, 否则没扫到
+    的那个前端组件全是孤点(只能靠软枢纽连)。按 plugin 删插 upsert, 故必须先跨仓累积再一次写,
+    不能每仓各 upsert(会互相覆盖)。框架/结构无关(react/vue/uni-app 自 detect)。fail-soft。
     """
     from codev_platform.plugins.builtin._stack_scan import scan_frontend_deps
 
-    nodes, edges = scan_frontend_deps(repo_path, project_id)
+    all_nodes: list[GraphNode] = []
+    all_edges: list[GraphEdge] = []
+    for repo_path in repos:
+        nodes, edges = scan_frontend_deps(repo_path, project_id)
+        all_nodes.extend(nodes)
+        all_edges.extend(edges)
     # dependency-cruiser 真依赖图(AST 工具): src=ast
-    stamp_unprovenanced(edges, ProvSource.AST, parser=FRONTEND_DEPS_PLUGIN)
+    stamp_unprovenanced(all_edges, ProvSource.AST, parser=FRONTEND_DEPS_PLUGIN)
     store.upsert_result(
         project_id,
-        AnalyzerResult(nodes=nodes, edges=edges, plugin=FRONTEND_DEPS_PLUGIN),
+        AnalyzerResult(nodes=all_nodes, edges=all_edges, plugin=FRONTEND_DEPS_PLUGIN),
     )
     report.ingested.append(FRONTEND_DEPS_PLUGIN)
     report.summaries[FRONTEND_DEPS_PLUGIN] = {
-        "components": len(nodes), "imports_edges": len(edges),
+        "components": len(all_nodes), "imports_edges": len(all_edges),
     }
 
 
