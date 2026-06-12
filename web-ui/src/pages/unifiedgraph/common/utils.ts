@@ -91,6 +91,15 @@ export function unifiedLayerOf(kind?: string): string {
   return KIND_LAYER[kind as UnifiedNodeKind] ?? '其他';
 }
 
+// 主链路层的序号 (前端=0 → 后端=1 → 数据库=2): 给 3D 图按层锁水平带用, 形成
+// "前端→后端→数据库"纵向架构层次。非主链路层 (文档/外部、其他) 返回 null = 不锁层, 自由布局。
+const _MAIN_CHAIN_LAYERS = ['前端', '后端', '数据库'];
+
+export function unifiedLayerRankOf(kind?: string): number | null {
+  const idx = _MAIN_CHAIN_LAYERS.indexOf(unifiedLayerOf(kind));
+  return idx >= 0 ? idx : null;
+}
+
 // 边 kind → 中文标签 (节点详情面板里分组展示关联节点)。
 export const EDGE_LABEL: Record<string, string> = {
   contains: '包含',

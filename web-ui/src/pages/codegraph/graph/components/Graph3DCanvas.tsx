@@ -29,7 +29,14 @@ interface Graph3DCanvasProps {
   // belongs_to_domain)与硬依赖边, 避免经角色/域 hub 的连通被误读成功能链路。统一图谱注入,
   // 不传则全按硬边 (codegraph 页行为不变)。
   linkIsSoftFn?: (kind?: string) => boolean;
+  // kind → 层序号 (0=最上层)。传了则把节点 **按层锁到水平带** (fy 固定): 前端带在上、后端带中、
+  // 数据库带下, 边在层间纵向连 → 力导向平铺糊成一团变成有层次的"前端→后端→数据库"架构图。
+  // 返回 null/负 = 不锁层 (该 kind 自由布局)。统一图谱注入, codegraph 页不传 (行为不变)。
+  layerRankFn?: (kind?: string) => number | null;
 }
+
+// 层间垂直间距 (3D 世界单位): 把各层水平带拉开足够距离, 一眼区分前端/后端/数据库。
+const LAYER_Y_SPACING = 340;
 
 // 默认按原始 kind 显示 (codegraph 页保持 [class] / [java_endpoint] 原样)。
 function defaultKindLabel(kind?: string): string {
@@ -52,6 +59,7 @@ interface FGNode extends NodeDTO {
   x?: number;
   y?: number;
   z?: number;
+  fy?: number;   // 固定 y (锁层用); d3-force-3d 尊重 fx/fy/fz 不再仿真该轴
 }
 
 interface FGLink {
@@ -136,6 +144,7 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
   nodeSizeFn = nodeSizeOf,
   kindLabelFn = defaultKindLabel,
   linkIsSoftFn = defaultIsSoft,
+  layerRankFn,
 }) => {
   // 用 unknown 收口 — react-force-graph-3d 的 ref 类型未导出（forwardRef 实例），
   // 通过 ref.current.controls() 拿 OrbitControls 实例
@@ -184,13 +193,18 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
         seen.add(n.id);
       }
     }
-    const nodes: FGNode[] = merged.map((n) => ({
-      ...n,
-      id: n.id ?? '',
-      color: nodeColorFn(n.kind),
-      // center 节点稍大一些突出显示
-      val: n.id === data.center?.id ? nodeSizeFn(n.kind) * 2 : nodeSizeFn(n.kind),
-    }));
+    const nodes: FGNode[] = merged.map((n) => {
+      const rank = layerRankFn ? layerRankFn(n.kind) : null;
+      return {
+        ...n,
+        id: n.id ?? '',
+        color: nodeColorFn(n.kind),
+        // center 节点稍大一些突出显示
+        val: n.id === data.center?.id ? nodeSizeFn(n.kind) * 2 : nodeSizeFn(n.kind),
+        // 锁层: fy 固定到该层的水平面 (rank 0 在最上, 向下递减)。null/负 = 不锁。
+        ...(rank != null && rank >= 0 ? { fy: -rank * LAYER_Y_SPACING } : {}),
+      };
+    });
     // 过滤掉端点不在 nodes 里的边，避免 react-force-graph 抛错
     const links: FGLink[] = (data.edges ?? [])
       .filter((e) => e.source && e.target && seen.has(e.source) && seen.has(e.target))
@@ -207,7 +221,7 @@ const Graph3DCanvas: React.FC<Graph3DCanvasProps> = ({
         };
       });
     return { nodes, links };
-  }, [data, nodeColorFn, nodeSizeFn, linkIsSoftFn]);
+  }, [data, nodeColorFn, nodeSizeFn, linkIsSoftFn, layerRankFn]);
 
   // 用户主动锁定（点击节点后 5 秒内不被 hover 重启自动旋转）
   const autoRotateLockedUntilRef = useRef<number>(0);

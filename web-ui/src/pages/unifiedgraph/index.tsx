@@ -23,6 +23,7 @@ import type {
 import {
   isSoftEdgeKind,
   unifiedKindLabelOf,
+  unifiedLayerRankOf,
   unifiedNodeColorOf,
   unifiedNodeSizeOf,
 } from './common/utils';
@@ -205,6 +206,7 @@ const UnifiedGraphPage: React.FC = () => {
         nodeSizeFn={unifiedNodeSizeOf}
         kindLabelFn={unifiedKindLabelOf}
         linkIsSoftFn={isSoftEdgeKind}
+        layerRankFn={unifiedLayerRankOf}
       />
     </div>
   );
