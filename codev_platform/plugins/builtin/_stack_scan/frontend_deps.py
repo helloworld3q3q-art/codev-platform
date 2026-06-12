@@ -47,12 +47,34 @@ _COMPONENT_DIRS = ("src", "pages", "components", "common", "store", "views", "ap
 
 
 def _component_dirs(front: Path) -> list[str]:
-    """该前端根下真正含组件(.vue/.tsx/.jsx)的源目录(相对根)。空 = 非前端根。"""
+    """该前端根下真正含组件(.vue/.tsx/.jsx)的源目录(相对根)。仅用于**识别**是否前端根。空=非前端根。"""
     out: list[str] = []
     for c in _COMPONENT_DIRS:
         d = front / c
         if d.is_dir() and any(_has_file_with_suffix(d, s) for s in (".vue", ".tsx", ".jsx")):
             out.append(c)
+    return out
+
+
+_SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue")
+# 扫描时排除的非源码顶层目录(静态资源 / 产物)。
+_NON_SRC_DIRS = frozenset({"static", "public", "dist", "build", "assets", "unpackage"})
+
+
+def _source_dirs(front: Path) -> list[str]:
+    """该前端根下**所有含源文件(.js/.ts/.vue...)的顶层目录** —— 比组件目录广。
+
+    组件 import 的共享模块(如 API 常量 `common/js/URL.js`)常在非组件目录(common/utils/api...),
+    若扫描只盯组件目录, 这些共享模块不入图 → 组件→共享模块→api_call 断链, api_call 全悬空、前端
+    连不到后端。故扫描范围用本函数(广), 识别前端根才用 _component_dirs(窄)。"""
+    out: list[str] = []
+    if not front.is_dir():
+        return out
+    for d in sorted(front.iterdir()):
+        if not d.is_dir() or d.name in _SKIP_PARTS or d.name in _NON_SRC_DIRS:
+            continue
+        if any(_has_file_with_suffix(d, s) for s in _SOURCE_SUFFIXES):
+            out.append(d.name)
     return out
 
 
@@ -117,7 +139,7 @@ def _src_fingerprint(front: Path) -> str:
     覆盖实际组件目录(src/pages/...)而非写死 src, 否则 uni-app(pages/)缓存指纹恒空永不刷新。"""
     import hashlib
     h = hashlib.sha256()
-    for c in _component_dirs(front):
+    for c in _source_dirs(front):
         for f in sorted((front / c).rglob("*")):
             if f.suffix not in (".ts", ".tsx", ".js", ".jsx", ".vue") or _SKIP_PARTS & set(f.parts):
                 continue
@@ -181,10 +203,10 @@ def _run_depcruise(front: Path, project_id: str) -> dict | None:
                 return cached["data"]  # 命中: src 未变, 跳过整个 depcruise
         except (OSError, ValueError):
             pass  # 缓存损坏 → 重跑
-    dirs = _component_dirs(front)
+    dirs = _source_dirs(front)                       # 扫描范围用**全部源码目录**(含共享模块目录)
     if not dirs:
         return None
-    include = "^(" + "|".join(dirs) + ")"            # includeOnly 覆盖实际组件目录, 不写死 ^src
+    include = "^(" + "|".join(dirs) + ")"            # includeOnly 覆盖全部源码目录, 不写死 ^src
     ts_cfg, _tmp = _resolve_setup(front)
     scan_glob = (dirs[0] + "/**/*.{ts,tsx,jsx,js,vue}") if len(dirs) == 1 \
         else "{" + ",".join(dirs) + "}/**/*.{ts,tsx,jsx,js,vue}"
