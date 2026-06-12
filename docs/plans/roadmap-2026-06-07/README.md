@@ -16,6 +16,8 @@
 | [loop-cost-optimization-plan-2026-06-11.md](loop-cost-optimization-plan-2026-06-11.md) | agent loop 成本优化(云账单大头); 实测成本结构(miss 67%+out 25%, 随步数超线性)+ 符号级多跳工具(省 60-70% 且修多跳质量弱点)+ per-档 max_steps + A/B CI 验证 | ✅ 残留已清(2026-06-12: codegraph_trace/紧凑JSON/read_file窗口/per-租户计量/max_steps cap 机制); 激进 cap 值待 A/B |
 
 > 多仓 operationId 契约桥课题独立成轨, 见 [`../roadmap-2026-06-10/`](../roadmap-2026-06-10/)。
+>
+> 日报: [06-08](daily-summary-2026-06-08.md) / [06-09](daily-summary-2026-06-09.md) / [06-10](daily-summary-2026-06-10.md) / [06-11](daily-summary-2026-06-11.md) / [06-12](daily-summary-2026-06-12.md) / [**06-13**](daily-summary-2026-06-13.md)(PDA 链路收尾: code_vec 大项目建成 + find_api_callers URL 解析 + 前端调用方精确归因 uses_api + 跨仓 config 版本化 + agent 文件工具多仓 + 部署根因 web agent=codev-agent)。
 
 ## 落地状态(2026-06-08, 只拎 2 高 ROI 项)
 
