@@ -183,3 +183,30 @@ def test_remote_rerank_failure_swallowed_by_qwen_reranker(monkeypatch):
                MemoryEntry(id="b", scope="personal", scope_ref="u", owner_user_id="u", content="y")]
     out = QwenReranker(RemoteRerankModel("http://127.0.0.1:1/rerank")).rerank("q", entries, top_k=8)
     assert [e.id for e in out] == ["a", "b"]   # 远端崩 → 原序返回, 不丢候选不报错
+
+
+# ---- code_vec 专用 embedder: 索引侧用本机 GPU, 不经共享 daemon(防大批量死锁 daemon) ----
+
+@_needs_st
+def test_code_vec_embedder_defaults_local():
+    """默认走本机 qwen-local(不经 daemon /embed), 与 agent-memory 默认 remote 区分。"""
+    from codev_platform.agent.embed.registry import build_code_vec_embedder
+    from codev_platform.agent.embed.qwen import QwenLocalEmbedder
+    emb = build_code_vec_embedder({})
+    assert isinstance(emb, QwenLocalEmbedder)
+
+
+def test_code_vec_embedder_remote_override():
+    """显式配 remote 仍可回退共享 daemon(单机省显存等场景)。"""
+    from codev_platform.agent.embed.registry import build_code_vec_embedder
+    from codev_platform.agent.embed.remote import RemoteEmbedder
+    emb = build_code_vec_embedder({"recall": {"code_vec": {"embed_backend": "remote"}}})
+    assert isinstance(emb, RemoteEmbedder)
+
+
+@_needs_st
+def test_code_vec_embedder_device_override():
+    """recall.code_vec.embed_device 显式覆盖自动 cuda/cpu 探测。"""
+    from codev_platform.agent.embed.registry import build_code_vec_embedder
+    emb = build_code_vec_embedder({"recall": {"code_vec": {"embed_device": "cpu"}}})
+    assert emb._device == "cpu"

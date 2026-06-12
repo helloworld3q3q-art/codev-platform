@@ -99,3 +99,35 @@ def _build_remote(cfg: dict) -> Embedder | None:
 
 register_embedder("qwen-local", _build_qwen_local)
 register_embedder("remote", _build_remote)
+
+
+def _cuda_or_cpu() -> str:
+    """有 CUDA 用 cuda, 否则 cpu。torch 缺也回 cpu(下游 sentence-transformers 自处理)。"""
+    try:
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:  # noqa: BLE001
+        return "cpu"
+
+
+def build_code_vec_embedder(cfg: dict) -> Embedder | None:
+    """code_vec 索引专用 embedder —— 与 agent-memory(低频, 默认 remote 复用 daemon GPU)不同。
+
+    索引是**高吞吐批量**(大项目 ~19万节点): 用本机 qwen-local 直跑 GPU, **不经共享 daemon /embed**。
+    原因: 大批量串行打 daemon 会把它那把串行 GPU 信号量长占, 一旦某次 encode 卡住(CUDA 偶发)
+    sem 永不释放 → daemon /embed 整体死锁, 连带打挂 live search_docs。本机直跑则 build 与服务
+    解耦: build 自己的 CUDA 上下文出问题只失败自己(checkpoint 保进度), 不波及在线服务; 且省 HTTP。
+
+    config `recall.code_vec.embed_{backend,device}` 可覆盖; 默认 qwen-local + 自动 cuda/cpu。"""
+    from codev_platform.core.config import get as _get
+    backend = _get(cfg, "recall.code_vec.embed_backend", "qwen-local")
+    if backend == "remote":
+        return _build_remote(cfg)
+    import importlib.util
+    if importlib.util.find_spec("sentence_transformers") is None:
+        _log.warning("[code_vec] sentence-transformers 缺, 本机 embedder 不可用")
+        return None
+    from codev_platform.agent.embed.qwen import QwenLocalEmbedder
+    path = _get(cfg, "models.embed_path", str(Path.home() / "models" / "Qwen3-Embedding-0.6B"))
+    device = _get(cfg, "recall.code_vec.embed_device") or _cuda_or_cpu()
+    return QwenLocalEmbedder(path, device)

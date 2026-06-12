@@ -224,15 +224,17 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     - incremental=True 且 manifest 有效 → **增量**: 只重嵌变更/新增 + 删已不存在(小 upsert 安全便宜)。
     嵌入模型不可用直接抛(构建语境必须有模型, 不静默产空库)。
     """
-    from codev_platform.agent.embed.registry import build_embedder
+    from codev_platform.agent.embed.registry import build_code_vec_embedder
     from codev_platform.core.config import load_config
     from codev_platform.web.integrations.codegraph_client import CodegraphClient
 
-    embedder = build_embedder(load_config())
+    # 索引侧用专用 embedder(默认本机 qwen-local + GPU 直跑), 不经共享 daemon /embed —— 大批量
+    # 打 daemon 会长占其串行 GPU 信号量甚至死锁(连带打挂在线 search_docs)。build 与服务解耦。
+    embedder = build_code_vec_embedder(load_config())
     if embedder is None:
         raise RuntimeError(
             "embedder 不可用: 装 sentence-transformers + 配 models.embed_path(qwen-local), "
-            "或设 memory.embed.backend=remote 接 chroma daemon /embed。")
+            "或设 recall.code_vec.embed_backend=remote 接 chroma daemon /embed。")
 
     import shutil
 
