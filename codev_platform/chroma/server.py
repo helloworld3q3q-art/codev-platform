@@ -59,6 +59,7 @@ from codev_platform.chroma._config import (  # noqa: E402
     _CFG, _LOG_MODE, EMBED_MODEL, EMBED_DEVICE,
     RERANKER_MODEL, RERANKER_DEVICE, RERANKER_DTYPE, RERANKER_ENABLED, RERANKER_TOP_K,
     DEFAULT_RETURN_K, BM25_TOP_K, BM25_ENABLED, RRF_K_CONST, GPU_CONCURRENCY, _BM25_IMPORT_OK,
+    GPU_OP_TIMEOUT,
 )
 # load_config 仍在 server 用 (handle_sse / platform_status 的 ACL + 中间件构建)。
 from codev_platform.core.config import load_config  # noqa: E402
@@ -154,6 +155,19 @@ async def _run_stdio() -> None:
     """传统 stdio transport: Claude Code 直接 spawn cmd 当 stdio server。"""
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
+
+
+async def _gpu_call(fn):
+    """在线程跑同步 GPU 算子 (encode/rerank), 受 GPU_OP_TIMEOUT 收口。
+
+    超时 → 抛 asyncio.TimeoutError, 调用方的 `async with _get_gpu_sem()` 随之退出 **释放信号量**,
+    daemon 不会因一次卡死的算子永久持锁 (那会拖死整个 /embed + 在线 search_docs)。
+    注: 超时只取消等待、释放锁; 后台线程仍跑完那次 encode (Python 不能强杀线程), 但锁已放,
+    其余请求可继续。GPU_OP_TIMEOUT<=0 视为不限 (回退旧行为)。"""
+    coro = asyncio.to_thread(fn)
+    if GPU_OP_TIMEOUT and GPU_OP_TIMEOUT > 0:
+        return await asyncio.wait_for(coro, timeout=GPU_OP_TIMEOUT)
+    return await coro
 
 
 # /embed /rerank 请求体校验: 纯函数(不碰模型/GPU/starlette), 模块级可单测。
@@ -426,10 +440,15 @@ async def _run_http(port: int) -> None:
         if m is None:
             return JSONResponse({"error": "embedding model unavailable"}, status_code=503)
         try:
+            # wait_for 收口: 一次 encode 卡住时 **释放 GPU 信号量** 返 503, 不让它永久持锁拖死
+            # 整个 /embed(连带在线 search_docs)。云上大批量 remote 索引时这是稳定性硬前提。
             async with _get_gpu_sem():
-                vecs = await asyncio.to_thread(
+                vecs = await _gpu_call(
                     lambda: m.encode(texts, normalize_embeddings=True, convert_to_numpy=True))
             return JSONResponse({"vectors": [v.tolist() for v in vecs]})
+        except asyncio.TimeoutError:
+            _flog(f"[embed] GPU op 超时 (>{GPU_OP_TIMEOUT}s, texts={len(texts)}); 释放信号量返 503")
+            return JSONResponse({"error": "embed timeout"}, status_code=503)
         except Exception as exc:  # noqa: BLE001
             return JSONResponse({"error": f"embed failed: {type(exc).__name__}"}, status_code=500)
 
@@ -447,7 +466,10 @@ async def _run_http(port: int) -> None:
         query, docs = parsed
         try:
             async with _get_gpu_sem():
-                scores = await asyncio.to_thread(lambda: _rerank_scores(query, docs))
+                scores = await _gpu_call(lambda: _rerank_scores(query, docs))
+        except asyncio.TimeoutError:
+            _flog(f"[rerank] GPU op 超时 (>{GPU_OP_TIMEOUT}s, docs={len(docs)}); 释放信号量返 503")
+            return JSONResponse({"error": "rerank timeout"}, status_code=503)
         except Exception as exc:  # noqa: BLE001
             return JSONResponse({"error": f"rerank failed: {type(exc).__name__}"}, status_code=500)
         if scores is None:

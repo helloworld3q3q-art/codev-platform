@@ -81,3 +81,7 @@ RRF_K_CONST = int(env_or_config("PLATFORM_RRF_K_CONST", _CFG, "search.rrf_k_cons
 
 # GPU concurrency: 多 session 同时 search_docs 时 encode/rerank 串行化的最大并发 (8GB 卡用 1)。
 GPU_CONCURRENCY = int(env_or_config("PLATFORM_GPU_CONCURRENCY", _CFG, "search.gpu_concurrency", 1))
+# /embed /rerank 的 GPU 算子超时(秒)。正常 encode/rerank 一批 < 数秒; 超过 = 卡住/极端争用。
+# 超时则**释放 GPU 信号量**返 503(不再让一次卡死的 encode 永久持锁拖死整个 daemon /embed,
+# 连带打挂在线 search_docs)。0/负 = 不限(回退旧行为)。大批量索引在云上走 remote 时尤其关键。
+GPU_OP_TIMEOUT = float(env_or_config("PLATFORM_GPU_OP_TIMEOUT", _CFG, "search.gpu_op_timeout", 120.0))
