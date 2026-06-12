@@ -6,11 +6,12 @@
   server 部署: /var/lib/platform/data/ (或类似)
   迁移: 整个 data/ 目录可打包带走
 
-- chroma: 单 PersistentClient 多 collection, 通过 collection 名前缀隔离
-    路径: data/chroma/  (扁平, 不按 project 分目录)
-    collection 命名: <project_id>__<base_name>
-        例: openclaw-stock__platform_docs
-            openclaw-stock__platform_docs_bm25_meta
+- chroma: **每项目独立库**, 不再单库多 collection (chromadb 1.5.9 多 collection 共库 compaction
+    会损坏整库, 见 docs daily-summary-2026-06-12 §十.1 + 记忆 chromadb-multiflush-compaction):
+    路径: data/chroma/docs/<project_id>/   (platform_docs, 见 chroma_docs_dir)
+          data/chroma/code_vec/<project_id>/ (代码向量, 见 recall.code_vector_store)
+          data/chroma/                       (根库仅余 agent-memory 单 collection)
+    每库内 collection 仍带前缀名 <project_id>__<base_name>(一库一 collection, 名义保留)。
 
 - codegraph: 每 project 独立 SQLite DB
     路径: data/codegraph/<project_id>/codegraph.db

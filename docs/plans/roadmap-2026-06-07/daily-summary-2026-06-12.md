@@ -55,3 +55,47 @@
 - **token 模式端到端验证**:① in-process 真 PG 9/9(身份/授权/越权/401/`?token=`/**禁用用户·禁用 org 即失效**);② live HTTP 真 uvicorn 6 状态码全对(throwaway 端口, 运行 4 守护零干扰, config 用完即恢复)。runbook 标注 `[x]`。**剩**:真跨网络第二台机客户端(周末接入验)。
 - commit 链下午段:`2a6ac3c`→`0be3d21`→`793e971`→`85857e5`→`71ea071`→`d2874ce`→`1d0c084`→`0baf67e`(+ roadmap/runbook docs)。
 - **隔离泄漏修复**(此前):agent chat 跨项目读文档根因 = 业务仓 `index.json` external_doc_paths 灌平台 docs 进 openclaw collection(非路由串台),已删 + 重建 chroma + 真机 e2e CLEAN(见记忆 [[agent-project-isolation-chroma-leak]])。
+
+## 十、晚间段:一个"加列影响面 agent 答不出"挖出平台一串底层坑(全程逐层证伪)
+
+起因:用户给的 ideas-v2 agent 对「入库订单管理加列影响哪些模块 / 哪些 PDA 页调 `pda/task/check/container`」答不出(撞 max_steps、recall 全 `0.0164` floor)。顺藤摸瓜挖出平台服务**大型复杂多仓项目**时一连串真坑,逐个证伪定位 + 治本。**教训:不要凭现象调参,逐层量化证伪到根因**。
+
+### 10.1 chroma 多 collection compaction 损坏**复发** → 治本每项目独立库(`61759a6`)
+- 现象:给 ideas-v2 索引 311 个 `.rule` 后整库 `database disk image is malformed`,search_docs 全项目下线。
+- **证伪"单 upsert 够"**(06-05 的缓解):codev 单 collection 重建干净,**一加 openclaw 第二个 collection 立刻又坏** → 确认多 collection 共库无解(第二个 collection 的 compaction backfill 写坏整库)。
+- 治本:`platform_docs` 改**每项目独立库** `data/chroma/docs/<pid>/`(每库一 collection,永不跨 collection compaction),与 `code_vec/<pid>` 同构。`_get_client(project_id)` per-project client 字典;`.reindex.lock` 仍在根做全局 GPU 串行化。daemon **永不开根库** → 一项目 `.rule` 出问题炸不到别项目。3 库 1974/3911/1713 integrity ok。更新记忆 [[chromadb-multiflush-compaction]]。
+- 善后:清取证副本 + 损坏根库释放 ~361M;chroma 文本类型支持已扩(html 剥标签 + txt/`.rule`,`doc_patterns` 决定类型)。
+
+### 10.2 codegraph 图谱"发丝团" → 边数按节点比例收口(`c074cda`)
+- 现象:web `/codegraph/graph` 对 ideas-v2(28万节点)返回 2000 节点 / 11106 边 = **5.6 边/节点**,3D 一团乱(openclaw 2.9 / codev 2.3 正常)。
+- 根因:edge-first 选边(修"散点"加的)对超大稠密项目过度,默认 edge_cap=50000。
+- 修法:`_EDGE_PER_NODE_CAP=3`,`edge_cap=min(edge_cap, node_cap*3)`。只压过密项目(ideas → ≤6000 边),稀疏的不动。
+
+### 10.3 token 模式下 `/embed` 401 → 纯算力接口本机 loopback 免 token(`a6b8093`)
+- 现象:切 token 模式后,内部 code_vec 索引 / agent-memory 写经 `RemoteEmbedder` 调 daemon `/embed` 不带 token → 401 → **向量 lane 全挂**(recall 退化关键词,分全 floor)。
+- 修法:不把 `/embed` 设 public(远程白嫖 GPU),而是 `AuthMiddleware.loopback_exempt_paths`:`/embed`/`/rerank` 无租户数据,**仅真实 TCP 对端 loopback** 免 token,远程仍鉴权。对端取 `scope["client"]` 不信任 X-Forwarded-For。
+
+### 10.4 code_vec 索引性能/稳定**连环坑**(大项目服务的硬骨头)
+1. 逐节点一次 HTTP embed 太慢 → **批量** encode(`2b9cac6`)。
+2. 批量 256/批撞 30s HTTP 超时 + manifest 只末尾写(中途失败丢全部进度)→ **64/批 + 自适应超时 + manifest 增量 checkpoint**(断点续)(`14114f1`)。
+3. **daemon `/embed` 死锁**(根因级):`async with gpu_sem: await to_thread(encode)` —— 一次 encode 卡住则串行 GPU 信号量**永不释放**,`/embed` 整体死锁连带打挂在线 search_docs(重启才恢复)。→ `_gpu_call` 包 `wait_for(GPU_OP_TIMEOUT=120s)`,超时**释放信号量**返 503(`870a216`)。**上云硬前提 + 线上稳定性炸弹**。
+4. 本机 vs 远程 embedder **配置缝**(`294a487`→默认翻回 remote `1cae618`):8GB 单卡塞两份模型(daemon 2.5G + build 自己一份)挤爆显存 build 卡死在 65000;**云上无 GPU 的 worker 只能 remote** → `recall.code_vec.embed_backend` 默认 **remote**,`qwen-local` 为专用 GPU 索引节点 opt-in。
+5. PyTorch CUDA 缓存分配器**膨胀到 7.7/8GB** → 新 encode `AcceleratorError`(OOM)→ 大 batch(≥16,索引侧)后 `torch.cuda.empty_cache()` 去碎片(`63b80df`)。
+6. **固定 1500 字符硬切**把方法切一半(实测 6.1% 节点被截,7492 方法切半,god-class 75万字符只嵌 0.2%)→ **kind 感知切割 + 长方法滑窗**(`0fa1730`):class 只嵌头部摘要(body 由成员方法节点覆盖),method 完整体超 3500 行边界滑窗(重叠 8 行,≤12 块),多块 `node_id#k` 召回去重回节点。真数据验证放大仅 1.00x、最大块 3901、0.1% 切多块。
+
+### 10.5 graph url_registry 链路 method 未知误判 mismatch → 纯 URL 匹配(`07c856e`)
+- 现象:PDA `PICK_CHECK_TURN = SUFFIX+'task/check/container'` 明明调了后端 `GET /pda/task/check/container`,但 `api_callers` 像没连。
+- 根因:url 常量**本身没有 HTTP 动词**(动词在调用点 `.get()/.post()`),`url_registry` 扫描器默认 POST → `_link` 看 POST≠GET 把真链路打成 `conf=0.7 + 误标 method_mismatch`。**HTTP 方法不止 GET/POST**,凡真实动词非 POST(GET/PUT/DELETE/PATCH)的 url_registry 链路全中招。
+- 修法:`meta.url_registry=True` = method 未知 → 不按假 method 过滤/惩罚,纯按 URL 匹配,唯一候选 conf=1.0(`url_only`);同 URL 多动词仍降候选。
+- 附带纠错:别的 agent 把"这接口没连上"误判成"PDA 前端不在本仓"——PDA 前端**在图谱里**(646 frontend_api_call 等),是这一条链路的 method 坑。
+
+### 10.6 运维/工具坑(记着别再踩)
+- **WSL `origin` 是自建 Gitea**(`localhost:3000`/`fuwuqi`)**不是 github**:Windows 改完 `git push fuwuqi dev`,只 push github 则 WSL `git pull` 拉不到 → 旧码 worker 用旧逻辑跑(踩过一次,及时停 worker)。见 [[gitea-ci-runner-wsl]]。
+- **Bash 工具够不到 `wsl.exe`**(`/mnt/c/Windows/System32/wsl.exe: No such file`)→ 后台脚本静默没跑(echo 照常误导)。**WSL 操作一律走 PowerShell 工具**;复杂命令写 `.sh` 文件再 `wsl bash 文件`(避免 PowerShell 吃 `$!`/`$()`/嵌套引号)。补记忆 [[wsl-run-commands-from-windows]]。
+- **daemon mid-build 重启**会造 GPU 争用尖峰(daemon warmup + build 两份模型撞 8GB),build 进度假性停滞 —— 大索引期间别重启 daemon;真要独占 GPU 跑大索引就**停 daemon + qwen-local opt-in**(本会话最终用此法本地建)。
+
+### 10.7 commit 链(晚间段)
+`61759a6`(chroma 每项目库)→`c074cda`(图密度)→`a6b8093`(/embed loopback 免 token)→`2b9cac6`(批量 embed)→`14114f1`(超时+checkpoint)→`870a216`(daemon wait_for 死锁)→`294a487`→`1cae618`(embedder 本机/远程缝,默认 remote)→`0fa1730`(kind 感知切割+滑窗)→`07c856e`(url_registry method 纯 URL)→`63b80df`(empty_cache 防膨胀 OOM)。
+
+### 10.8 结论
+这条链是平台从"够用"走向"**服务大型复杂多仓项目**"必踩的工程化硬骨头:存储隔离(每项目库)、共享 GPU 服务的死锁/膨胀/鉴权、大批量索引的批量/断点/切割、跨仓链接的 method 语义。全部逐层证伪定位 + 治本 + 断言测试 + 真数据验证。code_vec 新切割全量重建 + graph re-ingest(让 method 修复生效)收尾中。
