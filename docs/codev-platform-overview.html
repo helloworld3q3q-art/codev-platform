@@ -130,13 +130,17 @@
   <div class="layout">
     <nav>
       <h1>codev-platform 一图总览</h1>
-      <p>多项目 AI 协作工具栈 · 真值源仓 × 运行时管道</p>
+      <p>多项目 AI 协作工具栈 · 真值源仓 × 运行时管道 · 2026-06-12 更新</p>
       <a href="#map">一图总览</a>
       <a href="#what">这平台是什么</a>
+      <a href="#glossary">新手名词速查</a>
       <a href="#advantages">作用与优势</a>
+      <a href="#evolution">近期演进 2026-06</a>
       <a href="#xplatform">跨平台 CLI</a>
       <a href="#agent">Agent 服务 + Memory</a>
+      <a href="#recall">检索召回融合</a>
       <a href="#modules">本仓模块</a>
+      <a href="#webui">Web 管理台</a>
       <a href="#distribute">分发链路</a>
       <a href="#isolation">数据隔离</a>
       <a href="#mcp">MCP 与索引</a>
@@ -152,17 +156,17 @@
       <div class="shell">
         <header class="hero">
           <h2>codev-platform</h2>
-          <p>一个仓 = 多项目 AI 协作工具栈的真值源。pip 包 + 跨平台 CLI + 共享规则 / Skill + 文档检索 daemon + 跨层链路 MCP,被多个业务仓引用。运行时(<code>.venv</code> / <code>data/</code> / launcher)已翻正归本仓自有,业务仓是纯消费者。运维编排从 Windows-only 脚本升级为跨平台 Python CLI,换机器只改一份 config,Win / Mac / Linux 通用。<strong>新增 Agent HTTP 服务</strong>(FastAPI,多模型可插拔 + 6 只读工具)与 <strong>Memory 基建</strong>(组织 / 团队 / 项目 / 个人四作用域 + PG 持久化 + 召回融合 + 生命周期),让协作工具栈从"被动检索"走向"主动 agent + 分层记忆"。</p>
+          <p>一个仓 = 多项目 AI 协作工具栈的真值源。pip 包 + 跨平台 CLI + 共享规则 / Skill + 四套 MCP 检索服务 + 常驻 Agent HTTP 服务 + Web 管理台,被多个业务仓引用。运行时(<code>.venv</code> / <code>data/</code>)归本仓自有,业务仓是纯消费者。<strong>2026-06 起平台从"单机工具栈"演进为多机 / 多组织共享平台</strong>:reindex 队列与统一图谱落 PostgreSQL 共享后端,网关 token 认证 + 多组织 RBAC 隔离,Git push 自动触发重建(webhook),自托管 CI,代码语义向量三路融合召回 —— AI 既能<strong>查</strong>(代码 / 契约 / 规则)、又能<strong>记</strong>(分层记忆)、还能<strong>主动干</strong>(Agent),且团队多人多机可共用同一份平台。</p>
         </header>
 
         <section id="map">
           <h2>一图总览</h2>
-          <p>按<strong>平面分层</strong>看当前已经落地的能力:codev-platform 是<strong>控制平面</strong>真值源仓,统一沉淀配置、规则、技能、命令行、租户标识与运行路径;<strong>知识索引平面</strong>负责文档检索增强、代码图谱、跨层链路;<strong>记忆平面</strong>负责会话与分层记忆;<strong>网关权限平面</strong>负责认证、授权与脱敏;<strong>运行时平面</strong>对外暴露 MCP SSE 与 Agent HTTP 服务。</p>
+          <p>按<strong>平面分层</strong>看当前已落地的能力,共 7 层:<strong>控制平面</strong>(真值源仓:配置、规则、技能、命令行、租户解析);<strong>知识索引平面</strong>(文档检索 + 代码图谱 + 统一图谱 + 代码语义向量,三路融合召回);<strong>写侧重建平面</strong>(Git push → webhook 验签 → 队列(单机 spool / PG 多机共享)→ worker 单写者串行重建,2026-06 新增);<strong>记忆平面</strong>(会话 + 四作用域分层记忆);<strong>网关权限平面</strong>(token 认证 + 多组织 RBAC + 限流 + 审计);<strong>运行时平面</strong>(MCP SSE 4 套 + Agent HTTP + Web 管理后端);<strong>消费平面</strong>(AI 编程会话、命令行、浏览器)。</p>
           <div class="legend">
             <span class="pill"><span class="dot violet"></span>控制平面</span>
             <span class="pill"><span class="dot green"></span>知识索引平面</span>
+            <span class="pill"><span class="dot amber"></span>写侧重建 / 运行时平面</span>
             <span class="pill"><span class="dot cyan"></span>记忆平面</span>
-            <span class="pill"><span class="dot amber"></span>运行时平面</span>
             <span class="pill"><span class="dot red"></span>网关权限平面</span>
             <span class="pill"><span class="dot"></span>消费平面</span>
           </div>
@@ -172,7 +176,7 @@
           </div>
 
           <div class="map-wrap" id="platform-map">
-            <svg class="map" viewBox="0 0 1480 1320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 当前已落地架构图">
+            <svg class="map" viewBox="0 0 1480 1480" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codev-platform 当前已落地架构图">
               <style>
                 text { font-family: "Microsoft YaHei","Segoe UI",-apple-system,sans-serif; }
                 .lane-title { font-size:14px; font-weight:800; fill:#334155; }
@@ -211,7 +215,7 @@
                 </filter>
               </defs>
 
-              <rect x="18" y="20" width="1444" height="1280" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
+              <rect x="18" y="20" width="1444" height="1440" rx="12" fill="#f8fafc" stroke="#dbe3ed"/>
 
               <!-- lane 1: control plane (violet, 5 nodes) -->
               <rect x="40" y="50" width="1400" height="130" rx="10" fill="#f5f3ff" stroke="#7c3aed"/>
@@ -244,7 +248,7 @@
 
               <!-- lane 2: knowledge index plane (green, 5 nodes) -->
               <rect x="40" y="208" width="1400" height="190" rx="10" fill="#ecfdf5" stroke="#bbf7d0"/>
-              <text class="lane-title" x="58" y="236" fill="#047857">2. 知识索引平面 · 文档检索增强 + 代码图谱 + 统一图谱: 多项目隔离、Chroma 集合、图谱代理、graph store</text>
+              <text class="lane-title" x="58" y="236" fill="#047857">2. 知识索引平面 · 文档检索 + 代码图谱 + 统一图谱 + 代码语义向量: 多项目隔离、SQLite / PG 双后端、三路融合召回</text>
               <g filter="url(#shadow)">
                 <rect x="62" y="258" width="256" height="116" rx="8" fill="#eff6ff" stroke="#2563eb"/>
                 <text class="node-title" x="190" y="284" text-anchor="middle">业务源码仓</text>
@@ -269,166 +273,196 @@
               <g filter="url(#shadow)">
                 <rect x="884" y="258" width="256" height="116" rx="8" fill="#dcfce7" stroke="#059669"/>
                 <text class="node-title" x="1012" y="284" text-anchor="middle">统一图谱(graph)</text>
-                <text class="node-sub" x="1012" y="308" text-anchor="middle">跨层血缘 + A1 业务域</text>
+                <text class="node-sub" x="1012" y="308" text-anchor="middle">跨层血缘 + A1 业务域 + A2 架构分层</text>
                 <text class="node-note" x="1012" y="330" text-anchor="middle">插件扫描 sql / spring / react</text>
-                <text class="node-note" x="1012" y="348" text-anchor="middle">+ A1 业务域 analyzer</text>
+                <text class="node-note" x="1012" y="348" text-anchor="middle">SQLite 单机 / PG 多机共享双后端</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1158" y="258" width="256" height="116" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="1286" y="284" text-anchor="middle">重建队列</text>
-                <text class="node-sub" x="1286" y="308" text-anchor="middle">脏标记 · 类型化载荷</text>
-                <text class="node-note" x="1286" y="330" text-anchor="middle">写侧串行消费</text>
-                <text class="node-note" x="1286" y="348" text-anchor="middle">完成后推送回调</text>
+                <rect x="1158" y="258" width="256" height="116" rx="8" fill="#dcfce7" stroke="#059669"/>
+                <text class="node-title" x="1286" y="284" text-anchor="middle">代码语义向量 + 召回融合</text>
+                <text class="node-sub" x="1286" y="308" text-anchor="middle">codegraph 节点嵌入"按意思找代码"</text>
+                <text class="node-note" x="1286" y="330" text-anchor="middle">vector + codegraph + graph 三路</text>
+                <text class="node-note" x="1286" y="348" text-anchor="middle">weighted RRF 融合 · MRR 0.917</text>
               </g>
               <path class="edge-green" d="M318 316 L336 316"/>
               <path class="edge-green" d="M592 316 L610 316"/>
               <path class="edge-green" d="M866 316 L884 316"/>
               <path class="edge-green" d="M1140 316 L1158 316"/>
 
-              <!-- lane 3: memory plane (cyan, 5 nodes, 2 rows) -->
-              <rect x="40" y="426" width="1400" height="220" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
-              <text class="lane-title" x="58" y="454" fill="#0e7490">3. 记忆平面 · 分层记忆 + 会话 + 可插拔召回 + 共享模型 RPC + 维护: 四作用域、PG 可选、降级地板、向量复用</text>
+              <!-- lane 3: write-side rebuild plane (amber, 3 nodes) - NEW 2026-06 -->
+              <rect x="40" y="426" width="1400" height="120" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+              <text class="lane-title" x="58" y="454" fill="#b45309">3. 写侧重建平面(2026-06 新增) · push 即重建: webhook 验签入队 → 重建队列(单机 spool / PG 多机共享) → worker 单写者串行</text>
               <g filter="url(#shadow)">
-                <rect x="62" y="470" width="432" height="78" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="278" y="496" text-anchor="middle">分层记忆存储</text>
-                <text class="node-sub" x="278" y="518" text-anchor="middle">组织 / 团队 / 项目 / 个人作用域</text>
-                <text class="node-note" x="278" y="538" text-anchor="middle">PG 可选,未启用时记忆接口返回 503</text>
+                <rect x="62" y="470" width="432" height="64" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="278" y="490" text-anchor="middle">webhook 接收器</text>
+                <text class="node-sub" x="278" y="509" text-anchor="middle">Git push → HMAC 验签 → 映射 project 入队</text>
+                <text class="node-note" x="278" y="526" text-anchor="middle">Gitea / GitLab provider 可扩展</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="510" y="470" width="432" height="78" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="726" y="496" text-anchor="middle">会话存储</text>
-                <text class="node-sub" x="726" y="518" text-anchor="middle">内存后端 / PG 后端</text>
-                <text class="node-note" x="726" y="538" text-anchor="middle">严格运行模式可显式失败</text>
+                <rect x="510" y="470" width="432" height="64" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="726" y="490" text-anchor="middle">重建队列(单机 / 多机)</text>
+                <text class="node-sub" x="726" y="509" text-anchor="middle">本机 spool 或 PgJobQueue 共享队列</text>
+                <text class="node-note" x="726" y="526" text-anchor="middle">SKIP LOCKED 认领 · 崩溃恢复(owner=主机名)</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="958" y="470" width="456" height="78" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="1186" y="496" text-anchor="middle">可插拔召回流水线</text>
-                <text class="node-sub" x="1186" y="518" text-anchor="middle">打分 → 融合 → 重排 · 关键词 / 向量 / RRF</text>
-                <text class="node-note" x="1186" y="538" text-anchor="middle">缺依赖时降级到地板,系统提示词增强</text>
+                <rect x="958" y="470" width="456" height="64" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="1186" y="490" text-anchor="middle">reindex worker</text>
+                <text class="node-sub" x="1186" y="509" text-anchor="middle">写侧串行(单写者) · dirty 合并 · 写回各索引</text>
+                <text class="node-note" x="1186" y="526" text-anchor="middle">构建留痕 index_builds manifest(新鲜度可查)</text>
+              </g>
+              <path class="edge" d="M494 502 L510 502"/>
+              <path class="edge" d="M942 502 L958 502"/>
+
+              <!-- lane 4: memory plane (cyan, 5 nodes, 2 rows) -->
+              <rect x="40" y="574" width="1400" height="220" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
+              <text class="lane-title" x="58" y="602" fill="#0e7490">4. 记忆平面 · 分层记忆 + 会话 + 可插拔召回 + 共享模型 RPC + 维护: 四作用域、PG 可选、降级地板、向量复用</text>
+              <g filter="url(#shadow)">
+                <rect x="62" y="618" width="432" height="78" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="278" y="644" text-anchor="middle">分层记忆存储</text>
+                <text class="node-sub" x="278" y="666" text-anchor="middle">组织 / 团队 / 项目 / 个人作用域</text>
+                <text class="node-note" x="278" y="686" text-anchor="middle">PG 可选,未启用时记忆接口返回 503</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="62" y="558" width="664" height="76" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="394" y="584" text-anchor="middle">共享模型 RPC</text>
-                <text class="node-sub" x="394" y="606" text-anchor="middle">嵌入 + 重排复用 Chroma daemon 的 GPU</text>
-                <text class="node-note" x="394" y="626" text-anchor="middle">避免第二份模型撑爆显存(OOM)</text>
+                <rect x="510" y="618" width="432" height="78" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="726" y="644" text-anchor="middle">会话存储</text>
+                <text class="node-sub" x="726" y="666" text-anchor="middle">内存后端 / PG 后端(多 worker 共享登录态)</text>
+                <text class="node-note" x="726" y="686" text-anchor="middle">严格运行模式可显式失败</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="742" y="558" width="672" height="76" rx="8" fill="#cffafe" stroke="#0891b2"/>
-                <text class="node-title" x="1078" y="584" text-anchor="middle">记忆维护</text>
-                <text class="node-sub" x="1078" y="606" text-anchor="middle">TTL 归档 + 向量垃圾回收</text>
-                <text class="node-note" x="1078" y="626" text-anchor="middle">每日定时任务(cron)清理过期记忆</text>
+                <rect x="958" y="618" width="456" height="78" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1186" y="644" text-anchor="middle">可插拔召回流水线</text>
+                <text class="node-sub" x="1186" y="666" text-anchor="middle">打分 → 融合 → 重排 · 关键词 / 向量 / RRF</text>
+                <text class="node-note" x="1186" y="686" text-anchor="middle">缺依赖时降级到地板,系统提示词增强</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="62" y="706" width="664" height="76" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="394" y="732" text-anchor="middle">共享模型 RPC</text>
+                <text class="node-sub" x="394" y="754" text-anchor="middle">嵌入 + 重排复用 Chroma daemon 的 GPU</text>
+                <text class="node-note" x="394" y="774" text-anchor="middle">避免第二份模型撑爆显存(OOM)</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="742" y="706" width="672" height="76" rx="8" fill="#cffafe" stroke="#0891b2"/>
+                <text class="node-title" x="1078" y="732" text-anchor="middle">记忆维护</text>
+                <text class="node-sub" x="1078" y="754" text-anchor="middle">TTL 归档 + 向量垃圾回收</text>
+                <text class="node-note" x="1078" y="774" text-anchor="middle">每日定时任务(cron)清理过期记忆</text>
               </g>
 
-              <!-- lane 4: gateway / authz plane (red, 5 nodes, 2 rows) -->
-              <rect x="40" y="674" width="1400" height="220" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
-              <text class="lane-title" x="58" y="702" fill="#be123c">4. 网关权限平面 · 认证 / 授权 / 限流 / 审计 / 多人保护: 本机透传或令牌、组织白名单、滑动窗口、日志脱敏、fail-fast</text>
+              <!-- lane 5: gateway / authz plane (red, 5 nodes, 2 rows) -->
+              <rect x="40" y="822" width="1400" height="220" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+              <text class="lane-title" x="58" y="850" fill="#be123c">5. 网关权限平面 · 认证 / 授权 / 限流 / 审计 / 多人保护: token 绑 org、多组织 RBAC、滑动窗口、日志脱敏、fail-fast</text>
               <g filter="url(#shadow)">
-                <rect x="62" y="718" width="432" height="78" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="278" y="744" text-anchor="middle">认证中间件</text>
-                <text class="node-sub" x="278" y="766" text-anchor="middle">本机透传 / 令牌认证</text>
-                <text class="node-note" x="278" y="786" text-anchor="middle">健康检查公开,业务端点鉴权</text>
+                <rect x="62" y="866" width="432" height="78" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="278" y="892" text-anchor="middle">认证中间件</text>
+                <text class="node-sub" x="278" y="914" text-anchor="middle">本机透传(单机) / token 认证(多人)</text>
+                <text class="node-note" x="278" y="934" text-anchor="middle">SSE 客户端 ?token= query 兜底</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="510" y="718" width="432" height="78" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="726" y="744" text-anchor="middle">项目访问控制</text>
-                <text class="node-sub" x="726" y="766" text-anchor="middle">组织归属 + 令牌白名单</text>
-                <text class="node-note" x="726" y="786" text-anchor="middle">MCP / 问答 / 项目记忆共用</text>
+                <rect x="510" y="866" width="432" height="78" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="726" y="892" text-anchor="middle">多组织 RBAC 访问控制</text>
+                <text class="node-sub" x="726" y="914" text-anchor="middle">用户↔org 多对多 · 角色分级 · 切换组织重签</text>
+                <text class="node-note" x="726" y="934" text-anchor="middle">web / MCP / agent 三入口统一闸</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="958" y="718" width="456" height="78" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="1186" y="744" text-anchor="middle">限流</text>
-                <text class="node-sub" x="1186" y="766" text-anchor="middle">滑动窗口 · 按身份计数</text>
-                <text class="node-note" x="1186" y="786" text-anchor="middle">超额拒绝,保护后端模型与存储</text>
+                <rect x="958" y="866" width="456" height="78" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1186" y="892" text-anchor="middle">限流</text>
+                <text class="node-sub" x="1186" y="914" text-anchor="middle">滑动窗口 · 按身份计数</text>
+                <text class="node-note" x="1186" y="934" text-anchor="middle">超额拒绝,保护后端模型与存储</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="62" y="806" width="664" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="394" y="832" text-anchor="middle">审计日志</text>
-                <text class="node-sub" x="394" y="854" text-anchor="middle">开发模式 / 生产模式</text>
-                <text class="node-note" x="394" y="874" text-anchor="middle">问题 / 参数 / 路径脱敏</text>
+                <rect x="62" y="954" width="664" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="394" y="980" text-anchor="middle">审计日志</text>
+                <text class="node-sub" x="394" y="1002" text-anchor="middle">开发模式 / 生产模式</text>
+                <text class="node-note" x="394" y="1022" text-anchor="middle">问题 / 参数 / 路径脱敏</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="742" y="806" width="672" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
-                <text class="node-title" x="1078" y="832" text-anchor="middle">多人 fail-fast 保护</text>
-                <text class="node-sub" x="1078" y="854" text-anchor="middle">本机透传模式下多开发者拒绝启动</text>
-                <text class="node-note" x="1078" y="874" text-anchor="middle">防止共用环境时身份串号</text>
-              </g>
-
-              <!-- lane 5: runtime plane (amber, 4 MCP + agent + tools) -->
-              <rect x="40" y="922" width="1400" height="190" rx="10" fill="#fffbeb" stroke="#fde68a"/>
-              <text class="lane-title" x="58" y="950" fill="#b45309">5. 运行时平面 · MCP SSE(4 套) + Agent HTTP 服务: 面向 Claude、Codex、MCP 客户端和平台调用方</text>
-              <g filter="url(#shadow)">
-                <rect x="62" y="970" width="206" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="165" y="998" text-anchor="middle">文档检索 MCP</text>
-                <text class="node-sub" x="165" y="1022" text-anchor="middle">Chroma · :18083/sse</text>
-              </g>
-              <g filter="url(#shadow)">
-                <rect x="284" y="970" width="206" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="387" y="998" text-anchor="middle">代码图谱 MCP</text>
-                <text class="node-sub" x="387" y="1022" text-anchor="middle">:18091/sse · 租户路由</text>
-              </g>
-              <g filter="url(#shadow)">
-                <rect x="506" y="970" width="206" height="80" rx="8" fill="#fef3c7" stroke="#b45309"/>
-                <text class="node-title" x="609" y="998" text-anchor="middle">统一图谱 MCP</text>
-                <text class="node-sub" x="609" y="1022" text-anchor="middle">:18092/sse · 跨层查询</text>
-              </g>
-              <g filter="url(#shadow)">
-                <rect x="728" y="970" width="206" height="80" rx="8" fill="#fef3c7" stroke="#0891b2"/>
-                <text class="node-title" x="831" y="998" text-anchor="middle">团队记忆 MCP</text>
-                <text class="node-sub" x="831" y="1022" text-anchor="middle">agent-memory · :18087/sse</text>
-              </g>
-              <g filter="url(#shadow)">
-                <rect x="950" y="962" width="232" height="96" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
-                <text class="node-title" x="1066" y="988" text-anchor="middle">Agent 运行时</text>
-                <text class="node-sub" x="1066" y="1010" text-anchor="middle">/chat · /memory · 工具循环</text>
-                <text class="node-note" x="1066" y="1030" text-anchor="middle">弱模型防空转 loop guard</text>
-                <text class="node-note" x="1066" y="1046" text-anchor="middle">多模型协议族 provider registry</text>
-              </g>
-              <g filter="url(#shadow)">
-                <rect x="1198" y="962" width="216" height="96" rx="8" fill="#e0f2fe" stroke="#0891b2"/>
-                <text class="node-title" x="1306" y="988" text-anchor="middle">工具注册表</text>
-                <text class="node-sub" x="1306" y="1010" text-anchor="middle">文档检索 · 代码图谱</text>
-                <text class="node-note" x="1306" y="1030" text-anchor="middle">统一图谱 · 只读工具</text>
-                <text class="node-note" x="1306" y="1046" text-anchor="middle">按项目标识构建</text>
+                <rect x="742" y="954" width="672" height="76" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+                <text class="node-title" x="1078" y="980" text-anchor="middle">多人 fail-fast 保护</text>
+                <text class="node-sub" x="1078" y="1002" text-anchor="middle">本机透传模式下多开发者拒绝启动</text>
+                <text class="node-note" x="1078" y="1022" text-anchor="middle">防止共用环境时身份串号</text>
               </g>
 
-              <!-- lane 6: consumers (blue, 5 nodes) -->
-              <rect x="40" y="1140" width="1400" height="98" rx="10" fill="#eff6ff" stroke="#dbeafe"/>
-              <text class="lane-title" x="58" y="1168" fill="#1d4ed8">6. 消费平面 · 当前消费端: Claude / Codex / MCP 会话、业务仓开发会话、命令行、Agent 调用方、运维</text>
+              <!-- lane 6: runtime plane (amber, 4 MCP row + agent/web/tools row) -->
+              <rect x="40" y="1070" width="1400" height="190" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+              <text class="lane-title" x="58" y="1098" fill="#b45309">6. 运行时平面 · MCP SSE(4 套) + Agent HTTP + Web 管理后端: 面向 Claude、Codex、MCP 客户端、浏览器与平台调用方</text>
               <g filter="url(#shadow)">
-                <rect x="62" y="1184" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
-                <text class="node-title" x="190" y="1209" text-anchor="middle">Claude / Codex / MCP 客户端</text>
+                <rect x="62" y="1118" width="322" height="56" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="223" y="1140" text-anchor="middle">文档检索 MCP</text>
+                <text class="node-sub" x="223" y="1160" text-anchor="middle">Chroma · :18083/sse · 向量+BM25+重排</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="336" y="1184" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
-                <text class="node-title" x="464" y="1209" text-anchor="middle">业务仓开发会话</text>
+                <rect x="406" y="1118" width="322" height="56" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="567" y="1140" text-anchor="middle">代码图谱 MCP</text>
+                <text class="node-sub" x="567" y="1160" text-anchor="middle">:18091/sse · 租户路由 · 9 工具</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="610" y="1184" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
-                <text class="node-title" x="738" y="1209" text-anchor="middle">codev-platform 命令行</text>
+                <rect x="750" y="1118" width="322" height="56" rx="8" fill="#fef3c7" stroke="#b45309"/>
+                <text class="node-title" x="911" y="1140" text-anchor="middle">统一图谱 MCP</text>
+                <text class="node-sub" x="911" y="1160" text-anchor="middle">:18092/sse · 跨层查询 · 13 工具</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="884" y="1184" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
-                <text class="node-title" x="1012" y="1209" text-anchor="middle">Agent 调用方</text>
+                <rect x="1094" y="1118" width="320" height="56" rx="8" fill="#fef3c7" stroke="#0891b2"/>
+                <text class="node-title" x="1254" y="1140" text-anchor="middle">团队记忆 MCP</text>
+                <text class="node-sub" x="1254" y="1160" text-anchor="middle">agent-memory · :18087/sse</text>
               </g>
               <g filter="url(#shadow)">
-                <rect x="1158" y="1184" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
-                <text class="node-title" x="1286" y="1209" text-anchor="middle">运维 / 体检 / 重建索引</text>
+                <rect x="62" y="1186" width="432" height="60" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+                <text class="node-title" x="278" y="1206" text-anchor="middle">Agent 运行时(/chat)</text>
+                <text class="node-sub" x="278" y="1224" text-anchor="middle">工具循环 + planner · 防空转护栏</text>
+                <text class="node-note" x="278" y="1240" text-anchor="middle">多模型协议族 provider registry · token 用量入库</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="510" y="1186" width="432" height="60" rx="8" fill="#e0f2fe" stroke="#0891b2"/>
+                <text class="node-title" x="726" y="1206" text-anchor="middle">Web 管理后端(FastAPI)</text>
+                <text class="node-sub" x="726" y="1224" text-anchor="middle">项目 / 组织 / 用户 / 记忆 / 图谱 / 报表 API</text>
+                <text class="node-note" x="726" y="1240" text-anchor="middle">OpenAPI 自动生成前端接口层</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="958" y="1186" width="456" height="60" rx="8" fill="#e0f2fe" stroke="#0891b2"/>
+                <text class="node-title" x="1186" y="1206" text-anchor="middle">工具注册表(9 只读工具)</text>
+                <text class="node-sub" x="1186" y="1224" text-anchor="middle">文档检索 · 代码图谱 · 统一图谱 · 记忆</text>
+                <text class="node-note" x="1186" y="1240" text-anchor="middle">按 project_id 构建 · agent 与 MCP 共用</text>
               </g>
 
-              <!-- main vertical flow: control -> index -> runtime -> consumers -->
+              <!-- lane 7: consumers (blue, 5 nodes) -->
+              <rect x="40" y="1288" width="1400" height="98" rx="10" fill="#eff6ff" stroke="#dbeafe"/>
+              <text class="lane-title" x="58" y="1316" fill="#1d4ed8">7. 消费平面 · 当前消费端: Claude / Codex / MCP 会话、业务仓开发会话、命令行、Web 管理台、运维</text>
+              <g filter="url(#shadow)">
+                <rect x="62" y="1332" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="190" y="1357" text-anchor="middle">Claude / Codex / MCP 客户端</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="336" y="1332" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="464" y="1357" text-anchor="middle">业务仓开发会话</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="610" y="1332" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="738" y="1357" text-anchor="middle">codev-platform 命令行</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="884" y="1332" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="1012" y="1357" text-anchor="middle">Web 管理台(浏览器)</text>
+              </g>
+              <g filter="url(#shadow)">
+                <rect x="1158" y="1332" width="256" height="40" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+                <text class="node-title" x="1286" y="1357" text-anchor="middle">运维 / 体检 / 重建索引</text>
+              </g>
+
+              <!-- main vertical flow: control -> index -> rebuild -> runtime -> consumers -->
               <path class="edge-violet" d="M738 160 C738 188 738 222 738 258"/>
-              <path class="edge-green" d="M738 374 C738 430 609 916 609 970"/>
-              <path class="edge-green" d="M464 374 C464 430 165 916 165 970"/>
+              <path class="edge-green" d="M190 374 C190 420 278 432 278 470"/>
+              <path class="edge-green" d="M1186 470 C1186 430 1080 398 1032 376"/>
+              <path class="edge-green" d="M464 374 C464 700 223 950 223 1118"/>
+              <path class="edge-green" d="M1012 374 C1012 700 911 950 911 1118"/>
               <!-- memory & gateway cross-cut into runtime -->
-              <path class="edge-dashed" d="M831 634 C831 700 831 900 831 970"/>
-              <path class="edge-red" d="M1066 882 C1066 920 1066 940 1066 962"/>
+              <path class="edge-dashed" d="M1078 782 C1078 950 1254 980 1254 1118"/>
+              <path class="edge-red" d="M1078 1030 C1078 1048 1078 1058 1078 1070"/>
               <!-- runtime -> consumers -->
-              <path class="edge-blue" d="M609 1050 C609 1100 464 1140 464 1184"/>
-              <path class="edge-blue" d="M1066 1058 C1066 1110 1012 1140 1012 1184"/>
+              <path class="edge-blue" d="M278 1246 C278 1292 464 1296 464 1332"/>
+              <path class="edge-blue" d="M726 1246 C726 1296 1012 1292 1012 1332"/>
 
               <!-- bottom note -->
-              <rect x="40" y="1252" width="1400" height="30" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
-              <text class="node-sub" x="58" y="1272">当前边界: 控制平面 + 知识索引(文档检索 / 代码图谱 / 统一图谱) + 记忆平面(分层记忆 / 召回 / 共享模型 RPC / 维护) + 网关权限(认证 / 授权 / 限流 / 审计 / 多人保护) + MCP SSE(4 套) / Agent HTTP 运行时。</text>
+              <rect x="40" y="1402" width="1400" height="30" rx="8" fill="#ffffff" stroke="#dbe3ed"/>
+              <text class="node-sub" x="58" y="1422">当前边界: 控制平面 + 知识索引(文档检索 / 代码图谱 / 统一图谱 / 代码语义向量) + 写侧重建(webhook / 队列 / worker) + 记忆平面 + 网关权限(token 认证 / 多组织 RBAC / 限流 / 审计) + 运行时(MCP SSE 4 套 / Agent HTTP / Web 管理后端)。存储层 SQLite(单机)与 PostgreSQL(多机共享)双后端按 config 切换。</text>
             </svg>
           </div>
         </section>
@@ -446,13 +480,130 @@
             </div>
             <div class="item">
               <h3>3. CLI 入口</h3>
-              <p><code>codev-platform</code> 6 子命令:<code>init</code> · <code>current</code> · <code>list-projects</code> · <code>validate</code> · <code>sync-rules</code> · <code>sync-skills</code> · <code>config</code>。新业务仓接入靠它。</p>
+              <p><code>codev-platform</code> 20+ 子命令:接入(<code>init</code> / <code>sync-rules</code> / <code>sync-skills</code> / <code>sync-hooks</code>)、服务编排(<code>serve-mcp</code> / <code>web</code> / <code>gateway</code>)、运维(<code>health</code> / <code>reindex</code> / <code>reindex-queue</code> / <code>index status</code> / <code>backup</code>)、图谱(<code>graph</code> / <code>codegraph link</code>)。新业务仓接入与日常运维全靠它。</p>
             </div>
             <div class="item">
               <h3>4. 用户配置中心</h3>
               <p><code>~/.codev-platform/config.json</code> 单一文件:模型路径 / daemon 端口 / 数据基目录 / search 参数。换机器只改这,代码不动。</p>
             </div>
           </div>
+        </section>
+
+        <section id="glossary">
+          <h2>新手名词速查(看不懂的词先来这查)</h2>
+          <p>本文档和平台代码里高频出现的专业名词,按主题分组。每条给<strong>大白话解释</strong> + <strong>在本平台里它是干什么的</strong>。初学建议先通读 A、B、C 三组,其余按需查。</p>
+
+          <h3>A. 平台骨架(这个平台怎么"长"的)</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>真值源<br>(single source of truth, SSOT)</td><td>同一份东西只在一个地方维护,别处都引用它,不各自拷贝。</td><td>codev-platform 仓就是所有业务仓的真值源:代码、规则、技能改这一处,处处生效。</td></tr>
+            <tr><td>pip 包 / editable 安装<br>(<code>pip install -e</code>)</td><td>Python 的"软链"装法:装的是指向源码目录的引用,改源码立即生效,不用重装。</td><td>业务仓 <code>pip install -e</code> 本仓后就能 <code>import codev_platform.*</code>,平台改一行业务仓马上拿到。</td></tr>
+            <tr><td>shim(垫片)</td><td>一个只有一行转发的小文件:<code>from codev_platform.x import *</code>,让旧的引用路径继续可用。</td><td>业务仓 <code>tools/_platform/</code> 下全是 shim,真代码都在平台仓。</td></tr>
+            <tr><td>CLI(命令行工具)</td><td>在终端敲命令操作的程序,和"点鼠标的图形界面"相对。</td><td><code>codev-platform</code> 命令本体:接入、体检、重建索引、起服务都靠它。</td></tr>
+            <tr><td>daemon(常驻服务)</td><td>一直在后台跑的进程,启动一次大家共用。</td><td>检索模型(~3GB 显存)装进一个 daemon,所有项目所有会话共用,避免每个会话各加载一份把显存撑爆。</td></tr>
+            <tr><td>多租户(multi-tenant)</td><td>一套服务同时服务多个"租户"(项目 / 组织),数据按租户标识隔离互不可见。</td><td>所有服务按 <code>project_id</code> / <code>org_id</code> 路由,A 项目永远查不到 B 项目的数据。</td></tr>
+            <tr><td>contextvar</td><td>Python 里"每个请求自带的小抽屉":并发处理多个请求时,各自的变量互不干扰。</td><td>daemon 同时服务多项目请求,靠 contextvar 保证每个请求用自己的 project_id,不串库。</td></tr>
+            <tr><td>fail-soft / fail-fast</td><td>软失败 = 某组件挂了就降级继续跑;快失败 = 发现配置不安全宁可拒绝启动。</td><td>检索少一条 lane 照样出结果(fail-soft);多人共用却没开认证则直接拒绝启动(fail-fast),防身份串号。</td></tr>
+            <tr><td>幂等(idempotent)</td><td>同一操作执行多次,效果和执行一次一样,重试安全。</td><td><code>sync-hooks</code>、<code>codegraph link</code> 等命令反复跑不会越跑越乱。</td></tr>
+          </table>
+
+          <h3>B. AI / 大模型</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>LLM(大语言模型)</td><td>GPT / Claude / DeepSeek 这类模型的统称。</td><td>Agent 的"脑子";A1 / A2 图谱标注、记忆压缩也用它。</td></tr>
+            <tr><td>token</td><td>模型计费和长度的单位,粗略 ≈ 一个汉字 / 半个英文单词。</td><td>检索系统的核心价值之一就是省 token:只挑相关片段给模型,不整仓塞。</td></tr>
+            <tr><td>上下文窗口<br>(context window)</td><td>模型一次能"看见"的内容上限。</td><td>预索引 + top-k 召回让有限的窗口装的全是相关内容。</td></tr>
+            <tr><td>prompt / 系统提示词<br>(system prompt)</td><td>给模型的指令文本;系统提示词是每轮对话开头固定注入的那部分。</td><td>Agent 把召回到的记忆 / 规则注入系统提示词,模型"带着记忆"回答。</td></tr>
+            <tr><td>工具调用(tool use)</td><td>模型不瞎编,而是声明"我要调 X 工具查一下",程序执行后把结果喂回给它。</td><td>Agent 自带 9 个只读工具(查文档 / 查符号 / 查影响面…);Claude Code 调 MCP 也是这个机制。</td></tr>
+            <tr><td>Agent / agent loop</td><td>让模型"计划 → 调工具 → 看结果 → 再计划"循环跑、直到给出答案的程序框架。</td><td><code>agent/loop.py</code>;还带防空转硬护栏:重复调用拦截、倒数步强制收尾。</td></tr>
+            <tr><td>planner(规划器)</td><td>循环外层先给问题分类(找符号?查影响面?查文档?),据此分配工具预算和停止条件。</td><td>确定性(规则)分类版已上线;LLM 版经 A/B 实验证明无增益,默认关。</td></tr>
+            <tr><td>provider / 协议族<br>(protocol family)</td><td>provider = 一家模型服务;协议族 = 它们 API 说话的格式。市面 95% 模型兼容 OpenAI 协议格式。</td><td>平台铁律:按协议族写适配器(2 个文件),厂商只是 config 数据 —— 加一家模型零代码。</td></tr>
+            <tr><td>LLM-judge</td><td>用一个模型给另一个模型的输出打分,实现自动评测。</td><td>agent 端到端 eval 的打分手段之一。</td></tr>
+            <tr><td>prompt cache(提示词缓存)</td><td>模型厂商对重复出现的前缀打折计费。</td><td>agent 多步循环里前缀大量重复,实测缓存命中 ~80%,省约 74% 成本。</td></tr>
+          </table>
+
+          <h3>C. 检索与召回(平台的核心本事)</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>向量嵌入(embedding)</td><td>把一段文字变成一串数字(向量),意思相近的文字向量也相近 → "按意思搜"的基础。</td><td>Qwen3-Embedding 模型把文档 / 代码嵌入向量,存进 Chroma 向量库。</td></tr>
+            <tr><td>语义检索 / 向量召回<br>(semantic search / vector recall)</td><td>用向量找"意思相关"的内容,哪怕用词完全不同也能命中。</td><td><code>search_docs</code> 的主路;代码语义 vector lane 补"按行为找代码"盲区。</td></tr>
+            <tr><td>BM25</td><td>搜索引擎的经典关键词打分算法,擅长精确词命中(版本号、规则编号、罕见标识符)。</td><td>词法召回 lane,专补向量检索"漏掉精确词"的短板。</td></tr>
+            <tr><td>倒排索引<br>(inverted index)</td><td>"词 → 出现在哪些文档"的反向索引表,BM25 的底层结构。</td><td><code>chroma/bm25.py</code> 维护,每个项目独立一份。</td></tr>
+            <tr><td>jieba 分词</td><td>中文分词库。中文没空格,得先切成词才能建倒排索引。</td><td>中英混合文档的词法召回靠它切词。</td></tr>
+            <tr><td>lane(召回路)</td><td>一条独立的检索通道,各查各的、互不依赖。</td><td>代码召回有 vector / codegraph / graph 三条 lane;文档召回有向量 + BM25 两条。</td></tr>
+            <tr><td>RRF(倒数排名融合)</td><td>把多条 lane 各自的排名合成一个总排名:在每条 lane 里排得越靠前得分越高,相加排序。简单且稳健。</td><td>weighted RRF = 按 query 类型给不同 lane 不同权重;实测比单 lane 明显更准。</td></tr>
+            <tr><td>reranker / cross-encoder(重排器)</td><td>召回拿到前几十条后,用一个更重的模型对"问题 + 候选"逐对精细打分、重新排序。更准但更慢,只用在最后一步。</td><td>Qwen3-Reranker 精排 <code>search_docs</code> 结果;代码召回的 reranker lane 实验中默认关。</td></tr>
+            <tr><td>top-k / chunk</td><td>top-k = 只取前 k 条;chunk = 文档切成的小段,检索的最小单位。</td><td>chunk 策略:目标 1000 / 上限 1500 字符,按标题 → 段落 → 硬切三级。</td></tr>
+            <tr><td>MRR / nDCG</td><td>检索质量的两个评测指标:MRR 看"第一个正确答案排多前",nDCG 看"整个排序质量"。0~1,越大越好。</td><td>代码召回当前 MRR 0.917 / nDCG 0.858(35 条金标)。</td></tr>
+            <tr><td>金标(golden set)</td><td>人工标注的"标准答案"题库,改了检索逻辑就拿它回归测一遍,防变差。</td><td>代码召回 35 条金标;agent 也有端到端评测集。</td></tr>
+            <tr><td>A/B 测试 + 置信区间<br>(A/B test · confidence interval)</td><td>两个方案各跑同一评测集,用统计方法(bootstrap 置信区间)判断差异是真提升还是随机波动。</td><td>平台上线检索 / planner 改动前都先 A/B:增益不显著就默认关,不拍脑袋。</td></tr>
+          </table>
+
+          <h3>D. 代码图谱与影响分析</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>codegraph(代码图谱)</td><td>把代码解析成"符号(函数 / 类)+ 调用关系"的图,能回答"谁调用了它 / 它调用了谁"。</td><td>9 个 MCP 工具(search / callers / callees / impact / context…)。</td></tr>
+            <tr><td>AST(抽象语法树)</td><td>编译器视角的代码结构树,比文本正则匹配可靠得多。</td><td>图谱解析的基础:从 AST 抽符号和调用边。</td></tr>
+            <tr><td>统一图谱(graph)<br>(unified graph)</td><td>跨语言跨层的图:前端页面 ↔ API 端点 ↔ SQL 表的链路全连起来。</td><td>"改这张表会影响哪些页面"一查便知;8 个 MCP 工具。</td></tr>
+            <tr><td>节点 / 边<br>(node / edge)</td><td>图的基本元素:节点 = 实体(函数 / 表 / 页面),边 = 关系(调用 / 读写 / 依赖)。</td><td><code>GraphNode</code> / <code>GraphEdge</code> 中性类型,所有扫描插件的通用货币。</td></tr>
+            <tr><td>BFS(广度优先搜索)</td><td>从一个节点一圈一圈往外扩的图遍历方法。</td><td>影响面分析 = 反向 BFS:从被改的节点逆着依赖边往外找波及范围。</td></tr>
+            <tr><td>影响面(blast radius)</td><td>改一个东西会波及哪些东西,直译"爆炸半径"。</td><td><code>codegraph_impact</code> / <code>find_impact</code>,改代码前必查。</td></tr>
+            <tr><td>血缘(lineage)</td><td>数据 / 调用"从哪来、到哪去"的链路。</td><td>统一图谱的跨层血缘:页面 → 端点 → 服务 → 表。</td></tr>
+            <tr><td>provenance(来源追溯)</td><td>每条边记着"它是被什么方法发现的"(AST 解析 / 框架约定 / 正则启发),来源决定可信度。</td><td>impact 查询可按 <code>certain_only</code> 只看高可信边。</td></tr>
+            <tr><td>置信度(confidence)</td><td>0~1 的可靠程度打分。</td><td>低置信边可被过滤;图谱审计会报告低置信边占比。</td></tr>
+            <tr><td>软节点 / 硬节点<br>(soft / hard node)</td><td>硬节点 = 从代码硬解析出的事实;软节点 = LLM 或规则"理解"出来的标签。</td><td>A1 业务域、A2 架构分层(controller / service / repository…)都是软节点,带置信度、可重算。</td></tr>
+          </table>
+
+          <h3>E. 服务与通信</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>MCP(Model Context Protocol)</td><td>Anthropic 提出的标准协议,让 AI 编程工具(Claude Code 等)用统一方式调用外部工具和数据源。</td><td>平台对 AI 暴露的 4 套检索服务(文档 / 代码图谱 / 统一图谱 / 团队记忆)全是 MCP 服务。</td></tr>
+            <tr><td>SSE(Server-Sent Events)</td><td>HTTP 上"服务器 → 客户端"持续单向推送的技术。</td><td>MCP 远程传输方式:业务仓 <code>.mcp.json</code> 连 <code>http://…/sse?project_id=</code> 服务地址。</td></tr>
+            <tr><td>stdio</td><td>标准输入输出管道,进程间最朴素的通信方式。</td><td>MCP 的本地传输(每会话 spawn 一个子进程)。平台已升级为 SSE 常驻服务支持多人共享,stdio 留作单机回退。</td></tr>
+            <tr><td>FastAPI</td><td>Python 的现代 Web 框架,写 HTTP API 用。</td><td>Agent 服务和 Web 管理后端都用它。</td></tr>
+            <tr><td>endpoint(端点)</td><td>HTTP API 的一个具体接口地址,如 <code>POST /chat</code>。</td><td>统一图谱里"端点"也是一类节点,连接前端调用与后端实现。</td></tr>
+            <tr><td>webhook</td><td>反向通知:事件发生时,源头主动发 HTTP 请求告诉你,不用你轮询。</td><td>Git 服务器 push 时调平台 webhook → 自动入队重建索引,索引随提交自动保鲜。</td></tr>
+            <tr><td>HMAC 验签</td><td>用共享密钥对消息算签名,收方核对,确认请求真来自对方而非伪造。</td><td>webhook 入口验签,防止伪造请求触发重建。</td></tr>
+            <tr><td>OpenAPI / 生成 API 层</td><td>HTTP API 的机器可读说明书;前端按它自动生成调用代码和类型。</td><td>web-ui 的接口层由后端 OpenAPI 生成(<code>pnpm run api</code>),前端不手写接口类型,杜绝前后端字段漂移。</td></tr>
+          </table>
+
+          <h3>F. 存储与并发</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>SQLite</td><td>单文件嵌入式数据库,零部署零运维,适合单机。</td><td>单机模式下图谱 / 会话的默认后端,一个项目一个文件。</td></tr>
+            <tr><td>PostgreSQL(PG)</td><td>服务器级关系数据库,多人多机共享场景的标配。</td><td>多机模式:reindex 队列、统一图谱、会话、记忆、RBAC 全落 PG 共享。</td></tr>
+            <tr><td>双后端 + 工厂<br>(dual backend · factory pattern)</td><td>同一套接口、两套实现(SQLite 单机 / PG 共享),由"工厂"按配置决定造哪个。</td><td><code>GraphStore</code> / <code>JobQueue</code> / <code>SessionStore</code> 都是这个模式;契约测试保证两套行为一致。</td></tr>
+            <tr><td>WAL(Write-Ahead Log)</td><td>SQLite 的日志模式,读和写互不阻塞。</td><td>本地库默认开 WAL,daemon 读时后台还能写。</td></tr>
+            <tr><td>migration(迁移)/ alembic</td><td>数据库表结构的版本管理:每次改表写成带编号的脚本,任何机器按顺序执行就升到最新。</td><td>PG 库的 schema 演进全走 alembic 编号脚本,多机不漂移。</td></tr>
+            <tr><td>事务(transaction)</td><td>一组数据库操作"要么全成、要么全不成"。</td><td>会话 / 记忆写入走短事务,保证不写半截。</td></tr>
+            <tr><td><code>SKIP LOCKED</code></td><td>PG 的"抢任务"语法:多台机器同时取任务,已被别人锁住的行直接跳过,天然防重复消费。</td><td>PgJobQueue 多机认领 reindex 任务的核心机制。</td></tr>
+            <tr><td>advisory lock(咨询锁)</td><td>PG 提供的应用级锁:抢到才干活,抢不到就跳过。</td><td>记忆维护任务用它保证同一主题同时只有一个实例在压缩。</td></tr>
+            <tr><td>单写者(single-writer)</td><td>同一份数据同时只允许一个进程写,读随便 —— 防止并发写把索引写坏。</td><td>所有索引重建必须经队列串行消费,绝不两个进程同时写一份索引。</td></tr>
+            <tr><td>队列(job queue)+ worker</td><td>"活儿先排队,worker 一个一个干"。</td><td>提交代码 → 任务入队 → worker 按序重建索引;多机时 PgJobQueue 共享一个队列。</td></tr>
+          </table>
+
+          <h3>G. 安全与权限</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>认证 vs 授权<br>(authentication / authorization)</td><td>认证 = 你是谁;授权 = 你能干什么。先认证后授权。</td><td>gateway 验 token 是认证;RBAC 查角色权限是授权。</td></tr>
+            <tr><td>Bearer token</td><td>HTTP 请求头里携带的"令牌"字符串,服务端据此识别身份。</td><td>多人服务器模式的身份凭证;SSE 客户端带不了 header 时走 <code>?token=</code> query 参数兜底。</td></tr>
+            <tr><td>RBAC(基于角色的访问控制)</td><td>权限不直接发给个人,而是发给"角色"(viewer / member / admin),人挂在角色上。</td><td>org > team > project > personal 四层作用域 × 角色 × 动作的权限矩阵。</td></tr>
+            <tr><td>org(组织)与隔离红线<br>(organization · isolation red line)</td><td>多租户的最外层单位;用户可属多个 org,但 org 之间数据严格隔离。</td><td>跨 org 不可见是平台红线;token 必须绑 org;有结构守护测试防止任何端点漏挂权限闸。</td></tr>
+            <tr><td>passthrough(透传模式)</td><td>"不验身份直接放行"的开发模式。</td><td>单机自用合法;检测到多人共用会 fail-fast 拒绝启动,必须切 token 模式,防个人记忆串号。</td></tr>
+            <tr><td>审计日志(audit log)</td><td>"谁、什么时候、对什么、做了什么"的流水账。</td><td>平台操作留痕,Web 管理台 <code>/system/audit</code> 可查。</td></tr>
+            <tr><td>脱敏(redact)</td><td>日志落盘前抹掉敏感内容(密钥 / 路径 / 问题原文)。</td><td>生产日志模式自动脱敏。</td></tr>
+            <tr><td>限流(rate limit)</td><td>滑动窗口数请求次数,超频拒绝,保护后端资源。</td><td>gateway 按身份计数限流,防止单用户打爆模型和存储。</td></tr>
+          </table>
+
+          <h3>H. 工程化</h3>
+          <table>
+            <tr><th>名词</th><th>大白话解释</th><th>在本平台里</th></tr>
+            <tr><td>CI(持续集成)+ runner</td><td>每次 push 自动跑测试和检查;runner 是实际执行这些任务的机器进程。</td><td>自托管 Gitea act_runner(不依赖 GitHub):预装 venv 零下载,同分支新 push 自动取消旧任务。</td></tr>
+            <tr><td>git hook(钩子)</td><td>git 动作前后自动执行的脚本。</td><td>pre-push 跑审计门禁;post-commit 后台触发增量重建索引;PreToolUse hook 提醒 AI 优先用 MCP。</td></tr>
+            <tr><td>契约测试(contract test)</td><td>对"接口约定"而非具体实现写的测试:换一套实现也必须全过。</td><td>SQLite 和 PG 双后端共用同一套契约测试,保证行为一致,切后端不踩坑。</td></tr>
+            <tr><td>回归(regression)</td><td>改新功能把旧功能改坏了;回归测试就是防这个。</td><td>1400+ pytest 用例 + 检索金标 + agent 评测集,任何改动后测试数不许下降。</td></tr>
+            <tr><td>对抗式审计<br>(adversarial audit)</td><td>大改动收口前,派一个"默认怀疑"的独立 AI 审计员专门找漏洞、写攻击用例。</td><td>平台惯例:PgJobQueue / PgGraphStore / RBAC 等大改全部经过对抗审计,抓出多个 P0/P1。</td></tr>
+          </table>
         </section>
 
         <section id="advantages">
@@ -467,11 +618,11 @@
             </div>
             <div class="item">
               <h3>2. AI 协作的检索底座</h3>
-              <p>三套 MCP(<strong>代码图谱 / 跨层链路 / 文档检索</strong>)预索引。AI 改代码前先查定义、调用链、影响面、规则,少凭记忆瞎改 —— 准确率的地基。</p>
+              <p>四套 MCP(<strong>代码图谱 / 跨层链路 / 文档检索 / 团队记忆</strong>)预索引。AI 改代码前先查定义、调用链、影响面、规则,少凭记忆瞎改 —— 准确率的地基。</p>
             </div>
             <div class="item">
               <h3>3. 常驻 Agent 服务</h3>
-              <p>FastAPI 多模型可插拔(按<strong>协议族</strong>,加厂商≈零代码),自带 6 只读工具 + 防空转护栏。从"被动检索"升级为"<strong>主动问答 / 执行</strong>",可被 widget / CLI / 会话调用。</p>
+              <p>FastAPI 多模型可插拔(按<strong>协议族</strong>,加厂商≈零代码),自带平台工具集(图谱 / 影响面 / 文档检索 / 记忆)+ 防空转护栏。从"被动检索"升级为"<strong>主动问答 / 执行</strong>",可被 web-ui / CLI / 会话调用。</p>
             </div>
             <div class="item">
               <h3>4. 分层记忆基建</h3>
@@ -504,8 +655,91 @@
           </div>
         </section>
 
+        <section id="evolution">
+          <h2>近期演进(2026-06 浪潮):单机工具栈 → 多机多组织平台</h2>
+          <p>2026-06 之后的主线是<strong>把"一台机器上的个人工具栈"升级为"团队多台机器共用的平台"</strong>。三条暗线:① 共享存储后移到 PostgreSQL(队列 / 图谱 / 会话 / 记忆);② 身份与隔离前移到网关(token 认证 + 多组织 RBAC);③ 质量可量化(检索金标、agent 评测、token 用量、图谱审计)。每项大改都经过对抗式审计再收口。</p>
+          <table>
+            <tr><th>主题</th><th>解决什么问题</th><th>关键设计</th><th>状态</th></tr>
+            <tr>
+              <td>PgJobQueue 多机共享队列</td>
+              <td>多台机器抢同一堆 reindex 任务,不重复、不丢、崩了能恢复</td>
+              <td>PG <code>SKIP LOCKED</code> 行级认领 + claim_token;worker 崩溃按 owner(主机名)恢复;多 org 亲和调度;单机仍可用本地 spool 队列</td>
+              <td>✅ 已上线</td>
+            </tr>
+            <tr>
+              <td>PgGraphStore 图谱 PG 后端</td>
+              <td>统一图谱从"每机一份 SQLite"变成多机共享同一份</td>
+              <td><code>GraphStore</code> 抽象 + SQLite / PG 双实现 + 工厂切换;契约测试硬闸保证两后端行为一致</td>
+              <td>✅ 已上线</td>
+            </tr>
+            <tr>
+              <td>Gateway token 认证</td>
+              <td>多人共用服务器时身份不串号</td>
+              <td>token 强制绑 org;SSE 客户端带不了 header 时经 <code>?token=</code> query 兜底;单机 passthrough 保留 + 多人 fail-fast</td>
+              <td>✅ 已上线(含多人服务器 runbook)</td>
+            </tr>
+            <tr>
+              <td>多组织 RBAC 隔离</td>
+              <td>堵跨组织 / 跨项目越权</td>
+              <td>用户↔org 多对多;切换组织重签会话;web / MCP / agent 三入口统一 <code>require_project_access</code> 闸;结构守护测试防任何端点漏挂</td>
+              <td>✅ 已上线</td>
+            </tr>
+            <tr>
+              <td>代码语义向量 lane(Phase 6)</td>
+              <td>"按行为 / 意图找代码"盲区 —— codegraph 只认符号名</td>
+              <td>codegraph 节点嵌入向量化;graph + codegraph + vector 三路 weighted RRF 融合;reindex worker 自动增量刷新</td>
+              <td>✅ 已上线(eval MRR +0.43 ~ +0.57)</td>
+            </tr>
+            <tr>
+              <td>reranker 精排 lane</td>
+              <td>召回 top 候选再精排一道</td>
+              <td>cross-encoder 逐对打分;A/B 实测 nDCG +0.08 不显著</td>
+              <td>🧪 实验性(config 门控,默认关)</td>
+            </tr>
+            <tr>
+              <td>Agent planner + 端到端评测</td>
+              <td>agent 跑题 / 超预算无量化手段</td>
+              <td>确定性 query 分类 → 工具预算 + 停止条件;e2e eval(grounding / 预算合规双 bootstrap CI + LLM-judge);LLM 版 planner 经 A/B 双重证伪</td>
+              <td>✅ 已上线(LLM planner 默认关)</td>
+            </tr>
+            <tr>
+              <td>Token 用量可观测(Phase 8)</td>
+              <td>云账单大头定位不了</td>
+              <td>per-query token + 缓存命中率持久化进会话;首页用量卡 + <code>/reports/agent-usage</code> 聚合</td>
+              <td>✅ 已上线(缓存 80% ≈ 省 74% 成本)</td>
+            </tr>
+            <tr>
+              <td>A2 架构分层 analyzer</td>
+              <td>自动标注"这文件在架构里演什么角色"</td>
+              <td>LLM 标 controller / service / repository…;前后端词表隔离防污染;复用 A1 全套护栏(缓存 / fail-soft / 越界拒绝)</td>
+              <td>✅ 已上线(后端严格准确率 ~91%)</td>
+            </tr>
+            <tr>
+              <td>索引新鲜度 + 图谱审计</td>
+              <td>"索引是不是旧的?图谱质量退化没?"</td>
+              <td><code>index_builds</code> manifest 每次构建留痕(commit / 耗时 / 状态);graph audit 体检断链 / 串台 / 低置信边</td>
+              <td>✅ 已上线(<code>index status</code> 可视化)</td>
+            </tr>
+            <tr>
+              <td>自托管 CI</td>
+              <td>云 CI 不可控、慢、依赖外网</td>
+              <td>Gitea act_runner host 模式;预装 ci-venv 零下载;同分支新 push 自动取消旧 run</td>
+              <td>✅ 已上线</td>
+            </tr>
+            <tr>
+              <td>webhook 自动重建</td>
+              <td>push 后索引自动跟上,不靠手动</td>
+              <td>Gitea / GitLab push → HMAC 验签 → 仓库映射 project → 按 scope 入队 reindex;provider 协议可扩展</td>
+              <td>✅ 已上线</td>
+            </tr>
+          </table>
+          <div class="ok">
+            ✅ 取舍纪律:每个"聪明功能"上线前先过评测 —— reranker 不显著就默认关、LLM planner 被证伪就停轮、抗错误前提机制实验否定就不建。<strong>增益拿数据说话,拿不出数据的默认不开。</strong>
+          </div>
+        </section>
+
         <section id="xplatform">
-          <h2>跨平台 CLI 与工业化(本 session 落地)</h2>
+          <h2>跨平台 CLI 与工业化</h2>
           <p>本轮把工具栈从"Windows 专属 + 业务仓寄居"重构为"跨平台 + 本仓自有运行时",抹掉了所有机器路径硬编码,补齐了测试与 CI。</p>
 
           <h3>1. 平台所有权翻正</h3>
@@ -532,15 +766,15 @@
           <h3>4. 工业化基线</h3>
           <table>
             <tr><th>项</th><th>内容</th></tr>
-            <tr><td>测试</td><td>pytest 41 用例(ops / config / paths / project_id 覆盖)</td></tr>
-            <tr><td>CI</td><td>GitHub Actions 跨平台矩阵(Win / Mac / Linux)</td></tr>
+            <tr><td>测试</td><td>pytest 1400+ 用例(ops / graph / agent / recall / reindex / web / RBAC 全栈覆盖)+ 检索金标 + agent 评测集</td></tr>
+            <tr><td>CI</td><td>自托管 Gitea act_runner(host 模式;预装 ci-venv 零下载;同分支防积压)</td></tr>
             <tr><td>可复现</td><td>setup 脚本一键重建 .venv,文档化 SETUP / USAGE</td></tr>
           </table>
         </section>
 
         <section id="agent">
           <h2>Agent 服务 + Memory 基建(新增能力)</h2>
-          <p>工具栈从"AI 调 MCP 被动检索"扩展为"<strong>常驻 Agent HTTP 服务</strong>"。Agent 多模型可插拔(按<strong>协议族</strong>而非厂商分文件:Anthropic 协议 + OpenAI 兼容协议族一个适配器全吃),自带 6 只读工具与防空转硬护栏;并接入 <strong>Memory 基建</strong> —— 组织 / 团队 / 项目 / 个人四作用域,落 PG 独立库,召回时跨作用域合并 + 冲突消解(红线最高),会话与记忆跨重启持久化,生命周期含 supersede / TTL 归档 / LLM 压缩融合。身份是请求级三元组 <code>(org_id, user_id, project_id)</code>,多租户物理隔离。</p>
+          <p>工具栈从"AI 调 MCP 被动检索"扩展为"<strong>常驻 Agent HTTP 服务</strong>"。Agent 多模型可插拔(按<strong>协议族</strong>而非厂商分文件:Anthropic 协议 + OpenAI 兼容协议族一个适配器全吃),自带平台工具集(代码图谱 / 影响面 / 文档检索 / 文件读取 / 记忆召回与写入)与防空转硬护栏;并接入 <strong>Memory 基建</strong> —— 组织 / 团队 / 项目 / 个人四作用域,落 PG 独立库,召回时跨作用域合并 + 冲突消解(红线最高),会话与记忆跨重启持久化,生命周期含 supersede / TTL 归档 / LLM 压缩融合。身份是请求级三元组 <code>(org_id, user_id, project_id)</code>,多租户物理隔离;token 认证 + 多组织 RBAC(M5 / M6)已于 2026-06 落地。</p>
           <div class="legend">
             <span class="pill"><span class="dot cyan"></span>身份三元组(请求级)</span>
             <span class="pill"><span class="dot"></span>HTTP 传输层</span>
@@ -573,7 +807,7 @@
 
               <!-- B0 身份三元组 -->
               <rect x="40" y="44" width="1300" height="96" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
-              <text class="lane-title" x="58" y="70" fill="#0e7490">① 身份三元组(请求级,plan §3.4)· header &gt; env &gt; 默认(单人期 default / local)· 一人多 org 无法从 user 推,故每请求带</text>
+              <text class="lane-title" x="58" y="70" fill="#0e7490">① 身份三元组(请求级)· token 认证身份(多人)/ header &gt; env &gt; 默认(单机)· 一人多 org 无法从 user 推,故每请求带</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="82" width="400" height="46" rx="8" fill="#cffafe" stroke="#0891b2"/><text class="node-title" x="258" y="110" text-anchor="middle">X-Org-Id → 组织(租户根)</text></g>
               <g filter="url(#shadow-ag)"><rect x="490" y="82" width="400" height="46" rx="8" fill="#cffafe" stroke="#0891b2"/><text class="node-title" x="690" y="110" text-anchor="middle">X-User-Id → 用户(org_members 多对多)</text></g>
               <g filter="url(#shadow-ag)"><rect x="922" y="82" width="418" height="46" rx="8" fill="#cffafe" stroke="#0891b2"/><text class="node-title" x="1131" y="110" text-anchor="middle">X-Project-Id → 项目(工具 + 记忆路由)</text></g>
@@ -582,9 +816,9 @@
               <rect x="40" y="158" width="1300" height="92" rx="10" fill="#eff6ff" stroke="#dbeafe"/>
               <text class="lane-title" x="58" y="184" fill="#1d4ed8">② HTTP 传输层(FastAPI · 路由只做 DTO↔domain + 错误码,不含编排)</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="196" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text class="node-title" x="208" y="223" text-anchor="middle">POST /chat</text></g>
-              <g filter="url(#shadow-ag)"><rect x="386" y="196" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text class="node-title" x="536" y="223" text-anchor="middle">POST · GET /memory</text></g>
-              <g filter="url(#shadow-ag)"><rect x="714" y="196" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text class="node-title" x="864" y="223" text-anchor="middle">GET /health</text></g>
-              <g filter="url(#shadow-ag)"><rect x="1042" y="196" width="298" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text class="node-title" x="1191" y="223" text-anchor="middle">GET /providers</text></g>
+              <g filter="url(#shadow-ag)"><rect x="386" y="196" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text class="node-title" x="536" y="223" text-anchor="middle">POST · GET · DELETE /memory</text></g>
+              <g filter="url(#shadow-ag)"><rect x="714" y="196" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text class="node-title" x="864" y="223" text-anchor="middle">POST · GET /sessions</text></g>
+              <g filter="url(#shadow-ag)"><rect x="1042" y="196" width="298" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text class="node-title" x="1191" y="223" text-anchor="middle">GET /health · /providers</text></g>
 
               <!-- B2 应用编排层 -->
               <rect x="40" y="268" width="1300" height="104" rx="10" fill="#fffbeb" stroke="#fde68a"/>
@@ -598,7 +832,7 @@
               <text class="lane-title" x="58" y="416" fill="#5b21b6">④ 推理 + 多模型 ★(loop 只依赖中性类型与 LLMProvider 策略接口)</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="428" width="400" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="258" y="452" text-anchor="middle">AgentLoop</text><text class="node-sub" x="258" y="470" text-anchor="middle">plan→tool→observe · 重复调用拦截 / 倒数步收尾</text></g>
               <g filter="url(#shadow-ag)"><rect x="490" y="428" width="400" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="690" y="452" text-anchor="middle">Brain · 多 provider 注册表</text><text class="node-sub" x="690" y="470" text-anchor="middle">按协议族分文件,厂商是 config 数据</text></g>
-              <g filter="url(#shadow-ag)"><rect x="922" y="428" width="418" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="1131" y="452" text-anchor="middle">6 只读工具</text><text class="node-sub" x="1131" y="470" text-anchor="middle">codegraph / graph / search_docs(按 project 路由)</text></g>
+              <g filter="url(#shadow-ag)"><rect x="922" y="428" width="418" height="58" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text class="node-title" x="1131" y="452" text-anchor="middle">平台工具集</text><text class="node-sub" x="1131" y="470" text-anchor="middle">codegraph / graph / search_docs / remember(按 project 路由)</text></g>
               <text class="node-sub" x="58" y="508" fill="#5b21b6">协议族适配器(中性↔原生双向翻译,加厂商 = 改 config / 注册一行,非新文件):</text>
               <g filter="url(#shadow-ag)"><rect x="58" y="516" width="300" height="38" rx="8" fill="#f3e8ff" stroke="#7c3aed"/><text class="node-title" x="208" y="540" text-anchor="middle">Anthropic 协议 · Claude</text></g>
               <g filter="url(#shadow-ag)"><rect x="386" y="516" width="300" height="38" rx="8" fill="#f3e8ff" stroke="#7c3aed"/><text class="node-title" x="536" y="540" text-anchor="middle">OpenAI 兼容 · DeepSeek</text></g>
@@ -611,8 +845,8 @@
               <g filter="url(#shadow-ag)"><rect x="58" y="618" width="400" height="64" rx="8" fill="#dcfce7" stroke="#059669"/><text class="node-title" x="258" y="642" text-anchor="middle">SessionStore</text><text class="node-sub" x="258" y="660" text-anchor="middle">会话跨重启 · BIGSERIAL 消息序</text><text class="node-sub" x="258" y="676" text-anchor="middle">(org_id, user_id, session_id) 隔离</text></g>
               <g filter="url(#shadow-ag)"><rect x="490" y="618" width="400" height="64" rx="8" fill="#dcfce7" stroke="#059669"/><text class="node-title" x="690" y="642" text-anchor="middle">MemoryStore · 4 作用域</text><text class="node-sub" x="690" y="660" text-anchor="middle">org / team / project / personal</text><text class="node-sub" x="690" y="676" text-anchor="middle">write / supersede / forget / archive</text></g>
               <g filter="url(#shadow-ag)"><rect x="922" y="618" width="418" height="64" rx="8" fill="#dcfce7" stroke="#059669"/><text class="node-title" x="1131" y="642" text-anchor="middle">生命周期 + 冲突消解</text><text class="node-sub" x="1131" y="660" text-anchor="middle">TTL 归档 · 压缩融合(留痕)· supersede</text><text class="node-sub" x="1131" y="676" text-anchor="middle">红线最高不可配 · policy(个人/组织优先)</text></g>
-              <g filter="url(#shadow-ag)"><rect x="58" y="694" width="630" height="76" rx="8" fill="#fef9c3" stroke="#b45309"/><text class="node-title" x="373" y="718" text-anchor="middle">多租户隔离(所有读写带 org_id / user_id)</text><text class="node-sub" x="373" y="736" text-anchor="middle">personal 只能读本人 · 召回 ≠ 直接读 · 连接池可调</text><text class="node-sub" x="373" y="754" text-anchor="middle">M5 接缝已留:visible_scopes 可覆写 + 统一 allowed() 授权</text></g>
-              <g filter="url(#shadow-ag)"><rect x="710" y="694" width="630" height="76" rx="8" fill="#dcfce7" stroke="#059669"/><text class="node-title" x="1025" y="718" text-anchor="middle">阶段(单人即落地)</text><text class="node-sub" x="1025" y="736" text-anchor="middle">M1 身份 ✅ · M2 作用域存储 ✅ · M3 召回合并 ✅ · M4 生命周期 ✅</text><text class="node-sub" x="1025" y="754" text-anchor="middle">M5 ACL / M6 RBAC + 认证 ⏳(等真多人多组织)</text></g>
+              <g filter="url(#shadow-ag)"><rect x="58" y="694" width="630" height="76" rx="8" fill="#fef9c3" stroke="#b45309"/><text class="node-title" x="373" y="718" text-anchor="middle">多租户隔离(所有读写带 org_id / user_id)</text><text class="node-sub" x="373" y="736" text-anchor="middle">personal 只能读本人 · 召回 ≠ 直接读 · 连接池可调</text><text class="node-sub" x="373" y="754" text-anchor="middle">M5 已落地:统一 allowed() 授权 + visible_scopes 过滤</text></g>
+              <g filter="url(#shadow-ag)"><rect x="710" y="694" width="630" height="76" rx="8" fill="#dcfce7" stroke="#059669"/><text class="node-title" x="1025" y="718" text-anchor="middle">阶段(单人即落地)</text><text class="node-sub" x="1025" y="736" text-anchor="middle">M1 身份 ✅ · M2 作用域存储 ✅ · M3 召回合并 ✅ · M4 生命周期 ✅</text><text class="node-sub" x="1025" y="754" text-anchor="middle">M5 ACL ✅ · M6 RBAC + token 认证 ✅(2026-06 落地)</text></g>
 
               <!-- edges -->
               <path class="edge-ag" d="M690 140 L690 158" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-ag)"/>
@@ -636,6 +870,8 @@
             <tr><td>记忆召回</td><td><code>recall_service.py</code> · <code>memory_recall.py</code></td><td>跨作用域召回合并 + 确定性冲突消解(红线最高)</td></tr>
             <tr><td>记忆存储</td><td><code>memory_store{,_pg}.py</code> · <code>session{,_pg}.py</code></td><td>4 作用域记忆 + 会话,PG 持久化 + 读写分离接缝</td></tr>
             <tr><td>生命周期</td><td><code>memory_maintenance.py</code></td><td>TTL 归档 + 同 topic LLM 压缩融合(advisory lock 单实例)</td></tr>
+            <tr><td>查询规划</td><td><code>planner.py</code></td><td>确定性 query 分类(overview / impact / symbol / doc_rule)→ 工具预算 + 优先 lane + 停止条件;LLM 版经 A/B 证伪默认关</td></tr>
+            <tr><td>可观测</td><td>会话 extra + <code>/reports/agent-usage</code></td><td>per-query token 用量 + prompt cache 命中率持久化,Web 首页用量卡可视化</td></tr>
           </table>
 
           <h3>加模型走三档(协议族架构铁律)</h3>
@@ -649,54 +885,125 @@
             ✅ 市面 95% 模型走 OpenAI 兼容协议 → 一个 <code>openai_compat.py</code> 全吃(GPT / DeepSeek / 通义千问 / Kimi / 智谱 / Groq / Ollama / vLLM)。厂商是 config 数据,协议族才是代码 —— 杜绝"每加一家加一文件"。
           </div>
           <div class="warning">
-            ⚠️ Memory 数据严禁与任何业务库同 database:平台独立库 <code>codev_platform_memory</code>(可与业务共 PG server,但独立 database + 独立 role)。当前单 org / 单人期默认 <code>default</code> / <code>local</code>;X-Org-Id 强制、archive 按 org 迭代、统一 <code>allowed()</code> 授权层等留到 M5 / M6(真多人多组织才落地,接缝已留)。
+            ⚠️ Memory 数据严禁与任何业务库同 database:平台独立库 <code>codev_platform_memory</code>(可与业务共 PG server,但独立 database + 独立 role)。<strong>M5 ACL / M6 RBAC + token 认证已于 2026-06 落地</strong>:统一 <code>allowed()</code> 授权、X-Org-Id 切换组织、跨 org 隔离红线全部生效;单机开发仍可用 passthrough 模式(<code>default</code> / <code>local</code>),检测到多人共用会 fail-fast。
+          </div>
+        </section>
+
+        <section id="recall">
+          <h2>检索召回融合(recall)— 多路并发查,融成一个排名</h2>
+          <p>"找代码 / 找文档 / 找记忆"都不押宝单一手段,而是<strong>多条 lane(召回路)并发各查各的,再用 weighted RRF 融成一个总排名</strong>。每条 lane 擅长不同盲区,谁挂了就少谁(fail-soft),不会整体瘫;权重按 query 类型自动选。</p>
+          <table>
+            <tr><th>lane</th><th>擅长什么</th><th>原理</th></tr>
+            <tr><td>vector(语义向量)</td><td>"按意思找" —— 描述行为 / 意图,哪怕用词和代码完全不同</td><td>Qwen3-Embedding 把代码 / 文档嵌入为向量,近邻搜索</td></tr>
+            <tr><td>BM25(词法)</td><td>精确词命中 —— 版本号 / 规则编号 / 罕见标识符</td><td>jieba 分词 + 倒排索引,经典关键词打分</td></tr>
+            <tr><td>codegraph(符号)</td><td>符号名与结构 —— 函数、类、调用关系</td><td>AST 解析的代码图谱节点检索</td></tr>
+            <tr><td>graph(跨层)</td><td>跨层链路 —— 页面 ↔ 端点 ↔ 表</td><td>统一图谱节点检索</td></tr>
+            <tr><td>reranker(精排)</td><td>对融合后的 top 候选逐对精细打分</td><td>cross-encoder;A/B 增益不显著 → 默认关</td></tr>
+          </table>
+          <div class="ok">
+            ✅ 实测(35 条金标,代码召回):三路融合 vs 两路,MRR +0.43(本仓)/ +0.57(业务仓),bootstrap 置信区间全正;weighted vs uniform 也确证正增益。当前 MRR 0.917 / nDCG 0.858。
+          </div>
+          <div class="warning">
+            ⚠️ 易混名澄清:<code>codev_platform/recall/</code> 是<strong>代码召回</strong>(跨 lane 融合 → <code>recall_code</code> 工具);<code>codev_platform/agent/recall/</code> 是<strong>记忆召回</strong>(ACL 过滤 / 去重 / 红线置顶 / 截断)。同名不同职,两套管道互不依赖。
           </div>
         </section>
 
         <section id="modules">
           <h2>本仓模块结构</h2>
+          <p>14 个一级子包,各司其职。整体哲学:<strong>协议优先</strong>(策略接口 + 中性类型)、<strong>可插拔</strong>(存储 / 模型 / 插件都有双实现或注册表)、<strong>fail-soft</strong>(单点失败不拖垮整体)、<strong>权限前置</strong>(RBAC 贯穿全栈)。</p>
           <table>
-            <tr><th>路径</th><th>作用</th><th>关键文件</th></tr>
+            <tr><th>路径</th><th>作用</th><th>关键内容</th></tr>
             <tr>
-              <td><code>codev_platform/core/</code></td>
-              <td>project_id resolver / 路径解析 / config 加载</td>
-              <td>project_id.py · paths.py · config.py</td>
+              <td><code>core/</code></td>
+              <td>跨平台地基:配置 / 路径 / project_id 解析 / RBAC / 审计 / 限流</td>
+              <td>config · paths · project_id · rbac · acl · audit · httpkit/</td>
             </tr>
             <tr>
-              <td><code>codev_platform/chroma/</code></td>
-              <td>多租户 MCP 常驻服务 + 词法倒排索引(server 按 file-discipline 拆包:状态机 / 模型 / reranker / 工具各成 sibling 模块)</td>
-              <td>server.py (512 行) · _project_state.py · _models.py · _reranker.py · bm25.py</td>
+              <td><code>chroma/</code></td>
+              <td>文档检索 daemon:向量 + BM25 混合召回 + Qwen3 重排,多租户 SSE</td>
+              <td>server · bm25 · indexer · _reranker · chunking</td>
             </tr>
             <tr>
-              <td><code>codev_platform/graph/</code></td>
-              <td>统一图谱:跨层血缘 + A1 业务域,8 工具 MCP(原 cross-link 2026-06-05 退役并入;数据在 <code>data/graph_store/&lt;pid&gt;.sqlite</code>)</td>
-              <td>store · impact · mcp_server · plugins/ · analyzers/</td>
+              <td><code>graph/</code></td>
+              <td>统一图谱:跨层血缘 + A1 业务域 + A2 架构分层;SQLite / PG 双后端;13 工具 MCP</td>
+              <td>store · pg_store · impact · mcp_server · plugins/ · analyzers/ · audit</td>
             </tr>
             <tr>
-              <td><code>codev_platform/agent/</code></td>
-              <td>Agent HTTP 服务:多模型推理 + 6 只读工具 + Memory(四作用域 / 召回 / 生命周期)</td>
-              <td>service · loop · brain/ · recall_service · memory_store · session · memory_maintenance</td>
+              <td><code>codegraph/</code></td>
+              <td>外部 codegraph 的多租户 SSE 代理(每项目一个 stdio client,9 工具原样透传)</td>
+              <td>server</td>
             </tr>
             <tr>
-              <td><code>codev_platform/cli.py</code></td>
-              <td>codev-platform 命令实现</td>
-              <td>6 子命令分发</td>
+              <td><code>recall/</code></td>
+              <td>代码召回融合:vector / bm25 / codegraph / graph 多 lane → weighted RRF</td>
+              <td>fusion · weights · service · code_vector_store · rerank</td>
             </tr>
             <tr>
-              <td><code>rules/</code></td>
-              <td>11 条跨项目通用规则 (真值源)</td>
-              <td>workflow · commit-pr · cross-layer-enum · security · ...</td>
+              <td><code>reindex/</code></td>
+              <td>写侧任务队列三层:queue(本机 spool / PG 多机共享)+ runners + worker</td>
+              <td>queue · pg_queue · runners · worker · git_sync</td>
             </tr>
             <tr>
-              <td><code>skills/</code></td>
-              <td>3 个跨项目通用 skill (真值源)</td>
-              <td>ai-health · update-local-ai · git-commit</td>
+              <td><code>agent/</code></td>
+              <td>Agent HTTP 服务:loop + 多模型 brain + 9 只读工具 + planner + 记忆 / 会话</td>
+              <td>loop · brain/ · tools/ · planner · memory_* · session_* · recall/</td>
+            </tr>
+            <tr>
+              <td><code>gateway/</code></td>
+              <td>统一认证 + 限流中间件(passthrough 单机 / token 多人双模式)</td>
+              <td>auth · middleware</td>
+            </tr>
+            <tr>
+              <td><code>web/</code></td>
+              <td>Web 管理后端(FastAPI):项目 / 组织 / 用户 / 记忆 / 图谱 / 报表 API</td>
+              <td>routes/ · services/ · repositories/ · db/ · security/</td>
+            </tr>
+            <tr>
+              <td><code>webhook/</code></td>
+              <td>Git push → HMAC 验签 → 仓库映射 project → 自动入队 reindex</td>
+              <td>providers(Gitea / GitLab) · server</td>
+            </tr>
+            <tr>
+              <td><code>plugins/</code></td>
+              <td>analyzer 插件协议 + 注册表 + 失败隔离执行器</td>
+              <td>base · registry · executor</td>
+            </tr>
+            <tr>
+              <td><code>ops/</code></td>
+              <td>跨平台运维编排:体检 / 重建 / 备份 / 指标 / 服务启停(替代旧 .ps1)</td>
+              <td>health/ · webhook · gateway · backup · bootstrap · metrics</td>
+            </tr>
+            <tr>
+              <td><code>cli.py</code> + <code>cli_cmds/</code></td>
+              <td>CLI 入口:cli.py 只做分发,20+ 子命令各自成模块</td>
+              <td>init · sync · serve-mcp · graph · web · config · plugins</td>
+            </tr>
+            <tr>
+              <td><code>resources/</code></td>
+              <td>分发真值源:跨项目通用 rules / skills / hooks(2026-06-01 移入包内,wheel 可带走)</td>
+              <td>rules/ · skills/ · hooks/</td>
             </tr>
             <tr>
               <td><code>platform_meta/</code></td>
-              <td>各 project 登记表</td>
-              <td>业务A · 本平台 · 业务B</td>
+              <td>各 project 登记表(仓库路径 / 组织归属 / 元数据)</td>
+              <td>projects/*/meta.json</td>
             </tr>
+          </table>
+        </section>
+
+        <section id="webui">
+          <h2>Web 管理台(web-ui)</h2>
+          <p>React(UmiJS + Ant Design)前端 + <code>codev_platform/web</code> FastAPI 后端。平台从"纯命令行 + MCP"长出了<strong>浏览器可视化面</strong>:不会敲命令的协作者也能看项目状态、浏览图谱、管理记忆、查任务和账单。接口层由后端 OpenAPI 自动生成(<code>pnpm run api</code>),前端不手写接口类型,杜绝前后端字段漂移。</p>
+          <table>
+            <tr><th>页面</th><th>用途</th></tr>
+            <tr><td><code>/dashboard</code></td><td>平台总览:项目、索引状态、Agent token 用量卡(总量 / 模型 / 缓存率 / 估算成本)</td></tr>
+            <tr><td><code>/projects</code> · <code>/orgs</code> · <code>/users</code></td><td>多组织治理:项目登记、组织与成员管理、用户与角色分配</td></tr>
+            <tr><td><code>/agent</code></td><td>Agent 控制台:会话聊天(浮层会话列表)+ provider / 模型配置</td></tr>
+            <tr><td><code>/codegraph/*</code></td><td>代码图谱浏览:文件列表 / 符号表 / 调用关系图可视化</td></tr>
+            <tr><td><code>/unifiedgraph</code></td><td>统一图谱浏览:节点 / 边 / 跨层链路 / 业务域</td></tr>
+            <tr><td><code>/memory</code></td><td>分层记忆管理:org / team / project / personal 四作用域增删查</td></tr>
+            <tr><td><code>/jobs</code></td><td>reindex 任务与队列监控(状态 / 耗时 / 失败原因)</td></tr>
+            <tr><td><code>/system/audit</code> · <code>/system/usage</code></td><td>操作审计日志 + 用量报表</td></tr>
           </table>
         </section>
 
@@ -708,7 +1015,7 @@
             <tr>
               <td>核心代码</td>
               <td><code>pip install -e</code> 软链</td>
-              <td>改本仓 → 业务仓即时生效 (不需重装)。但 daemon 进程持旧代码,需 <code>Stop-Process -Id (Get-NetTCPConnection -LocalPort 18083).OwningProcess -Force</code> 重启。</td>
+              <td>改本仓 → 业务仓即时生效 (不需重装)。但 daemon 进程持旧代码,需重启服务:<code>codev-platform serve-mcp start</code> 重拉;WSL systemd 部署则 <code>systemctl restart codev-mcp-*</code>。</td>
             </tr>
             <tr>
               <td>shim re-export</td>
@@ -716,9 +1023,9 @@
               <td>新增 symbol 必须手动在业务仓 shim 加一行 re-export,否则业务仓引用不到。</td>
             </tr>
             <tr>
-              <td>规则 / Skill</td>
-              <td><code>sync-rules</code> / <code>sync-skills</code></td>
-              <td>本仓改真值源 → 各业务仓手动跑 sync 命令拉副本。不自动推。</td>
+              <td>规则 / Skill / Hook</td>
+              <td><code>sync-rules</code> / <code>sync-skills</code> / <code>sync-hooks</code></td>
+              <td>本仓改真值源(<code>codev_platform/resources/</code>)→ 各业务仓手动跑 sync 命令拉副本。不自动推。</td>
             </tr>
           </table>
           <div class="warning">
@@ -736,6 +1043,11 @@
               <td>✅ 找不到就报错,不默认串</td>
             </tr>
             <tr>
+              <td>org(组织)</td>
+              <td>用户↔org 多对多;token 强制绑 org;web / MCP / agent 三入口统一 <code>require_project_access</code> 闸;PG 共享表按 org / project 列隔离</td>
+              <td>✅ 跨组织严格隔离是红线;结构守护测试防任何端点漏挂权限闸</td>
+            </tr>
+            <tr>
               <td>Chroma collection</td>
               <td>命名 <code>&lt;project_id&gt;__platform_docs</code></td>
               <td>✅ 物理两个 collection,search_docs 不跨查</td>
@@ -751,9 +1063,9 @@
               <td>✅ A 仓看不到 B 仓代码 (这通常是想要的)</td>
             </tr>
             <tr>
-              <td>MEMORY</td>
-              <td>用户级共享,所有项目可见</td>
-              <td>⚠️ feature 不是 bug — 偏好不重复教,但 A 项目复盘可能污染 B</td>
+              <td>本地 MEMORY.md</td>
+              <td>用户级共享,所有项目可见(本地草稿层)</td>
+              <td>⚠️ feature 不是 bug — 偏好不重复教,但 A 项目复盘可能污染 B;平台分层记忆(agent-memory)则按 org / project / personal 严格隔离</td>
             </tr>
             <tr>
               <td>sync 后副本</td>
@@ -768,7 +1080,7 @@
 
         <section id="mcp">
           <h2>MCP 与索引</h2>
-          <p>四套 MCP 服务的代码全在 <code>codev_platform/</code>,业务仓只放 shim re-export。<strong>2026-05-30 服务化后:都是平台 SSE 服务,业务仓 <code>.mcp.json</code> 走 <code>type:sse</code> 连服务地址(不再 stdio 文件路径)</strong>,由 <code>codev-platform serve-mcp start</code> 编排常驻;单机可用 <code>.mcp.json.stdio.bak</code> 回退 stdio 自 spawn。<strong>(原 cross-link 第 5 套 2026-06-05 退役删包,能力并入 graph。)</strong></p>
+          <p>四套 MCP 服务的代码全在 <code>codev_platform/</code>,业务仓只放 shim re-export。<strong>2026-05-30 服务化后:都是平台 SSE 服务,业务仓 <code>.mcp.json</code> 走 <code>type:sse</code> 连服务地址(不再 stdio 文件路径)</strong>,由 <code>codev-platform serve-mcp start</code> 编排常驻;单机可用 <code>.mcp.json.stdio.bak</code> 回退 stdio 自 spawn。多人服务器模式下四端点统一走 token 认证(SSE 客户端带不了 header 时经 <code>?token=</code> query 兜底)。<strong>(原 cross-link 第 5 套 2026-06-05 退役删包,能力并入 graph。)</strong></p>
           <table>
             <tr>
               <th>组件</th>
@@ -803,7 +1115,7 @@
             <tr>
               <td>dirty-index</td>
               <td>本地检查脚本</td>
-              <td>业务仓 <code>tools/dev/dirty-index-check.ps1</code></td>
+              <td><code>codev-platform dirty-check</code>(跨平台 CLI;原 <code>.ps1</code> 退化为薄 shim)</td>
               <td>命中时 MCP 只能作参考,关键判断读真实文件。</td>
             </tr>
             <tr>
@@ -830,15 +1142,17 @@
             <tr><td><code>codegraph_node</code> · <code>_explore</code> · <code>_files</code> · <code>_status</code> · <code>_trace</code></td><td>取节点源码 / 探索 / 列文件 / 索引状态 / 链路追踪</td><td>精确取源码、查索引新鲜度</td></tr>
           </table>
 
-          <h3>② graph(统一图谱)— 前端↔端点↔表 跨层链路 + A1 业务域(8 工具)</h3>
+          <h3>② graph(统一图谱)— 前端↔端点↔表 跨层链路 + A1 业务域 + A2 架构分层(13 工具)</h3>
           <table>
             <tr><th>工具</th><th>中文用途</th><th>何时用</th></tr>
             <tr><td><code>find_table_usage</code></td><td>某表被谁读 / 写(跨 Python / Java / 前端全栈)</td><td>改表 / Flyway 前看全栈影响</td></tr>
             <tr><td><code>find_api_callers</code></td><td>某 endpoint 的调用方 / 链路</td><td>改 DTO / API 前看谁依赖</td></tr>
-            <tr><td><code>find_impact</code></td><td>跨层影响面 BFS(blast radius)</td><td>评估跨层改动波及</td></tr>
+            <tr><td><code>find_impact</code> · <code>find_impact_paths</code></td><td>跨层影响面 BFS(blast radius)/ 影响传播的具体路径</td><td>评估跨层改动波及、解释"为什么会影响到它"</td></tr>
             <tr><td><code>find_page_dependencies</code> · <code>find_impacted_pages</code></td><td>页面依赖什么 / 改组件影响哪些页面</td><td>前端组件 / 页面改动</td></tr>
             <tr><td><code>find_node_domain</code> · <code>list_domain_members</code></td><td>节点属哪个业务域 / 列业务域成员(A1 软节点)</td><td>按业务域理解链路</td></tr>
+            <tr><td><code>find_arch_role</code> · <code>list_layer_members</code> · <code>find_arch_violations</code></td><td>文件在架构里演什么角色 / 列某分层成员 / 找越层违规(A2 软节点)</td><td>按架构分层理解代码、查分层违规</td></tr>
             <tr><td><code>search_nodes</code></td><td>模糊搜节点(端点 / 表 / 函数 / 业务域)</td><td>找跨层节点(<strong>承接退役的 cross-link</strong>)</td></tr>
+            <tr><td><code>recall_code</code></td><td>代码召回融合:vector + codegraph + graph 三路 weighted RRF</td><td>"按意思 / 行为找代码",不知道符号名时</td></tr>
           </table>
 
           <h3>③ platform-docs(chroma)— 规则 / 设计 / 事故 语义检索</h3>
@@ -848,11 +1162,13 @@
             <tr><td><code>get_by_file</code> · <code>list_collections</code></td><td>按文件路径取所有 chunks / 看知识库统计</td><td>精确取某文档、看库规模与 category</td></tr>
           </table>
 
-          <h3>④ agent-memory — 跨机 / 跨开发者共享团队记忆(读侧 MVP)</h3>
+          <h3>④ agent-memory — 跨机 / 跨开发者共享团队记忆(读写齐全,5 工具)</h3>
           <table>
             <tr><th>工具</th><th>中文用途</th><th>何时用</th></tr>
             <tr><td><code>recall(query)</code></td><td>query-aware 去冲突 top-N 召回(personal / project 分层 + redline 永置顶)</td><td>换机 / 重 clone 后同 token 召回本人记忆</td></tr>
             <tr><td><code>list_scope</code></td><td>诊断单作用域记忆(可见性排查)</td><td>查记忆为什么召回 / 不召回</td></tr>
+            <tr><td><code>remember</code></td><td>写入记忆(按身份落 personal / project 作用域)</td><td>沉淀偏好 / 约定 / 项目状态进团队记忆</td></tr>
+            <tr><td><code>forget</code> · <code>supersede</code></td><td>删除记忆 / 用新记忆替代旧记忆(留痕)</td><td>记忆过时或错误时清理、改写</td></tr>
           </table>
 
           <h3>⑤ Skills — 平台封装的可复用工作流(斜杠命令)</h3>
@@ -897,8 +1213,13 @@
             </tr>
             <tr>
               <td>索引重建</td>
-              <td>不允许并发写。</td>
-              <td>Chroma 重建锁、代码图谱重建锁、跨层链路临时库发布。</td>
+              <td>不允许并发写(单写者)。</td>
+              <td>一律经 reindex 队列串行消费;Chroma / 代码图谱重建锁带 PID 存活检查,死锁持有者立即抢占。</td>
+            </tr>
+            <tr>
+              <td>多机任务认领</td>
+              <td>多台机器可同时当 worker。</td>
+              <td>PgJobQueue:PG <code>SKIP LOCKED</code> 行级认领 + claim_token;worker 崩溃后任务按 owner(主机名)恢复,不重复消费、不丢任务。</td>
             </tr>
             <tr>
               <td>源码文件</td>
@@ -908,7 +1229,7 @@
             <tr>
               <td>本仓 codev-platform 自身改动</td>
               <td>不允许并发改 + 同时 daemon 持旧。</td>
-              <td>改完 commit + push + 各业务仓重启 daemon(<code>Stop-Process</code> port 18083)。</td>
+              <td>改完 commit + push + 重启持旧代码的服务(<code>serve-mcp start</code> 重拉 / WSL systemd restart)。</td>
             </tr>
             <tr>
               <td>会话 / 记忆持久化(数据库)</td>
@@ -935,7 +1256,7 @@
 
         <section id="workflow">
           <h2>开发工作流</h2>
-          <p>规则真值源在本仓 <code>rules/workflow.md</code>,经 <code>sync-rules</code> 推送到各业务仓 <code>.claude/rules/</code>。改前门禁:AI 做 L2/L3/L4 时,先产出合并影响面,再决定文件范围、生成边界和验证命令。</p>
+          <p>规则分两层:本仓工作规则在 <code>.claude/rules/</code>;跨项目通用真值源在 <code>codev_platform/resources/rules/</code>,经 <code>sync-rules</code> 推送到各业务仓 <code>.claude/rules/</code>。改前门禁:AI 做 L2/L3/L4 时,先产出合并影响面,再决定文件范围、生成边界和验证命令。</p>
           <div class="flow" style="display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px;">
             <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
               <strong>0. 自报 trigger</strong>
@@ -943,7 +1264,7 @@
             </div>
             <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
               <strong>1. 判级</strong>
-              <p>L1 小改轻流程。L2 单层查规则+影响面。L3 跨层查三套 MCP。L4 高风险先说边界。</p>
+              <p>L1 小改轻流程。L2 单层查规则+影响面。L3 跨层查多套 MCP。L4 高风险先说边界。</p>
             </div>
             <div class="step" style="min-height:126px; padding:16px; border-left:4px solid var(--blue); border-radius:8px; background:#f8fafc;">
               <strong>2. 查证</strong>
@@ -1031,12 +1352,16 @@
           <table>
             <tr><th>指标</th><th>当前值</th><th>说明</th></tr>
             <tr><td>项目登记数</td><td>3</td><td>业务A (真业务) · 本平台 (codev-platform 本仓) · 业务B (Tray UI 开发中)。</td></tr>
-            <tr><td>chroma chunks</td><td>4427 (openclaw) + 290 (本仓) ≈ 4717</td><td>各项目独立 collection,物理隔离。本仓 290 chunks 覆盖 rules + skills + docs + CLAUDE.md。</td></tr>
+            <tr><td>chroma chunks</td><td>4427 (openclaw) + 290 (本仓) ≈ 4717(2026-05 口径,持续增长)</td><td>各项目独立 collection,物理隔离。本仓 chunks 覆盖 rules + skills + docs + CLAUDE.md。</td></tr>
             <tr><td>chunk 策略</td><td>target 1000 / max 1500 字符,三级(heading → paragraph → hard)</td><td>由 <code>codev_platform/chroma</code> 提供,所有项目统一策略。</td></tr>
             <tr><td>词法倒排索引</td><td>每 collection 独立 ~2.1s 重建</td><td>常驻服务启动 + Chroma 重建时同步构建,中英混合分词。</td></tr>
             <tr><td>GPU 占用</td><td>恒定 ~3GB (Qwen3-Embedding-0.6B)</td><td>所有项目所有会话共享同一 daemon。没这个共享每会话 ~3GB → 第 2 会话 OOM。</td></tr>
             <tr><td>daemon 端口</td><td>18083 (HTTP/SSE)</td><td>所有会话经 SSE(<code>type:sse</code>)连同一 daemon。</td></tr>
             <tr><td>pre-push audit gates</td><td>6 项 (业务仓 openclaw)</td><td>parity / null cast / sanity test / fetcher registry / frontend grep / DOC_PATTERNS。silent failure 转 loud failure。</td></tr>
+            <tr><td>代码召回 eval</td><td>MRR 0.917 / nDCG 0.858</td><td>35 条人工金标;三路融合 vs 两路 MRR +0.43 ~ +0.57,bootstrap 置信区间全正。</td></tr>
+            <tr><td>A2 架构分层准确率</td><td>后端 ~91%(严格口径)</td><td>真实 LLM 验收;前后端词表隔离防互相污染。</td></tr>
+            <tr><td>Agent 单查询成本</td><td>~10 万 token,缓存命中 ~80%</td><td>prompt cache 省约 74% 成本;用量入库,Web 首页 / <code>/system/usage</code> 可视化。</td></tr>
+            <tr><td>CI</td><td>自托管 Gitea runner</td><td>预装 ci-venv 零下载 + 镜像加速;同分支新 push 自动取消旧 run 防积压。</td></tr>
           </table>
         </section>
 
@@ -1061,7 +1386,7 @@
             <tr><td>1</td><td>本仓改完 commit + push</td></tr>
             <tr><td>2</td><td>本仓 .venv 已是 editable,改 <code>codev_platform/*.py</code> 即生效,无需重装(仅新增重依赖才 <code>uv pip install -r requirements-runtime.txt</code>)</td></tr>
             <tr><td>3</td><td>业务仓 shim 文件加 symbol re-export(若有新 symbol;业务仓仍 pip -e 本仓到自己 venv)</td></tr>
-            <tr><td>4</td><td>重启 daemon(持旧代码时):<code>Stop-Process -Id (Get-NetTCPConnection -LocalPort 18083 -State Listen).OwningProcess -Force</code></td></tr>
+            <tr><td>4</td><td>重启服务(持旧代码时):<code>codev-platform serve-mcp start</code> 重拉;WSL systemd 部署则 <code>sudo systemctl restart codev-mcp-*</code></td></tr>
           </table>
 
           <h3>最小验证闭环</h3>
@@ -1111,7 +1436,7 @@
             </ul>
           </div>
           <p style="margin-top: 14px;">
-            <strong>判断标准</strong>:目前 3 项目登记中 (1 个真业务 + 1 个本仓自身 + 1 个 widget 开发中)。如果未来还会再加 2-3 个业务项目,这套基础设施就值;如果就这 3 个不再扩,收益主要在 daemon 单例 + 规则统一,够本但不惊艳。
+            <strong>判断标准</strong>:目前 3 项目登记(1 个真业务 + 1 个本仓自身 + 1 个 widget 开发中)。2026-06 多机多组织化之后,收益维度从"项目数"扩展到"<strong>人数 × 机器数</strong>":PG 共享队列 / 图谱 / 会话 / 记忆让整个团队共用同一份索引与上下文,新人换机或重 clone 后跑一条命令即接回全部记忆与索引 —— 平台价值随团队规模放大,不再只随项目数放大。
           </p>
         </section>
       </div>

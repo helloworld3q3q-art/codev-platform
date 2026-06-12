@@ -54,6 +54,17 @@
 - 付费档:max_steps=12 + 软停 + 强模型免 planner。
 - **成本绑定档位** + per-租户用量计量(cache_hit/miss 已可观测,是计量地基)。
 
+**已落地(2026-06-12,机制 only,默认不变):**
+- **per-档 max_steps cap 机制**:`LoopPolicy.max_steps_caps: dict[query_type→cap]`(config 驱动,
+  `agent.providers.<name>.loop.max_steps_caps` / `agent.loop.max_steps_caps` 两级,`registry.loop_policy`
+  按 provider 档解析,不为单模型硬编)。loop 取 `policy.effective_max_steps(query_type)` =
+  `min(max_steps, cap[qt])`,query_type 来自 planner。**默认 `{}` = 任何档不封顶,行为与现状完全一致**。
+  ⚠️ **cap 值未启用**:plan 明确"砍 max_steps 是质量↔成本权衡,须 A/B 后定值"——本次只交付可配置机制 +
+  默认不变,**激进上限留待 A/B**(grounding 非劣 + within_budget 不降 + miss 显著降 才采纳,见 §七)。
+- **per-租户 token 计量**:`Trace` 落 `org_id`/`user_id`(身份取请求已记录身份,非新造通道);
+  `usage_report.agent_usage_report` 扩出 `byOrg`/`byUser` 桶 + `agent_usage_by_tenant(dimension=org|user)`
+  专用聚合函数(只读地基,为 §十 per-租户配额/计费归属铺垫)。web 现有 schema 未含新键 → 前端不受影响。
+
 ## 六、危险动作(别做)
 
 - 不补多跳工具就砍 max_steps → 多跳题手爬到一半被切,grounding 崩。
