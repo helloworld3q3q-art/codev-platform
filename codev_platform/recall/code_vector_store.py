@@ -106,10 +106,115 @@ def _source_snippet(repo, node: dict, max_chars: int = _SNIPPET_MAX_CHARS) -> st
 
 
 def _embed_text(node: dict, repo) -> str:
-    """索引侧嵌入文本 = 基础(名/签名/docstring)+ 源码片段(补语义)。无源码退基础。"""
+    """[legacy, 单块] 嵌入文本 = 基础 + 截断源码片段。build 路径已改 _node_chunks(kind 感知+滑窗);
+    本函数保留供单测 / 简单调用。"""
     base = build_text(node)
     snip = _source_snippet(repo, node)
     return f"{base}\n{snip}" if snip else base
+
+
+# ---------- 切割策略: kind 感知 + 长方法滑窗 (替代固定 1500 字符硬截断) ----------
+# 旧做法对每节点 build_text + 源码片段[:1500] 一刀切: 6.1% 节点被截(含 7492 个 method 切到一半、
+# 巨型 god-class 757K 字符只嵌 0.2%)。改成:
+#   - container(class/interface...): 只嵌**头部摘要**(类声明+字段+docstring), body 由其成员方法
+#     节点各自覆盖, 不该把整个 body 塞进类向量(god-class 嵌也白嵌)。
+#   - body(method/function...): 嵌**完整体**; 超 budget 则按**行边界滑窗**切多块, 尾部逻辑不丢。
+#   - 单块用裸 node id(与 codegraph 同 ref 空间, RRF 叠分); 多块加 #k 后缀, 召回时去重回节点。
+_CONTAINER_KINDS = frozenset({"class", "interface", "enum", "struct", "trait", "module", "namespace"})
+_BODY_KINDS = frozenset({"method", "function", "constructor", "component"})
+_CHUNK_BODY_CHARS = 3500     # 单块源码片段预算(method 体 / 默认); base(名/签名/docstring)另算
+_CHUNK_OVERLAP_LINES = 8     # 滑窗重叠行数(跨窗的逻辑不被切断丢失)
+_CLASS_HEAD_CHARS = 1800     # container 头部摘要预算(body 由成员节点覆盖)
+_MAX_CHUNKS_PER_NODE = 12    # 单节点最多切几块(防超长 god-method 切出几百块; 12*3500≈4.2万字符封顶)
+
+
+def _node_source_lines(repo, node: dict) -> list[str]:
+    """节点源码行列表 (start_line..end_line), 路径穿越防御; repo/文件/行号缺或失败 → []。"""
+    if repo is None:
+        return []
+    fp, s, e = node.get("filePath"), node.get("startLine"), node.get("endLine")
+    if not fp or not s:
+        return []
+    from pathlib import Path
+    try:
+        root = Path(repo).resolve()
+        p = (root / fp).resolve()
+        if not p.is_relative_to(root):   # filePath 含 '..'/绝对路径逃出 repo → 拒读
+            logger.warning("[code_vec] 跳过越界 filePath(疑似路径穿越): %r", fp)
+            return []
+        if not p.exists():
+            return []
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        return lines[max(0, int(s) - 1):int(e or s)]
+    except Exception:  # noqa: BLE001 — 读源码失败仅降级
+        return []
+
+
+def _head_at_line_boundary(lines: list[str], budget: int) -> str:
+    """取前若干**完整行**直到累计长度超 budget(不切到行中间)。至少收 1 行。"""
+    out: list[str] = []
+    n = 0
+    for ln in lines:
+        if out and n + len(ln) + 1 > budget:
+            break
+        out.append(ln)
+        n += len(ln) + 1
+    return "\n".join(out)
+
+
+def _window_lines(lines: list[str], budget: int, overlap: int) -> list[str]:
+    """按行边界滑窗切分: 每窗累计 ≤ budget 字符, 相邻窗重叠 overlap 行(跨窗逻辑不丢)。"""
+    wins: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        cur: list[str] = []
+        clen, j = 0, i
+        while j < n:
+            ln = lines[j]
+            if cur and clen + len(ln) + 1 > budget:
+                break
+            if not cur and len(ln) + 1 > budget:   # 单行超 budget: 收该行(截断)避免空窗死循环
+                cur.append(ln[:budget])
+                j += 1
+                break
+            cur.append(ln)
+            clen += len(ln) + 1
+            j += 1
+        wins.append("\n".join(cur))
+        if j >= n:
+            break
+        i = max(j - overlap, i + 1)   # 重叠 + 必前进
+    return wins
+
+
+def _node_chunks(node: dict, repo) -> list[tuple[str, str]]:
+    """节点 → [(chunk_id, text)]。kind 感知 + 长方法滑窗(见上注释)。空文本节点 → []。"""
+    nid = str(node.get("id"))
+    base = build_text(node)
+    kind = node.get("kind") or ""
+    lines = _node_source_lines(repo, node)
+
+    if kind in _CONTAINER_KINDS:                       # 类等: 仅头部摘要 1 块
+        head = _head_at_line_boundary(lines, _CLASS_HEAD_CHARS)
+        text = f"{base}\n{head}" if head else base
+        return [(nid, text)] if text.strip() else []
+
+    if kind in _BODY_KINDS and lines and len("\n".join(lines)) > _CHUNK_BODY_CHARS:
+        wins = _window_lines(lines, _CHUNK_BODY_CHARS, _CHUNK_OVERLAP_LINES)[:_MAX_CHUNKS_PER_NODE]
+        out = [(f"{nid}#{k}", f"{base}\n{w}") for k, w in enumerate(wins) if (base + w).strip()]
+        if out:
+            return out
+        return [(nid, base)] if base.strip() else []
+
+    # 默认: 小 method / field / function / 其它 → 单块(头部片段, 绝大多数本就 < budget 不截)
+    head = _head_at_line_boundary(lines, _CHUNK_BODY_CHARS)
+    text = f"{base}\n{head}" if head else base
+    return [(nid, text)] if text.strip() else []
+
+
+def _node_id_of(chunk_id: str) -> str:
+    """sub-chunk id → 裸 node id(剥 '#k' 后缀)。无后缀原样返回。"""
+    return chunk_id.split("#", 1)[0]
 
 
 def _node_hash(text: str) -> str:
@@ -156,16 +261,26 @@ def _get_query_client(persist_path: str):
 
 
 def _parse_query_result(res: dict) -> tuple[list[str], dict]:
-    """chroma query 结果 → (按相似度降序的 node id 列表, ref → {name,kind,file} 富化)。纯函数。"""
+    """chroma query 结果 → (按相似度降序的 **node** id 列表, ref → {name,kind,file} 富化)。纯函数。
+
+    长方法滑窗 → 同一节点可能多个 sub-chunk 命中: 按 meta.node(回退剥 '#k' 后缀)**去重回节点**,
+    只留最高分那块。返回的恒是 codegraph node id(与 codegraph lane 同 ref 空间, RRF 可叠分)。"""
     ids_outer = res.get("ids") or [[]]
     metas_outer = res.get("metadatas") or [[]]
     ids = list(ids_outer[0]) if ids_outer else []
     metas = metas_outer[0] if metas_outer else []
+    ranked: list[str] = []
     details: dict = {}
-    for i, nid in enumerate(ids):
+    seen: set[str] = set()
+    for i, cid in enumerate(ids):
         m = metas[i] if i < len(metas) and metas[i] else {}
+        nid = m.get("node") or _node_id_of(cid)   # 优先 meta.node; 无则剥后缀(向后兼容旧库)
+        if nid in seen:
+            continue                                # 同节点的后续(更低分)sub-chunk 丢弃
+        seen.add(nid)
+        ranked.append(nid)
         details[nid] = {"name": m.get("name"), "kind": m.get("kind"), "file": m.get("file")}
-    return ids, details
+    return ranked, details
 
 
 def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], dict]:
@@ -185,8 +300,12 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
         logger.warning("[code_vec] embedder 不可用(memory.embed.backend), 向量 lane 退化")
         return [], {}
     qv = embedder.encode(query)
-    res = col.query(query_embeddings=[qv], n_results=k, include=["metadatas"])
-    return _parse_query_result(res)
+    # 过取: 长方法切多块, top-k chunk 去重回节点后可能不足 k 个不同节点 → 多取再裁。
+    over = min(max(k * 3, k), 200)
+    res = col.query(query_embeddings=[qv], n_results=over, include=["metadatas"])
+    ranked, details = _parse_query_result(res)
+    ranked = ranked[:k]
+    return ranked, {nid: details[nid] for nid in ranked}
 
 
 class CodeVecLockBusy(RuntimeError):
@@ -284,17 +403,21 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
             nid = node.get("id")
             if node.get("kind") in _SKIP_KINDS:   # 低价值 kind 不入向量库(import/file/variable)
                 continue
-            text = _embed_text(node, repo)         # 名/签名/docstring + 源码片段
-            if not nid or not text.strip():
+            if not nid:
                 continue
             nid = str(nid)
-            new_manifest[nid] = _node_hash(text)
-            text_by_id[nid] = text
-            meta_by_id[nid] = {
-                "name": node.get("name") or "",
-                "kind": node.get("kind") or "",
-                "file": node.get("filePath") or "",
-            }
+            # kind 感知切割: 一个节点可能产出多块(长方法滑窗); chunk_id 含 '#k' 后缀。
+            for chunk_id, text in _node_chunks(node, repo):
+                if not text.strip():
+                    continue
+                new_manifest[chunk_id] = _node_hash(text)
+                text_by_id[chunk_id] = text
+                meta_by_id[chunk_id] = {
+                    "name": node.get("name") or "",
+                    "kind": node.get("kind") or "",
+                    "file": node.get("filePath") or "",
+                    "node": nid,   # 召回去重回节点 + RRF 对齐 codegraph ref 空间
+                }
 
     changed, deleted = _diff_manifest(old_manifest, new_manifest)
 
