@@ -274,36 +274,6 @@ def find_api_callers(store, project_id: str, endpoint_ref: str, *,
             "count": len(callers), "certainOnly": certain_only}
 
 
-def find_contract_drift(store, project_id: str, *, limit: int = 200) -> dict:
-    """契约漂移: 列出**悬空前端调用** —— frontend_api_call 节点无任何 calls_api 出边
-    (调了后端不暴露的接口: 接口被删 / 改签名 / operationId 漂移 / URL 写错)。
-
-    语言 / 框架 / 仓库数无关(只看中性 frontend_api_call 节点 + calls_api 边): 单仓多仓同理,
-    operationId 桥落地后, 同 URL 多服务里"连不上对的服务"也会显为悬空(URL 兜底误连被消歧降级)。
-    每条带前端节点 brief + 它尝试调的 url/operation_id(供定位); 截断在 limit。
-    """
-    g = build_impact_graph(store, project_id)
-    drift: list[dict] = []
-    for n in g.nodes.values():
-        if n.kind != NodeKind.FRONTEND_API_CALL.value:
-            continue
-        has_api_edge = any(kind == EdgeKind.CALLS_API.value for _t, kind in g.fwd.get(n.id, ()))
-        if has_api_edge:
-            continue
-        brief = _node_brief(n)
-        # 带上它"想调谁"的线索, 便于人核对漂移(后端少了哪个端点)。
-        if n.meta:
-            for k in ("url", "http_method", "operation_id", "service"):
-                if n.meta.get(k):
-                    brief[k] = n.meta[k]
-        drift.append(brief)
-        if len(drift) >= limit:
-            break
-    drift.sort(key=lambda d: (d.get("file") or "", d.get("line") or 0))
-    return {"found": True, "projectId": project_id,
-            "danglingCalls": drift, "count": len(drift), "truncated": len(drift) >= limit}
-
-
 def generate_impact_report(store, project_id: str, node_ref: str, *,
                            certain_only: bool = False) -> dict:
     """改 node_ref → 一份可读跨层影响报告 (A5)。

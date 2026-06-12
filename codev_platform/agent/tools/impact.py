@@ -169,7 +169,8 @@ class ContractDriftTool(Tool):
         self.project_id = project_id
 
     def run(self, args: dict[str, Any]) -> ToolResult:
-        return _run_query(self.project_id, I.find_contract_drift)
+        from codev_platform.graph import contract_drift as _cd
+        return _run_query(self.project_id, _cd.find_contract_drift)
 
 
 def register_into(registry, project_id: str | None = None) -> None:

@@ -29,6 +29,7 @@ from mcp.types import TextContent, Tool
 
 from codev_platform.core.errors import ErrorCode
 from codev_platform.core.project_id import ProjectIdError, resolve_local
+from codev_platform.graph import contract_drift as _contract_drift
 from codev_platform.graph import impact as _impact
 from codev_platform.graph.store import GraphStore, graph_store_path, open_store
 
@@ -255,7 +256,7 @@ _DISPATCH = {
     "list_layer_members": lambda c, p, a: _impact.list_layer_members(c, p, a["role"]),
     "find_arch_violations": lambda c, p, a: _impact.find_arch_violations(
         c, p, int(a.get("limit", 200))),
-    "find_contract_drift": lambda c, p, a: _impact.find_contract_drift(
+    "find_contract_drift": lambda c, p, a: _contract_drift.find_contract_drift(
         c, p, limit=int(a.get("limit", 200))),
     # recall_code 自开 graph+codegraph store(融合), 忽略传入的 graph conn。
     "recall_code": lambda c, p, a: _recall_code_tool(p, a),

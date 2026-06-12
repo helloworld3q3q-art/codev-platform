@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from codev_platform.graph.impact import find_contract_drift
+from codev_platform.graph.contract_drift import find_contract_drift
 from codev_platform.graph.schema import (
     AnalyzerResult,
     EdgeKind,
