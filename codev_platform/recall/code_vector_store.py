@@ -97,9 +97,24 @@ def _code_vec_persist_dir(project_id: str):
     return chroma_dir() / _CODE_VEC_SUBDIR / project_id
 
 
+# 各字段长度上界: 防某些 parser 把整段方法体 / 巨型块注释塞进 signature / docstring(实测 ideas-v2
+# 有 docstring 达 17KB 的 Java 方法)。base 不限 → 撑爆 + **每个滑窗都重复带一份** → 单 chunk 24KB:
+# 既慢(成批长序列 encode 超 daemon 120s 上限)又稀释向量语义(检索质量差)。name/qualifiedName 短不限。
+_BASE_FIELD_MAX = {"signature": 600, "docstring": 1200}
+
+
 def build_text(node: dict) -> str:
-    """codegraph 节点 → 基础嵌入文本(name + qualifiedName + signature + docstring, 跳空字段)。"""
-    return "\n".join(str(node[f]) for f in _TEXT_FIELDS if node.get(f))
+    """codegraph 节点 → 基础嵌入文本(name + qualifiedName + signature + docstring, 跳空字段)。
+    signature / docstring 按 _BASE_FIELD_MAX 截断(防超长字段撑爆每个 chunk, 见上)。"""
+    parts: list[str] = []
+    for f in _TEXT_FIELDS:
+        v = node.get(f)
+        if not v:
+            continue
+        s = str(v)
+        cap = _BASE_FIELD_MAX.get(f)
+        parts.append(s[:cap] if cap and len(s) > cap else s)
+    return "\n".join(parts)
 
 
 _SNIPPET_MAX_CHARS = 1500   # 源码片段截断(够含 docstring + 函数体, 不撑爆嵌入)

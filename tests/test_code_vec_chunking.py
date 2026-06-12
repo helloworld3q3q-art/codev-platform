@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from codev_platform.recall.code_vector_store import (
+    _BASE_FIELD_MAX,
     _CHUNK_BODY_CHARS,
     _DEFAULT_SKIP_KINDS,
     _existing_chroma_healthy,
@@ -16,6 +17,7 @@ from codev_platform.recall.code_vector_store import (
     _parse_query_result,
     _resolve_skip_kinds,
     _window_lines,
+    build_text,
 )
 
 
@@ -28,6 +30,23 @@ def _write(tmp_path: Path, rel: str, body: str) -> None:
 def test_node_id_strips_suffix():
     assert _node_id_of("abc#3") == "abc"
     assert _node_id_of("abc") == "abc"
+
+
+def test_build_text_caps_oversized_docstring_and_signature():
+    # 实测 ideas-v2 有 docstring 达 17KB 的 Java 方法 → base 撑爆每个 chunk(慢 encode + 稀释)。
+    node = {"name": "fetch", "qualifiedName": "p.C.fetch",
+            "signature": "X" * 5000, "docstring": "Y" * 17000}   # X/Y 不出现在 name/qualifiedName
+    t = build_text(node)
+    assert t.count("X") == _BASE_FIELD_MAX["signature"]      # signature 截断到上界
+    assert t.count("Y") == _BASE_FIELD_MAX["docstring"]      # docstring 截断到上界
+    assert "fetch" in t and "p.C.fetch" in t                 # name/qualifiedName 不限, 保留
+    # base 总长有界(防 24KB 巨型 chunk)
+    assert len(t) < _BASE_FIELD_MAX["signature"] + _BASE_FIELD_MAX["docstring"] + 200
+
+
+def test_build_text_short_fields_unchanged():
+    node = {"name": "f", "qualifiedName": "p.C.f", "signature": "void f()", "docstring": "does x"}
+    assert build_text(node) == "f\np.C.f\nvoid f()\ndoes x"
 
 
 def test_head_at_line_boundary_never_cuts_midline():
