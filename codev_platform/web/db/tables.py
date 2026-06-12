@@ -137,6 +137,25 @@ sessions = Table(
     Column("refresh_expires_at", Float, nullable=False),
 )
 
+# IDE agent 接入 token (multi-org server Phase 2)。只存 token 的 sha256 hash (明文不落库, 同 sessions)。
+# 与 config gateway.tokens 的关键差别: token→user 走 PG, lookup 时 join users.status 实时校验 —— web
+# 禁用用户 (users.status=DISABLED) 后该用户所有 token 下一请求即失效 (config token 做不到, 是脱节洞的根因)。
+# projects 存 JSON 文本 ("*" 或 ["pid1",...]); status ACTIVE|REVOKED (吊销不删行, 留审计 + 防 hash 复用)。
+agent_tokens = Table(
+    "agent_tokens",
+    metadata,
+    Column("token_hash", Text, primary_key=True),
+    Column("user_id", Text, ForeignKey("users.user_id"), nullable=False),
+    Column("org_id", Text, ForeignKey("orgs.org_id"), nullable=False),
+    Column("projects", Text),  # JSON: "*" | ["pid",...] | null(无项目权)
+    Column("label", Text),     # 人读备注 (如 "alice laptop")
+    # ACTIVE | REVOKED
+    Column("status", Text, nullable=False, server_default=_STATUS_DEFAULT),
+    Column("expires_at", Float),  # epoch 秒; null = 永久 (对齐 gateway token_expired)
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+Index("ix_agent_tokens_user", agent_tokens.c.user_id)
+
 # 多机共享 reindex 队列 (PgJobQueue, alembic 0004)。per (project_id,kind) 合并(复合主键);
 # lease(claimed_by/lease_expires_at)+ claim_token 做跨机原子认领 + 防接管误删。must 进 metadata,
 # 否则 alembic autogenerate 会把它当"DB 有 metadata 无" → 提议 DROP 生产队列表(审计 P1)。

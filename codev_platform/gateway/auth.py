@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -142,69 +143,148 @@ class PassthroughAuthenticator:
         return Identity(user_id=user_id, org_id=org_id, via="passthrough", all_projects=True)
 
 
-class TokenAuthenticator:
-    """验 Bearer token → (org,user)。**认证加密**:config/PG 只存 token 的 sha256 hash
-    (明文 token 不落盘),每请求 hash 入参 + `hmac.compare_digest` 常量时间比对(防时序攻击)。
+def _meta_to_identity(meta: Mapping[str, Any]) -> Identity:
+    """token meta(含 user_id/org_id/projects)→ Identity(via='token')。
 
-    token_hashes 形如 {<sha256hex>: {"user_id":..,"org_id":..}}。真 token 表应走 PG
-    (codev_platform_memory),config 仅放本机调用方自己的 key hash。
-    传输加密(HTTPS/TLS)是部署层:远程平台 platform.url 用 https,TLS 在反代/uvicorn 终结。"""
+    project 白名单解析(ACL 闸2 真值): "*"/["*"]=全部; list/tuple=显式白名单;
+    缺省/其它=无权(安全默认, 不给空 token 越权访问所有项目)。非法 pid 剔除不 raise
+    (一条脏配置不该炸认证, 剔除即少放行)。config / PG 两来源共用此组装, 语义一致。
+    """
+    raw = meta.get("projects")
+    if raw == "*" or raw == ["*"]:
+        all_projects = True
+        projects: frozenset[str] = frozenset()
+    elif isinstance(raw, (list, tuple)):
+        valid: set[str] = set()
+        for p in raw:
+            try:
+                valid.add(_validate_pid(p))
+            except ProjectIdError as exc:
+                _log.warning("[gateway] token 白名单含非法 project_id %r, 已跳过: %s", p, exc)
+        projects = frozenset(valid)
+        all_projects = False
+    else:
+        projects = frozenset()
+        all_projects = False
+    return Identity(
+        user_id=str(meta.get("user_id") or "unknown"),
+        org_id=str(meta.get("org_id") or "default"),
+        via="token", projects=projects, all_projects=all_projects,
+    )
+
+
+@runtime_checkable
+class TokenResolver(Protocol):
+    """token 查找策略: presented_hash(Bearer 的 sha256)→ token meta 或 None。
+
+    实现负责"hash → meta"的来源差异(config 静态字典 / PG 实时查 + 用户状态校验);
+    TokenAuthenticator 只依赖本接口, 组装 Identity + 过期判定与来源无关(策略模式, 零分支)。
+    """
+    def resolve(self, presented_hash: str) -> Mapping[str, Any] | None:
+        ...
+
+
+class MappingTokenResolver:
+    """config `gateway.tokens` 字典来源: 常量时间遍历比对(dev fallback / bootstrap admin)。"""
 
     def __init__(self, token_hashes: Mapping[str, Mapping[str, Any]]) -> None:
         self._by_hash = {str(k): dict(v) for k, v in (token_hashes or {}).items()}
+
+    def resolve(self, presented_hash: str) -> Mapping[str, Any] | None:
+        ident = None
+        # 不 break —— 命中后仍走完全表, 使命中/未命中耗时一致(消除"提前返回"时序侧信道)。
+        for h, meta in self._by_hash.items():
+            if hmac.compare_digest(h, presented_hash):
+                ident = meta
+        return ident
+
+
+class CompositeTokenResolver:
+    """按序尝试多个 resolver, 首个命中即返回。PG 优先 + config 兜底(迁移期 bootstrap token 仍可用)。"""
+
+    def __init__(self, resolvers: list[TokenResolver]) -> None:
+        self._resolvers = [r for r in resolvers if r is not None]
+
+    def resolve(self, presented_hash: str) -> Mapping[str, Any] | None:
+        for r in self._resolvers:
+            meta = r.resolve(presented_hash)
+            if meta is not None:
+                return meta
+        return None
+
+
+class PgTokenResolver:
+    """PG `agent_tokens` 来源: lookup 内 join users.status 实时校验(禁用用户 token 即失效)。
+
+    DB 唯一索引按 hash 直查(hash 单向, 不泄漏明文), 无需遍历常量时间比对。store 异常 fail-closed
+    (返回 None = 认证失败), 不把 DB 抖动变成放行。
+    """
+
+    def __init__(self, store: Any) -> None:
+        self._store = store
+
+    def resolve(self, presented_hash: str) -> Mapping[str, Any] | None:
+        try:
+            return self._store.lookup(presented_hash)
+        except Exception as exc:  # noqa: BLE001 — DB 抖动 fail-closed(拒绝优于误放行)
+            _log.warning("[gateway] PG token lookup 失败, 拒绝该 token: %s", exc)
+            return None
+
+
+class TokenAuthenticator:
+    """验 Bearer token → Identity。**认证加密**: 只存/比对 token 的 sha256 hash(明文不落盘)。
+
+    token 来源经 `TokenResolver` 策略注入(config 字典 / PG 实时 / 组合), 本类只做: 取 token →
+    hash → resolver.resolve → 过期判定 → 组装 Identity(来源无关)。向后兼容: 传 dict 自动包成
+    MappingTokenResolver(旧调用 `TokenAuthenticator({...})` 不变)。
+    传输加密(HTTPS/TLS)是部署层: 远程平台 platform.url 用 https, TLS 在反代/uvicorn 终结。
+    """
+
+    def __init__(self, tokens_or_resolver: Mapping[str, Mapping[str, Any]] | TokenResolver) -> None:
+        # 有 .resolve = 已是策略对象直接用; 否则按 config 字典包成 MappingTokenResolver(向后兼容)。
+        if hasattr(tokens_or_resolver, "resolve"):
+            self._resolver: TokenResolver = tokens_or_resolver  # type: ignore[assignment]
+        else:
+            self._resolver = MappingTokenResolver(tokens_or_resolver or {})  # type: ignore[arg-type]
 
     def authenticate(self, headers: Mapping[str, str], query: str = "") -> Identity:
         tok = _bearer(headers) or _query_token(query)   # header 优先, SSE 无 header 时 ?token= 兜底
         if not tok:
             raise Unauthorized("缺少 Authorization: Bearer <token> 或 ?token=<token>")
-        presented = token_hash(tok)
-        ident = None
-        # 遍历 + 常量时间比对:不因命中/字符差异泄漏时序;hash 本身已使明文不可逆。
-        # 不 break —— 命中后仍走完全表, 使命中/未命中耗时一致(消除"提前返回"时序侧信道)。
-        for h, meta in self._by_hash.items():
-            if hmac.compare_digest(h, presented):
-                ident = meta
-        if ident is None:
+        meta = self._resolver.resolve(token_hash(tok))
+        if meta is None:
             raise Unauthorized("无效 token")
-        # 过期判定放命中后(不破坏遍历的常量时间特性: 过期 check 不依赖输入字符差异)。
-        if token_expired(ident, time.time()):
+        if token_expired(meta, time.time()):
             raise Unauthorized("token 已过期")
-        # project 白名单解析(ACL 闸2 真值): "*"/["*"]=全部; list/tuple=显式白名单;
-        # 缺省/其它=无权(安全默认, 不给空 token 越权访问所有项目)。
-        raw = ident.get("projects")
-        if raw == "*" or raw == ["*"]:
-            all_projects = True
-            projects: frozenset[str] = frozenset()
-        elif isinstance(raw, (list, tuple)):
-            # 逐个过 project_id 格式校验: 合法保留, 非法跳过 + warning。
-            # 不 raise —— 一条脏配置不应炸掉整个认证, 只剔除该项 (安全侧: 剔除即少放行)。
-            valid: set[str] = set()
-            for p in raw:
-                try:
-                    valid.add(_validate_pid(p))
-                except ProjectIdError as exc:
-                    _log.warning(
-                        "[gateway] token 白名单含非法 project_id %r, 已跳过: %s", p, exc,
-                    )
-            projects = frozenset(valid)
-            all_projects = False
-        else:
-            projects = frozenset()
-            all_projects = False
-        return Identity(
-            user_id=str(ident.get("user_id") or "unknown"),
-            org_id=str(ident.get("org_id") or "default"),
-            via="token",
-            projects=projects,
-            all_projects=all_projects,
-        )
+        return _meta_to_identity(meta)
+
+
+def _build_token_resolver(cfg: dict) -> TokenResolver:
+    """token 模式的 resolver 装配: PG 优先(实时 user-active 校验)+ config 兜底(bootstrap admin)。
+
+    配了 memory.pg_dsn 且 psycopg 可用 → PgTokenResolver 进组合首位(web 管的用户 token 走它,
+    禁用即失效); config `gateway.tokens` 始终作兜底(迁移期 / 单机 bootstrap)。两者皆无 = 纯 config。
+    PG 不可用(缺 psycopg / DSN 坏)优雅降级到 config-only(不挂服务, 同 deps 范式)。
+    """
+    config_tokens = _cfg_get(cfg, "gateway.tokens", {}) or {}
+    resolvers: list[TokenResolver] = []
+    dsn = _cfg_get(cfg, "memory.pg_dsn", None) or os.environ.get("CODEV_PLATFORM_MEMORY_DSN")
+    if dsn:
+        try:
+            from codev_platform.gateway.token_store_pg import PgTokenStore
+            read_dsn = _cfg_get(cfg, "memory.pg_dsn_read", None)
+            resolvers.append(PgTokenResolver(PgTokenStore(dsn, read_dsn=read_dsn)))
+        except Exception as exc:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 降级 config-only, 不挂服务
+            _log.warning("[gateway] PG token store 不可用, 降级 config-only token: %s", exc)
+    resolvers.append(MappingTokenResolver(config_tokens))  # config 始终兜底(bootstrap)
+    return resolvers[0] if len(resolvers) == 1 else CompositeTokenResolver(resolvers)
 
 
 def build_authenticator(cfg: dict | None = None) -> Authenticator:
     """按 config.gateway.auth_mode 选认证器(默认 passthrough)。换模式零改上层。"""
     mode = _cfg_get(cfg or {}, "gateway.auth_mode", "passthrough") if cfg is not None else "passthrough"
     if mode == "token":
-        return TokenAuthenticator(_cfg_get(cfg or {}, "gateway.tokens", {}) or {})
+        return TokenAuthenticator(_build_token_resolver(cfg or {}))
     return PassthroughAuthenticator()
 
 

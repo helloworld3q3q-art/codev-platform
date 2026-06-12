@@ -65,9 +65,110 @@ def _expires_disp(meta: dict, now: float) -> str:
     return f"{int(exp_f - now)}s 后到期"
 
 
+def _pg_token_store():
+    """构造 PgTokenStore(config memory.pg_dsn); None(dsn 未配 / psycopg 缺)→ 打印指引, 调用方退非 0。
+
+    PG token 与 config token 的区别(为何另起一套): PG token→user 走库, 认证时 join users.status
+    实时校验, web 禁用用户即失效; config token 是静态快照禁用不了。多 dev server 用 PG, 单机可用 config。
+    """
+    from codev_platform.core.config import get, load_config
+    cfg = load_config()
+    import os
+    dsn = get(cfg, "memory.pg_dsn", None) or os.environ.get("CODEV_PLATFORM_MEMORY_DSN")
+    if not dsn:
+        _err("FATAL: PG token 需 memory.pg_dsn (或 env CODEV_PLATFORM_MEMORY_DSN) + psycopg。")
+        _err("  单机临时用可改走 config token: codev-platform gateway token-add <user> --projects '*'")
+        return None
+    try:
+        from codev_platform.gateway.token_store_pg import PgTokenStore
+        return PgTokenStore(dsn, read_dsn=get(cfg, "memory.pg_dsn_read", None))
+    except Exception as exc:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 友好退非 0, 不 raise
+        _err(f"FATAL: PG token store 不可用: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _cmd_pg_token(args: argparse.Namespace) -> int:
+    """PG token 子命令: issue / revoke / revoke-user / list。明文只在 issue 打印一次。"""
+    from codev_platform.gateway.auth import token_hash
+    store = _pg_token_store()
+    if store is None:
+        return 1
+    try:
+        if args.action == "pg-token-issue":
+            if not args.arg:
+                _err("FATAL: pg-token issue 需 <user_id> (须先 codev-platform org add-user <user>)")
+                return 1
+            raw = args.projects
+            if raw is None or raw.strip() == "":
+                projects = None
+                _out("WARN: 未指定 --projects: 此 token 无任何项目访问权 (用 --projects pid1,pid2 或 '*')")
+            elif raw.strip() == "*":
+                projects = "*"
+            else:
+                projects = [p.strip() for p in raw.split(",") if p.strip()]
+            try:
+                ttl = parse_duration(getattr(args, "expires", None))
+            except ValueError as exc:
+                _err(f"FATAL: {exc}")
+                return 1
+            tok = secrets.token_urlsafe(32)
+            exp = time.time() + ttl if ttl is not None else None
+            store.issue(token_hash(tok), args.arg, args.org,
+                        projects=projects, label=getattr(args, "label", None), expires_at=exp)
+            exp_disp = _expires_disp({"expires_at": exp}, time.time()) if exp else "永久"
+            _out("PG token 已签发 (明文只显示这一次, 存好):")
+            _out("")
+            _out(f"    {tok}")
+            _out("")
+            _out(f"  user_id={args.arg}  org_id={args.org}  projects={projects if projects is not None else '(无项目权)'}  expires={exp_disp}")
+            _out("  禁用即失效: web 把该 user 置 DISABLED 后此 token 下一请求即拒 (config token 做不到)。")
+            _out("  客户端: export PLATFORM_TOKEN='<上面 token>'  +  codev-platform gateway client-auth")
+            return 0
+
+        if args.action == "pg-token-revoke":
+            if not args.arg:
+                _err("FATAL: pg-token revoke 需 <hash 前缀>")
+                return 1
+            n = store.revoke(args.arg)
+            _out(f"OK: 吊销 {n} 个 token (status=REVOKED)" if n else f"未找到匹配 '{args.arg}' 的 active token")
+            return 0 if n else 1
+
+        if args.action == "pg-token-revoke-user":
+            if not args.arg:
+                _err("FATAL: pg-token revoke-user 需 <user_id>")
+                return 1
+            n = store.revoke_user(args.arg)
+            _out(f"OK: 吊销 user '{args.arg}' 的 {n} 个 active token")
+            return 0
+
+        if args.action == "pg-token-list":
+            rows = store.list_tokens(args.arg or None)
+            if not rows:
+                _out("(无 PG token)")
+                return 0
+            now = time.time()
+            _out(f"PG token {len(rows)} 个:")
+            for r in rows:
+                proj = r["projects"] if r["projects"] not in (None, "") else "(无项目权)"
+                _out(f"  user={r['user_id']}  org={r['org_id']}  projects={proj}  "
+                     f"status={r['status']}  expires={_expires_disp(r, now)}  "
+                     f"label={r.get('label') or '-'}  hash={r['token_hash'][:12]}...")
+            return 0
+    except Exception as exc:  # noqa: BLE001 — 连库 / FK(user 不存在)等运行期错, 友好退非 0
+        _err(f"FATAL: 操作失败 (连库 / user 未建?): {type(exc).__name__}: {exc}")
+        _err("  确认 database 已建 + 先 codev-platform org add-user <user> (agent_tokens 外键依赖 users)。")
+        return 1
+
+    _err(f"unknown pg-token action: {args.action}")
+    return 1
+
+
 def cmd_gateway(args: argparse.Namespace) -> int:
     from codev_platform.core.config import load_config, save_config, get
     from codev_platform.gateway.auth import token_hash
+
+    if args.action.startswith("pg-token-"):
+        return _cmd_pg_token(args)
 
     if args.action == "mode":
         if args.arg not in ("passthrough", "token"):
@@ -310,14 +411,20 @@ def cmd_gateway(args: argparse.Namespace) -> int:
 
 
 def register(subparsers) -> None:
-    gw = subparsers.add_parser("gateway", help="gateway 鉴权管理 (mode / token-add / token-list / token-rm / token-rotate / client-auth / client-url)")
-    gw.add_argument("action", choices=["mode", "token-add", "token-list", "token-rm", "token-rotate", "client-auth", "client-url"])
-    gw.add_argument("arg", nargs="?", default=None, help="mode: passthrough|token; token-add/rm/rotate: user")
-    gw.add_argument("--org", default="default", help="token-add: org_id (默认 default)")
+    gw = subparsers.add_parser("gateway", help="gateway 鉴权管理 (mode / token-* config / pg-token-* PG / client-auth / client-url)")
+    gw.add_argument("action", choices=[
+        "mode", "token-add", "token-list", "token-rm", "token-rotate",
+        "pg-token-issue", "pg-token-revoke", "pg-token-revoke-user", "pg-token-list",
+        "client-auth", "client-url",
+    ])
+    gw.add_argument("arg", nargs="?", default=None,
+                    help="mode: passthrough|token; token/pg-token-issue/revoke: user 或 hash前缀")
+    gw.add_argument("--org", default="default", help="token-add / pg-token-issue: org_id (默认 default)")
     gw.add_argument("--projects", default=None,
-                    help="token-add: 可访问项目, 逗号分隔 pid1,pid2 或 '*' 全部; 缺省=无权")
+                    help="token-add / pg-token-issue: 可访问项目, 逗号分隔 pid1,pid2 或 '*' 全部; 缺省=无权")
     gw.add_argument("--expires", default=None,
-                    help="token-add/rotate: 有效期 30d/12h/90m/45s; 缺省/空=永久")
+                    help="token-add/rotate / pg-token-issue: 有效期 30d/12h/90m/45s; 缺省/空=永久")
+    gw.add_argument("--label", default=None, help="pg-token-issue: 人读备注 (如 'alice laptop')")
     gw.add_argument("--repo", default=None, help="client-auth/client-url: 业务仓路径 (默认 cwd)")
     gw.add_argument("--base", default=None, help="client-url: 远程反代基地址 (https://host)")
     gw.add_argument("--env", default="PLATFORM_TOKEN", help="client-auth: header 引用的 env 变量名 / query-token 明文来源 env")
