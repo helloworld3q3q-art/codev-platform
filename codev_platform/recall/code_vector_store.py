@@ -56,6 +56,29 @@ def _resolve_skip_kinds(cfg: dict) -> frozenset:
     return _DEFAULT_SKIP_KINDS
 
 
+def _existing_chroma_healthy(persist) -> bool:
+    """增量续跑前探活既有 code_vec 库。
+
+    被 SIGKILL(如 worker 超时 timeout)中断在 flush 中途的 chroma 库会留**半写坏的 sqlite/
+    segment**; 再往上 upsert 会触发 compaction 522 → 'database disk image is malformed' 把库彻底
+    搞崩(2026-06-12 ideas-v2 实证)。续跑前读侧 quick_check 探一下, 坏了让调用方退全量 rmtree 拿
+    干净库 —— 自愈而非接脏库越写越烂。读侧独立连接即开即关, 不引入 chromadb client 缓存副作用。
+    无库文件(首建)视为健康(交全量逻辑处理)。"""
+    db = persist / "chroma.sqlite3"
+    if not db.exists():
+        return True
+    import sqlite3
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            row = con.execute("PRAGMA quick_check").fetchone()
+            return bool(row) and str(row[0]).lower() == "ok"
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 — 打不开/读不出 = 已损坏 → 退全量
+        return False
+
+
 def code_vec_collection_name(project_id: str) -> str:
     """该项目的代码向量 collection 名(与 platform_docs / agent_memory 隔离)。"""
     return chroma_collection_name(project_id, "code_vec")
@@ -400,6 +423,11 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
             logger.warning("[code_vec] %s: 源码富化模式 %s->%s(repo 解析翻转), 强制全量重建"
                            "(否则会误报 incremental 且检索文本降级)", project_id, old_enrich, enrich_now)
             full = True
+    # R5(2026-06-12): 增量续跑前探活既有库 —— 被 SIGKILL(worker 超时)中断的库 sqlite/segment 半
+    # 写坏, 再 upsert 会触发 compaction 522/malformed 彻底崩。探到坏即退全量 rmtree 拿干净库自愈。
+    if not full and incremental and not _existing_chroma_healthy(persist):
+        logger.warning("[code_vec] %s: 既有库探活失败(疑似被中断写坏), 转全量重建(rmtree)", project_id)
+        full = True
     if full:
         shutil.rmtree(persist, ignore_errors=True)
         _warn_persist_residue(persist)   # R1: rmtree 静默失败留残留 → 只 warn(单 collection 重灌安全)

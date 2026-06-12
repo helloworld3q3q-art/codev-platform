@@ -8,10 +8,13 @@ from pathlib import Path
 
 from codev_platform.recall.code_vector_store import (
     _CHUNK_BODY_CHARS,
+    _DEFAULT_SKIP_KINDS,
+    _existing_chroma_healthy,
     _node_chunks,
     _node_id_of,
     _head_at_line_boundary,
     _parse_query_result,
+    _resolve_skip_kinds,
     _window_lines,
 )
 
@@ -97,3 +100,49 @@ def test_parse_query_result_backward_compat_no_node_meta():
            "metadatas": [[{"name": "fa"}, {"name": "fa"}, {"name": "fb"}]]}
     ranked, _ = _parse_query_result(res)
     assert ranked == ["a", "b"]
+
+
+# ---- skip_kinds 配置化(默认不变, config 可覆盖) ----
+
+def test_resolve_skip_kinds_default_unchanged():
+    """config 未设 → 默认 import/file/variable, 平台与现存项目行为零改动。"""
+    assert _resolve_skip_kinds({}) == _DEFAULT_SKIP_KINDS
+    assert _resolve_skip_kinds({"recall": {}}) == _DEFAULT_SKIP_KINDS
+
+
+def test_resolve_skip_kinds_config_override():
+    """config 设 list → 按 config(小写归一); Java 重仓可再排 field。"""
+    cfg = {"recall": {"code_vec": {"skip_kinds": ["import", "File", "VARIABLE", "field"]}}}
+    assert _resolve_skip_kinds(cfg) == frozenset({"import", "file", "variable", "field"})
+
+
+def test_resolve_skip_kinds_empty_list_skips_nothing():
+    """显式空 list = 不排除任何 kind = 全量嵌(区别于 None=默认)。"""
+    cfg = {"recall": {"code_vec": {"skip_kinds": []}}}
+    assert _resolve_skip_kinds(cfg) == frozenset()
+
+
+# ---- 增量续跑前探活(被中断写坏的库 → 退全量自愈) ----
+
+def test_existing_chroma_healthy_missing_db_is_healthy(tmp_path):
+    """首建无库文件 → 视为健康(交全量逻辑处理), 不误判。"""
+    assert _existing_chroma_healthy(tmp_path) is True
+
+
+def test_existing_chroma_healthy_valid_sqlite(tmp_path):
+    """正常 sqlite 库 → quick_check ok → 健康, 允许增量续跑。"""
+    import sqlite3
+    db = tmp_path / "chroma.sqlite3"
+    con = sqlite3.connect(db)
+    con.execute("create table t(x int)")
+    con.execute("insert into t values (1)")
+    con.commit()
+    con.close()
+    assert _existing_chroma_healthy(tmp_path) is True
+
+
+def test_existing_chroma_healthy_corrupt_file_detected(tmp_path):
+    """被中断写坏的库(非法 sqlite 字节)→ 探活失败 → 调用方退全量 rmtree 自愈。"""
+    db = tmp_path / "chroma.sqlite3"
+    db.write_bytes(b"SQLite format 3\x00" + b"\xff" * 4096)   # 伪头 + 垃圾 → malformed
+    assert _existing_chroma_healthy(tmp_path) is False
