@@ -1,0 +1,7 @@
+{
+  "project_id": "ideas-pda-app",
+  "display_name": "Ideas PDA App (RF 手持前端)",
+  "repo_url": "http://10.0.2.37/ideas-pda-app/Ideas-pda-app-hb.git",
+  "repo_path": "/home/helloworld/work/Ideas-pda-app-hb",
+  "notes": "uni-app(Vue) RF 手持 PDA 前端; 后端走 ideas-v2。同时作为 ideas-v2 的 extra_repos 参与统一图谱跨仓链路。"
+}

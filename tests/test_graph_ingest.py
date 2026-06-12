@@ -165,6 +165,32 @@ def test_resolve_repos_config_and_dedup(tmp_path, monkeypatch):
     assert _resolve_repos(main, "p", [str(main)]) == [main.resolve()]
 
 
+def test_resolve_meta_extra_entries_project_id_and_path():
+    # meta.json extra_repos: project-id 引用解析成其 repo_path(可移植); 字面路径透传; 空项跳过。
+    from codev_platform.graph.ingest import _resolve_meta_extra_entries
+    cfg = {"projects": {"ideas-pda-app": {"repo_path": "/x/pda"}}}
+    assert _resolve_meta_extra_entries(["ideas-pda-app", "/abs/other", "", "  "], cfg) == ["/x/pda", "/abs/other"]
+    # 未登记 project-id → 当字面值(不丢)
+    assert _resolve_meta_extra_entries(["unknown-proj"], {"projects": {}}) == ["unknown-proj"]
+    assert _resolve_meta_extra_entries([], cfg) == []
+
+
+def test_meta_extra_repos_absent_returns_empty():
+    # 不存在的 project → 无 meta.json → [](优雅降级, 回退用户 config)。
+    from codev_platform.graph.ingest import _meta_extra_repos
+    assert _meta_extra_repos("no-such-project-xyz", {"projects": {}}) == []
+
+
+def test_resolve_repos_merges_meta_extra(tmp_path, monkeypatch):
+    # meta.json 声明的可移植 extra_repos 与用户 config 合并(git 版本化跨仓关系换机不丢)。
+    from codev_platform.graph import ingest as _ing
+    main = tmp_path / "main"; main.mkdir()
+    pda = tmp_path / "pda"; pda.mkdir()
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr(_ing, "_meta_extra_repos", lambda pid, cfg: [str(pda)])
+    assert pda.resolve() in _ing._resolve_repos(main, "ideas-v2", None)
+
+
 def test_multiroot_merges_both_repos_no_overwrite(tmp_path):
     clear_registry()
     register_plugin(_RepoNodePlugin())
