@@ -26,18 +26,51 @@ from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode, NodeKind
 
 from ._common import _has_file_with_suffix, _rel, logger
 
-# depcruise config 模板: tsConfig 启用 tsconfig-paths 解 alias(见模块 docstring 🔑)。
-# %s = 项目 tsconfig 文件名(相对前端根)。单引号 here-doc 风格, 不插值业务数据。
-_DEPCRUISE_CONFIG_TMPL = """module.exports = {
-  options: {
-    doNotFollow: { path: "node_modules" },
-    includeOnly: "^src",
-    tsConfig: { fileName: %s },
-    tsPreCompilationDeps: true,
-    enhancedResolveOptions: { extensions: [".ts", ".tsx", ".js", ".jsx", ".vue", ".json", ".d.ts"] }
-  }
-};
+# depcruise config 模板: alias 解析**不写死 tsconfig** —— 随项目实际用的配置走(tsconfig/jsconfig
+# 解 tsconfig-paths;都没有的 uni-app 等用 enhancedResolveOptions.alias `@/`→根)。这样一个项目下
+# 结构各异的多个前端(React src+tsconfig / Vue src / uni-app pages 无 ts)都能扫到依赖, 不只 src 一种。
+# {include}=includeOnly 正则; {resolve}=tsConfig 段(指向项目自带 ts/jsconfig 或合成的临时 jsconfig
+# 解 `@/` alias —— depcruise 的 alias 只认 tsConfig/webpackConfig, enhancedResolveOptions 不收 alias)。
+_DEPCRUISE_CONFIG_TMPL = """module.exports = {{
+  options: {{
+    doNotFollow: {{ path: "node_modules" }},
+    includeOnly: "{include}",
+    {resolve}
+    enhancedResolveOptions: {{ extensions: [".ts", ".tsx", ".js", ".jsx", ".vue", ".json", ".d.ts"] }}
+  }}
+}};
 """
+
+# 组件源目录候选: 覆盖 React/Vue 的 src、uni-app 的 pages、以及 components/common/store/views 等。
+# 检测"哪些目录真有组件"而非写死 src —— 一前端多结构、一项目多前端都通用。
+_COMPONENT_DIRS = ("src", "pages", "components", "common", "store", "views", "app")
+
+
+def _component_dirs(front: Path) -> list[str]:
+    """该前端根下真正含组件(.vue/.tsx/.jsx)的源目录(相对根)。空 = 非前端根。"""
+    out: list[str] = []
+    for c in _COMPONENT_DIRS:
+        d = front / c
+        if d.is_dir() and any(_has_file_with_suffix(d, s) for s in (".vue", ".tsx", ".jsx")):
+            out.append(c)
+    return out
+
+
+def _resolve_setup(front: Path) -> tuple[str, list[Path]]:
+    """alias 解析配置(随项目实际 config 走, 不写死 tsconfig)。返回 (tsConfig 配置段, 待清理临时文件)。
+
+    - 项目自带 tsconfig.json / jsconfig.json → 直接用(tsconfig-paths 解 `@/` 等)。
+    - 都没有(uni-app 等)→ 合成临时 jsconfig: `@/*` → src/(有 src)否则项目根。depcruise alias
+      只认 tsConfig/webpackConfig, 故走合成 jsconfig 这条(临时文件跑完即删, 不污染用户仓)。"""
+    for cfg in ("tsconfig.json", "jsconfig.json"):
+        if (front / cfg).is_file():
+            return (f"tsConfig: {{ fileName: {json.dumps(cfg)} }},\n    tsPreCompilationDeps: true,", [])
+    base = "./src/*" if (front / "src").is_dir() else "./*"
+    syn = front / f".jsconfig.codev.{os.getpid()}.json"
+    syn.write_text(
+        json.dumps({"compilerOptions": {"baseUrl": ".", "paths": {"@/*": [base]}}}),
+        encoding="utf-8")
+    return (f"tsConfig: {{ fileName: {json.dumps(syn.name)} }},", [syn])
 _DEPCRUISE_PKG = "dependency-cruiser@17"  # pin major(17 = 当前最新). ⚠️ 勿降 16: 实测 16.10.4
 # 解析不全(platform 依赖边 254 vs 17.4.3 的 524, barrel/re-export 传递链断 → 反向"影响页面"全空)
 _TIMEOUT_S = 300
@@ -80,18 +113,19 @@ def _depcruise_base(front: Path) -> list[str] | None:
 
 
 def _src_fingerprint(front: Path) -> str:
-    """src 下前端源文件 (rel, mtime_ns, size) 聚合 hash —— 快(不读内容), 文件增删改即变。"""
+    """组件目录下前端源文件 (rel, mtime_ns, size) 聚合 hash —— 快(不读内容), 文件增删改即变。
+    覆盖实际组件目录(src/pages/...)而非写死 src, 否则 uni-app(pages/)缓存指纹恒空永不刷新。"""
     import hashlib
     h = hashlib.sha256()
-    src = front / "src"
-    for f in sorted(src.rglob("*")):
-        if f.suffix not in (".ts", ".tsx", ".js", ".jsx", ".vue") or _SKIP_PARTS & set(f.parts):
-            continue
-        try:
-            st = f.stat()
-        except OSError:
-            continue
-        h.update(f"{f.relative_to(front)}:{st.st_mtime_ns}:{st.st_size}\n".encode())
+    for c in _component_dirs(front):
+        for f in sorted((front / c).rglob("*")):
+            if f.suffix not in (".ts", ".tsx", ".js", ".jsx", ".vue") or _SKIP_PARTS & set(f.parts):
+                continue
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            h.update(f"{f.relative_to(front)}:{st.st_mtime_ns}:{st.st_size}\n".encode())
     return h.hexdigest()
 
 
@@ -109,22 +143,22 @@ def _cache_file(project_id: str, front: Path) -> Path | None:
 
 
 def _frontend_roots(repo: Path) -> list[Path]:
-    """找前端子目录: 含 tsconfig.json + src/ 且 src 下有 .tsx(React)或 .vue(Vue)组件。
+    """找前端项目根: 有 package.json **且**某组件目录(src/pages/components...)下有 .vue/.tsx/.jsx。
 
-    os.walk + 原地剪枝 node_modules/.git/dist 等 —— rglob 会**遍历进 node_modules**, 在
-    monorepo(几万依赖文件)上每次 scan 巨慢(实测 platform ~22s/次), 剪枝后秒级。
+    不再写死"tsconfig + src/"(那漏掉 uni-app=pages/无tsconfig、Vue 无 ts 等结构 —— 一项目挂
+    多个结构各异的前端时它们都得能扫到)。os.walk + 原地剪枝 node_modules/.git/dist(rglob 进
+    node_modules 在 monorepo 上巨慢)。找到一个前端根后不再下钻其子目录(避免把它的子目录也当根)。
     """
     import os
     roots: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(repo):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_PARTS]  # 原地剪枝, 不下钻这些
-        if "tsconfig.json" not in filenames:
+        if "package.json" not in filenames:
             continue
         d = Path(dirpath)
-        src = d / "src"
-        if src.is_dir() and (_has_file_with_suffix(src, ".tsx")
-                             or _has_file_with_suffix(src, ".vue")):
+        if _component_dirs(d):
             roots.append(d)
+            dirnames[:] = []   # 已是前端根 → 不再下钻子目录当独立根
     return roots
 
 
@@ -147,17 +181,26 @@ def _run_depcruise(front: Path, project_id: str) -> dict | None:
                 return cached["data"]  # 命中: src 未变, 跳过整个 depcruise
         except (OSError, ValueError):
             pass  # 缓存损坏 → 重跑
+    dirs = _component_dirs(front)
+    if not dirs:
+        return None
+    include = "^(" + "|".join(dirs) + ")"            # includeOnly 覆盖实际组件目录, 不写死 ^src
+    ts_cfg, _tmp = _resolve_setup(front)
+    scan_glob = (dirs[0] + "/**/*.{ts,tsx,jsx,js,vue}") if len(dirs) == 1 \
+        else "{" + ",".join(dirs) + "}/**/*.{ts,tsx,jsx,js,vue}"
     cfg = front / f".dependency-cruiser.codev.{os.getpid()}.cjs"
     try:
-        cfg.write_text(_DEPCRUISE_CONFIG_TMPL % json.dumps("tsconfig.json"), encoding="utf-8")
+        cfg.write_text(
+            _DEPCRUISE_CONFIG_TMPL.format(include=include, resolve=ts_cfg),
+            encoding="utf-8")
         proc = subprocess.run(
-            [*base, "--config", cfg.name, "--output-type", "json",
-             "src/**/*.{ts,tsx,jsx,js,vue}"],
+            [*base, "--config", cfg.name, "--output-type", "json", scan_glob],
             cwd=str(front), capture_output=True, text=True, encoding="utf-8",
             timeout=_TIMEOUT_S, shell=False,
         )
         if proc.returncode != 0 or not proc.stdout.strip():
-            logger.warning("[frontend_deps] depcruise rc=%s at %s", proc.returncode, front)
+            logger.warning("[frontend_deps] depcruise rc=%s at %s: %s",
+                           proc.returncode, front, (proc.stderr or "").strip()[:300])
             return None
         data = json.loads(proc.stdout)
         if cf is not None:
@@ -171,6 +214,8 @@ def _run_depcruise(front: Path, project_id: str) -> dict | None:
         return None
     finally:
         cfg.unlink(missing_ok=True)
+        for t in _tmp:                       # 合成的临时 jsconfig(若有)清理, 不污染用户仓
+            t.unlink(missing_ok=True)
 
 
 def scan_frontend_deps(
