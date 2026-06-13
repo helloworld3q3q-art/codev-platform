@@ -8,6 +8,11 @@
 A 库、handler 查 B 库 → 403。account_store 已靠各测试的 reset_account_stores() 自愈, 本夹具给
 **其余 web 单例**补同样的隔离: 每测试快照 + 还原。
 
+⚠️ **勿把 account_store 加进 `_WEB_SINGLETONS`**: 它的 `_active` 是**原地 mutate 的 dict**
+(`bind_account_stores`/`reset_account_stores` 都 `_active.update(...)`, 不重新赋值), 而本夹具的
+getattr/setattr 快照只对"重新赋值"的单例有效 —— 对原地 mutate 的 dict, 快照拿到同一引用、setattr
+还原是 no-op = **假覆盖**。account_store 的隔离只能走 `reset_account_stores()`(故意不在此)。
+
 **仅当相关模块已 import 时才动**(Windows 无 fastapi → web 模块从未 import → snap 为空 → 纯 no-op,
 绝不影响非 web 测试的收集 / 运行)。
 """
