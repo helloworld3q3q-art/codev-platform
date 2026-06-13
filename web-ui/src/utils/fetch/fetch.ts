@@ -260,6 +260,58 @@ export const post = <T extends BaseApiResponse>({
   return wrapRequest('POST', url, data, requestFactory);
 };
 
+// SSE 流式请求 —— 生成接口层(axios)读不了 ReadableStream, 流式对话(/chat/stream)走它。
+// 复用与 axios 拦截器**相同**的鉴权头(auth_token / current_project / current_org)+ 401 清登录态
+// 跳登录, 与 post() 同源不另起一套。返回**原始 ReadableStream**(不解析 SSE 帧, 由调用方按业务
+// 解析 data: 帧); signal 支持取消(标准 fetch 能力)。不进重复请求合并(流式天然唯一)。
+export const sseRequestStream = async ({
+  url,
+  data,
+  signal,
+}: {
+  url: string;
+  data?: Record<string, unknown>;
+  signal?: AbortSignal;
+}): Promise<ReadableStream<Uint8Array>> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+    'Cache-Control': 'no-cache',
+  };
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const projectId = localStorage.getItem('current_project');
+  if (projectId) {
+    headers['X-Project-Id'] = projectId;
+  }
+  const orgId = localStorage.getItem('current_org');
+  if (orgId) {
+    headers['X-Org-Id'] = orgId;
+  }
+
+  const resp = await fetch(url, {
+    method: data ? 'POST' : 'GET',
+    headers,
+    body: data ? JSON.stringify(data) : undefined,
+    signal,
+  });
+
+  if (resp.status === 401) {
+    clearAuthAndRedirect(); // 与 axios 401 同处理:清登录态跳登录
+    throw new Error('登录已过期，请重新登录');
+  }
+  if (!resp.ok) {
+    await message.error(`响应错误，状态码: ${resp.status}`);
+    throw new Error(`HTTP error! status: ${resp.status}`);
+  }
+  if (!resp.body) {
+    throw new Error('Response body is null');
+  }
+  return resp.body;
+};
+
 // get请求
 export const get = <T extends BaseApiResponse>({
   url,

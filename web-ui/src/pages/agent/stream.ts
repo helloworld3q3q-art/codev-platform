@@ -1,6 +1,8 @@
-// 流式对话 SSE 读取器 —— 生成接口层(axios)无法读 ReadableStream, 故对 /chat/stream 用原生
-// fetch + ReadableStream。鉴权头手动复刻 fetch.ts 拦截器(Authorization / X-Project-Id /
-// X-Org-Id), 因绕过了 axios 实例。后端帧形: data: {"kind","data"}\n\n(kind=token|step|done|error)。
+// 流式对话 SSE 解析器 —— 传输(fetch + 鉴权头 + 401)走共享 @/utils/fetch 的 sseRequestStream,
+// 本文件只负责把后端 SSE 帧(data: {"kind","data"}\n\n)解析成业务回调。与姊妹项目把传输放
+// utils/fetch、解析放页面侧的分层一致(本版 @ant-design/x 无 XStream, 解析需手写)。
+
+import { sseRequestStream } from '@/utils/fetch';
 
 export interface StreamStep {
   n?: number;
@@ -24,23 +26,6 @@ export interface StreamHandlers {
   onDone: (data: StreamDone) => void;
   onError: (message: string) => void;
 }
-
-const buildHeaders = (): Record<string, string> => {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  const projectId = localStorage.getItem('current_project');
-  if (projectId) {
-    headers['X-Project-Id'] = projectId;
-  }
-  const orgId = localStorage.getItem('current_org');
-  if (orgId) {
-    headers['X-Org-Id'] = orgId;
-  }
-  return headers;
-};
 
 const asObj = (v: unknown): Record<string, unknown> => {
   if (v && typeof v === 'object') {
@@ -87,25 +72,19 @@ const dispatch = (evt: unknown, h: StreamHandlers): void => {
   }
 };
 
-// 返回是否走通了流式(true=已 onDone;false=未建流, 调用方回退非流式)。
+// 返回是否走通了流式(true=正常读完;false=未建流, 调用方回退非流式)。
 export async function streamAgentChat(
   body: { question: string; sessionId?: string; maxSteps?: number },
   handlers: StreamHandlers,
+  signal?: AbortSignal,
 ): Promise<boolean> {
-  let resp: Response;
+  let stream: ReadableStream<Uint8Array>;
   try {
-    resp = await fetch('/api/v1/agent/chat/stream', {
-      method: 'POST',
-      headers: buildHeaders(),
-      body: JSON.stringify(body),
-    });
+    stream = await sseRequestStream({ url: '/api/v1/agent/chat/stream', data: body, signal });
   } catch {
-    return false; // 建连失败 → 回退非流式
+    return false; // 建连失败(含 401 已跳登录)→ 调用方回退非流式
   }
-  if (!resp.ok || !resp.body) {
-    return false;
-  }
-  const reader = resp.body.getReader();
+  const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buf = '';
   for (;;) {
