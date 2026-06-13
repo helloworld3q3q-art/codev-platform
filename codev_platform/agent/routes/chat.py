@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 
+import anyio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -121,21 +122,38 @@ def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
     再改 HTTP 状态(头已发) → 改发 error 事件帧, 前端据此回退非流式 /chat。
     """
     user_id, org_id, project_id, ident = _authorize(req, request)
+    svc = deps.get_chat_service()
 
-    def _events():
-        try:
-            for ev in deps.get_chat_service().ask_stream(
-                req.question, req.session_id, req.max_steps,
-                user_id=user_id, project_id=project_id, org_id=org_id,
-                task_id=req.task_id, identity=ident):
-                yield _sse_frame(ev.kind, ev.data)
-        except RuntimeError as e:  # provider 缺 key / 下游不可用
-            _log.warning("chat_stream upstream unavailable: %s", e)
-            yield _sse_frame("error", {"message": "agent provider unavailable",
-                                       "code": ErrorCode.UPSTREAM_UNAVAILABLE.value})
-        except Exception as e:  # noqa: BLE001 — 开流后任何异常都转 error 帧, 不让连接裸断
-            _log.exception("chat_stream failed: %s", e)
-            yield _sse_frame("error", {"message": "internal error"})
+    # ask_stream 是同步生成器, 内部用 contextvar(RunContext)管运行身份。Starlette 默认迭代同步
+    # 生成器会丢进 threadpool 且每次 __next__ 可能换线程 → set/reset_run_context 跨 Context 报
+    # ValueError、loop 内工具也可能读不到 RunContext。故整段同步消费固定在**单个**工作线程
+    # (to_thread.run_sync), SSE 帧经 memory stream 桥回事件循环逐帧发, contextvar 全程同线程一致。
+    async def _events():
+        send, recv = anyio.create_memory_object_stream(64)
+
+        def _produce() -> None:
+            try:
+                for ev in svc.ask_stream(
+                    req.question, req.session_id, req.max_steps,
+                    user_id=user_id, project_id=project_id, org_id=org_id,
+                    task_id=req.task_id, identity=ident):
+                    anyio.from_thread.run(send.send, _sse_frame(ev.kind, ev.data))
+            except RuntimeError as e:  # provider 缺 key / 下游不可用
+                _log.warning("chat_stream upstream unavailable: %s", e)
+                anyio.from_thread.run(send.send, _sse_frame(
+                    "error", {"message": "agent provider unavailable",
+                              "code": ErrorCode.UPSTREAM_UNAVAILABLE.value}))
+            except Exception as e:  # noqa: BLE001 — 开流后任何异常都转 error 帧, 不让连接裸断
+                _log.exception("chat_stream failed: %s", e)
+                anyio.from_thread.run(send.send, _sse_frame("error", {"message": "internal error"}))
+            finally:
+                anyio.from_thread.run(send.aclose)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(anyio.to_thread.run_sync, _produce)
+            async with recv:
+                async for frame in recv:
+                    yield frame
 
     # X-Accel-Buffering: no → 反代(nginx/caddy)不缓冲 SSE; no-cache 防中间层缓存。
     return StreamingResponse(_events(), media_type="text/event-stream",
