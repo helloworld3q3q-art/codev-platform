@@ -1,17 +1,48 @@
 # CLAUDE.md — codev-platform
 
 > AI 协作工具栈本体仓。通过 `pip install -e .` 被各业务仓引用。
+> **禁止在本文件 autoload 规则全文**(避免新会话即占满上下文)。规则按需读取:先看 `.claude/rules/workflow.md` §3 任务分级 + §6 任务映射,按本次任务读对应规则;规则清单见下方「规则索引」。
 
 ---
 
-## 0. 核心协议(不可漂移)
+## 0. 核心协议(不可漂移,inline 必读)
 
-1. **改文件前**:任务分级 + MCP 选型见 `.claude/rules/workflow.md`
+1. **改文件前**:先读 `.claude/rules/workflow.md` §3 任务分级 + §6 任务映射,按表读对应源规则,**不得只凭记忆**
 2. **门禁声明**:首次修改前一句话说明 — 触及层 / 适用规则 / 关键约束 / 验证方式
-3. **commit 不带 AI 痕迹**:禁 `Co-Authored-By: Claude` / `Generated with`(详见 `.claude/rules/commit-pr-conventions.md`)
-4. **PowerShell 脚本**:`.ps1` 禁含非 ASCII;读中文 MD/JSON 必须 `-Encoding UTF8`
-5. **MCP 优先 grep+Read**:按 `.claude/rules/workflow.md §3.2` 任务映射
-6. **改完同步业务仓 shim**:业务仓内有 thin shim re-export 自本仓,新增 symbol 要在 shim 加导出
+3. **未过门禁不得修改**:如已先改后说,停手 → 说明不合规点 + 影响 + 建议,等用户确认
+4. **不回滚用户未提交改动**:发现未知文件 / 未知分支先问
+5. **commit 不带 AI 痕迹**:禁 `Co-Authored-By: Claude` / `Generated with`(详见 `.claude/rules/commit-pr-conventions.md`)
+6. **PowerShell 脚本**:`.ps1` 禁含非 ASCII;读中文 MD/JSON/log 必须 `-Encoding UTF8`(`.claude/rules/windows-powershell.md`)
+7. **默认禁手改**:`.venv/` / `data/` / `.codegraph/`(运行态)/ `codev_platform/resources/{rules,skills,hooks}/`(分发真值源,改后必验 sync)/ `~/.codev-platform/config.json`(用户主权)/ `web-ui/src/services/**`(生成 API 层)。详见 `.claude/rules/workflow.md §2`
+8. **MCP 必须优先于 Grep,且按 workflow.md §4/§6 选对应 MCP**:**所有阶段**(开发 / 设计 / 分析文档 / 分析代码 / 审计)找 symbol / 调用链 / 规则 / 数据流,必须按任务类型主动选 MCP:
+   - 找代码符号 / 调用链 / 影响面 → `codegraph_search` / `codegraph_callers` / `codegraph_callees` / `codegraph_context` / `codegraph_impact`
+   - 找规则 / 设计文档 / 事故复盘 → `search_docs(query, module=?)`
+   - 找跨层链路 / 业务域(CLI ↔ resources、graph/chroma/codegraph 数据流)→ `graph` `find_table_usage` / `find_api_callers` / `find_impact` / `search_nodes`
+   - **选错 MCP** 视同没调(详见 workflow.md §6 任务映射表)
+9. **禁止不声明直接 Grep**:调 Grep 前必须在响应内显式声明例外类型 — `[Grep 例外: 索引滞后 / 看未提交改动 / 查 log 或归档非索引文件 / MCP 不可用 / Edit 前定位精确字符串 / 验证刚 Edit 的结果 / 查 git diff 或 git log 输出 / 其他<必填具体理由>]`。本仓已装 PreToolUse(Grep) hook 提醒,但 hook 只提醒、**不替代声明**。未声明直接 Grep = 视同违反 §8。**审计 agent 必查所有阶段 Grep 调用是否带例外声明 + MCP 选型是否对应 §6**
+10. **MCP 不可用**:说明一次,grep + Read 兜底,不反复重试
+11. **改完同步业务仓 shim**:业务仓内有 thin shim re-export 自本仓,新增 symbol 要在 shim 加导出
+12. **派 subagent 必查 workflow.md §12**:派审计 / 实施 agent 时直接抄 §12 的 prompt 模板(给边界 + 抛具体 MCP 调用清单 + final report 自报),**不要现编**
+13. **动手前自报 trigger**(HIGHEST PRIORITY):会话内**首次** Bash(非 `ls`/`git status`/`git log`/`git diff`/`cat`/`pwd`/`echo` 等只读探索)/ Edit / Write **之前**,必须先输出一行声明:`[L1|L2|L3|L4] 任务: <一句话描述> → MCP 计划: <列出本次要调的 MCP 工具名,或"无 — 因为 L1 小改/纯探索/已用过 MCP">`。未自报直接动手 = 视同违反 §0.8。**判级标准**见 workflow.md §3;L2/L3/L4 必须按 §6 / §12 抛具体 MCP 调用,不允许写"看情况"
+
+---
+
+## 规则索引(按需读取,不 autoload)
+
+> 全部在 `.claude/rules/`;改前按 `workflow.md` §3 分级 → §6 映射,定位本次要读哪几条。
+
+| 规则 | 用途 |
+|---|---|
+| `workflow.md` | 本仓全栈工作流:§3 任务分级(L1-L4)/ §4 MCP-first / §6 任务映射 / §12 subagent 模板。**改前必看** |
+| `ai-tools-mcp.md` | MCP 触发指南(codegraph / platform-docs / graph 选型 + 故障应急) |
+| `agent-provider-architecture.md` | agent 多模型接入(按协议族非厂商 / loop 硬护栏) |
+| `code-quality-discipline.md` | 写码红线(低耦合 / 单一职责 / 嵌套深度 / 死代码兜底) |
+| `commit-pr-conventions.md` | commit 不带 AI 痕迹(项目独有红线) |
+| `file-discipline.md` | 单文件规模 + 跨语言判重 + `docs/` 目录归类 |
+| `verification-checklist.md` | 改动后验证清单 + 测试基线红线 + pre-push 审计 |
+| `security.md` | 敏感信息与安全(密码 / token / 免责文案) |
+| `windows-powershell.md` | `.ps1` 编码 + Claude Code 安全检查友好写法 |
+| `weekly-iteration-cadence.md` | 每周迭代节奏 / `docs/plans/roadmap-*` 目录生命周期 |
 
 ---
 
@@ -101,6 +132,14 @@ pyproject.toml            pip 包定义 (package-data 含 resources/**)
 2. **sync** — `codev-platform sync-hooks`(复制脚本 + 幂等 merge PreToolUse hook 进 `.claude/settings.json`,保留现有 settings 不覆盖)
 3. **各业务仓** — 跑一次 `sync-hooks` 即装。node 脚本跨平台(macOS/Linux/Windows),不依赖 powershell/git-bash
 
+### Skills 入口(多步流程真值源)
+
+| 场景 | Skill |
+|---|---|
+| AI 工具栈体检(当前仓 / dirty-check / 全平台视图) | `/ai-health` |
+| 手工重建 AI 索引(Chroma / CodeGraph / graph) | `/update-local-ai` |
+| 标准 commit(合并提交 + post-commit 兜底 + 校验 reindex) | `/git-commit` |
+
 ---
 
 ## 五、跨仓改动协议
@@ -150,3 +189,14 @@ env > config > 代码默认。换机器只改 config,代码不动。
 - `data/`(本仓根,chroma collection + graph_store/<pid>.sqlite 运行态,gitignored;多租户共享,按 project_id 隔离)
 - 各业务仓 `.claude/project.json`(各仓自己写,本仓 CLI 只 init / 不远程改)
 - 用户 `~/.codev-platform/config.json`(用户主权,本仓代码不主动覆盖,只通过 CLI `config init` 或 `--force`)
+
+---
+
+## 九、修改本文件的规则
+
+- **不要 autoload**:本文件禁止加 `@.claude/rules/*.md` 引用(会触发级联 autoload,新会话即吃上下文);规则一律按需读取
+- **新增本仓规则** → 放 `.claude/rules/<name>.md` 并在「规则索引」加一行;跨项目通用规则改 `codev_platform/resources/rules/` 再 `sync-rules`(分层见 §四)
+- **新增 skill** → 加到 §四「Skills 入口」表
+- **章节号被全仓按号引用,严禁 renumber 既有 §一~九**:`workflow.md` 引 `§四`;`docs/*.html` 引 `§五`/`§八`;`docs/plans/`、`docs/log/` 引 `§八`(部分在已归档目录,按 `weekly-iteration-cadence.md §七` 改不得)。新增段落一律用不编号标题(如「规则索引」)或顺延到下一个号
+- **历史进度 / 路线图** → 沉到 `docs/plans/roadmap-*/`,不堆进本文件
+- **改前规则真值源永远是** `.claude/rules/workflow.md`(§3 分级 + §6 映射)
