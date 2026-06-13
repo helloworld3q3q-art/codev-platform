@@ -25,7 +25,12 @@ from codev_platform.graph.schema import (
     is_soft_edge_kind,
     is_soft_node_kind,
 )
-from codev_platform.graph.store import GraphStore, GraphStoreUnreadable, open_store
+from codev_platform.graph.store import (
+    GraphStore,
+    GraphStoreUnreadable,
+    _graph_backend,
+    open_store,
+)
 
 _LOW_CONF = 0.7
 _SAMPLE = 10
@@ -179,42 +184,88 @@ def _unreadable_report(project_id: str, reason: str) -> dict:
     }
 
 
+# pg 后端枚举时给 open_store 的占位 pid: 共享库构造只要 dsn 不用 pid(见 store.open_store)。
+_AUDIT_PLACEHOLDER_PID = "__audit__"
+
+
 def audit_all_stores(graph_store_dir=None) -> dict:
     """门禁聚合: 审计所有 project 的 graph store, 汇总结构 error。
 
-    **只读门禁**(2026-06-09 audit #10): 用 `open_store(pid, mode='ro')` 打开, 绝不建目录 /
-    设 WAL / 跑迁移 / 建表 —— audit 是纯读门禁, 不顺手改本地存储(schema 迁移 / 建表是写侧
-    ingest 的职责)。旧 schema(缺列)/ 坏库读不动 → store 抛 GraphStoreUnreadable, 该 store
-    记一条 audit_error(不崩门禁, 但计 1 error 让操作者知道需 reindex 迁移)。后端中性: 不 import
-    sqlite3, 枚举走 list_project_ids(), 错误走中性 GraphStoreUnreadable。
+    **只读门禁**(2026-06-09 audit #10): mode='ro' 打开, 不迁移 / 不改数据(schema 迁移是写侧
+    ingest 职责)。读不动(旧 schema / 坏库)→ 记 1 error 不崩门禁。
 
-    graph_store_dir: 待扫目录(None → data_root/graph_store)。glob `<pid>.sqlite` 枚举, 经
-    open_store(path=db, mode='ro') 打开 —— 显式 path 支持测试用 tmp 目录隔离。
-    返回 {projects: [pid...], reports: {pid: report}, total_errors: int}。无 store → 空 + 0。
+    **按后端枚举**(旧版只 glob sqlite, 在 pg 后端会扫空 = 门禁形同虚设, 故分流):
+    - 显式 graph_store_dir(测试 / 显式路径)或 sqlite 后端 → glob `<pid>.sqlite`(per-file 库)。
+    - pg(共享库)后端 → 单 ro 连接 list_project_ids() 枚举全部 pid(无 .sqlite 文件)。
+
+    fail-soft: pg 不可达 / 缺 dsn → 空报告 + 0 error(同 sqlite 无 store 的"优雅跳过", 不阻断 push)。
+    返回 {projects: [pid...], reports: {pid: report}, total_errors: int}。
     """
     from pathlib import Path
 
     from codev_platform.core.paths import data_root
 
-    d = Path(graph_store_dir) if graph_store_dir is not None else (data_root() / "graph_store")
+    # 显式 dir 走文件 glob(与 open_store"显式 path→sqlite"一致, 支持测试 tmp 隔离); 否则按后端分流。
+    if graph_store_dir is not None:
+        return _audit_sqlite_dir(Path(graph_store_dir))
+    if _graph_backend() == "sqlite":
+        return _audit_sqlite_dir(data_root() / "graph_store")
+    return _audit_shared_backend()
+
+
+def _audit_sqlite_dir(d) -> dict:
+    """per-file sqlite 后端: glob `<pid>.sqlite`, 各开 ro 连接审计。无 store → 空 + 0。"""
     pids = sorted(p.stem for p in d.glob("*.sqlite")) if d.exists() else []
     reports: dict[str, dict] = {}
     total = 0
     for pid in pids:
-        db = d / f"{pid}.sqlite"
         try:
-            store = open_store(pid, mode="ro", path=db)
+            store = open_store(pid, mode="ro", path=d / f"{pid}.sqlite")
             try:
                 rep = audit_graph(store, pid)
             finally:
                 store.close()
         except GraphStoreUnreadable as exc:
-            # 旧 schema / 坏库读不动: 记 error, 不崩门禁(迁移留给写侧 ingest)。
             rep = _unreadable_report(
                 pid, f"只读审计失败({exc}); 该 store 可能需 reindex 迁移到当前 schema")
         reports[pid] = rep
         total += rep["error_count"]
     return {"projects": pids, "reports": reports, "total_errors": total}
+
+
+def _audit_shared_backend() -> dict:
+    """共享后端(pg): 一个 ro 连接枚举共享库全部 project_id 逐个审计(复用同连接不 per-pid 重连)。
+    连不上 / 缺 dsn → fail-soft 空报告(不崩门禁)。单 pid 读不动 → 记 1 error 继续其余。"""
+    try:
+        store = open_store(_AUDIT_PLACEHOLDER_PID, mode="ro")  # path=None → 按后端构造(pg)
+    except (GraphStoreUnreadable, ValueError):
+        return {"projects": [], "reports": {}, "total_errors": 0}
+    reports: dict[str, dict] = {}
+    total = 0
+    try:
+        try:
+            pids = sorted(store.list_project_ids())
+        except GraphStoreUnreadable:
+            return {"projects": [], "reports": {}, "total_errors": 0}
+        for pid in pids:
+            try:
+                rep = audit_graph(store, pid)
+            except GraphStoreUnreadable as exc:
+                rep = _unreadable_report(pid, f"只读审计失败({exc})")
+            reports[pid] = rep
+            total += rep["error_count"]
+    finally:
+        store.close()
+    return {"projects": sorted(reports), "reports": reports, "total_errors": total}
+
+
+def reconcile_orphan_pids(graph_pids, known_pids) -> dict:
+    """孤儿 pid: graph 里有数据、但不在已登记 project 清单里的 pid(退役 project 残留库 / 串台)。
+
+    纯集合差、无 IO: 调用方传入 graph 的 list_project_ids() 结果 + 登记表 pid 集 —— graph 层不依赖
+    登记表来源(与 web/meta 解耦, 由 CLI 顶层组装)。返回 {orphan_pids:[...], count:int}。"""
+    orphans = sorted(set(graph_pids) - set(known_pids))
+    return {"orphan_pids": orphans, "count": len(orphans)}
 
 
 def render_markdown(report: dict) -> str:

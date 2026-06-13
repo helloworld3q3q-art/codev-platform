@@ -204,6 +204,60 @@ def test_render_markdown_smoke(tmp_path):
     assert "graph audit" in md and "clean" in md
 
 
+# ---- 后端分流 + 孤儿 reconcile(① 修门禁在 PG 后端扫空 / ② store 外孤儿检测)----
+
+class _FakeSharedStore:
+    """模拟共享后端(pg): list_project_ids 枚举全部 pid, load_graph 返空(审计为 clean)。"""
+    def __init__(self, pids):
+        self._pids = pids
+    def list_project_ids(self):
+        return self._pids
+    def load_graph(self, project_id, *, plugin=None):
+        return AnalyzerResult(plugin="t", nodes=[], edges=[], evidences=[], findings=[])
+    def audit_scan(self, project_id):
+        return {"foreign_project_ids": {"nodes": [], "edges": []},
+                "soft_plugins": {"nodes": [], "edges": []}}
+    def close(self):
+        pass
+
+
+def test_audit_all_stores_pg_dispatch_enumerates_via_list_project_ids(monkeypatch):
+    # pg 后端 + 无显式 dir → 不再 glob sqlite(会扫空), 而是单 store list_project_ids() 枚举共享库。
+    import codev_platform.graph.audit as A
+    monkeypatch.setattr(A, "_graph_backend", lambda *a, **k: "pg")
+    monkeypatch.setattr(A, "open_store", lambda *a, **k: _FakeSharedStore(["p1", "p2"]))
+    agg = A.audit_all_stores()
+    assert agg["projects"] == ["p1", "p2"]          # 枚举到两个 project(旧版会是 [])
+    assert set(agg["reports"]) == {"p1", "p2"}
+    assert agg["total_errors"] == 0
+
+
+def test_audit_all_stores_pg_unreachable_failsoft(monkeypatch):
+    # pg 连不上 / 缺 dsn → open_store 抛 → fail-soft 空报告, 不崩门禁(同 sqlite 无 store 跳过)。
+    import codev_platform.graph.audit as A
+    def _boom(*a, **k):
+        raise ValueError("graph.store_backend=pg 但未配 memory.pg_dsn")
+    monkeypatch.setattr(A, "_graph_backend", lambda *a, **k: "pg")
+    monkeypatch.setattr(A, "open_store", _boom)
+    assert A.audit_all_stores() == {"projects": [], "reports": {}, "total_errors": 0}
+
+
+def test_audit_all_stores_explicit_dir_still_globs_sqlite(tmp_path):
+    # 显式 dir(测试/显式路径)→ 仍按文件 glob, 与后端配置无关(回归: 现有调用方/测试零变化)。
+    conn = open_store(PID, path=tmp_path / f"{PID}.sqlite")
+    _seed(conn, [_node("f1", "foo")], [])
+    conn.close()
+    agg = audit_all_stores(tmp_path)
+    assert PID in agg["projects"] and agg["total_errors"] == 0
+
+
+def test_reconcile_orphan_pids():
+    from codev_platform.graph.audit import reconcile_orphan_pids
+    assert reconcile_orphan_pids(["a", "b", "x"], {"a", "b"}) == {"orphan_pids": ["x"], "count": 1}
+    assert reconcile_orphan_pids(["a"], {"a", "b"}) == {"orphan_pids": [], "count": 0}  # known 超集
+    assert reconcile_orphan_pids([], {"a"}) == {"orphan_pids": [], "count": 0}
+
+
 def test_audit_detects_duplicate_edges(tmp_path):
     # 同 (source,target,kind) 被两 plugin 各产一份(退役 codegraph_bridge 残留 vs call_resolvers)
     # → duplicate_edges 冲突 warning。

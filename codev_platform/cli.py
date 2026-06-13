@@ -244,11 +244,18 @@ def cmd_graph(args: argparse.Namespace) -> int:
         from codev_platform.graph.audit import audit_graph, render_markdown
         from codev_platform.graph.store import open_store
         if getattr(args, "all", False):
-            # 门禁模式: 审计所有有本地 store 的 project, 任一结构 error → 非零退出。
-            # 无 store(机器没建图谱)→ 优雅跳过(返回 0, 不阻断 push)。
-            from codev_platform.core.paths import data_root
-            from codev_platform.graph.audit import audit_all_stores
-            agg = audit_all_stores(data_root() / "graph_store")
+            # 门禁模式: 审计所有 project 的 graph store(按后端: sqlite glob / pg 枚举共享库),
+            # 任一结构 error → 非零退出。无 store(机器没建图谱)→ 优雅跳过(返回 0, 不阻断 push)。
+            from codev_platform.graph.audit import audit_all_stores, reconcile_orphan_pids
+            agg = audit_all_stores()
+            # 孤儿 pid: graph 有数据但未登记(退役残留 / 串台)→ warning 不计入 total_errors
+            # (退役 project 遗留库不该让 push 永久红); known 源 = 登记表 meta.json(顶层组装, 解耦)。
+            try:
+                from codev_platform.web.repositories.project_read_repo import ProjectReadRepository
+                known = {p["code"] for p in ProjectReadRepository().list_projects()}
+                agg["orphan_pids"] = reconcile_orphan_pids(agg["projects"], known)["orphan_pids"]
+            except Exception:  # noqa: BLE001 — 登记表读失败不崩门禁
+                agg["orphan_pids"] = []
             if getattr(args, "json", False):   # CI/脚本机器可读: 聚合 JSON + 退出码不变
                 _print(json.dumps(agg, ensure_ascii=False, indent=2))
                 return 0 if agg["total_errors"] == 0 else 1
@@ -262,6 +269,8 @@ def cmd_graph(args: argparse.Namespace) -> int:
                        f"edges {report['totals']['edges']}")
                 if not report["clean"]:
                     _print(render_markdown(report))
+            if agg["orphan_pids"]:
+                _print(f"\n⚠ 孤儿 graph store(有数据但未登记, 建议核对/清理): {', '.join(agg['orphan_pids'])}")
             if agg["total_errors"]:
                 _print(f"\n✗ graph audit 门禁失败: {agg['total_errors']} 个结构 error, 修复后再 push。")
             return 0 if agg["total_errors"] == 0 else 1
