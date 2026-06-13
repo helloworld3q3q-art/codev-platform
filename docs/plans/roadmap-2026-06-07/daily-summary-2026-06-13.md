@@ -71,9 +71,23 @@ agent 经图谱精确查到 PDA 页面后,`read_file`/`list_dir` 却报"路径�
 
 **质量教训沉淀成规则** → `.claude/rules/code-quality-discipline.md`(本日多次被用户纠"堆代码/深嵌套/死代码兜底/偷懒延后理由")。
 
+## 九、晚间段 —— 代码智能平台蓝图续建(Phase 5/8)+ MCP 可用性根因
+
+用户决定按主计划蓝图把代码智能平台逐个建出来(简单→难)。先核实"审计剩余项"#7 config DI / #8 set_roles 多 org 复核后**都是 stale 已完成**(只订正状态标记);Phase 3 残留核实为**已完成/低 ROI 冗余**(provenance src/parser/pv + 全套 audit + file:line 证据都在;source_line 落每边冗余),跳过不堆码。真有未建实质的从此开始:
+
+- **Phase 5 路径评分(`e7b72a1`)**:find_impact_paths 既有 conf×src 评分上,正交补 `_KIND_WEIGHT`(关系强度,imports/renders/mentions 降权)+ `_DEPTH_DECAY`(近依赖优先)。社区/新鲜度因子留 Phase 4/1 接入,不预埋。
+- **Phase 8 观测切片(`9ab5582`/`bcd6bf0`)**:RecallTrace per-query/per-lane 耗时·候选·无证据 best-effort 落 JSONL + `recall_latency_report` 聚合 P50/P95/无证据率/lane 命中率 + CLI `recall-stats`(measure-first)。conftest autouse 隔离 recall_trace 防测试污染真实 baseline。
+- **measure → fix → re-measure 闭环(`49e0d01`→`005382c`)**:观测一上线就量出"vector lane 对 codev-platform 0 命中却 P95 944ms"。精准修(非预建 cache):无 code_vec 项目 fs 探活快速跳过。首版用错标记(chroma.sqlite3 空库残留漏判)→ WSL 诊断查真因 → 改用 `.manifest.json`。WSL 实测 **vector P95 944→4.8ms、总 P95 991→24ms**。
+
+**MCP 可用性根因(整场"MCP 不可用"的真相,三层)**:
+1. **codegraph 配置冲突(预存)**:codev-platform 是平台仓本身、`.codegraph/config.json` 提交在 git(f9e5cae),无法整目录 junction 到平台数据 → repo `.codegraph` 只有 config 无 db → codegraph MCP "not initialized"。`codegraph link --all` 故意报 conflict 待手动取舍。**修**:symlink 平台 `codegraph.db` 进 repo `.codegraph`(config 留提交版,db 走 `*.db` gitignore)+ 重启 codev-mcp-codegraph。本地 symlink 不进 git(同其它项目 junction)。
+2. **会话 SSE 连接陈旧(自造)**:晚间部署反复 `systemctl restart codev-mcp-graph/codegraph` 把长跑 Claude Code 会话连接打断 → MCP 调用全 `-32602`(server 健康、client 连接死)。**修**:重启 Claude Code 重连(非 /clear)。重启后实测 codegraph_search / graph search_nodes 全通。
+3. **过程失误**:整场把"MCP 不可用"当借口没真试、理由(worktree 特定)错。教训记 [[wsl-mcp-daemons-stale-after-pull]]:会话中途别反复重启 MCP 服务;先测一次再断言。
+
 ## commit 链(2026-06-13 段)
 **上午(PDA 链路)**:`712588e`(code_vec batch+skip_kinds 配置)→`a0485ef`(/embed 反应式 OOM 回收)→`6530886`(续跑探活 R5)→`ba05cf9`(find_api_callers URL 解析)→`6cfa250`(前端 API 使用精确归因 uses_api 引擎)→`5d8a601`(meta.json 进 git + extra_repos 可移植)→`f3704ac`(build_text 封顶治超大 docstring)→`796665b`(agent 文件工具多仓 + core/repos 单一真值源)。
 **下午(对抗审计修复)**:`313a972`(审计批: P0 qwen/P1a reindex/3×P2/chroma bind)→`9e65067`(RepoScope 多仓节点碰撞根治)→`8b1623a`(/embed 内部信物闸)→`f912e03`(audit 按后端枚举+孤儿 reconcile)→`376e108`(A2/A3 悬空 plays_role 根治 25→0)。
+**晚间(蓝图续建)**:状态订正 `313a972`后`f413fac`(#7)/`3c56b3c`(#8)/`70a8daa`(conftest 注)→`e7b72a1`(Phase 5 路径 kind 权重+深度衰减)→`9ab5582`(Phase 8 观测 trace+聚合)→`bcd6bf0`(recall-stats CLI + conftest 隔离)→`49e0d01`/`005382c`(vector lane fs 探活快速跳过, P95 944→4.8ms)。MCP codegraph symlink 修复为本机 local 不进 git。
 
 ## web 端
 本会话改动**不需前端同步**:impact.py / api_usage / core.repos / fs.py / code_vector_store 全在 graph 引擎 + agent 工具 + 索引层,OpenAPI 未变,`pnpm run api` 不用跑。
