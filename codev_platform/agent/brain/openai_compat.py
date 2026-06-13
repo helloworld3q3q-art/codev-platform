@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 from codev_platform.agent.brain import (
@@ -14,6 +15,7 @@ from codev_platform.agent.brain import (
     Message,
     ToolCall,
 )
+from codev_platform.agent.brain.types import StreamEvent
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -117,3 +119,70 @@ class OpenAICompatProvider(LLMProvider):
             usage=usage,
             extra=extra,
         )
+
+    @staticmethod
+    def _assemble_stream_turn(text_parts: list[str], tool_frags: dict[int, dict],
+                              reasoning_parts: list[str], usage_obj: Any) -> AssistantTurn:
+        """流式分片 -> 中性 AssistantTurn。tool_calls 在流里按 index 分片到达, 此处重组。纯逻辑可单测。"""
+        tool_calls: list[ToolCall] = []
+        for frag in tool_frags.values():
+            try:
+                parsed = json.loads(frag["args"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                parsed = {}
+            tool_calls.append(ToolCall(id=frag["id"], name=frag["name"], args=parsed))
+        extra: dict[str, Any] = {}
+        if reasoning_parts:
+            extra["reasoning_content"] = "".join(reasoning_parts)
+        return AssistantTurn(
+            text="".join(text_parts) or None,
+            tool_calls=tool_calls,
+            stop_reason="tool_use" if tool_calls else "end",
+            usage=OpenAICompatProvider._extract_usage(usage_obj),
+            extra=extra,
+        )
+
+    def stream(self, system: str, messages: list[Message],
+               tools: list[dict[str, Any]]) -> Iterator[StreamEvent]:
+        """流式: content 增量逐个 yield token, 结束 yield 终结 turn(重组 tool_calls 分片 + usage)。
+
+        OpenAI 协议流式: 每 chunk 的 delta 带 content 片段或 tool_calls 分片(按 index 累积
+        id/name/arguments)。usage 需 stream_options.include_usage 才在末 chunk 出现(deepseek/
+        OpenAI 均支持; 不支持的 provider usage 取 0, 不报噪)。
+        """
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": self._to_native(system, messages),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            kwargs["tools"] = self._tools_native(tools)
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_frags: dict[int, dict] = {}
+        usage_obj: Any = None
+        for chunk in self._client.chat.completions.create(**kwargs):
+            if getattr(chunk, "usage", None):
+                usage_obj = chunk.usage
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if getattr(delta, "content", None):
+                text_parts.append(delta.content)
+                yield StreamEvent("token", delta.content)
+            rc = getattr(delta, "reasoning_content", None)
+            if rc:
+                reasoning_parts.append(rc)
+            for tcd in (getattr(delta, "tool_calls", None) or []):
+                slot = tool_frags.setdefault(tcd.index, {"id": "", "name": "", "args": ""})
+                if tcd.id:
+                    slot["id"] = tcd.id
+                fn = getattr(tcd, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["args"] += fn.arguments
+        yield StreamEvent("turn", self._assemble_stream_turn(
+            text_parts, tool_frags, reasoning_parts, usage_obj))

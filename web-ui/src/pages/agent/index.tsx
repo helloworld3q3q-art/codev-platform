@@ -8,6 +8,7 @@ import ChatPanel from './components/ChatPanel';
 import MenuSwapPanel from './components/MenuSwapPanel';
 import SessionSider from './components/SessionSider';
 import SessionToggle from './components/SessionToggle';
+import { streamAgentChat } from './stream';
 import type { ChatMessage } from './types';
 
 const MAX_STEPS = 12;
@@ -89,48 +90,83 @@ const AgentPage: React.FC = () => {
     async (question: string): Promise<void> => {
       const sentFor = activeSessionRef.current; // 发送时所处会话('' = 新会话), 用于回包后比对
       const userMsg: ChatMessage = { id: nextId(), role: 'user', content: question };
-      const placeholder: ChatMessage = { id: nextId(), role: 'assistant', content: '' };
+      const placeholder: ChatMessage = { id: nextId(), role: 'assistant', content: '', streaming: true };
       setMessages((prev) => [...prev, userMsg, placeholder]);
       setLoading(true);
-      try {
-        const res = await postAgentChat({
-          question,
-          sessionId: sentFor || undefined, // 用 ref 记录的当前会话, 不读可能过期的 state 闭包
-          maxSteps: MAX_STEPS,
-        });
-        if (activeSessionRef.current !== sentFor) {
-          return; // 发送途中切到别的会话, 丢弃本次响应, 不污染当前视图
-        }
-        const data = res.data;
-        if (data?.sessionId) {
-          activeSessionRef.current = data.sessionId; // 新会话落定 id, 同步 ref
-          setActiveSessionId(data.sessionId);
-        }
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === placeholder.id
-              ? {
-                ...msg,
-                content: data?.answer ?? '',
-                steps: data?.steps,
-                usage: data?.usage,
-                stopReason: data?.stopReason,
-              }
-              : msg,
-          ),
-        );
-        loadSessions(); // 新会话首答后刷新侧栏, 让其出现在历史列表
-      } catch {
-        if (activeSessionRef.current !== sentFor) {
+
+      const stillCurrent = (): boolean => {
+        return activeSessionRef.current === sentFor; // 切走则丢弃, 不污染当前视图(最后选中者胜)
+      };
+      const patch = (fields: Partial<ChatMessage>): void => {
+        if (!stillCurrent()) {
           return;
         }
         setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === placeholder.id ? { ...msg, content: '请求失败, 请重试' } : msg,
-          ),
+          prev.map((msg) => (msg.id === placeholder.id ? { ...msg, ...fields } : msg)),
         );
+      };
+      const bindSession = (sessionId?: string): void => {
+        if (sessionId && stillCurrent()) {
+          activeSessionRef.current = sessionId; // 新会话落定 id, 同步 ref
+          setActiveSessionId(sessionId);
+        }
+      };
+
+      // 非流式回退:流未建立 / 中途 error / 未收到 done 时走它(复用成熟同步接口)。
+      const runFallback = async (): Promise<void> => {
+        try {
+          const res = await postAgentChat({ question, sessionId: sentFor || undefined, maxSteps: MAX_STEPS });
+          if (!stillCurrent()) {
+            return;
+          }
+          const data = res.data;
+          bindSession(data?.sessionId);
+          patch({ content: data?.answer ?? '', steps: data?.steps, usage: data?.usage, stopReason: data?.stopReason, streaming: false });
+          loadSessions();
+        } catch {
+          patch({ content: '请求失败, 请重试', streaming: false });
+        }
+      };
+
+      // 流式优先:token 增量打字, step 实时入 ToolFlow, done 对账(权威 answer/steps 覆盖增量)。
+      let liveText = '';
+      const liveSteps: API.ChatStep[] = [];
+      let doneOk = false;
+      try {
+        const streamed = await streamAgentChat(
+          { question, sessionId: sentFor || undefined, maxSteps: MAX_STEPS },
+          {
+            onToken: (delta) => {
+              liveText += delta;
+              patch({ content: liveText, steps: [...liveSteps] });
+            },
+            onStep: (step) => {
+              liveSteps.push(step as API.ChatStep);
+              liveText = ''; // 上一段是"思考"(已入 ToolFlow), 下一段重新累积(下个思考或最终答案)
+              patch({ content: '', steps: [...liveSteps] });
+            },
+            onDone: (data) => {
+              doneOk = true;
+              bindSession(data.sessionId);
+              patch({
+                content: data.answer,
+                steps: (data.steps as API.ChatStep[] | undefined) ?? [...liveSteps],
+                usage: data.usage,
+                stopReason: data.stopReason,
+                streaming: false,
+              });
+              loadSessions();
+            },
+            onError: () => {
+              // 中途 error 帧 → 不在此处理, 落到下面 !doneOk 分支统一回退非流式
+            },
+          },
+        );
+        if (!streamed || !doneOk) {
+          await runFallback();
+        }
       } finally {
-        if (activeSessionRef.current === sentFor) {
+        if (stillCurrent()) {
           setLoading(false);
         }
       }

@@ -13,6 +13,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 
 from codev_platform.core.config import get as cfg_get
 from codev_platform.core.errors import ErrorCode, PlatformError
@@ -43,6 +44,46 @@ class AgentClient:
 
     def chat(self, ident, body: dict) -> dict:
         return self._request("POST", "/chat", ident, body=body)
+
+    def chat_stream(self, ident, body: dict) -> Iterator[bytes]:
+        """流式代理 /chat/stream: 逐行透传上游 SSE 字节(不解析, 由前端 SSE parser 重组)。
+
+        web 只作鉴权前门 + 哑透传, 不改 agent 已框好的 SSE 帧。连接建立失败(签名缺 / 不可达 /
+        建连超时)→ PlatformError(UPSTREAM_UNAVAILABLE), 由路由转成 error 帧; 建连后逐行 yield。
+        urllib readline 按 \\n 返回 → SSE 帧实时流出, 不缓冲到固定块大小。
+        """
+        if not self._secret:
+            raise PlatformError(
+                ErrorCode.UPSTREAM_UNAVAILABLE, "agent 代理未配置 internal_secret",
+                detail="set config agent.internal_secret",
+            )
+        url = self._base_url + "/chat/stream"
+        token = sign_identity(_claims(ident), self._secret)
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, method="POST",
+            headers={"X-Identity": token, "Content-Type": "application/json"})
+        try:
+            resp = urllib.request.urlopen(req, timeout=self._timeout)
+        except urllib.error.HTTPError as exc:
+            raise PlatformError(
+                ErrorCode.UPSTREAM_UNAVAILABLE, "agent 后端返回错误",
+                detail=f"{exc.code}: {exc.reason}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise PlatformError(
+                ErrorCode.UPSTREAM_UNAVAILABLE, "agent 后端不可达", detail=str(exc)) from exc
+
+        def _iter() -> Iterator[bytes]:
+            try:
+                while True:
+                    line = resp.readline()
+                    if not line:
+                        break
+                    yield line
+            finally:
+                resp.close()
+
+        return _iter()
 
     def memory_write(self, ident, body: dict) -> dict:
         return self._request("POST", "/memory", ident, body=body)

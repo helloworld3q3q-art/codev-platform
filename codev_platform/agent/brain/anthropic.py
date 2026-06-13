@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from codev_platform.agent.brain import (
@@ -12,6 +13,7 @@ from codev_platform.agent.brain import (
     Message,
     ToolCall,
 )
+from codev_platform.agent.brain.types import StreamEvent
 
 _DEFAULT_MAX_TOKENS = 4096
 
@@ -65,14 +67,9 @@ class AnthropicProvider(LLMProvider):
             for s in specs
         ]
 
-    def chat(self, system: str, messages: list[Message], tools: list[dict[str, Any]]) -> AssistantTurn:
-        resp = self._client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=system,
-            messages=self._to_native(messages),
-            tools=self._tools_native(tools),
-        )
+    @staticmethod
+    def _assemble_turn(resp: Any) -> AssistantTurn:
+        """Anthropic 完整 message -> 中性 AssistantTurn。chat() 与 stream() 共用,组装逻辑单一真值源。"""
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for block in resp.content:
@@ -91,3 +88,33 @@ class AnthropicProvider(LLMProvider):
             stop_reason=stop,
             usage=usage,
         )
+
+    def chat(self, system: str, messages: list[Message], tools: list[dict[str, Any]]) -> AssistantTurn:
+        resp = self._client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            system=system,
+            messages=self._to_native(messages),
+            tools=self._tools_native(tools),
+        )
+        return self._assemble_turn(resp)
+
+    def stream(self, system: str, messages: list[Message],
+               tools: list[dict[str, Any]]) -> Iterator[StreamEvent]:
+        """流式: 文本增量逐个 yield token, 结束 yield 终结 turn(组装含 tool_use/usage 的完整 AssistantTurn)。
+
+        用 SDK 的 messages.stream 上下文: text_stream 出文本增量(打字), get_final_message
+        给组装好的完整消息(含 tool_use 块 + usage), 复用 _assemble_turn 与 chat() 同一组装。
+        """
+        with self._client.messages.stream(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            system=system,
+            messages=self._to_native(messages),
+            tools=self._tools_native(tools),
+        ) as stream:
+            for delta in stream.text_stream:
+                if delta:
+                    yield StreamEvent("token", delta)
+            final = stream.get_final_message()
+        yield StreamEvent("turn", self._assemble_turn(final))

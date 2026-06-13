@@ -4,9 +4,11 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from codev_platform.agent import deps
 from codev_platform.agent.schemas import ChatRequest, ChatResponse, StepOut
@@ -66,8 +68,9 @@ def _resolve_identity(request: Request) -> tuple[str, str]:
     )
 
 
-@router.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, request: Request) -> ChatResponse:
+def _authorize(req: ChatRequest, request: Request) -> tuple[str, str, str | None, object | None]:
+    """鉴权 + 入参解析(chat / chat_stream 单一真值源)。返回 (user_id, org_id, project_id, ident);
+    非法身份/项目 → 400, 项目 ACL 拒 → 403(抛 HTTPException)。"""
     try:  # 非法 X-User-Id / X-Org-Id(含非法字符)→ 400,而非未捕获 500
         user_id, org_id = _resolve_identity(request)
     except ValueError as e:  # 入参非法 → INVALID_PARAMS;str(e) 仅日志
@@ -81,19 +84,59 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
         raise HTTPException(status_code=400, detail=to_http_detail(
             "invalid project_id", ErrorCode.INVALID_PARAMS)) from e
     # 项目 ACL 闸(恒查):token 越权 / token 模式无显式 project_id → 403;passthrough 放行
-    _ident = getattr(request.state, "identity", None)
-    _dec = can_access(load_config(), _ident, project_id)  # project_id 可能 None
-    audit_access("agent-chat", _ident, project_id, _dec)
-    if not _dec.allowed:  # 权限 → ACCESS_DENIED(403)
+    ident = getattr(request.state, "identity", None)
+    dec = can_access(load_config(), ident, project_id)  # project_id 可能 None
+    audit_access("agent-chat", ident, project_id, dec)
+    if not dec.allowed:  # 权限 → ACCESS_DENIED(403)
         raise HTTPException(status_code=403, detail=to_http_detail(
             "forbidden: project access denied", ErrorCode.ACCESS_DENIED))
+    return user_id, org_id, project_id, ident
+
+
+@router.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest, request: Request) -> ChatResponse:
+    user_id, org_id, project_id, ident = _authorize(req, request)
     try:
         outcome = deps.get_chat_service().ask(
             req.question, req.session_id, req.max_steps,
             user_id=user_id, project_id=project_id, org_id=org_id, task_id=req.task_id,
-            identity=_ident)  # P0: 透真 identity 给工具, remember 写 memory 走同一道 scope_decision
+            identity=ident)  # P0: 透真 identity 给工具, remember 写 memory 走同一道 scope_decision
     except RuntimeError as e:  # provider 缺 key / 下游不可用 → UPSTREAM_UNAVAILABLE(503);str(e) 仅日志
         _log.warning("chat upstream unavailable: %s", e)
         raise HTTPException(status_code=503, detail=to_http_detail(
             "agent provider unavailable", ErrorCode.UPSTREAM_UNAVAILABLE)) from e
     return _to_response(outcome)
+
+
+def _sse_frame(kind: str, data: object) -> str:
+    """SSE 帧: 一行 data: {json}\\n\\n。前端按 kind 分发(token 增量 / step 工具步 / done / error)。"""
+    return "data: " + json.dumps({"kind": kind, "data": data}, ensure_ascii=False) + "\n\n"
+
+
+@router.post("/chat/stream")
+def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
+    """流式问答(SSE)。鉴权/入参与 /chat 完全一致(_authorize 共享); 仅响应形态不同。
+
+    鉴权失败(400/403)在开流前抛 HTTPException → 正常状态码。开流后下游 provider 错误无法
+    再改 HTTP 状态(头已发) → 改发 error 事件帧, 前端据此回退非流式 /chat。
+    """
+    user_id, org_id, project_id, ident = _authorize(req, request)
+
+    def _events():
+        try:
+            for ev in deps.get_chat_service().ask_stream(
+                req.question, req.session_id, req.max_steps,
+                user_id=user_id, project_id=project_id, org_id=org_id,
+                task_id=req.task_id, identity=ident):
+                yield _sse_frame(ev.kind, ev.data)
+        except RuntimeError as e:  # provider 缺 key / 下游不可用
+            _log.warning("chat_stream upstream unavailable: %s", e)
+            yield _sse_frame("error", {"message": "agent provider unavailable",
+                                       "code": ErrorCode.UPSTREAM_UNAVAILABLE.value})
+        except Exception as e:  # noqa: BLE001 — 开流后任何异常都转 error 帧, 不让连接裸断
+            _log.exception("chat_stream failed: %s", e)
+            yield _sse_frame("error", {"message": "internal error"})
+
+    # X-Accel-Buffering: no → 反代(nginx/caddy)不缓冲 SSE; no-cache 防中间层缓存。
+    return StreamingResponse(_events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

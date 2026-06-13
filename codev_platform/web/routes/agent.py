@@ -8,9 +8,13 @@ require_project_access (core.acl 单一真值源) 先校验 X-Project-Id, 通过
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
 
 from codev_platform.core.config import load_config
+from codev_platform.core.errors import PlatformError
 from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.web.integrations.agent_client import AgentClient
@@ -52,6 +56,38 @@ def agent_chat(
     }
     raw = agent_client.chat(identity, payload)
     return ok(ChatData.of(raw), request_id=_rid(request))
+
+
+# include_in_schema=False: SSE 非 JSON 契约, 不进 OpenAPI(否则 pnpm run api 生成无用且错误的
+# JSON 客户端)。前端走原生 fetch + ReadableStream 直连此固定 URL, 不经生成接口层。
+@router.post("/api/v1/agent/chat/stream", include_in_schema=False)
+def agent_chat_stream(
+    request: Request,
+    body: ChatRequest,
+    ctx=Depends(require_project_access),
+) -> StreamingResponse:
+    """流式对话(SSE):鉴权同 /chat(require_project_access 单一闸), 哑透传 agent 已框好的 SSE 帧。
+
+    建连失败(下游不可达 / 缺信物)→ 发 error 帧(开流后无法改 HTTP 状态), 前端据此回退非流式。
+    """
+    identity, project_id = ctx
+    payload = {
+        "question": body.question,
+        "session_id": body.sessionId,
+        "max_steps": body.maxSteps,
+        "project_id": project_id,  # 经鉴权的项目 → agent 按此路由工具
+    }
+
+    def _passthrough():
+        try:
+            yield from agent_client.chat_stream(identity, payload)
+        except PlatformError:  # 下游不可达 / 缺信物 → error 帧(字节, 与上游帧同形)
+            frame = json.dumps({"kind": "error", "data": {"message": "agent 后端不可达"}},
+                               ensure_ascii=False)
+            yield ("data: " + frame + "\n\n").encode("utf-8")
+
+    return StreamingResponse(_passthrough(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def _as_list(raw) -> list:

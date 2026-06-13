@@ -10,4 +10,6 @@ export interface ChatMessage {
   steps?: API.ChatStep[];
   usage?: Record<string, unknown>;
   stopReason?: string;
+  // 流式进行中标志: 驱动 Bubble 原生 typing 打字效果(true=打字, false/缺省=静态显示)。
+  streaming?: boolean;
 }

@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from codev_platform.agent.brain.base import LLMProvider, Message
+from codev_platform.agent.brain.types import StreamEvent
 from codev_platform.agent.context_plan import build_context_plan
 from codev_platform.agent.loop import AgentLoop, AgentResult
 from codev_platform.agent.policy import LoopPolicy
@@ -63,10 +64,13 @@ class ChatService:
         self._rule_pack_sources_factory = rule_pack_sources_factory
         self._skill_pack_sources_factory = skill_pack_sources_factory
 
-    def ask(self, question: str, session_id: str | None = None,
-            max_steps: int | None = None, user_id: str = "local",
-            project_id: str | None = None, org_id: str = "default",
-            task_id: str | None = None, identity: object | None = None) -> ChatOutcome:
+    def _build_loop(self, question: str, session_id: str | None, max_steps: int | None,
+                    user_id: str, project_id: str | None, org_id: str, task_id: str | None):
+        """共享准备(ask / ask_stream 单一真值源): 解析会话 + 召回 + system + policy + loop + trace。
+
+        返回 (sid, history, loop, trace, system)。不设 RunContext(由调用方按同步/流式各自 set/reset,
+        因 runctx 生命周期要覆盖整段 loop 消费, 流式是生成器消费, 必须在调用方 finally 里 reset)。
+        """
         provider = self._provider_factory()  # 缺 key 抛 RuntimeError,由调用层(route)映射
 
         # 复用会话必须校验 project_id: 否则项目 A 的 session_id 在项目 B 请求里被复用 → 历史
@@ -81,8 +85,6 @@ class ChatService:
         memories = self._recall_memories(org_id, user_id, project_id, question, task_id)
         # M2: 召回记忆 → 分组(redline>task>project>personal>org)+ budget 裁剪 → context_plan,
         # 再注入 system prompt(让模型知道自己在哪个项目 / 为谁 + 遵循已知偏好, 受 budget 控制)。
-        # budget_max=recall_limit:召回已 [:recall_limit] 截断, 故此处 budget 主要做分组 +
-        # redline-never-cut 兜底;budget_max < recall_limit 时才进一步裁剪(防御纵深)。
         plan = build_context_plan(memories, task_id=task_id, budget_max=self._recall_limit)
         prompt_profile = (
             self._prompt_profile_factory(provider.name)
@@ -115,30 +117,24 @@ class ChatService:
             policy = LoopPolicy(max_steps=self._default_max_steps())
         if max_steps:  # 本次请求显式覆盖步数(策略其余字段不变)
             policy = replace(policy, max_steps=max_steps)
-        # planner 开关/硬封顶随 policy(每模型档, registry 按 provider 解析)走, 无需独立 factory。
         loop = AgentLoop(provider, registry, policy=policy)
         # org_id/user_id 落 trace → per-租户 token 计量(身份取请求已记录身份, 非新造通道)。
         trace = Trace(sid, provider.name, provider.model, org_id=org_id, user_id=user_id)
-        # M1: 设运行上下文(身份/项目/任务), 供 remember 等工具在 run() 内拿来写 memory;
-        # 退出即 reset, 不跨请求泄漏。
-        from codev_platform.agent.runctx import RunContext, reset_run_context, set_run_context
-        _ctx_token = set_run_context(
-            RunContext(user_id=user_id, org_id=org_id, project_id=project_id,
-                       task_id=task_id, identity=identity)
-        )
-        try:
-            result = loop.run(question, history=history, trace=trace, system=system)
-        finally:
-            reset_run_context(_ctx_token)
+        return sid, history, loop, trace, system
 
-        # 工具调用流随 assistant 消息持久化(存 extra,经 payload JSONB 往返),
-        # 历史会话重载时可回看(前端 ToolFlow)。extra 是中性透传袋, store 无需感知 steps 结构。
-        steps_payload = [
+    @staticmethod
+    def _steps_payload(result: AgentResult) -> list[dict]:
+        return [
             {"n": s.n, "thought": s.thought, "tool": s.tool,
              "args": s.args, "result_summary": s.result_summary}
             for s in result.steps
         ]
-        # extra 透传袋:steps(工具流回看)+ usage(token/缓存,Phase 8 历史可观测 + per-租户计量)。
+
+    def _persist(self, sid: str, user_id: str, org_id: str, question: str,
+                 result: AgentResult) -> None:
+        """会话落库(ask / ask_stream 共用)。工具流 + usage 经 assistant.extra 透传袋持久化,
+        历史重载可回看(前端 ToolFlow)+ Phase 8 历史可观测。store 无需感知 steps 结构。"""
+        steps_payload = self._steps_payload(result)
         assistant_extra: dict = {}
         if steps_payload:
             assistant_extra["steps"] = steps_payload
@@ -150,7 +146,57 @@ class ChatService:
             Message(role="assistant", content=result.answer, extra=assistant_extra),
             org_id=org_id,
         )
+
+    def ask(self, question: str, session_id: str | None = None,
+            max_steps: int | None = None, user_id: str = "local",
+            project_id: str | None = None, org_id: str = "default",
+            task_id: str | None = None, identity: object | None = None) -> ChatOutcome:
+        sid, history, loop, trace, system = self._build_loop(
+            question, session_id, max_steps, user_id, project_id, org_id, task_id)
+        # M1: 设运行上下文(身份/项目/任务), 供 remember 等工具在 run() 内拿来写 memory;退出即 reset。
+        from codev_platform.agent.runctx import RunContext, reset_run_context, set_run_context
+        _ctx_token = set_run_context(
+            RunContext(user_id=user_id, org_id=org_id, project_id=project_id,
+                       task_id=task_id, identity=identity))
+        try:
+            result = loop.run(question, history=history, trace=trace, system=system)
+        finally:
+            reset_run_context(_ctx_token)
+        self._persist(sid, user_id, org_id, question, result)
         return ChatOutcome(session_id=sid, result=result)
+
+    def ask_stream(self, question: str, session_id: str | None = None,
+                   max_steps: int | None = None, user_id: str = "local",
+                   project_id: str | None = None, org_id: str = "default",
+                   task_id: str | None = None, identity: object | None = None) -> Iterator[StreamEvent]:
+        """流式问答: 转发 loop 的 token/step 增量, loop 收尾后落库, 末尾 yield 含 session_id 的 done。
+
+        与 ask() 共用 _build_loop / _persist(单一真值源); 仅"消费方式"不同(生成器 vs 一次性)。
+        token/step 原样转发; loop 的 done(AgentResult)截下来落库, 再发带 session_id 的终结 done。
+        """
+        sid, history, loop, trace, system = self._build_loop(
+            question, session_id, max_steps, user_id, project_id, org_id, task_id)
+        from codev_platform.agent.runctx import RunContext, reset_run_context, set_run_context
+        _ctx_token = set_run_context(
+            RunContext(user_id=user_id, org_id=org_id, project_id=project_id,
+                       task_id=task_id, identity=identity))
+        result: AgentResult | None = None
+        try:
+            for ev in loop.run_stream(question, history=history, trace=trace, system=system):
+                if ev.kind == "done":
+                    result = ev.data  # 截下 AgentResult, 不直接转发(末尾补 session_id 再发)
+                else:
+                    yield ev  # token / step 原样转发给 SSE
+        finally:
+            reset_run_context(_ctx_token)
+        if result is None:  # loop 恒产 done; 防御性兜底
+            result = AgentResult(answer="(loop 未产出结果)", stop_reason="error")
+        self._persist(sid, user_id, org_id, question, result)
+        yield StreamEvent("done", {
+            "session_id": sid, "answer": result.answer,
+            "steps": self._steps_payload(result), "usage": result.usage,
+            "stop_reason": result.stop_reason,
+        })
 
     def _recall_memories(self, org_id: str, user_id: str, project_id: str | None,
                          question: str, task_id: str | None = None):

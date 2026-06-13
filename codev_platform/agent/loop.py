@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,6 +25,7 @@ from codev_platform.agent.brain import (
     Message,
     ToolResult,
 )
+from codev_platform.agent.brain.types import StreamEvent
 from codev_platform.agent.planner import plan_query, render_plan_preamble
 from codev_platform.agent.policy import LoopPolicy
 from codev_platform.agent.prompts import CODE_UNDERSTANDING_SYSTEM
@@ -225,6 +227,38 @@ class AgentLoop:
 
     def run(self, question: str, history: list[Message] | None = None, trace: Trace | None = None,
             system: str | None = None) -> AgentResult:
+        """非流式: drain run_stream, 取 done 事件的 AgentResult。
+
+        循环逻辑(护栏 / planner / trace)单一真值源在 run_stream; run() 仅消费, 忽略 token/step
+        增量事件。这样新增流式不复制一份护栏逻辑(code-quality-discipline: 单一真值源)。
+        """
+        result: AgentResult | None = None
+        for ev in self.run_stream(question, history=history, trace=trace, system=system):
+            if ev.kind == "done":
+                result = ev.data
+        if result is None:  # run_stream 恒产 done; 防御性兜底, 不应触达
+            result = AgentResult(answer="(loop 未产出结果)", stop_reason="error")
+        return result
+
+    def _stream_turn(self, system_prompt: str, messages: list[Message],
+                     specs: list[dict]) -> Iterator[StreamEvent]:
+        """一轮 provider 调用, yield token 增量 + 终结 turn。
+
+        provider 实现了 stream() 走流式(逐 token); 未实现(NotImplementedError)回退 chat()
+        一次性返回, 合成单个 turn 事件 —— 保证任何 provider 都能跑 run_stream(向后兼容)。
+        """
+        try:
+            yield from self.provider.stream(system_prompt, messages, specs)
+        except NotImplementedError:
+            turn = self.provider.chat(system_prompt, messages, specs)
+            yield StreamEvent("turn", turn)
+
+    def run_stream(self, question: str, history: list[Message] | None = None,
+                   trace: Trace | None = None, system: str | None = None) -> Iterator[StreamEvent]:
+        """流式循环引擎(单一真值源)。yield: token(答案/思考增量)/ step(工具步)/ done(AgentResult)。
+
+        run() drain 本生成器取 done; SSE 路由直接转发 token/step/done。护栏与非流式完全一致。
+        """
         # system 默认基础 prompt;ChatService 会传入注入了 (org/user/project) 上下文的版本,
         # 让模型"知道自己在为谁、在哪个项目工作"(否则问"哪个项目"会照写死 prompt 瞎猜)。
         system_prompt = system or CODE_UNDERSTANDING_SYSTEM
@@ -258,7 +292,15 @@ class AgentLoop:
         max_steps = self.policy.effective_max_steps(query_type)
 
         for n in range(1, max_steps + 1):
-            turn: AssistantTurn = self.provider.chat(system_prompt, messages, specs)
+            # 流式消费本轮: token 增量直接转发(打字), 终结 turn 拿组装好的 AssistantTurn。
+            turn: AssistantTurn | None = None
+            for ev in self._stream_turn(system_prompt, messages, specs):
+                if ev.kind == "token":
+                    yield ev
+                elif ev.kind == "turn":
+                    turn = ev.data
+            if turn is None:  # provider 流未产 turn(异常); 防御性兜底, 收尾
+                turn = AssistantTurn(text=None, tool_calls=[], stop_reason="error")
             # input/output + prompt 缓存命中拆分(cache_hit/miss 让"缓存率=hit/input"可观测,
             # 云成本最大杠杆;非报告此项的 provider 累加 0)。
             for k in ("input_tokens", "output_tokens", "cache_hit_tokens", "cache_miss_tokens"):
@@ -270,7 +312,8 @@ class AgentLoop:
                 if trace:
                     trace.step(n, _summarize(turn.text or ""), None, None, None)
                     trace.done("answered", n, total_usage)  # token+cache 落 trace(Phase 8 计量地基)
-                return AgentResult(answer, steps, total_usage, "answered")
+                yield StreamEvent("done", AgentResult(answer, steps, total_usage, "answered"))
+                return
 
             # 有工具调用:记录 assistant 这轮,执行每个 call,把结果回灌
             messages.append(Message(role="assistant", content=turn.text,
@@ -296,6 +339,9 @@ class AgentLoop:
                 if trace:
                     trace.step(n, _summarize(turn.text or ""), call.name, call.args, summary)
                 messages.append(Message(role="tool", content=result.content, tool_call_id=call.id))
+                # 工具步实时上报(前端 ToolFlow 边跑边显)。thought=本轮 assistant 文本(已 token 流过)。
+                yield StreamEvent("step", {"n": n, "thought": turn.text, "tool": call.name,
+                                           "args": call.args, "result_summary": summary})
 
         # 用尽 step 仍未收尾。读取充分性门:几乎没真读到文件 **且尾部在连续无效调用** → 判卡无效调用。
         # (加 consecutive_invalid 判据: 纯检索类任务可合法地从不 read_file, 不能仅凭"没读文件"误判空转。)
@@ -307,4 +353,5 @@ class AgentLoop:
                       "改对参数后再试,而非凭不足的信息下结论。)")
         else:
             answer = "(达到 max_steps 上限仍未得出最终答案;可提高 max_steps 或缩小问题)"
-        return AgentResult(answer=answer, steps=steps, usage=total_usage, stop_reason="max_steps")
+        yield StreamEvent("done", AgentResult(answer=answer, steps=steps, usage=total_usage,
+                                              stop_reason="max_steps"))
