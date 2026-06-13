@@ -338,12 +338,18 @@ def _parse_query_result(res: dict) -> tuple[list[str], dict]:
 def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], dict]:
     """语义相似度召回 codegraph 节点 → (ranked node ids, details)。
 
-    collection 缺失 → chromadb 抛(调用侧 fail-soft); 嵌入模型不可用 → ([], {}) 优雅空返。
-    **先开 collection 后建 embedder**: 无索引时不白加载嵌入模型(省内存 + 单测脱模型)。
+    collection 缺失 → 顶部廉价 fs 探活快速空返(见下); 嵌入模型不可用 → ([], {}) 优雅空返。
+    **先 fs 探活 → 开 collection → 后建 embedder**: 无索引时既不碰 chromadb 也不加载嵌入模型。
     """
     if k <= 0:                 # chromadb 对 n_results<=0 抛 TypeError; 正常边界值直接空返
         return [], {}
-    client = _get_query_client(str(_code_vec_persist_dir(project_id)))   # 进程内单例(per path)
+    persist = _code_vec_persist_dir(project_id)
+    # 廉价 fs 探活: 无 chroma 库文件 = 该项目没建 code_vec → 快速空返, **不 import chromadb / 不建
+    # client**(省首次 PersistentClient 冷启动 ~1s)。Phase 8 实测: 没建 code_vec 的项目 vector lane
+    # 0 命中却 P95 944ms 全耗在这个无用冷启动上。有库的项目走原路, 行为不变。
+    if not (persist / "chroma.sqlite3").is_file():
+        return [], {}
+    client = _get_query_client(str(persist))   # 进程内单例(per path)
     col = client.get_collection(code_vec_collection_name(project_id))  # 缺 → 抛, 调用侧 fail-soft
     from codev_platform.agent.embed.registry import build_embedder
     from codev_platform.core.config import load_config

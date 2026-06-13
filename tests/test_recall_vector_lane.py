@@ -44,6 +44,13 @@ def test_query_code_vectors_k_le_0_empty(monkeypatch):
     assert query_code_vectors("any-pid", "q", -3) == ([], {})
 
 
+def test_query_code_vectors_no_collection_fast_skip():
+    # Phase 8 优化: 项目没建 code_vec 库(persist 目录无 chroma.sqlite3)→ 顶部 fs 探活快速空返,
+    # 不 import chromadb / 不建 PersistentClient(省 ~1s 冷启动)。用不存在的 pid 走 fs-skip 路径(k>0)。
+    from codev_platform.recall.code_vector_store import query_code_vectors
+    assert query_code_vectors("no-such-proj-xyz-2026", "find user", 5) == ([], {})
+
+
 def test_parse_query_result_missing_meta_falls_back_to_none():
     ranked, details = _parse_query_result({"ids": [["x"]], "metadatas": [[None]]})
     assert ranked == ["x"]
