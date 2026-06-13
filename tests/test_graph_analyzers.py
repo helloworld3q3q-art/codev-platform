@@ -193,6 +193,42 @@ def test_analyzers_pass_drops_hallucinated_edge(clean_registry, tmp_path):
         conn.close()
 
 
+def test_analyzers_pass_drops_edge_to_prior_round_soft_node(clean_registry, tmp_path):
+    """Fix-B(2026-06-13 取证): analyzer 产的软边指向**别人上轮的软节点**(本轮未重产)→ hard_ids
+    只含硬节点, referential 校验丢弃该软边, 不持久化为悬空。这是 A2 plays_role→A3 inferred_api_call
+    软节点 25 条 dangling 的承重墙根因(软节点混进 hard_ids 让悬空软边蒙混过校验)。"""
+    from codev_platform.graph.ingest import ANALYZERS_PLUGIN, IngestReport, _analyzers_pass
+    from codev_platform.graph.store import open_store
+
+    class _RefsPriorSoft:
+        name = "refs_prior_soft"
+
+        def applies(self, nodes):
+            return True
+
+        def analyze(self, project_id, nodes, edges):
+            # 软边 source=硬节点(有效), target=上轮软节点(在 store/load_graph 里, 但不在本结果软集)。
+            # 只产边不产该节点 —— 仿 A2 引用 A3 上轮产的 inferred_api_call。
+            e = GraphEdge(source="p:backend_function:f", target="p:business_domain:prior",
+                          kind=EdgeKind.PLAYS_ROLE, confidence=0.8)
+            return AnalyzerResult(edges=[e], plugin="x")
+
+    conn = open_store("p", path=tmp_path / "g.sqlite")
+    try:
+        fn = GraphNode(id="p:backend_function:f", kind=NodeKind.BACKEND_FUNCTION, name="f", project_id="p")
+        conn.upsert_result("p", AnalyzerResult(nodes=[fn], plugin="builtin.backend_fastapi"))
+        prior = GraphNode(id="p:business_domain:prior", kind=NodeKind.BUSINESS_DOMAIN,
+                          name="prior", project_id="p")
+        conn.upsert_result("p", AnalyzerResult(nodes=[prior], plugin=ANALYZERS_PLUGIN))  # 上轮软节点
+        register_analyzer(_RefsPriorSoft())
+        _analyzers_pass(conn, "p", IngestReport(project_id="p"))
+        g = conn.load_graph("p", plugin=ANALYZERS_PLUGIN)
+        # 软边指向上轮软节点 → hard_ids 不含软 → 被丢, 不持久化为悬空(改前会留 → 下轮 load 悬空)
+        assert [e for e in g.edges if e.kind == EdgeKind.PLAYS_ROLE.value] == []
+    finally:
+        conn.close()
+
+
 def test_analyze_error_is_fail_soft(clean_registry, tmp_path):
     """单 analyzer 的 analyze 抛错 → fail-soft, 不拖垮其余 analyzer 的产出。"""
     from codev_platform.graph.ingest import ANALYZERS_PLUGIN, IngestReport, _analyzers_pass

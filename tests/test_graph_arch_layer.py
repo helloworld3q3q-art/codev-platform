@@ -86,6 +86,20 @@ def test_db_nodes_excluded_from_plays_role():
     assert "p:db_table:orders" not in sources               # db 表不获
 
 
+def test_soft_nodes_excluded_from_plays_role():
+    # Fix-A(2026-06-13 取证 25 条 dangling): inferred_api_call 等**软节点**不演代码架构层角色 →
+    # 不获 plays_role 边。否则 A2 给 A3 软节点发 plays_role, 而该软节点下轮未重产时边悬空(dangling)。
+    a = ArchLayerAnalyzer(FakeLayerLabeler())
+    fn = _func("web/x.py", "handle")                       # 代码节点
+    soft = GraphNode(id="p:inferred_api_call:web/x.py->p:backend_endpoint:POST:/api/y",
+                     kind=NodeKind.INFERRED_API_CALL.value, name="inferred",
+                     project_id="p", file="web/x.py")       # A3 软节点, 与 fn 同文件(改前会被 fan-out)
+    res = a.analyze("p", [_file("web/x.py"), fn, soft], [])
+    sources = {e.source for e in res.edges}
+    assert "p:backend_function:handle" in sources          # 代码节点仍获 plays_role
+    assert soft.id not in sources                          # 软节点不获(根除悬空源头)
+
+
 def test_soft_isolation_kinds():
     # ARCH_LAYER / PLAYS_ROLE 被 schema 认作软(impact 默认过滤 + referential-integrity 的依据)。
     assert is_soft_node_kind(NodeKind.ARCH_LAYER.value)

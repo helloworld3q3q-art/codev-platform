@@ -32,6 +32,7 @@ from codev_platform.graph.schema import (
     GraphEdge,
     GraphNode,
     NodeKind,
+    is_soft_node_kind,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,9 +116,11 @@ class ArchLayerAnalyzer:
             if not n.file:
                 continue
             node_file[n.id] = n.file
-            # plays_role 只对**代码节点**fan-out(排除 db_table/db_column 数据层节点);
-            # by_file 事实仍见全量节点(labeler 据完整上下文分类), 只是数据节点不获代码角色边。
-            if n.kind not in _NON_CODE_KINDS:
+            # plays_role 只对**确定性硬代码节点**fan-out: 排除 db_table/db_column 数据层节点, 也排除
+            # 软节点(inferred_api_call / business_domain / arch_layer 等)—— 软节点不演代码架构层角色,
+            # 且跨 analyzer 引用别人上轮软节点会产悬空 plays_role 边(2026-06-13 取证: 25 条 dangling)。
+            # by_file 事实仍见全量节点(labeler 据完整上下文分类), 只是这些节点不获代码角色边。
+            if n.kind not in _NON_CODE_KINDS and not is_soft_node_kind(n.kind):
                 file_nodes.setdefault(n.file, []).append(n.id)
             fc = by_file.setdefault(n.file, {
                 "endpoint": False, "tables": set(), "functions": 0, "imp_out": 0, "imp_in": 0,

@@ -22,6 +22,7 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
     ProvSource,
+    is_soft_node_kind,
     stamp_provenance,
     stamp_unprovenanced,
 )
@@ -364,7 +365,10 @@ def _analyzers_pass(store, project_id: str, report: IngestReport,
 
     merged = store.load_graph(project_id)
     hard_nodes = merged.nodes
-    hard_ids = {n.id for n in hard_nodes}
+    # referential-integrity 信任集只含**硬节点**: analyzer 仍读全量节点(hard_nodes)作上下文, 但产出的
+    # 软边只有指向硬节点(或本轮自产软节点)才算有效。含软节点会让"引用别人上轮软节点"的悬空软边蒙混
+    # 过校验持久化, 下轮 load 后悬空(2026-06-13 取证: A2 plays_role 指向 A3 inferred_api_call 软节点)。
+    hard_ids = {n.id for n in hard_nodes if not is_soft_node_kind(n.kind)}
     soft_nodes: list[GraphNode] = []
     soft_edges: list[GraphEdge] = []
     by_analyzer: dict[str, int] = {}
