@@ -414,23 +414,38 @@ _SRC_WEIGHT: dict[str, float] = {
     "ast": 1.0, "framework": 1.0, "bridge": 1.0, "regex": 0.7, "llm": 0.5, "manual": 1.0,
 }
 _SRC_DEFAULT_WEIGHT = 0.85   # 未盖 provenance 的硬边(插件直产 reads_table 等)
+
+# 边**关系强度**权重(与 src 权重正交: src=解析确定性, kind=该关系本身多强地表征"依赖")。
+# 只列**降权**的弱关系: import ≠ 重度依赖其行为 / renders 结构性 / mentions·relates_to 松关联 /
+# changed_by 历史关联。强依赖边(calls/calls_api/uses_api/reads/writes/updates/contains/...)取默认
+# 1.0 —— 其确定性已由 src 权重表达, 此处不二次惩罚(防双重降权)。
+_KIND_WEIGHT: dict[str, float] = {
+    "imports": 0.85, "renders": 0.9, "mentions": 0.6, "relates_to": 0.6, "changed_by": 0.7,
+}
+_KIND_DEFAULT_WEIGHT = 1.0
+# 深度衰减: 每多一跳乘一次 → 同等单边质量下**更短的依赖路径得分更高**(近依赖优先)。≤1 保 Dijkstra
+# 出堆即终态的单调性。1.0=不衰减(纯按边质量乘积)。
+_DEPTH_DECAY = 0.9
 _PATH_MAX_FANOUT = 60        # 单节点出边上限(防高出度爆炸)
 
 
-def _edge_quality(attr: dict) -> float:
-    """单边质量 ∈ (0,1]: confidence × src 权重。结构边×高置信≈1, regex/llm/低置信拉低。"""
+def _edge_quality(attr: dict, kind: str) -> float:
+    """单边质量 ∈ (0,1]: confidence × src 权重(解析确定性)× kind 权重(关系强度)。
+    结构边×高置信×强关系 ≈1; regex/llm/低置信/弱关系(import 等)拉低。"""
     conf = attr.get("confidence")
     conf = 1.0 if conf is None else conf
-    src = attr.get("src")
-    return conf * _SRC_WEIGHT.get(src, _SRC_DEFAULT_WEIGHT)
+    src_w = _SRC_WEIGHT.get(attr.get("src"), _SRC_DEFAULT_WEIGHT)
+    kind_w = _KIND_WEIGHT.get(kind, _KIND_DEFAULT_WEIGHT)
+    return conf * src_w * kind_w
 
 
 def _best_paths(g: ImpactGraph, start_id: str, *, reverse: bool,
                 max_depth: int = _MAX_DEPTH) -> dict[str, tuple[float, list]]:
-    """Dijkstra 最大乘积: 每个可达节点保**最优单路径**(score=Π 边质量, 越大越强依赖)。
+    """Dijkstra 最大乘积: 每个可达节点保**最优单路径**(score=Π(边质量 × 深度衰减), 越大越强依赖)。
 
-    每节点只留一条最优路径(非枚举全路径)→ 有界 O(节点数), 不指数爆炸。边质量 ≤1 故 score
-    沿路单调降, 标准 Dijkstra(出堆即终态)。返回 {node_id: (score, [(node_id, kind, attr)...])}。
+    每节点只留一条最优路径(非枚举全路径)→ 有界 O(节点数), 不指数爆炸。边质量 ≤1 且 depth_decay ≤1
+    故 score 沿路单调降, 标准 Dijkstra(出堆即终态)。边质量=conf×src权重×kind权重(见 _edge_quality),
+    每跳再乘 _DEPTH_DECAY → 近依赖优先。返回 {node_id: (score, [(node_id, kind, attr)...])}。
     """
     adj = g.rev if reverse else g.fwd
     best: dict[str, tuple[float, list]] = {start_id: (1.0, [])}
@@ -449,7 +464,7 @@ def _best_paths(g: ImpactGraph, start_id: str, *, reverse: bool,
                 continue
             key = (nbr, nid, kind) if reverse else (nid, nbr, kind)   # 边永远 source→target
             attr = g.edge_attr.get(key, {})
-            nscore = score * _edge_quality(attr)
+            nscore = score * _edge_quality(attr, kind) * _DEPTH_DECAY
             if nbr not in best or nscore > best[nbr][0]:
                 best[nbr] = (nscore, best[nid][1] + [(nbr, kind, attr)])
                 heapq.heappush(heap, (-nscore, depth + 1, nbr))

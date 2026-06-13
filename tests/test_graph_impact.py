@@ -365,3 +365,28 @@ def test_find_impact_paths_top_n_and_depth(conn):
     assert r["paths"][0]["endpoint"]["id"] == _FN                 # 最浅(d1)分最高
     assert r["paths"][0]["depth"] == 1
     assert r["paths"][0]["score"] >= r["paths"][1]["score"]      # 降序稳定
+
+
+def test_find_impact_paths_kind_weight_and_depth_decay(tmp_path):
+    # Phase 5: ① kind 权重(calls 强依赖 > imports 弱依赖, 同 src/conf/depth)② 深度衰减(单跳满质量边
+    # 的 score = 1.0 × _DEPTH_DECAY, 而非 1.0)。两者正交叠加, 一个用例同时验。
+    from codev_platform.graph.impact import _DEPTH_DECAY, find_impact_paths
+    from codev_platform.graph.schema import ProvSource, stamp_provenance
+    c = open_store("kw", path=tmp_path / "kw.sqlite")
+    T, A, B = "kw:db_table:t", "kw:backend_function:a", "kw:backend_function:b"
+    nodes = [
+        GraphNode(id=T, kind=NodeKind.DB_TABLE.value, name="t", project_id="kw"),
+        GraphNode(id=A, kind=NodeKind.BACKEND_FUNCTION.value, name="afn", project_id="kw", file="a.py"),
+        GraphNode(id=B, kind=NodeKind.BACKEND_FUNCTION.value, name="bfn", project_id="kw", file="b.py"),
+    ]
+    # 同 ast/conf 1.0、同 depth 1; A 经 calls(强关系 1.0), B 经 imports(弱关系 0.85)。
+    e_a = stamp_provenance(
+        GraphEdge(source=A, target=T, kind=EdgeKind.CALLS.value, confidence=1.0), ProvSource.AST)
+    e_b = stamp_provenance(
+        GraphEdge(source=B, target=T, kind=EdgeKind.IMPORTS.value, confidence=1.0), ProvSource.AST)
+    c.upsert_result("kw", AnalyzerResult(nodes=nodes, edges=[e_a, e_b], plugin="test"))
+    r = find_impact_paths(c, "kw", "t")
+    c.close()
+    assert r["paths"][0]["endpoint"]["id"] == A                  # calls(1.0) 排在 imports(0.85) 前
+    assert abs(r["paths"][0]["score"] - round(_DEPTH_DECAY, 4)) < 1e-9   # 深度衰减已计入(0.9, 非 1.0)
+    assert r["paths"][0]["score"] > r["paths"][1]["score"]       # kind 权重拉开差距
