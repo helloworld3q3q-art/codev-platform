@@ -76,11 +76,10 @@ const dispatch = (evt: unknown, h: StreamHandlers): void => {
 export async function streamAgentChat(
   body: { question: string; sessionId?: string; maxSteps?: number },
   handlers: StreamHandlers,
-  signal?: AbortSignal,
 ): Promise<boolean> {
   let stream: ReadableStream<Uint8Array>;
   try {
-    stream = await sseRequestStream({ url: '/api/v1/agent/chat/stream', data: body, signal });
+    stream = await sseRequestStream({ url: '/api/v1/agent/chat/stream', data: body });
   } catch {
     return false; // 建连失败(含 401 已跳登录)→ 调用方回退非流式
   }

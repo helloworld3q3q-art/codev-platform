@@ -91,7 +91,7 @@ const AgentPage: React.FC = () => {
       const sentFor = activeSessionRef.current; // 发送时所处会话('' = 新会话), 用于回包后比对
       const userMsg: ChatMessage = { id: nextId(), role: 'user', content: question };
       const placeholder: ChatMessage = {
-        id: nextId(), role: 'assistant', content: '', streaming: true, animating: true,
+        id: nextId(), role: 'assistant', content: '', animating: true,
       };
       setMessages((prev) => [...prev, userMsg, placeholder]);
       setLoading(true);
@@ -123,10 +123,10 @@ const AgentPage: React.FC = () => {
           }
           const data = res.data;
           bindSession(data?.sessionId);
-          patch({ content: data?.answer ?? '', steps: data?.steps, usage: data?.usage, stopReason: data?.stopReason, streaming: false });
+          patch({ content: data?.answer ?? '', steps: data?.steps, usage: data?.usage, stopReason: data?.stopReason });
           loadSessions();
         } catch {
-          patch({ content: '请求失败, 请重试', streaming: false, animating: false });
+          patch({ content: '请求失败, 请重试', animating: false });
         }
       };
 
@@ -155,7 +155,6 @@ const AgentPage: React.FC = () => {
                 steps: (data.steps as API.ChatStep[] | undefined) ?? [...liveSteps],
                 usage: data.usage,
                 stopReason: data.stopReason,
-                streaming: false,
               });
               loadSessions();
             },
@@ -176,10 +175,10 @@ const AgentPage: React.FC = () => {
     [nextId, loadSessions],
   );
 
-  // 某条 assistant 气泡 typing 动画播完 → 关其 animating/streaming(停打字光标; 历史消息不受影响)。
+  // 某条 assistant 气泡 typing 动画播完 → 关其 animating(停打字光标 + 切回 markdown 渲染; 历史消息不受影响)。
   const handleTypingComplete = useCallback((id: string): void => {
     setMessages((prev) =>
-      prev.map((msg) => (msg.id === id ? { ...msg, animating: false, streaming: false } : msg)),
+      prev.map((msg) => (msg.id === id ? { ...msg, animating: false } : msg)),
     );
   }, []);
 
@@ -198,7 +197,7 @@ const AgentPage: React.FC = () => {
           偏移 = ProLayout 头 + PageContainer header/面包屑 + 内容上下留白; 如有微小空隙/滚动条微调此值。 */}
       <div
         className="relative bg-#ffffff rounded-8 overflow-hidden border border-#f0f0f0 shadow-sm"
-        style={{ height: 'calc(100vh - 40px)' }}
+        style={{ height: 'calc(100vh - 60px)' }}
       >
         <ChatPanel messages={messages} loading={loading} onSend={handleSend} onComplete={handleTypingComplete} />
         {/* 贴左边缘(菜单右侧)的竖向小钮: 上下拖动 + 点击在"菜单 ↔ 会话列表"间切换 */}

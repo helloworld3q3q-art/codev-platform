@@ -10,9 +10,7 @@ export interface ChatMessage {
   steps?: API.ChatStep[];
   usage?: Record<string, unknown>;
   stopReason?: string;
-  // streaming: token 到达期(驱动 Bubble 原生 streaming prop —— 平滑增量、不重置 typing)。
-  // animating: typing 动画播放中(done 后仍 true, 让动画按 interval 播完, onTypingComplete 才置 false)。
-  // 两者分离: 模型很快吐完(streaming 窗口短)时, animating 仍撑住 typing 直到视觉打字结束。
-  streaming?: boolean;
+  // animating: typing 动画播放中(token 到达期 + done 后直到 onTypingComplete 播完)。驱动 Bubble
+  // 原生 typing + 打字期不挂 contentRender(content 须为 string 才启用原生打字, 见 ChatPanel)。
   animating?: boolean;
 }

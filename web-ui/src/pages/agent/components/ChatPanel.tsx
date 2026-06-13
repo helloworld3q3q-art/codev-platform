@@ -55,10 +55,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onSend, onComp
         key: m.id,
         role: m.role,
         content: m.content,
-        loading: m.role === 'assistant' && !m.content && !!m.streaming, // 收 token 前显示 loading 点
-        // Bubble 原生流式 prop: token 到达期 true → 平滑增量、保留前缀, 不把每次 setState 当新内容重置。
-        streaming: m.role === 'assistant' && !!m.streaming,
-        // 原生打字效果: 由 animating 撑住(done 后仍 true, 让动画按 interval 播完), onTypingComplete 才关。
+        loading: m.role === 'assistant' && !m.content && !!m.animating, // 收 token 前显示 loading 点
+        // 原生打字效果: 由 animating 撑住(token 到达期 + done 后), 动画按 interval 播完后 onTypingComplete 关。
         typing:
           m.role === 'assistant' && m.animating
             ? { step: 3, interval: 50, effect: 'typing' as const }
