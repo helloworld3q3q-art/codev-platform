@@ -101,11 +101,34 @@ agent 经图谱精确查到 PDA 页面后,`read_file`/`list_dir` 却报"路径�
 
 **教训沉淀**:验证一律 `store_path` 覆盖写临时库,**绝不对线上图谱跑手动 ingest**([[graph-rebuild-via-worker-not-manual-ingest]]:dependency-cruiser 冷启动 fail-soft 会 upsert 覆盖好数据)。Windows→UNC 访问 WSL 仓时 depcruise 走 npx 报 `UNC paths not supported` fail-soft(frontend_module 缺),纯 Python 正则扫描(component/route/api_call)经 UNC 正常 —— 是 Windows-UNC 限制非改动问题。
 
+## 十一、Phase 4 结构社区检测 + 全链路(MCP→tool→LLM→agent)测试(`907088a`→`6315294`→`f5020ec`)
+
+继 Phase 9 选 Phase 4(社区检测)。**先派 3 兄弟讨论否掉"无消费方"误判**:初判 Phase 4 唯一消费方=Phase 5 留白(0 活接线)→ 缓建。但用户点出真消费方 = **编码 agent(web/IDE/Claude/Codex)**,只要暴露成 agent 可调工具就成立 → 转做。**与 A1 互补**:A1=LLM 语义业务域(贵/只 endpoint),社区=算法结构聚类(免 LLM/全节点/确定性)。
+
+**实现(复用 Analyzer 协议, ingest.py 零改)**:
+- `graph/community.py` 纯 stdlib 确定性 Louvain(detect_communities + modularity, 无 networkx, sorted+min-id tie-break 消随机源)。
+- `CommunityAnalyzer` 复用 A1/A2 的 Analyzer 协议跑 `_analyzers_pass` → COMMUNITY 软节点 + IN_COMMUNITY 软边, 无条件注册(确定性免费, 默认开)。
+- **两条消费路径**:① graph MCP 加 `find_node_community`/`list_communities`(IDE/Claude/Codex)② agent `tools/impact.py` 同补两工具(**web agent 自带 in-process 引擎, 第一版漏了, 兄弟①抓出补上**)。
+- **Phase 5 社区因子 gate 默认关**(measure-first 对抗审计采纳):0.8 跨社区惩罚未经 A/B 证实增益, 比照 planner_llm/rerank/A1 默认关纪律, **不静默改活工具排序**(`build_impact_graph(with_community=)` 注入侧 gate, 关→退化 baseline 零回归)。社区软层 + 2 agent 工具是加性安全, 默认开。
+- `soft_quality` 加结构社区轴(coverage/giant 0.7/modularity 诊断);**砍掉 A1↔社区对齐率**(默认关不可算 + 正交无理论意义)。
+- `impact.py` 软查询(A1/社区/A2 + search_nodes)分出 `impact_soft.py`(773→561, 守 file-discipline ≤600)。
+
+**全链路测试(用户要"MCP→tool→LLM→agent 3 项目连贯+组合")**:
+- **L1 纯逻辑**:WSL 全量 **1759 passed**(Louvain 确定性/modularity/gate/A1+社区共存)。
+- **L3 live MCP**:codev-platform 经**真 `mcp__graph__` 工具**实调返跨层认证社区;openclaw 60 / ideas-v2 84 社区(reindex worker 补数据)。
+- **L4 真·LLM e2e**:in-process 驱动 agent loop + 真 deepseek, onboarding 提问 → **LLM 自主 step1 选 `communities_overview`** + list_dir 连贯链 + 3105 字结构概览。**证实 web agent 端 LLM 真能调到社区工具, 无需补 planner lane**(工具描述一次命中)。
+- 真实仓质量:codev 34 / openclaw 60 / ideas 84 社区, **无巨型簇**(最大 8~9%), 语义连贯(认证/agent/codegraph 各成簇), 优于 2026-06-11 连通分量退化。
+
+**测试逼出并修的 3 个真 bug**:① **web 403**(兄弟②):token 机全局 config → handler 重读 → 56 web 测试假红;`conftest` autouse 隔离宿主 config → host-independent(1725→1759 全绿)。② **循环导入**(我拆 impact_soft 引入):impact↔impact_soft 模块级互导, impact_soft 被先导即崩;惰性 import(`_engine()`)单向化修复。③ **dotnet 漏登记**(Phase 9 produces 修)。
+
+**部署**:`reindex-queue enqueue openclaw/ideas` 补社区数据 + 重启 codev-mcp-graph/codev-agent/codev-reindex 到 f5020ec(daemon 不随 pull 重载)+ 重启 Claude 重连 MCP, live 抽验干净码正常。
+
 ## commit 链(2026-06-13 段)
 **上午(PDA 链路)**:`712588e`(code_vec batch+skip_kinds 配置)→`a0485ef`(/embed 反应式 OOM 回收)→`6530886`(续跑探活 R5)→`ba05cf9`(find_api_callers URL 解析)→`6cfa250`(前端 API 使用精确归因 uses_api 引擎)→`5d8a601`(meta.json 进 git + extra_repos 可移植)→`f3704ac`(build_text 封顶治超大 docstring)→`796665b`(agent 文件工具多仓 + core/repos 单一真值源)。
 **下午(对抗审计修复)**:`313a972`(审计批: P0 qwen/P1a reindex/3×P2/chroma bind)→`9e65067`(RepoScope 多仓节点碰撞根治)→`8b1623a`(/embed 内部信物闸)→`f912e03`(audit 按后端枚举+孤儿 reconcile)→`376e108`(A2/A3 悬空 plays_role 根治 25→0)。
 **晚间(蓝图续建)**:状态订正 `313a972`后`f413fac`(#7)/`3c56b3c`(#8)/`70a8daa`(conftest 注)→`e7b72a1`(Phase 5 路径 kind 权重+深度衰减)→`9ab5582`(Phase 8 观测 trace+聚合)→`bcd6bf0`(recall-stats CLI + conftest 隔离)→`49e0d01`/`005382c`(vector lane fs 探活快速跳过, P95 944→4.8ms)。MCP codegraph symlink 修复为本机 local 不进 git。
 **Phase 9(adapter 形式化)**:`a01aadc`(produces 声明式扩展点 → ownership 派生 kind_owners() + capability 视图 + 收窄 _stack_scan re-export;修 dotnet 漏登记归属 bug,净减 19 行;274 单测 + 5 真实仓全链路实测)。
+**Phase 4(结构社区 + 全链路测试)**:`907088a`(Louvain 社区 analyzer + 2 graph MCP 工具 + Phase 5 ≤1 惩罚 gate 默认关 + soft_quality 社区轴)→`6315294`(impact 软查询分出 impact_soft + web agent 社区工具 + conftest host-config 隔离修 56 web 假红)→`f5020ec`(impact_soft 惰性 import 破循环)。L1 1759 passed + L3 3 项目 live + L4 真 deepseek 自主选社区工具。
 
 ## web 端
 本会话改动**不需前端同步**:impact.py / api_usage / core.repos / fs.py / code_vector_store 全在 graph 引擎 + agent 工具 + 索引层,OpenAPI 未变,`pnpm run api` 不用跑。
