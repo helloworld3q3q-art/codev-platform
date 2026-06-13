@@ -17,7 +17,7 @@
 
 > 多仓 operationId 契约桥课题独立成轨, 见 [`../roadmap-2026-06-10/`](../roadmap-2026-06-10/)。
 >
-> 日报: [06-08](daily-summary-2026-06-08.md) / [06-09](daily-summary-2026-06-09.md) / [06-10](daily-summary-2026-06-10.md) / [06-11](daily-summary-2026-06-11.md) / [06-12](daily-summary-2026-06-12.md) / [**06-13**](daily-summary-2026-06-13.md)(PDA 链路收尾: code_vec 大项目建成 + find_api_callers URL 解析 + 前端调用方精确归因 uses_api + 跨仓 config 版本化 + agent 文件工具多仓 + 部署根因 web agent=codev-agent)。
+> 日报: [06-08](daily-summary-2026-06-08.md) / [06-09](daily-summary-2026-06-09.md) / [06-10](daily-summary-2026-06-10.md) / [06-11](daily-summary-2026-06-11.md) / [06-12](daily-summary-2026-06-12.md) / [06-13](daily-summary-2026-06-13.md)(PDA 链路收尾: code_vec 大项目建成 + find_api_callers URL 解析 + 前端调用方精确归因 uses_api + 跨仓 config 版本化 + agent 文件工具多仓 + 部署根因 web agent=codev-agent)/ [**06-14**](daily-summary-2026-06-14.md)(/agent 端到端 SSE 流式 + 原生打字: 根治 30s 超时 + 逐字打字; 挖出 contextvar 跨线程 / contentRender 关闭 Bubble typing 两个真 bug, 都不在用户怀疑的 proxy)。
 
 ## 落地状态(2026-06-08, 只拎 2 高 ROI 项)
 
