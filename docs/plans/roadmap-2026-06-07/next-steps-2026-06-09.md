@@ -24,13 +24,15 @@ ai-health --all
 
 **测**:`tests/test_graph_audit.py` 加"只读连接审计不产 WAL / 不改文件";现有 audit 测试回归。
 
-### ⏸️ #7 config DI(改动大、价值低,真要彻底才做,~半天)
+### ✅ #7 config DI —— 已实现(2026-06-13 复核确认)
+
+**已落地**(走的正是下面"轻量做法"):`codev_platform/web/service_binding.py::rebind_web_services(cfg)` 把 session/job/index/agent_client/memory 单例统一按 cfg 重绑;`web/app.py:52` 在 `create_app(cfg)` 显式传 cfg 时调它;消费方走 `get_session_store()` getter 见新值。测试 `tests/test_web_rebind_services.py`(3 passed, WSL 复核)+ `conftest.py::_restore_web_singletons` autouse 防跨测试污染。本条 ⏸️ 标记为 stale,实为已完成。
+
+<details><summary>原问题/做法(留档)</summary>
 
 **问题**:`web/routes/jobs.py:28`、`agent.py:27`、`web/security/sessions.py:222`、`session_authenticator.py:41` 在 import 时 `load_config()` 绑单例;`create_app(cfg)` 的显式 cfg 只作用 app factory + authenticator → 测试注入 cfg / 多实例时可能 authenticator 用 cfg A、session/job 用 cfg B。
-
 **轻量做法**:加 `rebind_web_services(cfg)`,把那几个单例绑定收进一个函数,`create_app(cfg)` 启动时统一重绑。
-
-**注意**:单实例生产 config 一致(同一 `load_config`),影响主要在测试/多实例 → 价值低。改时盯 import 顺序 + 现有绑定流程别破。
+</details>
 
 ### ⏸️ #8 残留:set_roles 多 org 角色管理(安全敏感,要时再做)
 
