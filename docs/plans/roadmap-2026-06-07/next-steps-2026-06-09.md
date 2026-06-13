@@ -34,13 +34,18 @@ ai-health --all
 **轻量做法**:加 `rebind_web_services(cfg)`,把那几个单例绑定收进一个函数,`create_app(cfg)` 启动时统一重绑。
 </details>
 
-### ⏸️ #8 残留:set_roles 多 org 角色管理(安全敏感,要时再做)
+### ✅ #8 set_roles 多 org 角色管理 —— 已实现(2026-06-13 复核确认,比 plan 设想更严谨)
 
-**问题**:`web/services/user_service.py:134` `if org_id != user.org_id: raise "org_id 与用户归属组织不一致"` —— `user.org_id` 是登录默认首 org → admin 无法给用户在第 2 个 org 设角色(与多 org 模型冲突)。
+**已落地**(多组织 RBAC 加固那轮做的,见 [[rbac-multi-org-membership-model]]):`user_service.set_roles` 走多对多成员模型, 授权按**目标 org** 判。护栏拆成**两层**(比 plan 只提的 `_guard_same_org` 一个更安全):
+- `_guard_org_member`(per-org 角色管理 / 看详情, 按本 org 成员身份放开)
+- `_guard_home_org`(全局身份变更=密码/状态/资料, 严格首属 org, 防 org A admin 改共享用户全局凭据→跨 org 劫持)
+- org_admin 另有 `org_id != caller_org_id` 兜底(只能写自己 org)。
+**测试**(plan 要求的越权用例 + 红线全覆盖, WSL 36 passed): `test_web_users.py` 的 `set_roles_rejected_for_other_org_user` / `rejects_mismatched_org_id` / `platform_admin_sets_role_across_orgs` / `org_admin_manages_member_from_other_home_org` / `cannot_reset_password_of_shared_member` / `cannot_disable_shared_member`。本条 ⏸️ 标记为 stale。
 
-**正确做法(需谨慎)**:把 `org_id == user.org_id`(单一归属)改成校验目标用户是 `org_id` 的成员(或 caller 是 `org_id` 的 admin + 正在加入);`_guard_same_org` 也从"首 org"改成"目标 org"判定。
+<details><summary>原问题/做法(留档)</summary>
 
-**注意**:RBAC 安全代码,改错会造跨 org 越权。要动:先补多 org 越权测试(外组 admin 不能写、目标用户非成员处理),WSL 跑 `test_session_project_access` + RBAC 测试。不在常规流里顺手改。
+原 `web/services/user_service.py` `if org_id != user.org_id: raise` 按登录首 org 判 → admin 无法给用户在第 2 个 org 设角色。正确做法: 校验目标用户是 `org_id` 成员 + 全局变更走首属 org。已按此(并拆两层护栏)实现。
+</details>
 
 ---
 
