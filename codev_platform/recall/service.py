@@ -16,6 +16,7 @@ graph + codegraph 两 lane 直读 per-project 只读 sqlite(**不经 daemon**), 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from codev_platform.recall.fusion import LaneResult, weighted_rrf
@@ -150,16 +151,24 @@ def recall_code(query: str, project_id: str, *,
     if weights is None:   # 自动按 query 类型调权(planner 耦合隔离在 recall.weights)
         from codev_platform.recall.weights import lane_weights_for
         weights = lane_weights_for(query)
+    from codev_platform.recall.observability import RecallTrace
+    trace = RecallTrace(query, project_id)   # Phase 8: per-lane 计时/候选/无证据(best-effort)
     lanes: list[LaneResult] = []
     details: dict[str, dict] = {}
-    for lane, lane_details in (_graph_lane(project_id, query, per_lane),
-                               _codegraph_lane(project_id, query, per_lane),
-                               _vector_lane(project_id, query, per_lane)):
+    # lane 列表**就地**列(引用模块级函数, 调用期才解析名字 → 测试 monkeypatch 这些函数有效)。
+    # 勿提成模块级常量: 那会在 import 期 capture 死函数引用, 绕过 monkeypatch(捕获引用 footgun)。
+    for name, lane_fn in (("graph", _graph_lane), ("codegraph", _codegraph_lane),
+                          ("vector", _vector_lane)):
+        t0 = time.monotonic()
+        lane, lane_details = lane_fn(project_id, query, per_lane)
+        cand = len(lane.ranked) if (lane is not None and lane.ranked) else 0
+        trace.add_lane(name, (time.monotonic() - t0) * 1000.0, cand)
         if lane is not None and lane.ranked:
             lanes.append(lane)
             for ref, d in lane_details.items():
                 details.setdefault(ref, d)   # 同 ref 多 lane: 首见富化(graph 先)
     hits = _fuse_and_enrich(lanes, details, weights=weights, limit=limit)
+    trace.finish(len(hits))   # 落 trace(无证据 = 融合空); 失败静默不阻断
     # 精排(Phase 6 reranker): config `recall.rerank.enabled` 开则 cross-encoder 重排 top 候选,
     # 关 / 不可用 / 失败 → 原序(加权 RRF), 绝不因精排丢结果(plan Gate「reranker 关仍稳定」)。
     from codev_platform.recall.rerank import maybe_rerank_hits
