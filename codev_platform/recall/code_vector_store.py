@@ -344,10 +344,12 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     if k <= 0:                 # chromadb 对 n_results<=0 抛 TypeError; 正常边界值直接空返
         return [], {}
     persist = _code_vec_persist_dir(project_id)
-    # 廉价 fs 探活: 无 chroma 库文件 = 该项目没建 code_vec → 快速空返, **不 import chromadb / 不建
-    # client**(省首次 PersistentClient 冷启动 ~1s)。Phase 8 实测: 没建 code_vec 的项目 vector lane
-    # 0 命中却 P95 944ms 全耗在这个无用冷启动上。有库的项目走原路, 行为不变。
-    if not (persist / "chroma.sqlite3").is_file():
+    # 廉价 fs 探活: 无**成功构建标记** _MANIFEST_NAME(仅成功 build 写)= 该项目没建好 code_vec →
+    # 快速空返, **不 import chromadb / 不建 client**(省首次 PersistentClient 冷启动 ~700ms-1s)。
+    # 注意不能只看 chroma.sqlite3: 空库/半建会留 0-collection 的 chroma.sqlite3(实测 codev-platform
+    # 即此态: 库文件在、collections 空、无 manifest), 仍会触发冷启动 + get_collection NotFoundError。
+    # 用我们自己的 manifest(非 chromadb 内部 schema)做标记, 健壮。有库的项目走原路, 行为不变。
+    if not (persist / _MANIFEST_NAME).is_file():
         return [], {}
     client = _get_query_client(str(persist))   # 进程内单例(per path)
     col = client.get_collection(code_vec_collection_name(project_id))  # 缺 → 抛, 调用侧 fail-soft

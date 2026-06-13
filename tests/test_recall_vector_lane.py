@@ -44,11 +44,16 @@ def test_query_code_vectors_k_le_0_empty(monkeypatch):
     assert query_code_vectors("any-pid", "q", -3) == ([], {})
 
 
-def test_query_code_vectors_no_collection_fast_skip():
-    # Phase 8 优化: 项目没建 code_vec 库(persist 目录无 chroma.sqlite3)→ 顶部 fs 探活快速空返,
-    # 不 import chromadb / 不建 PersistentClient(省 ~1s 冷启动)。用不存在的 pid 走 fs-skip 路径(k>0)。
-    from codev_platform.recall.code_vector_store import query_code_vectors
-    assert query_code_vectors("no-such-proj-xyz-2026", "find user", 5) == ([], {})
+def test_query_code_vectors_no_collection_fast_skip(tmp_path, monkeypatch):
+    # Phase 8 优化: 没建好 code_vec → fs 探活快速空返, 不 import chromadb / 不建 client(省 ~1s 冷启动)。
+    # 关键: 即使 persist 残留空 chroma.sqlite3(0 collection, 实测 codev-platform 即此态), 只要无
+    # .manifest.json(成功构建标记)就跳过 —— 不能只看 chroma.sqlite3 在不在(那正是首版漏的坑)。
+    import codev_platform.recall.code_vector_store as cvs
+    persist = tmp_path / "code_vec" / "demo"
+    persist.mkdir(parents=True)
+    (persist / "chroma.sqlite3").write_bytes(b"x")        # 空库残留, 但无 manifest
+    monkeypatch.setattr(cvs, "_code_vec_persist_dir", lambda pid: persist)
+    assert cvs.query_code_vectors("demo", "find user", 5) == ([], {})   # 走 fs-skip, 不碰 chromadb
 
 
 def test_parse_query_result_missing_meta_falls_back_to_none():
