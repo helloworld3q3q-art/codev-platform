@@ -40,9 +40,11 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   loading: boolean;
   onSend: (question: string) => void;
+  // 某条 assistant 气泡 typing 动画播完回调(用于关闭其 animating, 停止打字光标)。
+  onComplete: (id: string) => void;
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onSend }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onSend, onComplete }) => {
   const [value, setValue] = useState<string>('');
 
   const items = useMemo<BubbleListProps['items']>(
@@ -51,16 +53,24 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onSend }) => {
         key: m.id,
         role: m.role,
         content: m.content,
-        loading: m.role === 'assistant' && !m.content, // 占位等待中显示 loading 点
-        // Ant Design X 原生打字效果: 仅流式进行中的 assistant 气泡开 typing, 收尾/历史静态显示。
+        loading: m.role === 'assistant' && !m.content && !!m.streaming, // 收 token 前显示 loading 点
+        // Bubble 原生流式 prop: token 到达期 true → 平滑增量、保留前缀, 不把每次 setState 当新内容重置。
+        streaming: m.role === 'assistant' && !!m.streaming,
+        // 原生打字效果: 由 animating 撑住(done 后仍 true, 让动画按 interval 播完), onTypingComplete 才关。
         typing:
-          m.role === 'assistant' && m.streaming
+          m.role === 'assistant' && m.animating
             ? { step: 3, interval: 50, effect: 'typing' as const }
             : false,
+        onTypingComplete:
+          m.role === 'assistant'
+            ? (): void => {
+                onComplete(m.id);
+              }
+            : undefined,
         // 答复末尾挂工具调用流(仅 assistant 且本轮有 steps)
         footer: m.role === 'assistant' && m.steps?.length ? <ToolFlow steps={m.steps} /> : undefined,
       })),
-    [messages],
+    [messages, onComplete],
   );
 
   const handleSubmit = useCallback(

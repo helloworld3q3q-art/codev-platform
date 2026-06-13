@@ -90,7 +90,9 @@ const AgentPage: React.FC = () => {
     async (question: string): Promise<void> => {
       const sentFor = activeSessionRef.current; // 发送时所处会话('' = 新会话), 用于回包后比对
       const userMsg: ChatMessage = { id: nextId(), role: 'user', content: question };
-      const placeholder: ChatMessage = { id: nextId(), role: 'assistant', content: '', streaming: true };
+      const placeholder: ChatMessage = {
+        id: nextId(), role: 'assistant', content: '', streaming: true, animating: true,
+      };
       setMessages((prev) => [...prev, userMsg, placeholder]);
       setLoading(true);
 
@@ -124,7 +126,7 @@ const AgentPage: React.FC = () => {
           patch({ content: data?.answer ?? '', steps: data?.steps, usage: data?.usage, stopReason: data?.stopReason, streaming: false });
           loadSessions();
         } catch {
-          patch({ content: '请求失败, 请重试', streaming: false });
+          patch({ content: '请求失败, 请重试', streaming: false, animating: false });
         }
       };
 
@@ -174,6 +176,13 @@ const AgentPage: React.FC = () => {
     [nextId, loadSessions],
   );
 
+  // 某条 assistant 气泡 typing 动画播完 → 关其 animating/streaming(停打字光标; 历史消息不受影响)。
+  const handleTypingComplete = useCallback((id: string): void => {
+    setMessages((prev) =>
+      prev.map((msg) => (msg.id === id ? { ...msg, animating: false, streaming: false } : msg)),
+    );
+  }, []);
+
   // 切项目: 清空会话重开 + 重拉会话列表 (会话与 project 上下文绑定)。
   useEffect(() => {
     activeSessionRef.current = '';
@@ -186,7 +195,7 @@ const AgentPage: React.FC = () => {
   return (
     <PageContainer>
       <div className="relative h-720 bg-#ffffff rounded-8 overflow-hidden border border-#f0f0f0 shadow-sm">
-        <ChatPanel messages={messages} loading={loading} onSend={handleSend} />
+        <ChatPanel messages={messages} loading={loading} onSend={handleSend} onComplete={handleTypingComplete} />
         {/* 贴左边缘(菜单右侧)的竖向小钮: 上下拖动 + 点击在"菜单 ↔ 会话列表"间切换 */}
         <SessionToggle open={sessionPanelOpen} onToggle={toggleSessionPanel} />
       </div>

@@ -10,6 +10,9 @@ export interface ChatMessage {
   steps?: API.ChatStep[];
   usage?: Record<string, unknown>;
   stopReason?: string;
-  // 流式进行中标志: 驱动 Bubble 原生 typing 打字效果(true=打字, false/缺省=静态显示)。
+  // streaming: token 到达期(驱动 Bubble 原生 streaming prop —— 平滑增量、不重置 typing)。
+  // animating: typing 动画播放中(done 后仍 true, 让动画按 interval 播完, onTypingComplete 才置 false)。
+  // 两者分离: 模型很快吐完(streaming 窗口短)时, animating 仍撑住 typing 直到视觉打字结束。
   streaming?: boolean;
+  animating?: boolean;
 }
