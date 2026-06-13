@@ -6,18 +6,23 @@ post-pass 产的**软节点 / 软边**(business_domain / community / arch_layer)
   - include_soft=True(放开软产物, 与查依赖默认过滤分开, 护城河不被 LLM 噪声污染)
   - 纯读 sqlite, **不调 LLM**(读已落库软标)
 
-复用 impact.py 的图构建 + 解析 + brief 渲染(单一真值源), 不重复造。impact.py 末尾 re-export
-本模块全部公共函数 → `from graph import impact; impact.find_node_domain(...)` 旧用法不破。
+复用 impact.py 的图构建 + 解析 + brief 渲染(单一真值源)。impact.py 末尾 re-export 本模块全部
+公共函数 → `impact.find_node_domain(...)` 旧用法不破。**impact 的助手在函数内惰性 import** ——
+打破 impact↔impact_soft 模块级循环(任一先导入都安全), 单向依赖。import 仅一次(Python 缓存)。
 """
 from __future__ import annotations
 
-from codev_platform.graph.impact import (
-    _node_brief,
-    _not_found,
-    _resolve,
-    build_impact_graph,
-)
 from codev_platform.graph.schema import EdgeKind, GraphNode, NodeKind
+
+
+def _engine():
+    """惰性取 impact 引擎(build_impact_graph/_resolve/_node_brief/_not_found)。
+
+    避免模块级 `from .impact import ...` 与 impact 末尾的 re-export 形成循环导入
+    (impact_soft 被先于 impact 单独 import 时会炸)。函数内 import → impact 此时已完成加载。
+    """
+    from codev_platform.graph import impact
+    return impact
 
 
 # ---------------------------------------------------------------- 节点搜索(模糊搜 name, 含软节点)
@@ -56,7 +61,8 @@ def search_nodes(store, project_id: str, query: str, kind: str = "all",
     命中行为兼容原版; 多词不再要求整串连续子串(原"impact analysis"整串匹配不到任何 name → 0
     命中的弱点), 让跨 lane 融合召回的 graph lane 出**有序**结果(相关项排前 → 融合质量↑)。
     """
-    g = build_impact_graph(store, project_id, include_soft=True)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
     terms = [t for t in (query or "").strip().lower().split() if t]
     if not terms:
         return {"query": query, "kind": kind, "hits": [], "count": 0}
@@ -69,7 +75,7 @@ def search_nodes(store, project_id: str, query: str, kind: str = "all",
         if key is not None:
             scored.append((key, n))
     scored.sort(key=lambda x: (x[0], x[1].kind, x[1].name or ""))   # 相关性键 + 稳定次序
-    hits = [_node_brief(n) for _, n in scored[: max(0, int(limit))]]
+    hits = [eng._node_brief(n) for _, n in scored[: max(0, int(limit))]]
     return {"query": query, "kind": kind, "hits": hits, "count": len(hits)}
 
 
@@ -81,22 +87,24 @@ def find_node_domain(store, project_id: str, node_ref: str) -> dict:
     放开软边(include_soft=True)—— 这是"查理解"类查询, 与"查依赖"(默认过滤软边)分开,
     互不污染: 查依赖走确定性硬骨架, 查理解才放开 LLM 标的软节点。
     """
-    g = build_impact_graph(store, project_id, include_soft=True)
-    node, ambig = _resolve(g, node_ref, None)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
+    node, ambig = eng._resolve(g, node_ref, None)
     if node is None:
-        return _not_found("ref", node_ref, ambig)
+        return eng._not_found("ref", node_ref, ambig)
     domains = []
     for tgt, kind in g.fwd.get(node.id, []):
         if kind == EdgeKind.BELONGS_TO_DOMAIN.value:
             dom = g.nodes.get(tgt)
             if dom is not None:
                 domains.append(dom.name)
-    return {"found": True, "node": _node_brief(node), "domains": sorted(set(domains))}
+    return {"found": True, "node": eng._node_brief(node), "domains": sorted(set(domains))}
 
 
 def list_domain_members(store, project_id: str, domain_name: str) -> dict:
     """查某业务域下有哪些 endpoint/表(反向软边)。读已标好的软节点, **不调 LLM**。"""
-    g = build_impact_graph(store, project_id, include_soft=True)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
     doms = g.find_nodes_by_name(domain_name, NodeKind.BUSINESS_DOMAIN.value)
     if not doms:
         return {"found": False, "domain": domain_name}
@@ -106,7 +114,7 @@ def list_domain_members(store, project_id: str, domain_name: str) -> dict:
         if kind == EdgeKind.BELONGS_TO_DOMAIN.value:
             m = g.nodes.get(src)
             if m is not None:
-                members.append(_node_brief(m))
+                members.append(eng._node_brief(m))
     members.sort(key=lambda x: x["name"])
     return {"found": True, "domain": dom.name, "members": members, "count": len(members)}
 
@@ -122,10 +130,11 @@ def find_node_community(store, project_id: str, node_ref: str) -> dict:
     给 agent 答"这块代码结构上和谁抱团"(全节点覆盖, 区别于 A1 业务域只 endpoint/表)。
     放开软边(include_soft=True)——"查理解"类查询, 与"查依赖"(默认过滤软边)分开互不污染。
     """
-    g = build_impact_graph(store, project_id, include_soft=True)
-    node, ambig = _resolve(g, node_ref, None)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
+    node, ambig = eng._resolve(g, node_ref, None)
     if node is None:
-        return _not_found("ref", node_ref, ambig)
+        return eng._not_found("ref", node_ref, ambig)
     communities = []
     for tgt, kind in g.fwd.get(node.id, []):
         if kind != EdgeKind.IN_COMMUNITY.value:
@@ -134,7 +143,7 @@ def find_node_community(store, project_id: str, node_ref: str) -> dict:
         if comm is None:
             continue
         members = [
-            _node_brief(g.nodes[src]) for src, k in g.rev.get(comm.id, [])
+            eng._node_brief(g.nodes[src]) for src, k in g.rev.get(comm.id, [])
             if k == EdgeKind.IN_COMMUNITY.value and src in g.nodes and src != node.id
         ]
         members.sort(key=lambda x: (x["layer"], x["kind"], x["name"] or ""))
@@ -146,7 +155,7 @@ def find_node_community(store, project_id: str, node_ref: str) -> dict:
             "members": members[:_COMMUNITY_MEMBER_CAP],
             "membersTruncated": len(members) > _COMMUNITY_MEMBER_CAP,
         })
-    return {"found": True, "node": _node_brief(node), "communities": communities}
+    return {"found": True, "node": eng._node_brief(node), "communities": communities}
 
 
 def list_communities(store, project_id: str, limit: int = 50) -> dict:
@@ -154,7 +163,8 @@ def list_communities(store, project_id: str, limit: int = 50) -> dict:
 
     读 COMMUNITY 软节点 meta(size/dominant_kind/sample), 按 size 降序。**不调 LLM**。
     """
-    g = build_impact_graph(store, project_id, include_soft=True)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
     items = []
     for n in g.nodes.values():
         if n.kind != NodeKind.COMMUNITY.value:
@@ -187,26 +197,28 @@ def find_arch_role(store, project_id: str, node_ref: str) -> dict:
     graph 无 FILE kind 节点, 故角色落到**节点级**(同一 file 的节点共享其 file 的角色); 传 endpoint/
     function/module 的 name 或 id 均可。
     """
-    g = build_impact_graph(store, project_id, include_soft=True)
-    node, ambig = _resolve(g, node_ref, None)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
+    node, ambig = eng._resolve(g, node_ref, None)
     if node is None:
-        return _not_found("node", node_ref, ambig)
+        return eng._not_found("node", node_ref, ambig)
     roles = [
         g.nodes[tgt].name for tgt, kind in g.fwd.get(node.id, [])
         if kind == EdgeKind.PLAYS_ROLE.value and tgt in g.nodes
     ]
-    return {"found": True, "node": _node_brief(node), "roles": sorted(set(roles))}
+    return {"found": True, "node": eng._node_brief(node), "roles": sorted(set(roles))}
 
 
 def list_layer_members(store, project_id: str, role: str) -> dict:
     """查某架构层角色下有哪些 file(反向 PLAYS_ROLE 软边)。读已标好的软节点, **不调 LLM**。"""
-    g = build_impact_graph(store, project_id, include_soft=True)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
     layers = g.find_nodes_by_name(role, NodeKind.ARCH_LAYER.value)
     if not layers:
         return {"found": False, "role": role}
     layer = layers[0]
     members = [
-        _node_brief(g.nodes[src]) for src, kind in g.rev.get(layer.id, [])
+        eng._node_brief(g.nodes[src]) for src, kind in g.rev.get(layer.id, [])
         if kind == EdgeKind.PLAYS_ROLE.value and src in g.nodes
     ]
     members.sort(key=lambda x: x["name"])
@@ -219,7 +231,8 @@ def find_arch_violations(store, project_id: str, limit: int = 200) -> dict:
     逆向依赖 = 下层角色(rank 大)经 calls/imports 依赖上层角色(rank 小), 如 repository→controller。
     LLM 只提供 layer 标签这一个软输入; 违规判定全确定性(硬边 + rank), 给 agent 重构/PR 自检用。
     """
-    g = build_impact_graph(store, project_id, include_soft=True)
+    eng = _engine()
+    g = eng.build_impact_graph(store, project_id, include_soft=True)
     # node id → role(直接从 PLAYS_ROLE 软边; A2 节点级, 同 file 的每个节点各带一条软边到其 layer)
     node_role: dict[str, str] = {}
     for src, nbrs in g.fwd.items():
@@ -239,8 +252,8 @@ def find_arch_violations(store, project_id: str, limit: int = 200) -> dict:
             if tr is None or tr not in _LAYER_RANK or _LAYER_RANK[sr] <= _LAYER_RANK[tr]:
                 continue  # 同层 / 正向(上→下)依赖合法
             violations.append({
-                "from": _node_brief(g.nodes[src]), "fromRole": sr,
-                "to": _node_brief(g.nodes[tgt]), "toRole": tr, "via": kind,
+                "from": eng._node_brief(g.nodes[src]), "fromRole": sr,
+                "to": eng._node_brief(g.nodes[tgt]), "toRole": tr, "via": kind,
                 "detail": f"{sr} 逆向依赖 {tr}: {g.nodes[src].name} --{kind}--> {g.nodes[tgt].name}",
             })
     violations.sort(key=lambda v: (v["fromRole"], v["toRole"], v["from"]["name"]))
