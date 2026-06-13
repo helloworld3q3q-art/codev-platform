@@ -45,6 +45,19 @@ def _restore_web_singletons():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_host_config(tmp_path_factory, monkeypatch):
+    """测试与宿主机 ~/.codev-platform/config.json 隔离。
+
+    部署机(如 WSL 多组织服务器)全局 config 是 auth_mode=token, 而 web 测试按 passthrough 写
+    (只给 build_app 注入 _CFG, 但 handler 的 require_project_access / acl.can_access 故意重读
+    **全局** load_config() 作单一真值源)→ 在 token 机上 web 请求全 403(56 web 测试假红, 与代码无关)。
+    指向不存在路径 → load_config() 回落默认(passthrough)→ 套件 host-independent(dev/CI/WSL 一致)。
+    测试体内若显式 setenv 覆盖(意图测 token 模式)其 monkeypatch 后跑、胜出, 不被本默认压住。"""
+    absent = tmp_path_factory.mktemp("nocfg") / "absent.json"   # 不创建 = 不存在 → 默认
+    monkeypatch.setenv("CODEV_PLATFORM_CONFIG", str(absent))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_recall_trace(tmp_path_factory, monkeypatch):
     """recall_code 每次查询 best-effort 写 trace 到 data_root/recall_trace(Phase 8 观测)。测试重定向到
     tmp, 防 recall service/weights 等测试把垃圾 trace 写进**真实平台 baseline**(measure-first 数据被污染)。

@@ -108,7 +108,33 @@ def test_store_missing_is_error(tmp_path, monkeypatch):
     assert res.is_error is True and "不存在" in res.content
 
 
+def test_community_agent_tools(tmp_path, monkeypatch):
+    # seed function clique + 社区软层, 验 node_community / communities_overview 两个 agent 工具。
+    from codev_platform.agent.tools.impact import CommunitiesOverviewTool, NodeCommunityTool
+    from codev_platform.graph.analyzers.community import CommunityAnalyzer
+
+    store = tmp_path / "g.sqlite"
+    c = open_store(_PID, path=store)
+    fns = [GraphNode(id=f"{_PID}:backend_function:f{i}", kind=NodeKind.BACKEND_FUNCTION.value,
+                     name=f"f{i}", project_id=_PID) for i in range(4)]
+    edges = [GraphEdge(source=fns[a].id, target=fns[b].id, kind=EdgeKind.CALLS.value)
+             for a in range(4) for b in range(4) if a < b]
+    c.upsert_result(_PID, AnalyzerResult(nodes=fns, edges=edges, plugin="test"))
+    soft = CommunityAnalyzer().analyze(_PID, fns, edges)
+    c.upsert_result(_PID, AnalyzerResult(nodes=soft.nodes, edges=soft.edges,
+                                         plugin="builtin.analyzers"))
+    c.close()
+    import codev_platform.graph.store as gs
+    monkeypatch.setattr(gs, "graph_store_path", lambda pid: store)
+
+    r = json.loads(NodeCommunityTool(_PID).run({"nodeRef": fns[0].id}).content)
+    assert r["found"] and r["communities"]
+    o = json.loads(CommunitiesOverviewTool(_PID).run({}).content)
+    assert o["count"] >= 1
+
+
 def test_registered_in_default_registry():
     reg = build_default_registry(_PID)
-    for name in ("impact_analysis", "table_usage", "page_dependencies", "api_callers", "impact_paths"):
+    for name in ("impact_analysis", "table_usage", "page_dependencies", "api_callers",
+                 "impact_paths", "node_community", "communities_overview"):
         assert reg.get(name) is not None

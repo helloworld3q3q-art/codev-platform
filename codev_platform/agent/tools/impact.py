@@ -173,6 +173,48 @@ class ContractDriftTool(Tool):
         return _run_query(self.project_id, _cd.find_contract_drift)
 
 
+class NodeCommunityTool(Tool):
+    name = "node_community"
+    description = (
+        "查某节点结构上属哪个社区 + 同簇成员 (算法结构聚类, 全节点覆盖: 前端组件/函数/端点/表都派号)。"
+        "回答'这块代码结构上和谁抱团'、看改它的结构邻域。与 business domain (业务语义域) 正交互补: "
+        "社区是免 LLM 的结构血缘聚类。入参 nodeRef=节点 id 或 name。"
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {"nodeRef": {"type": "string", "description": "节点 id 或 name"}},
+        "required": ["nodeRef"],
+    }
+
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        ref = (args or {}).get("nodeRef", "").strip()
+        if not ref:
+            return ToolResult(call_id="", content="缺少 nodeRef 参数", is_error=True)
+        return _run_query(self.project_id, I.find_node_community, ref)
+
+
+class CommunitiesOverviewTool(Tool):
+    name = "communities_overview"
+    description = (
+        "整仓结构社区地图: 每个社区的大小 / 主导类型 / 代表成员 —— 给 onboarding、快速看这仓有哪些"
+        "结构模块。免 LLM, 读已落库社区。无必填入参 (可选 limit, 默认 50)。"
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {"limit": {"type": "integer", "description": "返回上限 (默认 50)"}},
+    }
+
+    def __init__(self, project_id: str | None = None) -> None:
+        self.project_id = project_id
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        limit = int((args or {}).get("limit", 50))
+        return _run_query(self.project_id, I.list_communities, limit)
+
+
 def register_into(registry, project_id: str | None = None) -> None:
     registry.register(ImpactAnalysisTool(project_id))
     registry.register(TableUsageTool(project_id))
@@ -180,3 +222,5 @@ def register_into(registry, project_id: str | None = None) -> None:
     registry.register(ApiCallersTool(project_id))
     registry.register(ImpactPathsTool(project_id))
     registry.register(ContractDriftTool(project_id))
+    registry.register(NodeCommunityTool(project_id))        # Phase 4 结构社区(web agent 消费)
+    registry.register(CommunitiesOverviewTool(project_id))

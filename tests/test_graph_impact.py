@@ -275,7 +275,7 @@ def test_search_nodes_single_word_unchanged(conn):
 
 
 def test_name_relevance_tiers_exact_prefix_substring():
-    from codev_platform.graph.impact import _name_relevance
+    from codev_platform.graph.impact_soft import _name_relevance  # 2026-06-13 软查询分出
     # 越相关键越小: 精确 < 前缀 < 子串(同一词 save)
     exact = _name_relevance("save", ["save"], "save")
     prefix = _name_relevance("save_user", ["save"], "save")
