@@ -26,6 +26,7 @@ from codev_platform.graph.schema import (
     stamp_unprovenanced,
 )
 from codev_platform.graph.store import open_store
+from codev_platform.graph.repo_scope import RepoScope
 from codev_platform.plugins.builtin import _stack_scan
 from codev_platform.plugins.registry import run_applicable
 # "项目→仓根集合"解析在 core.repos 单一真值源(graph ingest 与 agent 文件工具共用)。
@@ -79,6 +80,39 @@ def _resolve_repos(repo_path: Path | str, project_id: str,
     return repos
 
 
+def _merge_result(merged: dict[str, AnalyzerResult], node_seen: dict[str, set[str]],
+                  exec_result, report: IngestReport) -> None:
+    """把一个插件执行结果按 plugin 累加进 merged(节点按 id 去重, 边 concat)+ 累加 summary。
+    同 plugin 跨仓多次结果合并到一处 —— upsert 按 plugin 删插, 不合并会互相覆盖。"""
+    ar = exec_result.result
+    plug = exec_result.plugin
+    acc = merged.setdefault(plug, AnalyzerResult(plugin=plug))
+    seen = node_seen.setdefault(plug, set())
+    for n in ar.nodes:
+        if n.id not in seen:
+            seen.add(n.id)
+            acc.nodes.append(n)
+    acc.edges.extend(ar.edges)
+    summ = exec_result.summary or {}
+    s = report.summaries.setdefault(plug, {"nodes": 0, "edges": 0})
+    s["nodes"] += summ.get("nodes", len(ar.nodes))
+    s["edges"] += summ.get("edges", len(ar.edges))
+
+
+def _collect_merged(repos: list[Path], project_id: str, scope: RepoScope,
+                    report: IngestReport) -> dict[str, AnalyzerResult]:
+    """跑所有仓 × 适用插件 → 前端节点打仓维度(scope.localize 防跨仓碰撞)→ 按 plugin 合并跨仓产出。"""
+    merged: dict[str, AnalyzerResult] = {}
+    node_seen: dict[str, set[str]] = {}
+    for repo in repos:
+        for exec_result in run_applicable(repo, project_id):
+            if exec_result.result is None:
+                continue
+            scope.localize(exec_result.result, repo)
+            _merge_result(merged, node_seen, exec_result, report)
+    return merged
+
+
 def ingest_project(
     repo_path: Path | str,
     project_id: str,
@@ -103,46 +137,13 @@ def ingest_project(
     repos = _resolve_repos(repo_path, project_id, extra_repos)
     report = IngestReport(project_id=project_id)
     store = open_store(project_id, path=store_path)
+    # 多仓: 前端节点 id/file 以仓相对路径为锚、无仓维度 → 跨仓同相对路径文件会碰撞(merge first-wins
+    # 静默丢后仓节点)。RepoScope 给前端节点打仓维度做仓内唯一化(主仓 tag='' no-op, 单仓零影响),
+    # 写侧 localize 与读侧 resolve(api_usage 读盘)共用同一映射。详见 graph.repo_scope。
+    scope = RepoScope(repos)
     try:
-        # 按 plugin 合并跨仓产出(防 upsert 删插互相覆盖)。
-        merged: dict[str, AnalyzerResult] = {}
-        node_seen: dict[str, set[str]] = {}
-        # 多仓时记被 id 碰撞丢弃的节点: 前端节点 id 嵌"仓相对路径"无仓维度, 两 extra_repos 同相对路径
-        # 文件(各自 src/pages/index.vue)→ 同 id → first-wins 静默丢后仓节点。根治需给前端节点 id/file
-        # 加仓维度(设计级: 跨 7+ 扫描器 + 桥/api_usage 按 file 匹配, 待专项), 此处先暴露成 WARN 不静默。
-        multi_repo = len(repos) > 1
-        dropped_ids: list[str] = []
-        for repo in repos:
-            for exec_result in run_applicable(repo, project_id):
-                ar = exec_result.result
-                if ar is None:
-                    continue
-                plug = exec_result.plugin
-                if plug not in merged:
-                    merged[plug] = AnalyzerResult(plugin=plug)
-                    node_seen[plug] = set()
-                acc, seen = merged[plug], node_seen[plug]
-                for n in ar.nodes:
-                    if n.id in seen:
-                        if multi_repo:
-                            dropped_ids.append(n.id)
-                        continue
-                    seen.add(n.id)
-                    acc.nodes.append(n)
-                acc.edges.extend(ar.edges)
-                s = report.summaries.setdefault(plug, {"nodes": 0, "edges": 0})
-                s["nodes"] += (exec_result.summary or {}).get("nodes", len(ar.nodes))
-                s["edges"] += (exec_result.summary or {}).get("edges", len(ar.edges))
-        if dropped_ids:
-            logger.warning(
-                "[ingest] 多仓节点 id 碰撞, %d 个节点被丢(前端节点 id 缺仓维度 → 后仓同相对路径文件覆盖"
-                "前仓; 影响 find_impacted_pages/page_dependencies 精度, 待加仓维度根治)。示例: %s",
-                len(dropped_ids), ", ".join(dropped_ids[:5]),
-            )
-            report.summaries["_cross_repo_id_collisions"] = {
-                "count": len(dropped_ids), "examples": dropped_ids[:20],
-            }
-        for plug, ar in merged.items():
+        # 跑所有仓 × 插件 + 前端节点打仓维度 + 按 plugin 合并跨仓产出, 然后逐 plugin 落库。
+        for plug, ar in _collect_merged(repos, project_id, scope, report).items():
             store.upsert_result(project_id, ar)
             report.ingested.append(plug)
 
@@ -166,7 +167,7 @@ def ingest_project(
         # 前端 API 使用精确归因 post-pass: 页面 --uses_api--> 它源码真正引用的 url_registry 常量。
         # 必须在 url_registry(api_call)+ frontend_deps(component)+ bridge 之后。取代"页面 import
         # 共享注册模块 → 算调用其每个接口"的过报(impact 据 uses_api 精确, 见 build_impact_graph)。
-        _frontend_api_usage_pass(store, project_id, report, repos)
+        _frontend_api_usage_pass(store, project_id, report, repos, scope)
 
         # 综合分析 second post-pass: 硬骨架全部落库且连通后, analyzer 在其上归纳软节点/软边
         # (业务域等)。软产物 confidence<1.0 + referential-integrity 校验, 与硬骨架物理隔离。
@@ -293,7 +294,7 @@ def _frontend_bridge_pass(store, project_id: str, report: IngestReport) -> None:
 
 
 def _frontend_api_usage_pass(store, project_id: str, report: IngestReport,
-                             repos: list[Path]) -> None:
+                             repos: list[Path], scope: RepoScope) -> None:
     """页面→api_call 精确 uses_api 边 post-pass —— 薄编排: 注入跨仓源码读取 + 委托解析引擎。
 
     解析逻辑在 `_stack_scan.api_usage`(策略式, 可扩展不同"使用模式": 当前 url_registry 常量引用;
@@ -301,8 +302,11 @@ def _frontend_api_usage_pass(store, project_id: str, report: IngestReport,
     module)之后跑。无适用 api_call(纯内联项目)→ no-op。fail-soft: 解析异常只 warn 不拖垮 ingest。"""
     from codev_platform.plugins.builtin._stack_scan.api_usage import resolve_api_usage_edges
 
-    def _read(rel: str) -> str:
-        for r in repos:
+    def _read(file: str) -> str:
+        # 多仓: file 可能带仓 tag(merge 期 RepoScope 加)→ resolve 还原到来源仓 + 真实相对路径(读对
+        # 那个仓的源码, 不被同相对路径别仓文件串内容)。单仓 / 无 tag → (None, 原样) 回退遍历全仓。
+        repo, rel = scope.resolve(file)
+        for r in ([repo] if repo is not None else repos):
             p = r / rel
             if p.is_file():
                 try:

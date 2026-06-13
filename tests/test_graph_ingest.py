@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from codev_platform.graph.ingest import ingest_project
-from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode
+from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode, NodeKind
 from codev_platform.graph.store import open_store
 from codev_platform.plugins import clear_registry, register_plugin
 from codev_platform.plugins.base import AnalyzerPlugin
@@ -219,3 +219,38 @@ def test_multiroot_merges_both_repos_no_overwrite(tmp_path):
     ids = {n.id for n in m.nodes}
     # 两仓节点都在 store(同插件跑两仓未互相 upsert 覆盖)
     assert "demo:project:main" in ids and "demo:project:extra" in ids
+
+
+class _FrontendCollidePlugin(AnalyzerPlugin):
+    """两仓都产同 id 的前端节点(模拟各自 src/pages/index.vue)→ 验 RepoScope 仓内唯一化不丢后仓。"""
+    name = "fake.frontcollide"
+    version = "1.0.0"
+
+    def detect(self, repo_path: Path) -> bool:
+        return True
+
+    def analyze(self, repo_path: Path, project_id: str) -> AnalyzerResult:
+        nid = f"{project_id}:frontend_module:src/pages/index.vue"
+        return AnalyzerResult(
+            plugin="fake.frontcollide",
+            nodes=[GraphNode(id=nid, kind=NodeKind.FRONTEND_MODULE.value, name="index",
+                             project_id=project_id, file="src/pages/index.vue")],
+        )
+
+
+def test_multiroot_frontend_id_collision_both_survive(tmp_path):
+    # 两仓同相对路径前端节点 id 相同 → 没有仓维度时 merge first-wins 静默丢后仓。RepoScope 给 extra
+    # 仓打 tag 仓内唯一化, 两节点都该进 store(根治 P1b)。主仓 tag='' 原 id 不变。
+    clear_registry()
+    register_plugin(_FrontendCollidePlugin())
+    main = tmp_path / "web"; main.mkdir()
+    pda = tmp_path / "pda"; pda.mkdir()
+    store = tmp_path / "g.sqlite"
+    ingest_project(main, "demo", store_path=store, extra_repos=[str(pda)])
+    s = open_store("demo", path=store)
+    mod_ids = {n.id for n in s.load_graph("demo").nodes
+               if n.kind == NodeKind.FRONTEND_MODULE.value}
+    s.close()
+    assert "demo:frontend_module:src/pages/index.vue" in mod_ids       # 主仓 tag='' 原样
+    assert "pda::demo:frontend_module:src/pages/index.vue" in mod_ids  # extra 仓打 tag, 未被丢
+    assert len(mod_ids) == 2
