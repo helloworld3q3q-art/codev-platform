@@ -34,7 +34,7 @@ def test_remote_encode_batch_one_call_per_subbatch(monkeypatch):
     """子批 <= _EMBED_HTTP_BATCH 时只发一次 /embed, 带 texts 列表。"""
     seen = []
 
-    def fake_post(url, payload, timeout, token):
+    def fake_post(url, payload, timeout, token, internal_call=None):
         seen.append(payload)
         return {"vectors": [[1.0, 2.0]] * len(payload["texts"])}
 
@@ -50,7 +50,7 @@ def test_remote_encode_batch_chunks_large_input(monkeypatch):
     """超过子批阈值 → 切多次 /embed, 每次 <= _EMBED_HTTP_BATCH, 向量顺序拼回。"""
     calls = []
 
-    def fake_post(url, payload, timeout, token):
+    def fake_post(url, payload, timeout, token, internal_call=None):
         n = len(payload["texts"])
         calls.append(n)
         # 用文本内容回填可校验顺序
@@ -81,7 +81,7 @@ def test_remote_encode_batch_retries_transient_timeout(monkeypatch):
     monkeypatch.setattr(remote_mod.time, "sleep", lambda *_: None)  # 不真睡
     calls = {"n": 0}
 
-    def flaky(url, payload, timeout, token):
+    def flaky(url, payload, timeout, token, internal_call=None):
         calls["n"] += 1
         if calls["n"] < 3:
             raise TimeoutError("timed out")
@@ -101,6 +101,28 @@ def test_remote_encode_batch_raises_after_exhausting_retries(monkeypatch):
     import pytest
     with pytest.raises(RuntimeError):
         RemoteEmbedder("http://x/embed").encode_batch(["a"])
+
+
+def test_remote_embedder_sends_internal_call_header(monkeypatch):
+    """配了 internal_call → /embed 请求带 X-Internal-Call 信物(daemon loopback 豁免据此放行,
+    防同机反代白嫖)。不配 → 不带头(单机 passthrough 纯 loopback)。验真实 urlopen 收到的 header。"""
+    seen = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"vectors": [[1.0]]}'
+
+    def fake_urlopen(req, timeout=None):
+        seen["headers"] = {k.lower(): v for k, v in req.header_items()}
+        return _Resp()
+
+    monkeypatch.setattr(remote_mod.urllib.request, "urlopen", fake_urlopen)
+    RemoteEmbedder("http://x/embed", internal_call="s3cr3t").encode("hi")
+    assert seen["headers"].get("X-internal-call".lower()) == "s3cr3t"
+    seen.clear()
+    RemoteEmbedder("http://x/embed").encode("hi")   # 不配 → 不带头
+    assert "x-internal-call" not in seen["headers"]
 
 
 def test_qwen_local_init_sets_model_none_for_lazy_load():

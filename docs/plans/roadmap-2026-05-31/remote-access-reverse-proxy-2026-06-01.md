@@ -23,6 +23,12 @@
 platform.example.com {
   # TLS 由 Caddy 向 Let's Encrypt 自动签发 + 续期（域名须解析到本机公网 IP，开放 80/443）
 
+  # 🚨 /embed /rerank 是内部 GPU 算力接口, 绝不经反代对外: daemon 对 loopback 对端免 token,
+  #    而同机反代连上游的对端就是 127.0.0.1 → 不拦则远程经反代白嫖 GPU。必须前置显式拒。
+  #    (daemon 侧已加 X-Internal-Call 信物闸做纵深第一道, 此处反代层再拒一道, 见 §五。)
+  @platform_docs_internal path /platform-docs/embed /platform-docs/rerank
+  handle @platform_docs_internal { respond 403 }
+
   handle_path /platform-docs/* { reverse_proxy 127.0.0.1:18083 }
   handle_path /cross-link/*    { reverse_proxy 127.0.0.1:18086 }
   handle_path /codegraph/*     { reverse_proxy 127.0.0.1:18091 }
@@ -33,6 +39,7 @@ platform.example.com {
 > 端口为模板默认(见上节注解);**用 `gateway client-url` 打印的实际端口替换**。
 > `handle_path` strip 前缀；client 打 `/platform-docs/sse?project_id=x` → 上游收到 `/sse?project_id=x`。
 > codegraph 现为多租户单端点(`mcp.codegraph_sse_port`,默认 18091),`?project_id=` 路由,**一条 `handle_path` 即可**,不再每项目一端口。
+> **`@platform_docs_internal` 拒 /embed /rerank 必须排在 `handle_path /platform-docs/*` 之前**(Caddy 按 handle 顺序匹配),否则 catch-all 先命中就透传了。其它前缀(cross-link/codegraph/webhook)无 loopback 豁免接口, 无需此拒。
 
 ## 三、客户端操作（远程机器，每个业务仓一次）
 
@@ -78,6 +85,7 @@ handle_path /platform-docs/* {
 - **TLS 只在 Caddy 终结**：4 个上游服务保持绑 `127.0.0.1`（明文仅走 loopback，不出本机）；公网只暴露 Caddy :443。
 - **webhook /webhook/***：给远程 VCS（GitHub/GitLab）推送用，须配 `webhook.secret` 验签（fail-closed）；走 TLS。
 - **最小暴露**：除上述 4 前缀外不开任何 location；防火墙只放 80/443。
+- **/embed /rerank 绝不经反代对外**（纵深两道）：① 反代层前置 `@platform_docs_internal` 拒 403（见 §二 Caddyfile）；② daemon 层 —— 配了 `agent.internal_secret` 时,`/embed /rerank` 的 loopback 豁免额外要求 `X-Internal-Call` 信物(内部调用方 `RemoteEmbedder` 自动带,远程经反代转发带不出 → 落正常 token 鉴权)。两道任一生效即挡住"同机反代把远程伪装成 loopback 白嫖 GPU"。passthrough 单机不配 secret → 纯 loopback 豁免不变(无反代,无风险)。
 
 ## 关联
 

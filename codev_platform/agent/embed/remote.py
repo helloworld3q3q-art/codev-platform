@@ -15,10 +15,15 @@ import urllib.request
 from codev_platform.agent.memory_vector import Embedder, RerankModel
 
 
-def _post_json(url: str, payload: dict, timeout: float, token: str | None) -> dict:
+def _post_json(url: str, payload: dict, timeout: float, token: str | None,
+               internal_call: str | None = None) -> dict:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if internal_call:
+        # 本机 loopback 内部调用信物: daemon 配了 internal_secret 时, /embed /rerank 的 loopback 豁免
+        # 额外要求此头(防同机反代把远程请求伪装成 loopback 白嫖 GPU)。secret 只在本机内部传, 不过网络。
+        headers["X-Internal-Call"] = internal_call
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -36,13 +41,15 @@ _EMBED_RETRY_BACKOFF = 3.0  # 秒, 线性递增 (3/6/9)
 
 
 class RemoteEmbedder(Embedder):
-    def __init__(self, url: str, *, timeout: float = 30.0, token: str | None = None) -> None:
+    def __init__(self, url: str, *, timeout: float = 30.0, token: str | None = None,
+                 internal_call: str | None = None) -> None:
         self._url = url
         self._timeout = timeout
         self._token = token
+        self._internal_call = internal_call
 
     def encode(self, text: str) -> list[float]:
-        data = _post_json(self._url, {"text": text}, self._timeout, self._token)
+        data = _post_json(self._url, {"text": text}, self._timeout, self._token, self._internal_call)
         vecs = data.get("vectors")
         if not vecs:
             raise ValueError(f"remote embed 返回无 vectors: {data}")
@@ -65,7 +72,7 @@ class RemoteEmbedder(Embedder):
         last_exc: Exception | None = None
         for attempt in range(_EMBED_RETRIES):
             try:
-                data = _post_json(self._url, payload, _EMBED_CALL_TIMEOUT, self._token)
+                data = _post_json(self._url, payload, _EMBED_CALL_TIMEOUT, self._token, self._internal_call)
                 vecs = data.get("vectors")
                 if not vecs or len(vecs) != expect:
                     raise ValueError(f"remote embed 返回向量数不符: 期望 {expect} 得 {len(vecs) if vecs else 0}")
@@ -80,13 +87,16 @@ class RemoteEmbedder(Embedder):
 class RemoteRerankModel(RerankModel):
     """调 chroma daemon /rerank,复用那份 GPU reranker。失败抛 → QwenReranker 吞(不动序,降级)。"""
 
-    def __init__(self, url: str, *, timeout: float = 30.0, token: str | None = None) -> None:
+    def __init__(self, url: str, *, timeout: float = 30.0, token: str | None = None,
+                 internal_call: str | None = None) -> None:
         self._url = url
         self._timeout = timeout
         self._token = token
+        self._internal_call = internal_call
 
     def score(self, query: str, docs: list[str]) -> list[float]:
-        data = _post_json(self._url, {"query": query, "docs": docs}, self._timeout, self._token)
+        data = _post_json(self._url, {"query": query, "docs": docs}, self._timeout,
+                          self._token, self._internal_call)
         scores = data.get("scores")
         if scores is None:
             raise ValueError(f"remote rerank 返回无 scores: {data}")

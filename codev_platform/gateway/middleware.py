@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import time
 from collections.abc import Iterable
@@ -88,15 +89,26 @@ class AuthMiddleware:
         claims = verify_identity(token, self._internal_secret)
         return identity_from_internal_claims(claims) if claims is not None else None
 
+    def _loopback_call_authorized(self, headers: Headers) -> bool:
+        """loopback 豁免的附加闸: 未配 internal_secret → 纯 loopback 可信 (单机 passthrough, 原行为);
+        配了 → 必须带匹配的 X-Internal-Call 信物。同机反代转发的远程请求带不出 secret (它只在本机内部
+        调用方 config 里, 不过网络) → 拿不到豁免, 落正常鉴权 (防白嫖 GPU)。"""
+        if not self._internal_secret:
+            return True
+        provided = headers.get("x-internal-call") or ""
+        return hmac.compare_digest(provided, self._internal_secret)
+
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or self._is_public(scope.get("path", "")):
             await self.app(scope, receive, send)
             return
-        # 纯算力接口本机免 token: 仅当路径在豁免集 **且** 真实对端是 loopback 时放行。
-        if self._is_loopback_exempt(scope.get("path", "")) and _client_is_loopback(scope):
+        headers = Headers(scope=scope)
+        # 纯算力接口本机免 token: 路径在豁免集 + 真实对端 loopback + (未配 secret 或带对的内部信物)。
+        # 带 secret 时, 不带/带错信物的 loopback 请求 (同机反代转发的远程) 落到下方正常鉴权。
+        if (self._is_loopback_exempt(scope.get("path", "")) and _client_is_loopback(scope)
+                and self._loopback_call_authorized(headers)):
             await self.app(scope, receive, send)
             return
-        headers = Headers(scope=scope)
         try:
             # 服务间信物优先: web 前门已认证身份经 X-Identity 直接采信, 不破坏 passthrough/token 回退。
             identity = self._internal_identity(headers)

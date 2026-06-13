@@ -44,7 +44,7 @@
   },
 
   "agent": {
-    "_comment": "agent HTTP 服务 (codev-platform agent serve)。provider 选大脑; api_key 留空则走 env (ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)。安全红线: 真 key 只写本机 ~/.codev-platform/config.json, 绝不进仓; 本样板只放占位符。session_backend: memory(默认,进程内,重启丢) | pg(持久化到 memory.pg_dsn)。base_url —— codev-web 前门代理 chat/memory 到 agent 的地址 (默认 http://127.0.0.1:8848, agent 绑 127.0.0.1)。internal_secret —— web↔agent 服务间 X-Identity 信物的 HMAC 密钥 (web 签发 / agent 验签, 短时效令牌, 非对外鉴权); 空=不启 X-Identity 通道 (web 代理需配); 安全红线: 真值只写本机 config / env, 绝不进仓。timeout_sec —— web 代理调 agent 的超时秒数 (默认 30)。",
+    "_comment": "agent HTTP 服务 (codev-platform agent serve)。provider 选大脑; api_key 留空则走 env (ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)。安全红线: 真 key 只写本机 ~/.codev-platform/config.json, 绝不进仓; 本样板只放占位符。session_backend: memory(默认,进程内,重启丢) | pg(持久化到 memory.pg_dsn)。base_url —— codev-web 前门代理 chat/memory 到 agent 的地址 (默认 http://127.0.0.1:8848, agent 绑 127.0.0.1)。internal_secret —— 平台单一内部信物密钥, 两用: ① web↔agent 服务间 X-Identity (web 签发 / agent 验签, 短时效令牌, 非对外鉴权); ② chroma daemon /embed /rerank 的 loopback 豁免闸 —— 配了它时内部调用 (RemoteEmbedder) 须带 X-Internal-Call=本值, 同机反代转发的远程请求带不出 → 落正常鉴权 (防白嫖 GPU)。空=两通道都不启 (单机 passthrough 纯 loopback 豁免); 安全红线: 真值只写本机 config / env, 绝不进仓。timeout_sec —— web 代理调 agent 的超时秒数 (默认 30)。",
     "provider": "claude",
     "model": "claude-opus-4-7",
     "max_steps": 12,

@@ -50,11 +50,20 @@ def _remote_timeout(cfg: dict) -> float:
     return float(_get(cfg, "memory.embed.timeout", 30.0))
 
 
+def _internal_call_secret(cfg: dict) -> str | None:
+    """本机内部调用信物 = 平台单一 internal_secret(与 web→agent X-Identity 同源)。daemon 配了它时,
+    /embed /rerank 的 loopback 豁免要求带此信物 → 同机反代转发的远程请求带不出, 防白嫖 GPU。未配 → None
+    (单机 passthrough 维持纯 loopback 豁免不变)。"""
+    from codev_platform.core.config import get as _get
+    return _get(cfg, "agent.internal_secret") or None
+
+
 def _build_remote_rerank(cfg: dict) -> RerankModel | None:
     from codev_platform.core.config import get as _get
     from codev_platform.agent.embed.remote import RemoteRerankModel
     url = _get(cfg, "memory.rerank_model.url") or f"http://127.0.0.1:{_chroma_base_port(cfg)}/rerank"
-    return RemoteRerankModel(url, timeout=_remote_timeout(cfg), token=_get(cfg, "memory.embed.token"))
+    return RemoteRerankModel(url, timeout=_remote_timeout(cfg), token=_get(cfg, "memory.embed.token"),
+                             internal_call=_internal_call_secret(cfg))
 
 
 register_rerank_model("remote", _build_remote_rerank)
@@ -94,7 +103,8 @@ def _build_remote(cfg: dict) -> Embedder | None:
     from codev_platform.core.config import get as _get
     from codev_platform.agent.embed.remote import RemoteEmbedder
     url = _get(cfg, "memory.embed.url") or f"http://127.0.0.1:{_chroma_base_port(cfg)}/embed"
-    return RemoteEmbedder(url, timeout=_remote_timeout(cfg), token=_get(cfg, "memory.embed.token"))
+    return RemoteEmbedder(url, timeout=_remote_timeout(cfg), token=_get(cfg, "memory.embed.token"),
+                          internal_call=_internal_call_secret(cfg))
 
 
 register_embedder("qwen-local", _build_qwen_local)

@@ -62,7 +62,7 @@ from codev_platform.chroma._config import (  # noqa: E402
     GPU_OP_TIMEOUT, EMBED_ENCODE_BATCH,
 )
 # load_config 仍在 server 用 (handle_sse / platform_status 的 ACL + 中间件构建)。
-from codev_platform.core.config import load_config  # noqa: E402
+from codev_platform.core.config import get as _cfg_get, load_config  # noqa: E402
 
 # Reranker 子系统抽到 _reranker.py (无环: 它从 _config 拿常量, 不依赖 server)。re-export
 # _ensure_reranker/_rerank_scores (main prewarm + _tools + tests 用); `rr` 供 health 读
@@ -540,6 +540,10 @@ async def _run_http(port: int) -> None:
             AuthMiddleware,
             authenticator=build_authenticator(_cfg),
             public_paths={"/healthz", "/health"},
+            # 平台单一内部信物(与 web→agent X-Identity 同源)。配了它时, 下面 loopback 豁免额外要求
+            # X-Internal-Call 信物 → 同机反代转发的远程请求带不出 secret 拿不到豁免(防白嫖 GPU);
+            # 未配(单机 passthrough)→ 维持纯 loopback 豁免不变。
+            internal_secret=_cfg_get(_cfg, "agent.internal_secret", "") or None,
             # /embed /rerank 是无租户数据的纯算力接口: 本机 loopback 内部调用 (code_vec 索引 /
             # agent-memory 写 复用 daemon GPU 模型) 免 token; 远程访问仍按 token 鉴权 (审计 R: 防白嫖)。
             loopback_exempt_paths={"/embed", "/rerank"},
