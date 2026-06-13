@@ -123,12 +123,21 @@ agent 经图谱精确查到 PDA 页面后,`read_file`/`list_dir` 却报"路径�
 
 **部署**:`reindex-queue enqueue openclaw/ideas` 补社区数据 + 重启 codev-mcp-graph/codev-agent/codev-reindex 到 f5020ec(daemon 不随 pull 重载)+ 重启 Claude 重连 MCP, live 抽验干净码正常。
 
+## 十二、file-discipline 收尾:大文件拆分(budget 彻底绿,06-14)
+
+Phase 4 全量测试时 `test_file_size_budget` 抓出**两个超 600 行**文件(预存红, 非 Phase 4 新破, 父 commit 同样): `impact.py` 677(我 Phase 4 加社区查询到 773)+ `chroma/server.py` 647。逐个拆到合规:
+- **`impact.py` 773→561**(§十一已记):软查询(A1 域 / Phase 4 社区 / A2 架构层 + search_nodes)分出 `impact_soft.py`。末尾 re-export 保兼容;惰性 import 破循环(`f5020ec`)。
+- **`chroma/server.py` 647→526**(`388457f`):**/embed /rerank 共享 GPU 算力端点子系统**(handler + `validate_embed_body`/`validate_rerank_body` + `_gpu_call`/`_release_cuda_cache` 算子收口)抽到 `_embed_api.py`(叶子, 只依赖 `_config/_models/_reranker/_helpers/_obslog`, **不 import server → 单向无环**, 吸取 impact_soft 循环坑教训)。`_run_http` 按 Route 注册 `_embed_api.embed/rerank`;re-export 保 `server.<name>` 兼容(测试用);`test_chroma_gpu_op_timeout` target 跟随 `_embed_api`。纯结构搬移**行为零变**;审 GPU 路径(batch 封顶/OOM 回收/wait_for 超时/清缓存)已调优, 不动避免行为变化。
+
+**结果**:`file_size_budget` 两 offender 清零 → **WSL 全量 1766 passed / 0 failed**(此前唯一红就是这条 budget)。教训:大文件拆分按"内聚子系统"切 + **叶子单向依赖**(不与原模块互导), 别图省事 re-export 成环。
+
 ## commit 链(2026-06-13 段)
 **上午(PDA 链路)**:`712588e`(code_vec batch+skip_kinds 配置)→`a0485ef`(/embed 反应式 OOM 回收)→`6530886`(续跑探活 R5)→`ba05cf9`(find_api_callers URL 解析)→`6cfa250`(前端 API 使用精确归因 uses_api 引擎)→`5d8a601`(meta.json 进 git + extra_repos 可移植)→`f3704ac`(build_text 封顶治超大 docstring)→`796665b`(agent 文件工具多仓 + core/repos 单一真值源)。
 **下午(对抗审计修复)**:`313a972`(审计批: P0 qwen/P1a reindex/3×P2/chroma bind)→`9e65067`(RepoScope 多仓节点碰撞根治)→`8b1623a`(/embed 内部信物闸)→`f912e03`(audit 按后端枚举+孤儿 reconcile)→`376e108`(A2/A3 悬空 plays_role 根治 25→0)。
 **晚间(蓝图续建)**:状态订正 `313a972`后`f413fac`(#7)/`3c56b3c`(#8)/`70a8daa`(conftest 注)→`e7b72a1`(Phase 5 路径 kind 权重+深度衰减)→`9ab5582`(Phase 8 观测 trace+聚合)→`bcd6bf0`(recall-stats CLI + conftest 隔离)→`49e0d01`/`005382c`(vector lane fs 探活快速跳过, P95 944→4.8ms)。MCP codegraph symlink 修复为本机 local 不进 git。
 **Phase 9(adapter 形式化)**:`a01aadc`(produces 声明式扩展点 → ownership 派生 kind_owners() + capability 视图 + 收窄 _stack_scan re-export;修 dotnet 漏登记归属 bug,净减 19 行;274 单测 + 5 真实仓全链路实测)。
 **Phase 4(结构社区 + 全链路测试)**:`907088a`(Louvain 社区 analyzer + 2 graph MCP 工具 + Phase 5 ≤1 惩罚 gate 默认关 + soft_quality 社区轴)→`6315294`(impact 软查询分出 impact_soft + web agent 社区工具 + conftest host-config 隔离修 56 web 假红)→`f5020ec`(impact_soft 惰性 import 破循环)。L1 1759 passed + L3 3 项目 live + L4 真 deepseek 自主选社区工具。
+**file-discipline 收尾(06-14)**:`388457f`(chroma/server.py 647→526, /embed /rerank 抽 _embed_api 叶子无环)。budget 两 offender 清零 → 全量 1766 passed / 0 failed。
 
 ## web 端
 本会话改动**不需前端同步**:impact.py / api_usage / core.repos / fs.py / code_vector_store 全在 graph 引擎 + agent 工具 + 索引层,OpenAPI 未变,`pnpm run api` 不用跑。
