@@ -303,6 +303,7 @@ class DotNetPlugin(AnalyzerPlugin):
 
     name = PLUGIN_NAME
     version = "0.1.0"
+    produces = (NodeKind.BACKEND_ENDPOINT.value,)
 
     def detect(self, repo_path: Path) -> bool:
         return dotnet_detect(Path(repo_path))

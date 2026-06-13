@@ -191,27 +191,47 @@ def cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_plugins(args: argparse.Namespace) -> int:
-    """plugins list: 列出已注册的 analyzer 插件 (name / version)。
+def _print_extension_points() -> None:
+    """列出另两套扩展点 (调用边 resolver / 综合分析器) 给"平台能力"全貌。
 
-    Phase 2 第一批只内置插件 (registry._discover_builtins 显式注册);列空属正常,
-    内置插件 (builtin.sql / backend_spring / frontend_react / 分析器等) 注册后这里有行。
+    与 analyzer 插件 (产节点/硬边) 互补: resolver 产 CALLS 边, analyzer 产软节点/软边。
+    三套各自注册表, 这里只读不改, 让 `plugins list` 一屏看全平台能力。
     """
-    from codev_platform.plugins import list_plugins
-    if args.action == "list":
-        plugins = list_plugins()
-        if not plugins:
-            _print("(无已注册插件)")
-            _print("提示: 内置插件 (如 builtin.sql / backend_spring) 经 registry._discover_builtins 注册。")
-            return 0
-        width = max(len(p.name) for p in plugins)
-        _print(f"{'name'.ljust(width)}  version")
-        _print("-" * (width + 12))
-        for p in plugins:
-            _print(f"{p.name.ljust(width)}  {p.version}")
+    from codev_platform.graph.analyzers import registered_analyzers
+    from codev_platform.graph.call_resolvers import registered_resolvers
+
+    resolvers = ", ".join(r.name for r in registered_resolvers()) or "(无)"
+    analyzers = ", ".join(a.name for a in registered_analyzers()) or "(无)"
+    _print("")
+    _print(f"call resolvers: {resolvers}")
+    _print(f"analyzers:      {analyzers}")
+
+
+def cmd_plugins(args: argparse.Namespace) -> int:
+    """plugins list: 列出已注册 analyzer 插件的能力 (name / version / produces / 边来源类)。
+
+    Phase 9: 经 capabilities.describe_capabilities() 派生视图 (聚合各插件自描述) + footer
+    列调用边 resolver 与综合分析器, 回答"本平台支持哪些语言栈、各产什么"。列空属正常,
+    内置插件 (builtin.sql / backend_spring / frontend_react 等) 注册后这里有行。
+    """
+    if args.action != "list":
+        _eprint(f"unknown action: {args.action}")
+        return 1
+    from codev_platform.plugins.capabilities import describe_capabilities
+
+    caps = describe_capabilities()
+    if not caps:
+        _print("(无已注册插件)")
+        _print("提示: 内置插件 (如 builtin.sql / backend_spring) 经 registry._discover_builtins 注册。")
         return 0
-    _eprint(f"unknown action: {args.action}")
-    return 1
+    width = max(len(c.plugin) for c in caps)
+    _print(f"{'name'.ljust(width)}  version  produces / prov")
+    _print("-" * (width + 28))
+    for c in caps:
+        produces = ", ".join(c.produces) or "-"
+        _print(f"{c.plugin.ljust(width)}  {c.version.ljust(7)}  {produces}  [{c.prov_source or '-'}]")
+    _print_extension_points()
+    return 0
 
 
 def cmd_graph(args: argparse.Namespace) -> int:

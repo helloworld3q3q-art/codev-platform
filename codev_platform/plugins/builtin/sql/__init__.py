@@ -142,6 +142,8 @@ class SqlPlugin(AnalyzerPlugin):
     name = PLUGIN_NAME
     version = "0.1.0"
     prov_source = ProvSource.REGEX.value  # SQL DDL/DML 正则解析(精度由边 confidence 承载)
+    produces = (NodeKind.DB_TABLE.value, NodeKind.DB_COLUMN.value,
+                NodeKind.BACKEND_FUNCTION.value)
 
     def detect(self, repo_path: Path) -> bool:
         repo = Path(repo_path)

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codev_platform.graph.schema import AnalyzerResult
+from codev_platform.graph.schema import AnalyzerResult, NodeKind
 from codev_platform.plugins.base import AnalyzerPlugin
 from codev_platform.plugins.builtin import _stack_scan
 
@@ -27,6 +27,7 @@ class SpringPlugin(AnalyzerPlugin):
 
     name = PLUGIN_NAME
     version = "0.1.0"
+    produces = (NodeKind.BACKEND_ENDPOINT.value,)
 
     def detect(self, repo_path: Path) -> bool:
         return _stack_scan.spring_detect(Path(repo_path))

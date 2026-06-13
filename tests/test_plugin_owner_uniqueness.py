@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 
 from codev_platform.graph.ingest import ingest_project
-from codev_platform.plugins.ownership import KIND_OWNERS
+from codev_platform.plugins.ownership import kind_owners
 
 PID = "demo-owner"
 
@@ -75,8 +75,9 @@ def test_each_kind_only_from_its_owner(tmp_path: Path) -> None:
     assert "backend_endpoint" in kind_plugins
     assert "frontend_api_call" in kind_plugins
 
+    owners_map = kind_owners()
     for kind, plugins in kind_plugins.items():
-        owners = KIND_OWNERS.get(kind)
+        owners = owners_map.get(kind)
         if owners is None:
             continue  # 未登记的 kind 不约束。
         rogue = plugins - owners
@@ -121,5 +122,5 @@ def test_frontend_module_owner_registered(tmp_path: Path, monkeypatch) -> None:
 
     kind_plugins = _store_kind_plugins(store)
     assert "frontend_module" in kind_plugins
-    rogue = kind_plugins["frontend_module"] - KIND_OWNERS["frontend_module"]
+    rogue = kind_plugins["frontend_module"] - kind_owners()["frontend_module"]
     assert not rogue, f"frontend_module 被非 owner 产出: {rogue}"

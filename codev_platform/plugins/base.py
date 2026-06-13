@@ -50,11 +50,19 @@ class AnalyzerPlugin(ABC):
     值,如 "ast")。executor 据此给插件边盖来源戳 (边界统一归因);插件若已自盖更精确的戳
     则保留。None = 不声明 (executor 不臆测来源, 留 audit no-provenance 标出)。只产节点不产边
     的插件无需声明。这是声明式扩展点 (同 call_resolver.prov_source), 加插件零改 executor。
+
+    produces (Phase 9 capability):本插件 analyze 产出的架构级 NodeKind 值元组 (graph.schema
+    .NodeKind.<X>.value)。生产者**自描述**自己产什么 —— 这是节点归属的**单一真值源**:
+    ownership.kind_owners() 反转聚合所有插件的 produces 得到"kind -> owner 集合", 据此 audit
+    "杜绝跨插件重复产同类节点"。同时喂 capabilities.describe_capabilities() 的能力视图。
+    () = 只产未登记 kind (project/file/文档类, 不做归属约束) 或无产出。声明式扩展点: 加插件
+    只在本类声明一行 produces, 归属 / 能力视图 / 审计自动纳入, 零改 ownership / cli。
     """
 
     name: str = ""
     version: str = "0.0.0"
     prov_source: str | None = None
+    produces: tuple[str, ...] = ()
 
     @abstractmethod
     def detect(self, repo_path: Path) -> bool:

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codev_platform.graph.schema import AnalyzerResult, ProvSource
+from codev_platform.graph.schema import AnalyzerResult, NodeKind, ProvSource
 from codev_platform.plugins.base import AnalyzerPlugin
 from codev_platform.plugins.builtin import _stack_scan
 
@@ -29,6 +29,7 @@ class FrontendReactPlugin(AnalyzerPlugin):
     name = PLUGIN_NAME
     version = "0.1.0"
     prov_source = ProvSource.REGEX.value  # tsx import-call 正则解析
+    produces = (NodeKind.FRONTEND_ROUTE.value, NodeKind.FRONTEND_API_CALL.value)
 
     def detect(self, repo_path: Path) -> bool:
         return _stack_scan.react_detect(Path(repo_path))

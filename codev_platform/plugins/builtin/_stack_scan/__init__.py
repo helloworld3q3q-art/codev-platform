@@ -1,4 +1,4 @@
-"""通用栈插件共享扫描工具 (FrontendReact / FastApi 复用)。
+"""通用栈插件共享扫描工具 (FrontendReact / FastApi / Node / Spring / Vue 复用)。
 
 把 tools/cross_link/build_codev.py 里一次性、绑死 codev-platform 目录布局的扫描思路
 抽成**与项目无关**的纯函数: 给定 repo 根, 探测技术栈 + 扫出 frontend/backend 对象,
@@ -14,128 +14,57 @@
 - 不吞异常返回空: 单文件 parse / read 失败记 warning 并跳过该文件, 不中断整体。
 
 > 2026-06-04 结构拆分: 原 863 行单文件按栈拆为本包 (_common / react / vue /
-> fastapi / node / spring / _link), 纯结构移动, 零逻辑改动。本 __init__ re-export
-> 全部 public + helper, 保持 `from ... import _stack_scan; _stack_scan.<fn>` 旧用法不变。
+> fastapi / node / spring / sql / _link / frontend_deps / url_registry / api_usage)。
+> 2026-06-13 (Phase 9): **收窄本 __init__ re-export** —— 只保留真有跨模块消费方的符号
+> (插件壳经 `_stack_scan.<fn>` 访问的 scan_* / *_detect / 文件遍历原语 + link_api_calls)。
+> 各栈私有正则/解析内部 (_RE_* / _spring_* / _NODE_* ...) 不再从顶层 re-export —— 无外部
+> 消费方, 子模块各自 `from .<mod> import` 直取, 删 ~30 个死门面 (审计实证: 全仓无 `_stack_scan.
+> <私有符号>` 访问, 测试只 import 公共 scan_* / link_api_calls / scan_url_registry)。
 """
 from __future__ import annotations
 
-from ._common import (
-    _SKIP_DIRS,
-    _RE_INLINE_URL,
-    _has_file_with_suffix,
-    _iter_files,
-    _iter_named,
-    _norm_url,
-    _rel,
-    _scan_inline_api,
-    _walk_pruned,
-    logger,
-)
+# 文件遍历 / 路径 / url 归一原语 (_common): 插件壳与各栈扫描经 `_stack_scan.<fn>` 复用。
+from ._common import _SKIP_DIRS, _iter_files, _norm_url, _rel
+# 跨层 link (前端 api_call -> 后端 endpoint URL 匹配, 单一真值源)。
 from ._link import link_api_calls
+# 前端组件依赖图 (dependency-cruiser 接入)。
 from .frontend_deps import scan_frontend_deps
-from .fastapi import (
-    _HTTP_METHODS,
-    _route_from_decorator,
-    fastapi_detect,
-    scan_fastapi,
-)
-from .node import (
-    _NODE_BACKEND_DEPS,
-    _NODE_ROUTE_OBJ,
-    _RE_NODE_ROUTE,
-    node_detect,
-    scan_node_express,
-)
-from .react import (
-    _HTTP_METHOD_PREFIX,
-    _RE_FN,
-    _RE_URL,
-    _infer_method,
-    react_detect,
-    scan_react,
-    scan_react_pages,
-)
-from .spring import (
-    _JAVA_KW,
-    _RE_JAVA_TYPEDECL,
-    _RE_SPRING_CONTROLLER,
-    _RE_SPRING_MAPPING,
-    _SPRING_METHOD_ANN,
-    _join_url,
-    _spring_ann_path,
-    _spring_class_base,
-    _spring_class_pos,
-    _spring_handler_name,
-    _spring_req_method,
-    scan_spring,
-    spring_detect,
-)
-from .vue import (
-    _RE_VUE_ROUTE,
-    _RE_VUE_ROUTE_COMP,
-    _RE_VUE_ROUTE_NAME,
-    scan_vue,
-    scan_vue_routes,
-    vue_detect,
-)
+# 前端 API url 注册文件提取 (代码基础层)。
 from .url_registry import scan_url_registry
+# 各栈 detect + scan (插件壳经 _stack_scan.<fn> 调)。
+from .fastapi import fastapi_detect, scan_fastapi
+from .node import node_detect, scan_node_express
+from .react import react_detect, scan_react, scan_react_pages
+from .spring import scan_spring, spring_detect
+from .vue import scan_vue, scan_vue_routes, vue_detect
 
 __all__ = [
-    # common helpers
+    # _common 原语
     "_SKIP_DIRS",
-    "_RE_INLINE_URL",
-    "_has_file_with_suffix",
     "_iter_files",
-    "_iter_named",
     "_norm_url",
     "_rel",
-    "_scan_inline_api",
-    "_walk_pruned",
-    "logger",
     # link
     "link_api_calls",
-    # frontend component dep graph (via dependency-cruiser)
+    # 前端组件依赖图
     "scan_frontend_deps",
-    # frontend API url 注册文件提取(代码基础层, 通用)
+    # 前端 API url 注册文件提取
     "scan_url_registry",
     # react
     "react_detect",
     "scan_react",
     "scan_react_pages",
-    "_infer_method",
-    "_RE_FN",
-    "_RE_URL",
-    "_HTTP_METHOD_PREFIX",
     # vue
     "vue_detect",
     "scan_vue",
     "scan_vue_routes",
-    "_RE_VUE_ROUTE",
-    "_RE_VUE_ROUTE_NAME",
-    "_RE_VUE_ROUTE_COMP",
     # fastapi
     "fastapi_detect",
     "scan_fastapi",
-    "_route_from_decorator",
-    "_HTTP_METHODS",
     # node
     "node_detect",
     "scan_node_express",
-    "_NODE_BACKEND_DEPS",
-    "_RE_NODE_ROUTE",
-    "_NODE_ROUTE_OBJ",
     # spring
     "spring_detect",
     "scan_spring",
-    "_SPRING_METHOD_ANN",
-    "_RE_SPRING_CONTROLLER",
-    "_RE_SPRING_MAPPING",
-    "_JAVA_KW",
-    "_RE_JAVA_TYPEDECL",
-    "_spring_ann_path",
-    "_spring_req_method",
-    "_join_url",
-    "_spring_class_pos",
-    "_spring_class_base",
-    "_spring_handler_name",
 ]
