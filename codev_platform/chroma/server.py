@@ -520,9 +520,21 @@ async def _run_http(port: int) -> None:
     # public_paths 仅 /healthz (最小存活探针, 不泄敏); 详情面 /platform/health + /platform/status
     # 受鉴权保护 (审计 #4)。/health 保留为 /healthz 的 public 别名 (老探针向后兼容, 同样最小)。
     from starlette.middleware import Middleware
-    from codev_platform.gateway import AuthMiddleware, build_authenticator, maybe_rate_limit_middleware
+    from codev_platform.gateway import (
+        AuthMiddleware, build_authenticator, maybe_rate_limit_middleware, startup_policy_error,
+    )
+    from codev_platform.mcp_serve import mcp_bind_host
 
     _cfg = load_config()
+    # bind host 走单一真值源(与 graph/codegraph/memory 三套 MCP 对齐): config mcp.bind_host > loopback。
+    # 启动统一认证策略闸: 多 dev 串号 / prod 暴露 / 非 loopback bind 未认证(passthrough)→ 任一命中硬拒。
+    # 此前 daemon 写死 127.0.0.1 且不挂闸: 多机设 0.0.0.0 时 platform-docs 静默不生效(其余三套生效),
+    # 且反代+passthrough 拓扑下无 startup 护栏(对抗审计 P2)。/embed /rerank 仍按 TCP 对端 loopback 豁免。
+    _host = mcp_bind_host(_cfg)
+    _policy_err = startup_policy_error(_cfg, _host)
+    if _policy_err:
+        _flog(f"[daemon][startup] REFUSE: {_policy_err}")
+        raise SystemExit(f"platform-docs daemon 拒绝启动:{_policy_err}")
     _mw = [
         Middleware(
             AuthMiddleware,
@@ -561,10 +573,10 @@ async def _run_http(port: int) -> None:
         lifespan=streamable_lifespan(mcp_session_manager),
     )
 
-    _flog(f"[daemon] HTTP SSE/MCP server starting on 127.0.0.1:{port}")
+    _flog(f"[daemon] HTTP SSE/MCP server starting on {_host}:{port}")
     config = uvicorn.Config(
         app,
-        host="127.0.0.1",
+        host=_host,
         port=port,
         log_level="warning",
         access_log=False,

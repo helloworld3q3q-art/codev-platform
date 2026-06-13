@@ -220,6 +220,26 @@ def _norm_endpoint_path(ref: str) -> str:
     return s.rstrip("/")
 
 
+_PATH_PARAM = re.compile(r"^(?:\{[^}]*\}|:[^/]+)$")   # 路径参数占位: {id} (Spring/FastAPI) / :id (express)
+
+
+def _endpoint_path_match(stored: str, query: str) -> bool:
+    """裸路径模板感知匹配: 段数相等 + 逐段(相等 或 任一侧是路径参数占位)。
+
+    治"查具体值漏报模板端点": 后端端点存为模板 `/users/{id}`, 人/agent 从日志/network 自然敲具体
+    `/users/123` → 旧的纯字符串相等命不中(漏报)。占位**只对单段通配**故不过报: `/users/active`
+    不会命中 `/users/123`(段 'active' != '123' 且都非占位)。对称处理两侧写法(查询侧也可能是模板)。"""
+    if stored == query:
+        return True
+    sa, sb = stored.split("/"), query.split("/")
+    if len(sa) != len(sb):
+        return False
+    return all(
+        a == b or _PATH_PARAM.match(a) is not None or _PATH_PARAM.match(b) is not None
+        for a, b in zip(sa, sb)
+    )
+
+
 def _resolve_endpoint(g: ImpactGraph, ref: str) -> tuple[list[GraphNode], list[GraphNode]]:
     """端点解析: 先按 id/name(_resolve), 再按 **URL 路径** 匹配 meta.url。返回 (命中列表, 歧义候选)。
 
@@ -238,7 +258,7 @@ def _resolve_endpoint(g: ImpactGraph, ref: str) -> tuple[list[GraphNode], list[G
     matches = [
         n for n in g.nodes.values()
         if n.kind == NodeKind.BACKEND_ENDPOINT.value
-        and _norm_endpoint_path((n.meta or {}).get("url") or "") == path
+        and _endpoint_path_match(_norm_endpoint_path((n.meta or {}).get("url") or ""), path)
     ]
     return matches, []
 

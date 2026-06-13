@@ -126,6 +126,15 @@ class ReindexWorker:
         # 锁不会被占; 此路径仅兜底"误手动 reindex 撞 worker"的罕见并发。不记 manifest (非终态)。
         if rc == _RETRY_RC:
             _log(f"reindex {job.key} 锁占用/db busy (rc=2) — 保留重试, 不丢")
+            # PG 后端: pending() 认领即打 1800s lease, 不复位则 job 隐身到 lease 过期才重领(破坏
+            # "下轮重试")。显式 release 立即复位 pending → 下轮 drain 即重领。file 后端无 claim 状态
+            # (留着 spool 文件下轮自然重列), 无 release 方法 → getattr 守卫跳过, 语义不变。
+            release = getattr(self._q, "release", None)
+            if callable(release):
+                try:
+                    release(job)
+                except Exception as exc:  # noqa: BLE001 — 复位失败不阻断(最坏退化到等 lease 过期)
+                    _log(f"release {job.key} 失败 (不阻断, 退化到等 lease 过期): {exc!s}")
             return None
         # 终态 (rc==0 成功 / 其它 rc 失败): 写统一 manifest (Phase 1, best-effort 不阻断)。
         self._record_manifest(job, repo, started, "ok" if rc == 0 else "failed")

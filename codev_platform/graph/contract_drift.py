@@ -23,22 +23,34 @@ def _drift_brief(n: GraphNode) -> dict:
     return brief
 
 
-def find_contract_drift(store, project_id: str, *, limit: int = 200) -> dict:
-    """契约漂移: 列出悬空前端调用 —— frontend_api_call 节点无任何 calls_api 出边。
+def _has_calls_api(g, node_id: str) -> bool:
+    return any(kind == EdgeKind.CALLS_API.value for _t, kind in g.fwd.get(node_id, ()))
 
-    operationId 桥落地后, 同 URL 多服务里"连不上对的服务"也会显为悬空(URL 兜底误连被消歧降级)。
-    每条带前端节点 brief + 尝试调的 url/operation_id; 截断在 limit。
+
+def find_contract_drift(store, project_id: str, *, limit: int = 200) -> dict:
+    """契约漂移: 列出悬空前端调用 —— frontend_api_call 节点无**确定** calls_api 出边。
+
+    两档(都是真要核对的契约问题, 分开是因根因不同):
+    - danglingCalls: 一条 calls_api 边都没有 = 后端没这接口 / URL 写错 / 接口删了。
+    - uncertainCalls: 只有**低置信(<0.7)兜底边**(同 URL 多服务时 URL 兜底误连被消歧降到 0.5)=
+      连上了但"连的哪个服务不确定"。**此前被当已连接而静默漏报**(P2 修复): 0.5 边也满足旧的
+      "any calls_api 即非漂移", 把多服务误连藏掉了。现用 certain_only 图区分: 有确定边才算真连上。
+    每条带前端节点 brief + 尝试调的 url/operation_id; 各档截断在 limit。
     """
     g = build_impact_graph(store, project_id)
-    drift: list[dict] = []
+    g_certain = build_impact_graph(store, project_id, certain_only=True)
+    dangling: list[dict] = []
+    uncertain: list[dict] = []
     for n in g.nodes.values():
         if n.kind != NodeKind.FRONTEND_API_CALL.value:
             continue
-        if any(kind == EdgeKind.CALLS_API.value for _t, kind in g.fwd.get(n.id, ())):
-            continue  # 已连上后端端点, 非漂移
-        drift.append(_drift_brief(n))
-        if len(drift) >= limit:
-            break
-    drift.sort(key=lambda d: (d.get("file") or "", d.get("line") or 0))
+        if _has_calls_api(g_certain, n.id):
+            continue  # 有确定后端端点边, 真连上, 非漂移
+        bucket = uncertain if _has_calls_api(g, n.id) else dangling
+        if len(bucket) < limit:
+            bucket.append(_drift_brief(n))
+    for b in (dangling, uncertain):
+        b.sort(key=lambda d: (d.get("file") or "", d.get("line") or 0))
     return {"found": True, "projectId": project_id,
-            "danglingCalls": drift, "count": len(drift), "truncated": len(drift) >= limit}
+            "danglingCalls": dangling, "count": len(dangling), "truncated": len(dangling) >= limit,
+            "uncertainCalls": uncertain, "uncertainCount": len(uncertain)}

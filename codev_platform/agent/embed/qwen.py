@@ -12,6 +12,7 @@ class QwenLocalEmbedder(Embedder):
     def __init__(self, model_path: str, device: str = "cpu", *, batch_size: int = 32) -> None:
         self._model_path = model_path
         self._device = device
+        self._model = None   # lazy: 首次 encode 才 load(_ensure 据此判)。勿删——删了 _ensure 读它即 AttributeError。
         # encode 内部分批大小 = GPU 激活显存峰值上界。小显存(8GB)跑大项目 code_vec 时调小(8)
         # 把 fp32 激活峰值压进显存防 OOM, 不降模型精度。默认 32(ST 原生默认, 大显存/CPU 不受限)。
         self._batch_size = batch_size if batch_size and batch_size > 0 else 32

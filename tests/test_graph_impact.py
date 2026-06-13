@@ -230,6 +230,34 @@ def test_find_api_callers_url_aggregates_methods(tmp_path):
     c.close()
 
 
+def test_find_api_callers_url_matches_path_param_template(tmp_path):
+    # 端点存为模板 /users/{id}; 人/agent 从日志/network 敲具体值 /users/123 → 应命中(占位单段通配,
+    # 治参数化 REST 路由漏报)。反面: 具体值不该误配字面端点 /users/settings(段不等且都非占位)。
+    pid = "pp"
+    c = open_store(pid, path=tmp_path / "pp.sqlite")
+    tmpl = f"{pid}:backend_endpoint:GET:/users/{{id}}"
+    lit = f"{pid}:backend_endpoint:GET:/users/settings"
+    fe_t = f"{pid}:frontend_api_call:URL.js:GET_USER"
+    fe_l = f"{pid}:frontend_api_call:URL.js:GET_SETTINGS"
+    nodes = [
+        GraphNode(id=tmpl, kind=NodeKind.BACKEND_ENDPOINT.value, name="getUser", project_id=pid,
+                  file="C.java", meta={"url": "/users/{id}", "http_method": "GET"}),
+        GraphNode(id=lit, kind=NodeKind.BACKEND_ENDPOINT.value, name="getSettings", project_id=pid,
+                  file="C.java", meta={"url": "/users/settings", "http_method": "GET"}),
+        GraphNode(id=fe_t, kind=NodeKind.FRONTEND_API_CALL.value, name="GET_USER", project_id=pid, file="URL.js"),
+        GraphNode(id=fe_l, kind=NodeKind.FRONTEND_API_CALL.value, name="GET_SETTINGS", project_id=pid, file="URL.js"),
+    ]
+    edges = [GraphEdge(source=fe_t, target=tmpl, kind=EdgeKind.CALLS_API.value),
+             GraphEdge(source=fe_l, target=lit, kind=EdgeKind.CALLS_API.value)]
+    c.upsert_result(pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    # 具体值命中模板(治漏报)且只命中模板, 不误配字面 /users/settings(不过报)
+    r = find_api_callers(c, pid, "/users/123")
+    assert r["found"] and {x["id"] for x in r["callers"]} == {fe_t}
+    # 段数不等 → 不命中(占位只通配单段)
+    assert not find_api_callers(c, pid, "/users/123/roles")["found"]
+    c.close()
+
+
 def test_search_nodes_multiword_ranks_by_term_hits(conn):
     # 多词 query: 整串"save user"匹配不到任何 name(旧行为 0 命中); 分词后 save_user 命中
     # save+user 两词排第一, 修复 graph lane 多词检索弱点(直接提升融合召回质量)。

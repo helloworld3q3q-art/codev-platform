@@ -191,6 +191,21 @@ def test_resolve_repos_merges_meta_extra(tmp_path, monkeypatch):
     assert pda.resolve() in _ing._resolve_repos(main, "ideas-v2", None)
 
 
+def test_project_repo_roots_skips_relative_extra_fail_closed(tmp_path, monkeypatch):
+    # 相对 extra_repos 按进程 CWD 解析 = 不确定 + 把 CWD 下偶然同名目录拉进可读白名单(项目隔离风险)
+    # → fail-closed 丢弃, 只认绝对路径 / 已登记 project-id ref。
+    from codev_platform.core.repos import project_repo_roots
+    main = tmp_path / "main"; main.mkdir()
+    absx = tmp_path / "absx"; absx.mkdir()
+    monkeypatch.setattr("codev_platform.core.repos.load_config",
+                        lambda: {"projects": {"p": {"extra_repos": [str(absx), "sneaky-rel"]}}})
+    monkeypatch.setattr("codev_platform.core.repos.meta_extra_repos", lambda pid, cfg: [])
+    roots = project_repo_roots("p", main_repo=main)
+    assert main.resolve() in roots
+    assert absx.resolve() in roots                              # 绝对路径正常纳入
+    assert all("sneaky-rel" not in str(r) for r in roots)      # 相对项被 fail-closed 丢弃
+
+
 def test_multiroot_merges_both_repos_no_overwrite(tmp_path):
     clear_registry()
     register_plugin(_RepoNodePlugin())

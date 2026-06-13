@@ -180,3 +180,24 @@ def test_find_contract_drift_flags_dangling_call(tmp_path):
     ids = {d["id"] for d in r["danglingCalls"]}
     assert ids == {"fe_gone"}
     assert r["danglingCalls"][0]["url"] == "/api/gone"
+
+
+def test_find_contract_drift_uncertain_bucket_for_low_conf_link(tmp_path):
+    """只有低置信(<0.7)兜底边连上的前端调用 → uncertainCalls(既非真悬空也非确定连上)。
+    此前 0.5 边满足旧"any calls_api 即非漂移", 把同 URL 多服务的误连静默藏掉(P2 修复)。"""
+    c = open_store(_PID, path=tmp_path / "u.sqlite")
+    fe_solid = _fe("fe_solid", "/api/users")   # 确定连上(默认 conf 1.0)
+    fe_ambig = _fe("fe_ambig", "/api/list")    # 只有 0.5 兜底边(多服务消歧降级)
+    fe_gone = _fe("fe_gone", "/api/gone")      # 一条 calls_api 边都没有 = 真悬空
+    ep_u, ep_l = _ep("ep_u", "/api/users"), _ep("ep_l", "/api/list")
+    edges = [
+        GraphEdge(source="fe_solid", target="ep_u", kind=EdgeKind.CALLS_API.value),
+        GraphEdge(source="fe_ambig", target="ep_l", kind=EdgeKind.CALLS_API.value, confidence=0.5),
+    ]
+    c.upsert_result(_PID, AnalyzerResult(
+        nodes=[fe_solid, fe_ambig, fe_gone, ep_u, ep_l], edges=edges, plugin="test"))
+    r = find_contract_drift(c, _PID)
+    assert {d["id"] for d in r["danglingCalls"]} == {"fe_gone"}     # 真悬空只 fe_gone
+    assert {d["id"] for d in r["uncertainCalls"]} == {"fe_ambig"}   # 0.5 边不再被当已连接
+    assert r["count"] == 1 and r["uncertainCount"] == 1
+    c.close()

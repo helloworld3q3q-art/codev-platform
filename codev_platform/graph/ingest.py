@@ -107,6 +107,11 @@ def ingest_project(
         # 按 plugin 合并跨仓产出(防 upsert 删插互相覆盖)。
         merged: dict[str, AnalyzerResult] = {}
         node_seen: dict[str, set[str]] = {}
+        # 多仓时记被 id 碰撞丢弃的节点: 前端节点 id 嵌"仓相对路径"无仓维度, 两 extra_repos 同相对路径
+        # 文件(各自 src/pages/index.vue)→ 同 id → first-wins 静默丢后仓节点。根治需给前端节点 id/file
+        # 加仓维度(设计级: 跨 7+ 扫描器 + 桥/api_usage 按 file 匹配, 待专项), 此处先暴露成 WARN 不静默。
+        multi_repo = len(repos) > 1
+        dropped_ids: list[str] = []
         for repo in repos:
             for exec_result in run_applicable(repo, project_id):
                 ar = exec_result.result
@@ -116,15 +121,27 @@ def ingest_project(
                 if plug not in merged:
                     merged[plug] = AnalyzerResult(plugin=plug)
                     node_seen[plug] = set()
-                acc = merged[plug]
+                acc, seen = merged[plug], node_seen[plug]
                 for n in ar.nodes:
-                    if n.id not in node_seen[plug]:
-                        node_seen[plug].add(n.id)
-                        acc.nodes.append(n)
+                    if n.id in seen:
+                        if multi_repo:
+                            dropped_ids.append(n.id)
+                        continue
+                    seen.add(n.id)
+                    acc.nodes.append(n)
                 acc.edges.extend(ar.edges)
                 s = report.summaries.setdefault(plug, {"nodes": 0, "edges": 0})
                 s["nodes"] += (exec_result.summary or {}).get("nodes", len(ar.nodes))
                 s["edges"] += (exec_result.summary or {}).get("edges", len(ar.edges))
+        if dropped_ids:
+            logger.warning(
+                "[ingest] 多仓节点 id 碰撞, %d 个节点被丢(前端节点 id 缺仓维度 → 后仓同相对路径文件覆盖"
+                "前仓; 影响 find_impacted_pages/page_dependencies 精度, 待加仓维度根治)。示例: %s",
+                len(dropped_ids), ", ".join(dropped_ids[:5]),
+            )
+            report.summaries["_cross_repo_id_collisions"] = {
+                "count": len(dropped_ids), "examples": dropped_ids[:20],
+            }
         for plug, ar in merged.items():
             store.upsert_result(project_id, ar)
             report.ingested.append(plug)

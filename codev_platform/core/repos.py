@@ -12,9 +12,12 @@ extra_repos 两个来源合并:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from codev_platform.core.config import get as _cfg_get, load_config
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_meta_extra_entries(entries: list, cfg: dict) -> list[str]:
@@ -76,6 +79,11 @@ def project_repo_roots(project_id: str, *, main_repo: Path | str | None = None) 
     seen = {p.resolve() for p in roots}
     for r in list(from_cfg) + [x for x in from_meta if x not in from_cfg]:
         p = Path(r).expanduser()
+        # 相对路径按进程 CWD 解析 = 不确定 + 与"可移植声明"初衷相悖(应是绝对路径或已登记 project-id
+        # ref)。fail-closed 丢弃: 不把服务 CWD 下偶然同名目录拉进 agent 可读白名单(项目隔离防御)。
+        if not p.is_absolute():
+            logger.warning("[repos] 跳过相对 extra_repos %r(须绝对路径或 project-id ref, 防 CWD 串目录)", r)
+            continue
         if p.is_dir():
             rp = p.resolve()
             if rp not in seen:

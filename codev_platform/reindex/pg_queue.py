@@ -177,6 +177,28 @@ class PgJobQueue:
             )
             return cur.rowcount > 0
 
+    def release(self, job: Job) -> bool:
+        """rc=2(.reindex.lock 被占 / db busy 等**暂时性**失败)时把自己认领的行立即复位 pending,
+        不必干等 lease(默认 1800s)过期才能重领。按 **claim_token 精确匹配** —— 只复位自己那次认领,
+        若 lease 已被别 worker 接管(token 变)则不动(不抢他人在跑的行)。复位清 lease/token,
+        下轮 pending() 重领。返回是否命中复位。
+
+        FileSpoolQueue 无 claim 状态(pending() 每轮重列目录, rc=2 留着文件下轮自然重跑)→ 无此
+        方法; worker 用 getattr 守卫(同 reclaim_stale_own 范式), 故不动 file 后端语义。
+
+        **为何需要**: PgJobQueue.pending() 认领即把行置 status='running' + 1800s lease, 若 rc=2 后
+        worker 只早返不复位, 该 job 会**隐身到 lease 过期**(最多 1800s)才被下轮选中, 破坏"下轮重试"
+        契约(file 后端无此问题, PG 迁移引入的回归)。"""
+        self._ensure()
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                f"UPDATE {self._t} SET status = 'pending', claimed_by = NULL, "
+                "  lease_expires_at = NULL, claim_token = NULL "
+                "WHERE project_id = %s AND kind = %s AND claim_token = %s",
+                (job.project_id, job.kind, job.token),
+            )
+            return cur.rowcount > 0
+
     def reclaim_stale_own(self) -> int:
         """崩溃恢复: 把**本机**(owner=hostname)崩前留下的 status='running' 行复位 pending, 重启即
         接管, 不必干等 lease(默认 1800s)过期。owner 是机器级稳定标识(非 pid)→ systemd 重启后

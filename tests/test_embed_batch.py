@@ -101,3 +101,14 @@ def test_remote_encode_batch_raises_after_exhausting_retries(monkeypatch):
     import pytest
     with pytest.raises(RuntimeError):
         RemoteEmbedder("http://x/embed").encode_batch(["a"])
+
+
+def test_qwen_local_init_sets_model_none_for_lazy_load():
+    """回归: QwenLocalEmbedder.__init__ 必须设 self._model=None。否则 _ensure() 首次 encode 读
+    `self._model is None` 即 AttributeError → qwen-local embedder 全路径崩(code_vec query 侧 /
+    agent-memory 向量打分)。712588e 加 batch_size 时曾误删该行, 且原测试只覆盖 RemoteEmbedder 漏网。
+    init 不 load 模型(lazy), 故无需 sentence_transformers 即可断言此不变量。"""
+    from codev_platform.agent.embed.qwen import QwenLocalEmbedder
+    e = QwenLocalEmbedder("/nonexistent/model", device="cpu", batch_size=8)
+    assert e._model is None       # lazy-load 前置不变量(被删则此处 AttributeError)
+    assert e._batch_size == 8
