@@ -29,6 +29,8 @@ POST_PASS_OWNERS: dict[str, set[str]] = {
     NodeKind.FRONTEND_MODULE.value: {"builtin.frontend_deps"},
     # 软节点 (综合分析器派生, 非确定性血缘): 业务域归类。owner = analyzers 框架 post-pass。
     NodeKind.BUSINESS_DOMAIN.value: {"builtin.analyzers"},
+    # 软节点 (Phase 4 结构社区, 算法派生): 同走 analyzers post-pass(CommunityAnalyzer)。
+    NodeKind.COMMUNITY.value: {"builtin.analyzers"},
 }
 
 

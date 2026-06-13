@@ -26,6 +26,7 @@ def test_node_kind_covers_plan_list():
         "feishu_doc", "git_commit", "pull_request", "business_domain",
         "arch_layer",   # A2 软节点: 架构分层角色(2026-06-08)
         "inferred_api_call",   # A3 软节点: LLM 推断前端 API 调用(2026-06-12)
+        "community",   # Phase 4 软节点: 算法结构社区(2026-06-13)
     }
     assert {k.value for k in NodeKind} == expected
 
@@ -38,6 +39,7 @@ def test_edge_kind_covers_plan_list():
         "plays_role",   # A2 软边: file --plays_role--> arch_layer(2026-06-08)
         "calls_api_inferred",   # A3 软边: inferred_api_call --> backend_endpoint(2026-06-12)
         "uses_api",   # page/组件 --uses_api--> url_registry 常量(精确归因, 2026-06-13)
+        "in_community",   # Phase 4 软边: 硬节点 --in_community--> community(2026-06-13)
     }
     assert {k.value for k in EdgeKind} == expected
 

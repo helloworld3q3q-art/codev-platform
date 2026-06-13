@@ -49,6 +49,44 @@ def _seed(tmp_path, nodes, edges):
     return conn
 
 
+def test_community_axis_reported(tmp_path):
+    # 两个 function 团各成社区 + 团内 clique 连边 → communities 轴 2 社区 + modularity>0, healthy。
+    fns = [GraphNode(id=f"f{i}", kind=NodeKind.BACKEND_FUNCTION.value, name=f"f{i}",
+                     project_id=PID, file=f"m{i // 3}.py") for i in range(6)]
+    edges = []
+    for grp in ([0, 1, 2], [3, 4, 5]):
+        for a in grp:
+            for b in grp:
+                if a < b:
+                    edges.append(GraphEdge(source=f"f{a}", target=f"f{b}", kind="calls"))
+    comm = [GraphNode(id=f"{PID}:community:c{r}", kind=NodeKind.COMMUNITY.value,
+                      name=f"community-{r}", project_id=PID,
+                      meta={"confidence": 0.7, "derived_by": "community", "size": 3})
+            for r in (0, 1)]
+    for i in range(6):
+        edges.append(GraphEdge(source=f"f{i}", target=f"{PID}:community:c{i // 3}",
+                               kind=EdgeKind.IN_COMMUNITY.value, confidence=0.7))
+    conn = _seed(tmp_path, fns + comm, edges)
+    rep = assess_soft_labels(conn, PID)
+    conn.close()
+    assert rep["communities"]["soft_nodes"] == 2
+    assert rep["communities"]["coverage"] == 1.0
+    assert rep["communities"]["modularity"] is not None and rep["communities"]["modularity"] > 0
+    assert rep["healthy"] is True
+    md = render_markdown(rep)
+    assert "结构社区" in md and "modularity" in md
+
+
+def test_no_community_axis_na(tmp_path):
+    # 无社区软层 → communities 轴空 + modularity None, 不报假阳性。
+    conn = _seed(tmp_path, [_ep(1), _ep(2)], [])
+    rep = assess_soft_labels(conn, PID)
+    conn.close()
+    assert rep["communities"]["soft_nodes"] == 0
+    assert rep["communities"]["modularity"] is None
+    assert rep["healthy"] is True
+
+
 def test_balanced_domains_healthy(tmp_path):
     # 4 endpoint 均分两域(各 2)→ 无巨型, 覆盖 100% → healthy。
     nodes = [_ep(1), _ep(2), _ep(3), _ep(4), _domain("订单"), _domain("行情")]

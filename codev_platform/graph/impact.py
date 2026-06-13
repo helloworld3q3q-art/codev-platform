@@ -68,6 +68,9 @@ class ImpactGraph:
     # (id,kind) 邻接分开存 —— 不改邻接元组 arity, 既有遍历(find_node_domain/arch 等)零改;
     # 只在出影响 brief 时按方向算键回查, 给路径标来源 + 置信。
     edge_attr: dict[tuple[str, str, str], dict] = field(default_factory=dict)
+    # 节点 → 结构社区 id 映射(Phase 4 软层 in_community 边提取)。**软边被 BFS 图过滤掉, 但社区
+    # 映射随图一次加载备查** —— Phase 5 路径评分据此给跨社区边打 ≤1 惩罚(同社区不罚)。空=无社区数据。
+    community: dict[str, str] = field(default_factory=dict)
 
     def find_nodes_by_name(self, name: str, kind: str | None = None) -> list[GraphNode]:
         """按 name (可选 kind) 找**全部**同名节点 (大小写不敏感)。供歧义检测。"""
@@ -79,7 +82,8 @@ class ImpactGraph:
 
 
 def build_impact_graph(store, project_id: str, *, include_soft: bool = False,
-                       certain_only: bool = False) -> ImpactGraph:
+                       certain_only: bool = False,
+                       with_community: bool = False) -> ImpactGraph:
     """构建内存影响图。
 
     include_soft=False(默认): 过滤软节点(BUSINESS_DOMAIN)+ 软边(BELONGS_TO_DOMAIN)——
@@ -118,6 +122,15 @@ def build_impact_graph(store, project_id: str, *, include_soft: bool = False,
         prov = edge_provenance(e.meta)
         g.edge_attr[(e.source, e.target, e.kind)] = {
             "confidence": e.confidence, "src": prov.get("src"),
+        }
+    # 社区映射(Phase 5 评分用): 仅当 with_community=True 才从 merged.edges 提 in_community 软边。
+    # **默认关**(measure-first: 0.8 跨社区惩罚未经 A/B 证实增益, 比照 planner_llm/rerank/A1 默认关
+    # 纪律, 不静默改活工具排序)。关 → g.community 空 → _community_factor 恒 1.0 → 严格等于未接因子
+    # baseline。社区软层 + agent 查询工具(find_node_community/list_communities)不受此 gate, 始终可用。
+    if with_community:
+        g.community = {
+            e.source: e.target for e in merged.edges
+            if e.kind == EdgeKind.IN_COMMUNITY.value
         }
     return g
 
@@ -427,6 +440,23 @@ _KIND_DEFAULT_WEIGHT = 1.0
 # 出堆即终态的单调性。1.0=不衰减(纯按边质量乘积)。
 _DEPTH_DECAY = 0.9
 _PATH_MAX_FANOUT = 60        # 单节点出边上限(防高出度爆炸)
+# 跨社区惩罚(Phase 4 社区因子): 同社区边 = 1.0(不罚), 跨社区边乘此(<1)。**必须 ≤1** —— 若做成
+# "同社区 >1 加成"会破坏 _best_paths 的 ≤1 单调性 → Dijkstra 出堆即终态失效 → 排序错(排序上
+# "跨社区罚"与"同社区奖"等价, 但前者保单调)。无社区数据时退化为 1.0(见 _community_factor)。
+_CROSS_COMMUNITY_PENALTY = 0.8
+
+
+def _community_factor(community: dict[str, str], a_id: str, b_id: str) -> float:
+    """边两端社区一致性因子 ∈ (0,1]: 同社区或缺数据 = 1.0; 跨社区 = _CROSS_COMMUNITY_PENALTY。
+
+    缺数据(无社区软层 / 任一端无社区)→ 1.0 → 路径评分逐位等于未接社区前的 baseline(零回归)。
+    """
+    if not community:
+        return 1.0
+    ca, cb = community.get(a_id), community.get(b_id)
+    if ca is None or cb is None or ca == cb:
+        return 1.0
+    return _CROSS_COMMUNITY_PENALTY
 
 
 def _edge_quality(attr: dict, kind: str) -> float:
@@ -464,7 +494,9 @@ def _best_paths(g: ImpactGraph, start_id: str, *, reverse: bool,
                 continue
             key = (nbr, nid, kind) if reverse else (nid, nbr, kind)   # 边永远 source→target
             attr = g.edge_attr.get(key, {})
-            nscore = score * _edge_quality(attr, kind) * _DEPTH_DECAY
+            # 社区因子对称(同/跨社区), 与方向无关 → 直接用 nid/nbr。无社区数据时退化为 1.0。
+            nscore = (score * _edge_quality(attr, kind)
+                      * _community_factor(g.community, nid, nbr) * _DEPTH_DECAY)
             if nbr not in best or nscore > best[nbr][0]:
                 best[nbr] = (nscore, best[nid][1] + [(nbr, kind, attr)])
                 heapq.heappush(heap, (-nscore, depth + 1, nbr))
@@ -477,8 +509,14 @@ def find_impact_paths(store, project_id: str, node_ref: str, *,
 
     反向 BFS(谁依赖它)每节点取最优路径, 按 score=Π(confidence×src权重)降序取 top-N。
     每跳给 node + via_edge + src + confidence(可解释); 全跳确定边则 path certain。
+
+    社区因子(Phase 4): 仅当 config `analyzers.community.path_penalty_enabled`=true 才把社区
+    映射载进图给跨社区边打 ≤1 惩罚(默认关, measure-first 待 A/B; 关时严格等于未接因子 baseline)。
     """
-    g = build_impact_graph(store, project_id, certain_only=certain_only)
+    from codev_platform.core.config import get, load_config
+    with_community = bool(get(load_config(), "analyzers.community.path_penalty_enabled", False))
+    g = build_impact_graph(store, project_id, certain_only=certain_only,
+                           with_community=with_community)
     node, ambig = _resolve(g, node_ref, None)
     if node is None:
         return _not_found("ref", node_ref, ambig)
@@ -593,6 +631,65 @@ def list_domain_members(store, project_id: str, domain_name: str) -> dict:
                 members.append(_node_brief(m))
     members.sort(key=lambda x: x["name"])
     return {"found": True, "domain": dom.name, "members": members, "count": len(members)}
+
+
+# ---------------------------------------------------------------- 结构社区查询(Phase 4 软节点消费前门)
+
+_COMMUNITY_MEMBER_CAP = 50   # 单社区返回成员上限(大社区防 payload 爆; 仍给 size 全量计数)
+
+
+def find_node_community(store, project_id: str, node_ref: str) -> dict:
+    """查某节点属于哪个结构社区 + 同簇成员(Phase 4 软节点)。读 IN_COMMUNITY 软边, **不调 LLM**。
+
+    给 agent 答"这块代码结构上和谁抱团"(全节点覆盖, 区别于 A1 业务域只 endpoint/表)。
+    放开软边(include_soft=True)——"查理解"类查询, 与"查依赖"(默认过滤软边)分开互不污染。
+    """
+    g = build_impact_graph(store, project_id, include_soft=True)
+    node, ambig = _resolve(g, node_ref, None)
+    if node is None:
+        return _not_found("ref", node_ref, ambig)
+    communities = []
+    for tgt, kind in g.fwd.get(node.id, []):
+        if kind != EdgeKind.IN_COMMUNITY.value:
+            continue
+        comm = g.nodes.get(tgt)
+        if comm is None:
+            continue
+        members = [
+            _node_brief(g.nodes[src]) for src, k in g.rev.get(comm.id, [])
+            if k == EdgeKind.IN_COMMUNITY.value and src in g.nodes and src != node.id
+        ]
+        members.sort(key=lambda x: (x["layer"], x["kind"], x["name"] or ""))
+        meta = comm.meta or {}
+        communities.append({
+            "id": comm.id, "name": comm.name,
+            "size": meta.get("size", len(members) + 1),
+            "dominant_kind": meta.get("dominant_kind"),
+            "members": members[:_COMMUNITY_MEMBER_CAP],
+            "membersTruncated": len(members) > _COMMUNITY_MEMBER_CAP,
+        })
+    return {"found": True, "node": _node_brief(node), "communities": communities}
+
+
+def list_communities(store, project_id: str, limit: int = 50) -> dict:
+    """列整仓结构社区地图(每簇大小/主导 kind/代表成员)——给 agent 做 onboarding / 结构概览。
+
+    读 COMMUNITY 软节点 meta(size/dominant_kind/sample), 按 size 降序。**不调 LLM**。
+    """
+    g = build_impact_graph(store, project_id, include_soft=True)
+    items = []
+    for n in g.nodes.values():
+        if n.kind != NodeKind.COMMUNITY.value:
+            continue
+        m = n.meta or {}
+        items.append({
+            "id": n.id, "name": n.name, "size": m.get("size", 0),
+            "dominant_kind": m.get("dominant_kind"), "sample": m.get("sample", []),
+        })
+    items.sort(key=lambda x: (-(x["size"] or 0), x["id"]))   # 大簇优先, 稳定
+    capped = items[: max(0, int(limit))]
+    return {"project_id": project_id, "communities": capped, "count": len(capped),
+            "totalCount": len(items), "truncated": len(items) > len(capped)}
 
 
 # ---------------------------------------------------------------- 架构分层查询(A2 软节点消费前门)

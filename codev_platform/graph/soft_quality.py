@@ -18,13 +18,18 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from codev_platform.graph.schema import EdgeKind, GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.community import modularity as _modularity
+from codev_platform.graph.schema import (
+    EdgeKind, GraphEdge, GraphNode, NodeKind, is_soft_node_kind,
+)
 from codev_platform.graph.store import GraphStore
 
 # 默认阈值(可由调用方覆盖)。
 _GIANT_SHARE = 0.5      # 单 cluster 成员占比 > 此 = 巨型(疑似共享节点退化)
 _MIN_COVERAGE = 0.3     # 可标注硬节点的标注覆盖率 < 此 = 偏低
 _TOP_DIST = 10          # markdown 分布预览取前 N
+# 结构社区天然比业务域大(整块抱团)→ giant 阈值单独放宽, 否则正常大社区被误报退化。
+_COMMUNITY_GIANT_SHARE = 0.7
 
 # 各轴"可被标注的硬节点 kind"(coverage 分母)。A1 标 endpoint/表; A2 标代码节点。
 _DOMAIN_ELIGIBLE = frozenset({NodeKind.BACKEND_ENDPOINT.value, NodeKind.DB_TABLE.value})
@@ -32,6 +37,9 @@ _LAYER_ELIGIBLE = frozenset({
     NodeKind.BACKEND_FUNCTION.value, NodeKind.BACKEND_ENDPOINT.value,
     NodeKind.FRONTEND_MODULE.value, NodeKind.FRONTEND_COMPONENT.value,
 })
+# 结构社区覆盖**全硬节点**(非某子集)→ eligible = 所有非软 kind(从 SOFT_NODE_KINDS 取反, 单一真值源)。
+_COMMUNITY_ELIGIBLE = frozenset(
+    k.value for k in NodeKind if not is_soft_node_kind(k.value))
 
 
 def _assess_axis(nodes: list[GraphNode], edges: list[GraphEdge], *,
@@ -123,14 +131,28 @@ def assess_soft_labels(store: GraphStore, project_id: str, *,
         g.nodes, g.edges, soft_kind=NodeKind.ARCH_LAYER.value,
         soft_edge_kind=EdgeKind.PLAYS_ROLE.value, eligible_kinds=_LAYER_ELIGIBLE,
         giant_share=giant_share, min_coverage=min_coverage)
+    communities = _assess_axis(
+        g.nodes, g.edges, soft_kind=NodeKind.COMMUNITY.value,
+        soft_edge_kind=EdgeKind.IN_COMMUNITY.value, eligible_kinds=_COMMUNITY_ELIGIBLE,
+        giant_share=_COMMUNITY_GIANT_SHARE, min_coverage=min_coverage)
+    # 模块度(社区轴专属客观指标; 仅有社区软层时算, 越高=社区内密社区间疏=划分越好)。诊断不卡阈值。
+    if communities["soft_nodes"]:
+        cmap = {e.source: e.target for e in g.edges
+                if e.kind == EdgeKind.IN_COMMUNITY.value}
+        communities["modularity"] = round(_modularity(g.nodes, g.edges, cmap), 4)
+    else:
+        communities["modularity"] = None
 
     flags = (_axis_flags("业务域", domains, min_coverage=min_coverage)
-             + _axis_flags("架构层", layers, min_coverage=min_coverage))
+             + _axis_flags("架构层", layers, min_coverage=min_coverage)
+             + _axis_flags("结构社区", communities, min_coverage=min_coverage))
     return {
         "project_id": project_id,
-        "thresholds": {"giant_share": giant_share, "min_coverage": min_coverage},
+        "thresholds": {"giant_share": giant_share, "min_coverage": min_coverage,
+                       "community_giant_share": _COMMUNITY_GIANT_SHARE},
         "domains": domains,
         "layers": layers,
+        "communities": communities,
         "flags": flags,
         "healthy": not flags,
     }
@@ -161,4 +183,10 @@ def render_markdown(report: dict) -> str:
     lines += _render_axis("业务域 (A1)", report["domains"])
     lines += [""]
     lines += _render_axis("架构层 (A2)", report["layers"])
+    comm = report.get("communities")
+    if comm is not None:
+        lines += [""]
+        lines += _render_axis("结构社区 (Phase 4)", comm)
+        if comm.get("modularity") is not None:
+            lines.append(f"    - modularity Q = {comm['modularity']}")
     return "\n".join(lines)

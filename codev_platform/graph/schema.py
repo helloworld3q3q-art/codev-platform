@@ -60,6 +60,10 @@ class NodeKind(str, Enum):
     # FRONTEND_API_CALL(确定性字面量/常量解析)物理可分辨: confidence<1.0 + impact 默认过滤, 防
     # LLM 推断污染"查依赖"。grounding: 必须 resolve 回真实后端 endpoint, 否则丢。
     INFERRED_API_CALL = "inferred_api_call"
+    # 软节点(Phase 4 结构社区): 算法(Louvain)派生的结构聚类, 给**全节点**派社区号(免 LLM、
+    # 确定性、全 kind 覆盖)。与 BUSINESS_DOMAIN(LLM 语义域, 只 endpoint/表)正交互补: 一个节点
+    # 既属某结构社区又可属某业务域。软隔离(impact 默认过滤): 社区是分组叠加层非依赖关系。
+    COMMUNITY = "community"
 
 
 class EdgeKind(str, Enum):
@@ -90,6 +94,9 @@ class EdgeKind(str, Enum):
     # 语义同 CALLS_API(前端调后端)但来源是 LLM 推断而非静态解析 → 软隔离(confidence<1.0 +
     # impact 默认过滤), 与确定性 CALLS_API 区分: 查依赖默认只信静态边, 推断边作候选提示。
     CALLS_API_INFERRED = "calls_api_inferred"
+    # 软边(Phase 4): 硬节点 --in_community--> COMMUNITY 软节点(该节点属哪个结构社区)。
+    # 社区是结构聚类的"分组叠加层", 非依赖关系 → 软隔离(impact 默认过滤), 不污染查依赖。
+    IN_COMMUNITY = "in_community"
 
 
 def _kind_str(value: Any) -> str:
@@ -103,10 +110,10 @@ def _kind_str(value: Any) -> str:
 # 软节点判据不止 kind (还有 confidence<1.0 + meta.derived_by), 但 kind 是最直接的物理标记。
 SOFT_NODE_KINDS: frozenset[str] = frozenset(
     {NodeKind.BUSINESS_DOMAIN.value, NodeKind.ARCH_LAYER.value,
-     NodeKind.INFERRED_API_CALL.value})
+     NodeKind.INFERRED_API_CALL.value, NodeKind.COMMUNITY.value})
 SOFT_EDGE_KINDS: frozenset[str] = frozenset(
     {EdgeKind.BELONGS_TO_DOMAIN.value, EdgeKind.PLAYS_ROLE.value,
-     EdgeKind.CALLS_API_INFERRED.value})
+     EdgeKind.CALLS_API_INFERRED.value, EdgeKind.IN_COMMUNITY.value})
 
 
 def is_soft_node_kind(kind: Any) -> bool:

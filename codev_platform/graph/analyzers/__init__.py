@@ -55,6 +55,14 @@ try:
 except Exception:  # noqa: BLE001 — config/provider 不可用 → 不注册(no-op), 不拖垮 import
     pass
 
+# 结构社区(Phase 4): 确定性 + 免费(无 LLM)→ **无条件注册**(区别于上面 LLM analyzer 的
+# config gate 默认关)。软隔离(COMMUNITY/IN_COMMUNITY ∈ SOFT_*_KINDS)→ 不污染查依赖。
+try:
+    from codev_platform.graph.analyzers.community import CommunityAnalyzer
+    register_analyzer(CommunityAnalyzer())
+except Exception:  # noqa: BLE001 — 注册失败不拖垮 import(降级为无社区软层)
+    pass
+
 __all__ = [
     "Analyzer",
     "applicable_analyzers",

@@ -1,12 +1,13 @@
 """统一图谱 MCP server — 暴露 impact + A1 业务域 + A2 架构层查询给开发端 agent(Claude Code/Codex)。
 
-11 个 tools(薄包装 graph/impact 查询函数, 纯读 sqlite, **不调 LLM**):
-  跨层影响 — find_impact / find_table_usage / find_page_dependencies /
+tools(薄包装 graph/impact 查询函数, 纯读 sqlite, **不调 LLM**):
+  跨层影响 — find_impact / find_impact_paths / find_table_usage / find_page_dependencies /
              find_impacted_pages / find_api_callers
   A1 业务域 — find_node_domain(节点→域) / list_domain_members(域→成员)
+  Phase 4 结构社区 — find_node_community(节点→社区+同簇成员) / list_communities(整仓社区地图)
   A2 架构层 — find_arch_role(file→角色) / list_layer_members(角色→file) /
              find_arch_violations(确定性逆向依赖检测)
-  搜索 — search_nodes(模糊搜节点, 承接退役的 cross-link)
+  搜索/契约/召回 — search_nodes / find_contract_drift / recall_code
 
 多租户单端点 + ?project_id= 路由(镜像 cross-link)。读 data/graph_store/<pid>.sqlite。
 这是 A1 业务域 + 整个统一图谱对开发端 agent 的消费前门(第 5 套平台 MCP)。
@@ -205,6 +206,13 @@ async def list_tools() -> list[Tool]:
         Tool(name="list_domain_members",
              description="查某业务域下有哪些 endpoint/表(A1 软节点)",
              inputSchema=_str_schema("domain", "业务域名, 如 订单/行情")),
+        Tool(name="find_node_community",
+             description="查某节点结构上属哪个社区 + 同簇成员(Phase 4 算法社区, 全节点覆盖; 答'这块代码和谁抱团', 区别 A1 业务域只 endpoint/表)",
+             inputSchema=_REF_SCHEMA),
+        Tool(name="list_communities",
+             description="列整仓结构社区地图(每簇大小/主导 kind/代表成员)—— onboarding / 结构概览; 免 LLM",
+             inputSchema={"type": "object", "properties": {
+                 "limit": {"type": "integer", "description": "返回上限(默认 50)"}}}),
         Tool(name="search_nodes",
              description="模糊搜节点(name 含 query, 可选 kind 过滤)—— 找端点/表/函数/业务域(承接 cross-link)",
              inputSchema={"type": "object", "properties": {
@@ -250,6 +258,8 @@ _DISPATCH = {
         c, p, a["endpoint"], certain_only=bool(a.get("certain_only", False))),
     "find_node_domain": lambda c, p, a: _impact.find_node_domain(c, p, a["ref"]),
     "list_domain_members": lambda c, p, a: _impact.list_domain_members(c, p, a["domain"]),
+    "find_node_community": lambda c, p, a: _impact.find_node_community(c, p, a["ref"]),
+    "list_communities": lambda c, p, a: _impact.list_communities(c, p, int(a.get("limit", 50))),
     "search_nodes": lambda c, p, a: _impact.search_nodes(
         c, p, a["query"], a.get("kind", "all"), int(a.get("limit", 50))),
     "find_arch_role": lambda c, p, a: _impact.find_arch_role(c, p, a["file"]),

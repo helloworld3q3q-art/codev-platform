@@ -18,14 +18,16 @@ from codev_platform.graph.schema import (
 from codev_platform.graph.store import open_store
 
 
-def test_dispatch_table_has_fourteen_tools():
+def test_dispatch_table_has_sixteen_tools():
     # 8 (impact+A1) + 3 (A2) + recall_code(P6) + find_impact_paths(P5) + find_contract_drift(多仓 P1)
-    assert len(gm._DISPATCH) == 14
+    # + find_node_community / list_communities(Phase 4 结构社区)
+    assert len(gm._DISPATCH) == 16
     assert "find_impact_paths" in gm._DISPATCH
     assert "find_node_domain" in gm._DISPATCH
     assert "search_nodes" in gm._DISPATCH
     assert "list_domain_members" in gm._DISPATCH
     assert {"find_arch_role", "list_layer_members", "find_arch_violations"} <= set(gm._DISPATCH)
+    assert {"find_node_community", "list_communities"} <= set(gm._DISPATCH)
     assert "recall_code" in gm._DISPATCH
     assert "find_contract_drift" in gm._DISPATCH
 
