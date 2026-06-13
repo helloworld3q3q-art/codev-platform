@@ -57,8 +57,23 @@ agent 经图谱精确查到 PDA 页面后,`read_file`/`list_dir` 却报"路径�
 
 两次都是**先实测节点分布/字段长度/边/真跑函数,再定论**。"派对抗审计 + 实测验证"是平台开发的纪律,不是 nice-to-have。
 
+## 八、对抗审计 + 修复(下午段)—— 派 4 兄弟审上午这一大轮,抓修真 bug
+
+上午 commit 链收尾后,派 **4 个对抗审计兄弟**按风险聚类(嵌入管线 / 统一图谱 / 网关鉴权 / agent 多仓隔离)审 6/11晚~6/13 这一大轮。整体评价:对抗痕迹重,安全侧越权/穿越 PoC 几乎全被拦死;抓到并修了:
+
+- **P0(`313a972`)**:`qwen.py` `712588e` 加 batch_size 时**误删 `self._model=None`**,`_ensure` 仍读它 → qwen-local embedder 首次 encode 必 `AttributeError`(零测试覆盖,remote 默认掩盖)。补回 + 回归断言。
+- **P1a(`313a972`)**:PG 队列 rc=2(锁占)job 因 lease 隐身最多 1800s,破"下轮重试"契约(file 后端无此问题,PG 迁移引入)。`PgJobQueue.release()` 复位 pending。
+- **3×P2(`313a972`)**:`find_api_callers` 路径参数模板匹配(`/users/123`↔`/users/{id}`)/ 契约漂移 0.5 兜底边归 `uncertainCalls` 桶 / 相对 extra_repos fail-closed。+ chroma daemon 接 `bind_host`+`startup_policy_error`(与另三套 MCP 对齐,补反代 passthrough 护栏)。
+- **P1b 根治(`9e65067`)**:多仓前端节点 id/file 以仓相对路径为锚无仓维度 → 两仓同 `src/pages/index.vue` 碰撞 → merge first-wins **静默丢后仓节点**。新 `RepoScope` 单一职责单元(写侧 localize 打仓 tag / 读侧 resolve 还原),主仓 tag='' 零 churn。实测 ideas-v2 重建 **783 个 extra 仓节点带 tag 存活**(原会被丢)。
+- **/embed 闸(`8b1623a`)**:loopback 豁免在**同机反代**下可被远程白嫖 GPU。复用 `internal_secret` 加 `X-Internal-Call` 信物闸(配 secret 才生效)+ 反代 runbook 排除。token 模式平台**活体验证**:无信物→401、带→200。安全顺序(先重启调用方再重启 daemon)避免 embedding 断。
+- **audit 加固(`f912e03`)**:`audit_all_stores` 旧版只 glob sqlite,pg 后端会扫空=门禁形同虚设(潜伏 bug,平台现 sqlite)。改按后端枚举(pg 走 `list_project_ids`)+ store 外 `reconcile_orphan_pids` 孤儿检测。**否决**往 store 注入 allowlist(破 §8+契约对称)。
+- **audit 抓出并修的真 bug(`376e108`)**:跑 audit 抓出 codev-platform 图谱 **25 条 dangling** —— A2 给 A3 `inferred_api_call` 软节点发 plays_role,软节点下轮未重产即悬空。Fix-A(plays_role 排除软节点)+ Fix-B(`_analyzers_pass` 的 hard_ids 信任集只含硬节点,防任何 analyzer 跨轮引用软节点)。重建实测 **25→0**。
+
+**质量教训沉淀成规则** → `.claude/rules/code-quality-discipline.md`(本日多次被用户纠"堆代码/深嵌套/死代码兜底/偷懒延后理由")。
+
 ## commit 链(2026-06-13 段)
-`712588e`(code_vec batch+skip_kinds 配置)→`a0485ef`(/embed 反应式 OOM 回收)→`6530886`(续跑探活 R5)→`ba05cf9`(find_api_callers URL 解析)→`6cfa250`(前端 API 使用精确归因 uses_api 引擎)→`5d8a601`(meta.json 进 git + extra_repos 可移植)→`f3704ac`(build_text 封顶治超大 docstring)→`796665b`(agent 文件工具多仓 + core/repos 单一真值源)。
+**上午(PDA 链路)**:`712588e`(code_vec batch+skip_kinds 配置)→`a0485ef`(/embed 反应式 OOM 回收)→`6530886`(续跑探活 R5)→`ba05cf9`(find_api_callers URL 解析)→`6cfa250`(前端 API 使用精确归因 uses_api 引擎)→`5d8a601`(meta.json 进 git + extra_repos 可移植)→`f3704ac`(build_text 封顶治超大 docstring)→`796665b`(agent 文件工具多仓 + core/repos 单一真值源)。
+**下午(对抗审计修复)**:`313a972`(审计批: P0 qwen/P1a reindex/3×P2/chroma bind)→`9e65067`(RepoScope 多仓节点碰撞根治)→`8b1623a`(/embed 内部信物闸)→`f912e03`(audit 按后端枚举+孤儿 reconcile)→`376e108`(A2/A3 悬空 plays_role 根治 25→0)。
 
 ## web 端
 本会话改动**不需前端同步**:impact.py / api_usage / core.repos / fs.py / code_vector_store 全在 graph 引擎 + agent 工具 + 索引层,OpenAPI 未变,`pnpm run api` 不用跑。
