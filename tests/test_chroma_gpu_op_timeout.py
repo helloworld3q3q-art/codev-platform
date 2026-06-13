@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-import codev_platform.chroma.server as srv
+import codev_platform.chroma._embed_api as srv  # _gpu_call/_release_cuda_cache/GPU_OP_TIMEOUT 2026-06-14 抽到 _embed_api
 
 
 def test_gpu_call_returns_result_normally():
