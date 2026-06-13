@@ -25,7 +25,9 @@ const BUBBLE_ROLES: BubbleListProps['role'] = {
     variant: 'outlined',
     shape: 'round',
     avatar: AI_AVATAR,
-    contentRender: renderMarkdown,
+    // contentRender 不放这: Bubble 仅在 content 为 string 时启用原生 typing
+    // (见 Bubble.js: usingInnerAnimation = typing && typeof memoedContent==='string')。
+    // markdown 渲染会让 content 变 JSX → 打字失效。故 contentRender 移到 per-item, 打字播完才挂。
   },
 };
 
@@ -67,6 +69,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onSend, onComp
                 onComplete(m.id);
               }
             : undefined,
+        // 打字期(animating)不挂 contentRender → content 保持 string, Bubble 启用原生 typing;
+        // 播完(animating=false)再挂 markdown 渲染(代码块/列表)。用户消息不渲 markdown。
+        contentRender: m.role === 'assistant' && !m.animating ? renderMarkdown : undefined,
         // 答复末尾挂工具调用流(仅 assistant 且本轮有 steps)
         footer: m.role === 'assistant' && m.steps?.length ? <ToolFlow steps={m.steps} /> : undefined,
       })),
