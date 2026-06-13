@@ -42,3 +42,12 @@ def _restore_web_singletons():
     yield
     for mod, attr, val in snap:
         setattr(mod, attr, val)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_recall_trace(tmp_path_factory, monkeypatch):
+    """recall_code 每次查询 best-effort 写 trace 到 data_root/recall_trace(Phase 8 观测)。测试重定向到
+    tmp, 防 recall service/weights 等测试把垃圾 trace 写进**真实平台 baseline**(measure-first 数据被污染)。
+    recall.observability 仅 stdlib 依赖(不引 web/重栈), 直接 patch 其 _trace_dir 安全、不影响非 recall 测试。"""
+    d = tmp_path_factory.mktemp("recall_trace")
+    monkeypatch.setattr("codev_platform.recall.observability._trace_dir", lambda: d)

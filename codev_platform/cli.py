@@ -295,6 +295,30 @@ def cmd_graph(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_recall_stats(args: argparse.Namespace) -> int:
+    """recall 查询观测 baseline(Phase 8 measure-first): P50/P95 / 无证据率 / 每 lane 命中率与耗时。
+
+    读 data_root/recall_trace(recall_code 每次查询 best-effort 落的 trace)。在跑 recall 的机器
+    (平台 WSL)上看才有数据。先量后优: 看慢在哪个 lane / 无证据率多高, 再决定要不要做 cache。
+    """
+    from codev_platform.core.paths import data_root
+    from codev_platform.recall.observability import recall_latency_report
+    rep = recall_latency_report(data_root() / "recall_trace")
+    if getattr(args, "json", False):
+        _print(json.dumps(rep, ensure_ascii=False, indent=2))
+        return 0
+    w = rep["last7d"]
+    if not w["queries"]:
+        _print("(近 7 天无 recall trace; 跑些 recall 查询后再看, 或确认在平台机器上运行)")
+        return 0
+    _print(f"recall 近 7 天: {w['queries']} 查询 | P50 {w['p50Ms']}ms / P95 {w['p95Ms']}ms | "
+           f"无证据率 {w['noEvidenceRate']:.1%}")
+    for lane in w["byLane"]:
+        _print(f"  [{lane['lane']}] 命中率 {lane['hitRate']:.1%} | "
+               f"P50 {lane['p50Ms']}ms / P95 {lane['p95Ms']}ms ({lane['runs']} 跑)")
+    return 0
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     from codev_platform import __version__
     _print(f"codev-platform {__version__}")
@@ -393,6 +417,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp_graph.add_argument("--all", action="store_true",
                           help="audit: 审计所有有本地 store 的 project(门禁模式, 任一结构 error 非零退出)")
     sp_graph.set_defaults(func=cmd_graph)
+
+    sp_rs = sub.add_parser("recall-stats",
+                           help="recall 查询观测 baseline (Phase 8: P50/P95 / 无证据率 / 每 lane 命中率)")
+    sp_rs.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
+    sp_rs.set_defaults(func=cmd_recall_stats)
 
     sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")
     sp_dae.add_argument("action", choices=["status", "stop"], help="status=查 /health / stop=按 pid 结束")
