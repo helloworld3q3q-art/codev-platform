@@ -84,10 +84,28 @@ agent 经图谱精确查到 PDA 页面后,`read_file`/`list_dir` 却报"路径�
 2. **会话 SSE 连接陈旧(自造)**:晚间部署反复 `systemctl restart codev-mcp-graph/codegraph` 把长跑 Claude Code 会话连接打断 → MCP 调用全 `-32602`(server 健康、client 连接死)。**修**:重启 Claude Code 重连(非 /clear)。重启后实测 codegraph_search / graph search_nodes 全通。
 3. **过程失误**:整场把"MCP 不可用"当借口没真试、理由(worktree 特定)错。教训记 [[wsl-mcp-daemons-stale-after-pull]]:会话中途别反复重启 MCP 服务;先测一次再断言。
 
+## 十、Phase 9 多语言 adapter 形式化 —— produces 声明式归属 + capability 视图(`a01aadc`)
+
+继 §九 蓝图续建,按"简单→难"选 Phase 9(纯后端、无新依赖)。**先派 3 兄弟对抗式讨论定调**(正方设计 / YAGNI 反方 / 多语言通用性),避开过度设计陷阱:
+
+- **关键定调**:平台**已**三套并行扩展点各自插件化(AnalyzerPlugin / CallResolver / Analyzer,均"协议族+registry+零 if-else")。盲目再叠"统一 adapter 框架"= 撞空抽象 / 重复真值源红线。三契约签名+生命周期实质不同(入参 0→nodes→nodes+edges,落库前→落库后→骨架连通后),**不合并**(`call_resolvers/base.py` 注释已论证)。真有价值的窄口子=① capability matrix 单一真值源缺失 ② dotnet 漏登记 bug。
+- **决胜证据**:正方挖到真 bug —— `builtin.dotnet` 产 `backend_endpoint` 却漏登记 `KIND_OWNERS`,既有 `test_plugin_owner_uniqueness` 无 .NET fixture → 静默漏检。
+
+**四项交付(净减 19 行,加能力反少代码)**:
+1. **produces 声明式扩展点**:`AnalyzerPlugin` 加 `produces`(同 `prov_source` 模式),7 个栈插件各声明自己产的 NodeKind。
+2. **ownership 收敛单一真值源**:删手维护 `KIND_OWNERS` dict → `kind_owners()` 从插件 produces 反转派生 ∪ `POST_PASS_OWNERS`(非插件 post-pass 产物 frontend_deps/analyzers)。**dotnet bug 结构性消除**(声明即归属,不是加测试去抓);既有 owner 闸保留(抓"产了没声明")。
+3. **capability matrix 派生视图**:`plugins/capabilities.py::describe_capabilities()`(聚合 name/version/produces/prov_source,**派生非新存储真值源**)+ CLI `plugins list` 显示 produces/prov + footer 列 call resolvers / analyzers,回答"平台支持哪些语言栈、各产什么"。
+4. **收窄 `_stack_scan/__init__.py` re-export 墙**:数据驱动审计(全仓零 `_stack_scan.<私有符号>` 访问,测试只 import 公共符号)删约 30 个零消费私有门面,141→81 行。
+
+**验证**:新增静态护栏测试(produces 合法性 + dotnet 归属回归锁 + capability 派生一致);目标单测 **274 通过**(41+233)。**真实仓全链路实测**(Windows editable 跑改动码,`store_path` 覆盖写临时库零碰线上):5 仓 ingest 全 OK、归属零 rogue;**跨仓** ideas-pda-app 前端 → ideas-v2 后端 **603 条 calls_api 跨仓连边**(RepoScope `Ideas-pda-app-hb::` tag 正确);**单仓全链** openclaw-stock BFS 找到 `frontend_api_call→backend_endpoint→backend_function→db_table` 四层贯通路径。
+
+**教训沉淀**:验证一律 `store_path` 覆盖写临时库,**绝不对线上图谱跑手动 ingest**([[graph-rebuild-via-worker-not-manual-ingest]]:dependency-cruiser 冷启动 fail-soft 会 upsert 覆盖好数据)。Windows→UNC 访问 WSL 仓时 depcruise 走 npx 报 `UNC paths not supported` fail-soft(frontend_module 缺),纯 Python 正则扫描(component/route/api_call)经 UNC 正常 —— 是 Windows-UNC 限制非改动问题。
+
 ## commit 链(2026-06-13 段)
 **上午(PDA 链路)**:`712588e`(code_vec batch+skip_kinds 配置)→`a0485ef`(/embed 反应式 OOM 回收)→`6530886`(续跑探活 R5)→`ba05cf9`(find_api_callers URL 解析)→`6cfa250`(前端 API 使用精确归因 uses_api 引擎)→`5d8a601`(meta.json 进 git + extra_repos 可移植)→`f3704ac`(build_text 封顶治超大 docstring)→`796665b`(agent 文件工具多仓 + core/repos 单一真值源)。
 **下午(对抗审计修复)**:`313a972`(审计批: P0 qwen/P1a reindex/3×P2/chroma bind)→`9e65067`(RepoScope 多仓节点碰撞根治)→`8b1623a`(/embed 内部信物闸)→`f912e03`(audit 按后端枚举+孤儿 reconcile)→`376e108`(A2/A3 悬空 plays_role 根治 25→0)。
 **晚间(蓝图续建)**:状态订正 `313a972`后`f413fac`(#7)/`3c56b3c`(#8)/`70a8daa`(conftest 注)→`e7b72a1`(Phase 5 路径 kind 权重+深度衰减)→`9ab5582`(Phase 8 观测 trace+聚合)→`bcd6bf0`(recall-stats CLI + conftest 隔离)→`49e0d01`/`005382c`(vector lane fs 探活快速跳过, P95 944→4.8ms)。MCP codegraph symlink 修复为本机 local 不进 git。
+**Phase 9(adapter 形式化)**:`a01aadc`(produces 声明式扩展点 → ownership 派生 kind_owners() + capability 视图 + 收窄 _stack_scan re-export;修 dotnet 漏登记归属 bug,净减 19 行;274 单测 + 5 真实仓全链路实测)。
 
 ## web 端
 本会话改动**不需前端同步**:impact.py / api_usage / core.repos / fs.py / code_vector_store 全在 graph 引擎 + agent 工具 + 索引层,OpenAPI 未变,`pnpm run api` 不用跑。
