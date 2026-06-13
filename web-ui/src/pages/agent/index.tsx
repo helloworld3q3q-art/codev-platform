@@ -194,7 +194,12 @@ const AgentPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <div className="relative h-720 bg-#ffffff rounded-8 overflow-hidden border border-#f0f0f0 shadow-sm">
+      {/* 高度铺满右侧内容区: 内联 calc(UnoCSS 任意值 h-[..] 在本项目配置下会被丢弃, 故用 style)。
+          偏移 = ProLayout 头 + PageContainer header/面包屑 + 内容上下留白; 如有微小空隙/滚动条微调此值。 */}
+      <div
+        className="relative bg-#ffffff rounded-8 overflow-hidden border border-#f0f0f0 shadow-sm"
+        style={{ height: 'calc(100vh - 40px)' }}
+      >
         <ChatPanel messages={messages} loading={loading} onSend={handleSend} onComplete={handleTypingComplete} />
         {/* 贴左边缘(菜单右侧)的竖向小钮: 上下拖动 + 点击在"菜单 ↔ 会话列表"间切换 */}
         <SessionToggle open={sessionPanelOpen} onToggle={toggleSessionPanel} />
