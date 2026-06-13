@@ -13,7 +13,7 @@
     models.reranker_device   cuda / cpu
     models.reranker_enabled  true / false
     data.platform_data_dir   chroma / graph 共享基目录
-    daemon.port              chroma daemon HTTP 端口
+    mcp.platform_docs_sse_port  chroma daemon HTTP 端口 (旧 daemon.port 为兼容别名)
     daemon.mode              true=daemon 共享 / false=每会话独立
     daemon.prewarm           启动期预热模型 (避免首次 query 60s 超时)
     search.recall_k          embedding 召回候选数 (rerank 前)
@@ -54,7 +54,9 @@ DEFAULTS: dict[str, Any] = {
         "platform_data_dir": None,  # None = 走 _business_repo_root cwd 推导
     },
     "daemon": {
-        "port": 18083,
+        # 端口默认的单一真值源是 mcp_serve._bind_port (canonical 键 mcp.platform_docs_sse_port
+        # > deprecated 别名 daemon.port > DEFAULT_CHROMA_PORT)。此处不再复制 daemon.port,
+        # 否则默认 config 缺 canonical 键时会命中别名触发 deprecation warning。
         "mode": True,
         "prewarm": True,
     },

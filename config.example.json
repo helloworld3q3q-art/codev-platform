@@ -23,8 +23,7 @@
   },
 
   "daemon": {
-    "_comment": "chroma daemon 模式。mode=true 启 daemon (多 session 共享 GPU 模型, 默认); prewarm=true 启动期加载模型避免首次 query 60s 超时。注: port 为 platform-docs 端口的 deprecated 别名, 推荐用 mcp.platform_docs_sse_port (4 套统一命名); 两者都配时 mcp.platform_docs_sse_port 优先, port 仍兼容可读。",
-    "port": 18083,
+    "_comment": "chroma daemon 模式。mode=true 启 daemon (多 session 共享 GPU 模型, 默认); prewarm=true 启动期加载模型避免首次 query 60s 超时。端口配在 mcp.platform_docs_sse_port (4 套统一命名); 旧 daemon.port 别名代码仍兼容可读, 但样板不再列出 — 避免与 canonical 键重复造成误解。",
     "mode": true,
     "prewarm": true
   },
@@ -98,7 +97,7 @@
   },
 
   "platform": {
-    "_comment": "平台服务地址 (访问平台数据一律走 HTTP/HTTPS 的入口)。`codev-platform health --all` / 子应用健康检查 通过它 GET /platform/status, 不直接读文件。null = 用 daemon 默认 http://127.0.0.1:<daemon.port>; 远程平台填 http(s)://<host>:<port>。",
+    "_comment": "平台服务地址 (访问平台数据一律走 HTTP/HTTPS 的入口)。`codev-platform health --all` / 子应用健康检查 通过它 GET /platform/status, 不直接读文件。null = 用 daemon 默认 http://127.0.0.1:<mcp.platform_docs_sse_port>; 远程平台填 http(s)://<host>:<port>。",
     "url": null
   },
 
@@ -114,7 +113,7 @@
   },
 
   "mcp": {
-    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。4 套端口统一命名 mcp.<service>_sse_port (端口真值单一入口, serve-mcp / systemd / 客户端 local 源全从此派生)。platform_docs_sse_port: chroma daemon (默认 18083; 历史别名 daemon.port 仍兼容)。codegraph_sse_port: codegraph 多租户代理 (默认 18091, 平台自写代理按 ?project_id= 懒启动 per-repo 后端转发)。agent_memory_sse_port: 分层记忆 MCP 前门 (默认 18087)。graph_sse_port: 统一图谱 MCP (impact 跨层影响 + A1 业务域 + search_nodes, 替代退役的 cross-link, 默认 18092)。",
+    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。4 套端口统一命名 mcp.<service>_sse_port (端口真值单一入口, serve-mcp / systemd / 客户端 local 源全从此派生)。platform_docs_sse_port: chroma daemon (默认 18083; 旧 daemon.port 别名仅代码兼容可读, 不再写入样板)。codegraph_sse_port: codegraph 多租户代理 (默认 18091, 平台自写代理按 ?project_id= 懒启动 per-repo 后端转发)。agent_memory_sse_port: 分层记忆 MCP 前门 (默认 18087)。graph_sse_port: 统一图谱 MCP (impact 跨层影响 + A1 业务域 + search_nodes, 替代退役的 cross-link, 默认 18092)。",
     "_comment_bind_host": "MCP 服务端 uvicorn bind host (默认 127.0.0.1 仅本机可达)。多机部署(供其它机器连)才改 0.0.0.0, 且**必须**配合 gateway.auth_mode=token —— 否则 graph/codegraph/agent-memory MCP 启动硬拒(bind_policy_error: 非 loopback bind + passthrough = 未认证对外开放)。改远程务必反代终结 TLS。",
     "bind_host": "127.0.0.1",
     "platform_docs_sse_port": 18083,
