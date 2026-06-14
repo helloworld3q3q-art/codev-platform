@@ -89,7 +89,6 @@ def _pg_token_store():
 
 def _cmd_pg_token(args: argparse.Namespace) -> int:
     """PG token 子命令: issue / revoke / revoke-user / list。明文只在 issue 打印一次。"""
-    from codev_platform.gateway.auth import token_hash
     store = _pg_token_store()
     if store is None:
         return 1
@@ -111,10 +110,9 @@ def _cmd_pg_token(args: argparse.Namespace) -> int:
             except ValueError as exc:
                 _err(f"FATAL: {exc}")
                 return 1
-            tok = secrets.token_urlsafe(32)
-            exp = time.time() + ttl if ttl is not None else None
-            store.issue(token_hash(tok), args.arg, args.org,
-                        projects=projects, label=getattr(args, "label", None), expires_at=exp)
+            from codev_platform.gateway.token_issue import issue_token
+            tok, exp = issue_token(store, args.arg, args.org, projects=projects,
+                                   label=getattr(args, "label", None), ttl_seconds=ttl)
             exp_disp = _expires_disp({"expires_at": exp}, time.time()) if exp else "永久"
             _out("PG token 已签发 (明文只显示这一次, 存好):")
             _out("")
