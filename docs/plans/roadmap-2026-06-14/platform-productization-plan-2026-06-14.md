@@ -38,7 +38,11 @@
 
 ## P2 — 多组织 web 签发 UI(加用户简化)【解冻 06-10 多组织 Phase 2】
 
-**现状**(06-10 Phase 1 已建,agent 核实):后端 RbacStore/account_store/PgTokenStore + CLI `org create/add-user/set-password` + `gateway pg-token-*` 全有。**缺**:浏览器图形化管理(现全走 CLI)。
+> 🔬 **2026-06-14 两兄弟代码核实修正范围(又是"大部分已存在")**:建 org/用户/改密/角色 **web 路由 + 前端页全已存在**(`orgs.py`+`users.py`+`pages/{orgs,users}`,且已接 `_guard_home_org`/`_guard_org_member` 安全闸);项目↔org 绑定也有(`projects.create` 收 orgId)。**唯一真缺口 = token 签发 web 化**(现仅 CLI `gateway pg-token-add`)。→ 范围从"中(net-new users/orgs 页)"**收窄到"轻:1 路由 + 1 token 页 + 抽共享 issue service"**。**刻意不做**:审批流/批量导入/角色矩阵编辑器/token 自助轮换/不重做已存在页。
+>
+> 🚧 **进度(2026-06-14)**:① **`gateway/token_issue.issue_token` 共享纯函数已交付**(`379f42c`,CLI `_cmd_pg_token` 改用之去重,web 路由下一步复用)。② **web 路由设计就绪**(复用点+5 红线落点定死):`schemas/tokens.py` + `services/token_service.py`(复用 `UserService._guard_org_member` + `issue_token` + `PgTokenStore`)+ `routes/tokens.py`(**`org_id=sess.org_id` 不由 client**,`require_org_role("admin")`)+ app.py 注册 + 越权单测 + 前端 `pages/tokens/` + `pnpm run api`。**剩余**:web 路由后端 4 文件 + 越权单测 + 前端页(WSL run api)—— 安全敏感 L4,建议清爽 context 实现。
+
+**现状**(06-10 Phase 1 已建,agent 核实):后端 RbacStore/account_store/PgTokenStore + CLI `org create/add-user/set-password` + `gateway pg-token-*` 全有。**缺**:仅 token 签发的 web 路由 + 前端页(其余 org/user 管理 web 化已完成)。
 
 **目标**:web 控制台建 org / 建用户 / 发 token / 项目→org 绑定,替代 CLI 手敲。
 

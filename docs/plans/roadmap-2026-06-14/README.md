@@ -9,7 +9,8 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [platform-productization-plan-2026-06-14.md](platform-productization-plan-2026-06-14.md) | 主 plan:P1 onboard 接入简化 / P2 多组织 web 签发 UI / P3 多仓多根索引 fan-out / P4 Phase 10 治理收尾 | 📋 规划(待实现)|
+| [platform-productization-plan-2026-06-14.md](platform-productization-plan-2026-06-14.md) | 主 plan:P1 onboard / P2 多组织 web 签发 / P3 多仓多根索引 / P4 Phase 10 治理 | P1✅ P4✅ P2🚧 P3 待 |
+| [daily-summary-2026-06-14.md](daily-summary-2026-06-14.md) | 产品化迭代 Day 1:onboard/治理/token 起步 + 贯穿教训"先核实避免重造" | 日报 |
 
 ## 四项速览(优先级序)
 
@@ -17,7 +18,7 @@
 |---|---|---|---|
 | 1 | **P1 onboard**(加项目 8 步→1 步)✅**已交付** `76d5ea8`(onboard 命令已存在,补 sync+.mcp.json 2 软步)| 轻 | roadmap-2026-06-07 Phase 10 |
 | 2 | **P4 Phase 10 治理** ✅**已交付**(接入指南重写成一键 onboard;治理看板已存在;能力矩阵 enabled 伪需求不做)| 轻 | roadmap-2026-06-07 Phase 10 |
-| 3 | **P2 多组织 web 签发 UI**(加用户简化,复用双 store)| 中 | roadmap-2026-06-10 多组织 Phase 2(解冻)|
+| 3 | **P2 多组织 web 签发 UI** 🚧**进行中**(核实:唯一缺 token 签发 web 化;`issue_token` 共享已交付 `379f42c`,web 路由设计就绪)| 轻(收窄) | roadmap-2026-06-10 多组织 Phase 2(解冻)|
 | 4 | **P3 多仓多根索引**(codegraph/code_vec fan-out,最重)| 重 | roadmap-2026-06-10 多仓 Phase 2(解冻)|
 
 ## 关联
