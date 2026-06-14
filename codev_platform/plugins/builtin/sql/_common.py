@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import re
+from pathlib import Path
 
 from codev_platform.graph.schema import (
     EdgeKind,
@@ -14,6 +15,20 @@ from codev_platform.graph.schema import (
     GraphNode,
     NodeKind,
 )
+
+
+def _read_text(path: Path) -> str:
+    """读源文件, 容忍非 UTF-8 (遗留仓常有 GBK/Latin1 的 .sql/.hbm.xml/.java)。
+
+    utf-8 优先 (快路径); 解码失败回退 errors="ignore" —— 丢坏字节但保住 CREATE TABLE /
+    <class table=> 等结构 (表/列名是 ASCII, 不受影响)。否则**一个**非 utf-8 文件就让整个
+    SqlPlugin.analyze 抛 UnicodeDecodeError, ingest fail-soft 丢掉全插件 → 该仓 DB 层全黑
+    (2026-06-14 ideas-v2 实证: 一个 GBK .sql 让 1068 个 hbm 表全扫不到)。OSError 仍由调用方处理。
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="ignore")
 
 # DB 定义关系边 kind: 统一 EdgeKind 暂无精确枚举对应, 用裸字符串 defines_column
 # (前端 unifiedgraph / codegraph utils 真消费此边 kind, 渲染"定义字段"关系)。

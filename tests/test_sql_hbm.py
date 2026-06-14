@@ -85,3 +85,13 @@ def test_sql_plugin_detects_and_analyzes_hbm(tmp_path: Path):
     result = plugin.analyze(tmp_path, "p")
     tables = {n.name for n in result.nodes if n.kind == NodeKind.DB_TABLE.value}
     assert {"OMS_ORDER", "OMS_INBOUND_ORDER"} <= tables
+
+
+def test_sql_plugin_tolerates_non_utf8_file(tmp_path: Path):
+    """遗留仓的非 UTF-8 (GBK) .sql 不该让整个 analyze 崩 —— 否则 1 个坏文件 = 全插件被
+    ingest fail-soft 丢弃, 该仓 DB 层全黑 (2026-06-14 ideas-v2 实证根因)。"""
+    (tmp_path / "legacy.sql").write_bytes(b"CREATE TABLE t (\xbb\xff col1 INT);")  # 非 utf-8 字节
+    (tmp_path / "OmsOrder.hbm.xml").write_text(_HBM, encoding="utf-8")
+    result = SqlPlugin().analyze(tmp_path, "p")  # 不抛 UnicodeDecodeError
+    tables = {n.name for n in result.nodes if n.kind == NodeKind.DB_TABLE.value}
+    assert "OMS_INBOUND_ORDER" in tables  # 坏 .sql 不阻断后续 hbm 扫描

@@ -56,6 +56,7 @@ from codev_platform.plugins.builtin.sql._common import (
     _NON_TABLE,
     _plausible_table,
     _RE_TEST_PATH,
+    _read_text,
     _str_const,
     _unquote,
 )
@@ -161,7 +162,7 @@ class SqlPlugin(AnalyzerPlugin):
         #    (codev 主用 conn.execute("CREATE TABLE ...") / executescript 建表)。
         for f in _stack_scan._iter_files(repo, (".py",)):
             try:
-                text = f.read_text(encoding="utf-8")
+                text = _read_text(f)
             except OSError:
                 continue
             if any(hint in text for hint in _ORM_HINTS):
@@ -171,7 +172,7 @@ class SqlPlugin(AnalyzerPlugin):
         # 4) Java MyBatis 注解 SQL (@Select/@Insert/... raw SQL) 也算 DB 栈。
         for f in _stack_scan._iter_files(repo, (".java",)):
             try:
-                text = f.read_text(encoding="utf-8")
+                text = _read_text(f)
             except OSError:
                 continue
             if _RE_JAVA_SQL_ANN.search(text):
@@ -179,7 +180,7 @@ class SqlPlugin(AnalyzerPlugin):
         # 5) MyBatis XML Mapper (*.xml 含 <mapper>) 或 Hibernate HBM (*.xml 含 <hibernate-mapping>) 也算 DB 栈。
         for f in _stack_scan._iter_files(repo, (".xml",)):
             try:
-                text = f.read_text(encoding="utf-8")
+                text = _read_text(f)
             except OSError:
                 continue
             if is_mybatis_mapper(text) or is_hbm_mapping(text):
@@ -210,7 +211,7 @@ class SqlPlugin(AnalyzerPlugin):
         # Pass 1: .sql 文件里的 CREATE TABLE。
         for f in _stack_scan._iter_files(repo, _SQL_SUFFIXES):
             try:
-                text = f.read_text(encoding="utf-8")
+                text = _read_text(f)
             except OSError as exc:
                 logger.warning("read fail %s: %s", f, exc)
                 continue
@@ -228,7 +229,7 @@ class SqlPlugin(AnalyzerPlugin):
         core_table_vars: dict[str, str] = {}
         for f in _stack_scan._iter_files(repo, (".py",)):
             try:
-                src = f.read_text(encoding="utf-8")
+                src = _read_text(f)
             except OSError as exc:
                 logger.warning("read fail %s: %s", f, exc)
                 continue
@@ -258,7 +259,7 @@ class SqlPlugin(AnalyzerPlugin):
         # 建 inferred stub。纯 Hibernate 仓 (无 .sql/注解, 如 ideas-v2) 的整个 DB 层全靠这一 pass。
         for f in _stack_scan._iter_files(repo, (".xml",)):
             try:
-                src = f.read_text(encoding="utf-8")
+                src = _read_text(f)
             except OSError as exc:
                 logger.warning("read fail %s: %s", f, exc)
                 continue
@@ -293,7 +294,7 @@ class SqlPlugin(AnalyzerPlugin):
         java_srcs: list[tuple[str, str]] = []
         for f in _stack_scan._iter_files(repo, (".java",)):
             try:
-                src = f.read_text(encoding="utf-8")
+                src = _read_text(f)
             except OSError as exc:
                 logger.warning("read fail %s: %s", f, exc)
                 continue
@@ -318,7 +319,7 @@ class SqlPlugin(AnalyzerPlugin):
         # 第三种 Java 表访问写法 (注解 4b / Plus 4c 之外); 去动态标签后走同款 _sql_table_access。
         for f in _stack_scan._iter_files(repo, (".xml",)):
             try:
-                src = f.read_text(encoding="utf-8")
+                src = _read_text(f)
             except OSError as exc:
                 logger.warning("read fail %s: %s", f, exc)
                 continue
