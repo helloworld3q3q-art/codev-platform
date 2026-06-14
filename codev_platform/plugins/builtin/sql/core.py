@@ -459,6 +459,88 @@ def _scan_java_dml(
     return nodes, edges
 
 
+# ============================ Hibernate HQL ============================
+#
+# HQL 引用**实体类名** (from OmsInboundOrder), 非 SQL 表名 -> 既有 _sql_table_access (找 SQL
+# 表名) 命不中。用 hbm 抽取器产的 entity_class->table 映射把实体名解析回表, 补 Hibernate 仓
+# "表 <-> Java 后端" 血缘 (此前 OMS_INBOUND_ORDER 等 hbm 表在图里孤立, find_table_usage usage 空)。
+# 归属到字面量所在**类** (粗粒度; 精确方法级交 codegraph Java 调用图)。只对**已知实体**产边
+# (entity_to_table 过滤), 故 "select x from Menu" 之类非实体串不误连。
+
+_RE_HQL_HINT = re.compile(r"^\s*(?:from|select|update|delete)\b", re.IGNORECASE | re.ASCII)
+_RE_HQL_FROM = re.compile(r"\b(?:from|join)\s+([A-Z]\w+)", re.ASCII)   # 实体类 PascalCase
+_RE_HQL_UPDATE = re.compile(r"\bupdate\s+([A-Z]\w+)", re.ASCII)
+_RE_HQL_DELETE = re.compile(r"\bdelete\s+from\s+([A-Z]\w+)", re.ASCII)
+_RE_JAVA_CLASS_DECL = re.compile(r"\bclass\s+(\w+)", re.ASCII)
+
+
+def _scan_java_hql(
+    src: str, rel: str, project_id: str,
+    entity_to_table: dict[str, str], known_tables: set[str],
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    """扫 .java 字面量里的 Hibernate HQL -> backend_function(类粒度) + reads/writes_table 边。
+
+    entity_to_table: {实体简名 lower -> 表名 lower}(hbm 抽取器产 db_table.meta.entity_class 汇总)。
+    空(非 Hibernate 仓)直接跳。只对**已知实体**产边, 杜绝非 HQL 串误连。confidence 0.8(表访问
+    确定, 方法归属粗 -> 不取 1.0)。
+    """
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    if not entity_to_table:
+        return nodes, edges
+    classes = [(mm.start(), mm.group(1)) for mm in _RE_JAVA_CLASS_DECL.finditer(src)]
+    seen_func: set[str] = set()
+    seen_stub: set[str] = set()
+    for m in _RE_JAVA_STR.finditer(src):
+        lit = m.group(1)
+        if not _RE_HQL_HINT.match(lit):
+            continue
+        reads: set[str] = set()
+        writes: set[str] = set()
+        for em in _RE_HQL_FROM.finditer(lit):
+            t = entity_to_table.get(em.group(1).lower())
+            if t:
+                reads.add(t)
+        for em in _RE_HQL_UPDATE.finditer(lit):
+            t = entity_to_table.get(em.group(1).lower())
+            if t:
+                writes.add(t)
+        for em in _RE_HQL_DELETE.finditer(lit):
+            t = entity_to_table.get(em.group(1).lower())
+            if t:
+                writes.add(t)
+        if not reads and not writes:
+            continue
+        owner: str | None = None
+        for pos, name in classes:
+            if pos < m.start():
+                owner = name
+            else:
+                break
+        owner = owner or f"<{rel.rsplit('/', 1)[-1]}>"
+        func_id = f"{project_id}:backend_function:{rel}:{owner}#hql"
+        if func_id not in seen_func:
+            seen_func.add(func_id)
+            nodes.append(
+                GraphNode(
+                    id=func_id,
+                    kind=NodeKind.BACKEND_FUNCTION.value,
+                    name=owner,
+                    project_id=project_id,
+                    file=rel,
+                    line=src.count("\n", 0, m.start()) + 1,
+                    language="java",
+                    meta={"db_access": True, "hql": True},
+                )
+            )
+        a_nodes, a_edges = _emit_table_access(
+            func_id, writes, reads, project_id, known_tables, seen_stub, confidence=0.8
+        )
+        nodes.extend(a_nodes)
+        edges.extend(a_edges)
+    return nodes, edges
+
+
 # ============================ MyBatis-Plus BaseMapper CRUD ============================
 #
 # MyBatis-Plus 的 `interface XxxMapper extends BaseMapper<YyyEntity>` 自动有 CRUD, 无显式

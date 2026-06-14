@@ -37,6 +37,18 @@ _HBM = """<?xml version="1.0"?>
 """
 
 
+_JAVA_HQL = """
+package com.x.service;
+public class FileValidateServiceImpl {
+    private static final String FIND_INBOUND_ORDER_HQL = "from OmsInboundOrder o where o.code = ?";
+    public void check() {
+        getSession().createQuery("select o from OmsInboundOrder o");
+        getSession().createQuery("update OmsInboundOrder set status = 1 where id = ?");
+    }
+}
+"""
+
+
 def _tables(nodes):
     return {n.name: n for n in nodes if n.kind == NodeKind.DB_TABLE.value}
 
@@ -95,3 +107,44 @@ def test_sql_plugin_tolerates_non_utf8_file(tmp_path: Path):
     result = SqlPlugin().analyze(tmp_path, "p")  # 不抛 UnicodeDecodeError
     tables = {n.name for n in result.nodes if n.kind == NodeKind.DB_TABLE.value}
     assert "OMS_INBOUND_ORDER" in tables  # 坏 .sql 不阻断后续 hbm 扫描
+
+
+# ---- Hibernate HQL 访问边 (实体名 -> 表) ----
+
+
+def test_scan_java_hql_resolves_entity_to_table():
+    from codev_platform.plugins.builtin.sql.core import _scan_java_hql
+    e2t = {"omsinboundorder": "oms_inbound_order"}
+    nodes, edges = _scan_java_hql(
+        _JAVA_HQL, "svc/FileValidateServiceImpl.java", "p", e2t, {"oms_inbound_order"}
+    )
+    funcs = [n for n in nodes if n.kind == NodeKind.BACKEND_FUNCTION.value]
+    assert funcs and funcs[0].name == "FileValidateServiceImpl"  # 类粒度归属
+    assert {e.target for e in edges} == {"p:db_table:oms_inbound_order"}
+    kinds = {e.kind for e in edges}
+    assert any("read" in k for k in kinds) and any("write" in k for k in kinds)  # select/from=读, update=写
+
+
+def test_scan_java_hql_empty_entity_map_noop():
+    from codev_platform.plugins.builtin.sql.core import _scan_java_hql
+    nodes, edges = _scan_java_hql(_JAVA_HQL, "x.java", "p", {}, set())
+    assert nodes == [] and edges == []  # 非 Hibernate 仓零开销
+
+
+def test_scan_java_hql_ignores_non_entity_strings():
+    from codev_platform.plugins.builtin.sql.core import _scan_java_hql
+    src = 'class C { String s = "select item from Menu"; }'  # Menu 非已知实体
+    nodes, edges = _scan_java_hql(src, "x.java", "p", {"omsinboundorder": "oms_inbound_order"}, set())
+    assert nodes == [] and edges == []  # 杜绝非 HQL/未知实体串误连
+
+
+def test_analyze_hbm_plus_hql_connects_table(tmp_path: Path):
+    """端到端: hbm 定义 OMS_INBOUND_ORDER + java HQL 引用 OmsInboundOrder -> 表不再孤立。"""
+    (tmp_path / "OmsOrder.hbm.xml").write_text(_HBM, encoding="utf-8")
+    (tmp_path / "Svc.java").write_text(_JAVA_HQL, encoding="utf-8")
+    result = SqlPlugin().analyze(tmp_path, "p")
+    access = [
+        e for e in result.edges
+        if e.target == "p:db_table:oms_inbound_order" and "_table" in e.kind
+    ]
+    assert access  # HQL 访问边存在 -> find_table_usage 的 usage 不再空

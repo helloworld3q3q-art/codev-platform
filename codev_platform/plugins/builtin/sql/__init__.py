@@ -120,6 +120,7 @@ from codev_platform.plugins.builtin.sql.core import (
     _scan_core_dml_in_func,
     _scan_entity_tables,
     _scan_java_dml,
+    _scan_java_hql,
     _scan_mybatis_plus,
     _scan_python_core_dml,
     _scan_python_core_table_vars,
@@ -303,10 +304,19 @@ class SqlPlugin(AnalyzerPlugin):
                 continue
             java_srcs.append((rel, src))
 
-        # 4b: 注解 SQL (@Select/@Insert/@Update/@Delete raw SQL)。
+        # Hibernate HQL 解析所需: 实体简名 -> 表名 (hbm 抽取器在 db_table.meta.entity_class 留的映射)。
+        # 空 (非 Hibernate 仓) -> _scan_java_hql 自跳过, 无开销。
+        entity_to_table = {
+            str((n.meta or {}).get("entity_class") or "").lower(): n.name.lower()
+            for n in result.nodes
+            if n.kind == NodeKind.DB_TABLE.value and (n.meta or {}).get("entity_class")
+        }
+
+        # 4b: 注解 SQL (@Select/...) + Hibernate HQL (字面量里 from <Entity>, 经 entity_class 映射回表)。
         for rel, src in java_srcs:
             if _RE_JAVA_SQL_ANN.search(src):
                 _absorb(*_scan_java_dml(src, rel, project_id, known_tables))
+            _absorb(*_scan_java_hql(src, rel, project_id, entity_to_table, known_tables))
 
         # 4c: MyBatis-Plus BaseMapper<Entity> -> @TableName 表 (隐式 CRUD, 粗粒度读写)。
         entity_table = _scan_entity_tables(java_srcs)
