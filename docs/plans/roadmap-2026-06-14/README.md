@@ -15,7 +15,7 @@
 
 | 序 | 项 | 重量 | 继承 |
 |---|---|---|---|
-| 1 | **P1 onboard**(加项目 8 步→1 步,薄编排命令)| 轻 | roadmap-2026-06-07 Phase 10 |
+| 1 | **P1 onboard**(加项目 8 步→1 步)✅**已交付** `76d5ea8`(onboard 命令已存在,补 sync+.mcp.json 2 软步)| 轻 | roadmap-2026-06-07 Phase 10 |
 | 2 | **P4 Phase 10 治理**(接入指南+能力矩阵+治理看板,文档+聚合)| 轻 | roadmap-2026-06-07 Phase 10 |
 | 3 | **P2 多组织 web 签发 UI**(加用户简化,复用双 store)| 中 | roadmap-2026-06-10 多组织 Phase 2(解冻)|
 | 4 | **P3 多仓多根索引**(codegraph/code_vec fan-out,最重)| 重 | roadmap-2026-06-10 多仓 Phase 2(解冻)|

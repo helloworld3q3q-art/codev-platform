@@ -16,6 +16,8 @@
 
 ## P1 — onboard 接入简化(加项目 8 步→1 步)【最高优先,最轻】
 
+> ✅ **已交付(2026-06-14, `76d5ea8`)**。代码核实发现 `ops/onboard.py` **命令已存在**(config/project.json/meta/RBAC/codegraph/reindex 全有,且分层 关键步停/软步 warn)→ 实际工作 = 补 2 个软步(sync rules/skills/hooks + 生成 .mcp.json)+ 抽 repo-aware 公共核心(`sync_resources_to`/`_apply_grep_hook`/`build_mcp_servers`)复用不复制。WSL 真机验证:sync 真拷 9 rules/3 skills/1 hook + settings grep merge;`.mcp.json` 4 套真平台端点。**又一个"代码核实避免从零重造"的例子**。
+
 **痛点**:加入一个新业务仓现在要 ~8-10 步手动命令(`init`→`register`→`sync-rules/skills/hooks`→`codegraph link`→手配 `.mcp.json`→`reindex`→`serve-mcp`),散在文档各处。
 
 **目标**:一条 `codev-platform onboard <pid>` 把**项目级接入**串成一步。
