@@ -114,6 +114,24 @@ def commit_build(base: Path, build_id: str) -> None:
     os.replace(tmp, _pointer_path(base))   # 跨平台原子替换单文件
 
 
+def evict_stale_build_clients(base: Path, current: Path, clients: dict) -> list[str]:
+    """从 reader 的 `path→client` 缓存里移除 `base/builds/` 下**非 current** 的旧 build client。
+
+    handoff 切换后旧 build 的 client 仍在缓存 + 句柄开着。pop 它:① **缓存卫生**(防字典无限涨 ——
+    长跑 daemon 每次 full rebuild 一个新 build path,不 pop 会泄漏)② 移除强引用**给 GC 释放机会**。
+    **注**: chromadb PersistentClient 共享 System 单例(SharedSystemClient 类级缓存),pop **不保证
+    立即释放底层 sqlite 句柄** —— Windows 上完全释放仍靠 daemon 重启; 本函数 + `gc_builds` fail-soft
+    让旧 build 最终被回收且**绝不阻断重建**。current 与非 build 路径(根库等)不动。返回被 evict 的 path。"""
+    builds = base / _BUILDS
+    evicted: list[str] = []
+    for path in list(clients):
+        p = Path(path)
+        if p != current and builds in p.parents:
+            clients.pop(path, None)
+            evicted.append(path)
+    return evicted
+
+
 def gc_builds(base: Path, *, keep: int = 2) -> list[str]:
     """删旧 build, 按 mtime 新→旧保最近 keep 个; **current 永不删**(防删正读的库)。
 

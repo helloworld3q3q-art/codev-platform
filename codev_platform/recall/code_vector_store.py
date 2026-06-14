@@ -339,7 +339,10 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     """
     if k <= 0:                 # chromadb 对 n_results<=0 抛 TypeError; 正常边界值直接空返
         return [], {}
-    persist = resolve_current(_code_vec_persist_dir(project_id))   # handoff: 读**当前 build**(无 pointer 退 base)
+    base_dir = _code_vec_persist_dir(project_id)
+    persist = resolve_current(base_dir)   # handoff: 读**当前 build**(无 pointer 退 base)
+    from codev_platform.core.index_handoff import evict_stale_build_clients
+    evict_stale_build_clients(base_dir, persist, _QUERY_CLIENTS)   # 切新 build 后清旧 client(缓存卫生)
     # 廉价 fs 探活: 无**成功构建标记** _MANIFEST_NAME(仅成功 build 写)= 该项目没建好 code_vec →
     # 快速空返, **不 import chromadb / 不建 client**(省首次 PersistentClient 冷启动 ~700ms-1s)。
     # 注意不能只看 chroma.sqlite3: 空库/半建会留 0-collection 的 chroma.sqlite3(实测 codev-platform

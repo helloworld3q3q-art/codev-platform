@@ -189,3 +189,24 @@ def test_gc_builds_fail_soft_when_rmtree_blocked(tmp_path, monkeypatch):
     assert "old" not in removed                            # 删不掉的不计入 removed
     assert (tmp_path / "builds" / "old").is_dir()          # 仍在(待下次 gc / daemon 重启回收)
     assert ih.resolve_current(tmp_path).name == "new"      # current 不受影响
+
+
+def test_evict_stale_build_clients_pops_old_keeps_current(tmp_path):
+    # reader 缓存清旧 build client: 只 pop 同 base/builds 下非 current 的, current 与根库不动。
+    base = tmp_path / "lib"
+    builds = base / "builds"
+    old = builds / "old"
+    cur = builds / "new"
+    clients = {str(old): "old-client", str(cur): "cur-client", str(base): "root-client"}
+    evicted = ih.evict_stale_build_clients(base, cur, clients)
+    assert evicted == [str(old)]
+    assert str(old) not in clients          # 旧 build pop
+    assert str(cur) in clients              # current 保留
+    assert str(base) in clients             # 非 build 路径(根库)不动
+
+
+def test_evict_stale_build_clients_noop_without_builds(tmp_path):
+    base = tmp_path / "lib"
+    clients = {str(base): "c"}
+    assert ih.evict_stale_build_clients(base, base, clients) == []
+    assert str(base) in clients
