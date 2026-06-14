@@ -133,32 +133,55 @@ def cmd_onboard(args: argparse.Namespace) -> int:
         if store is not None:
             store.upsert_project(code, org, name=name)
             store.grant_project(code, owner, "user", role="admin")
-            _out(f"[4/6] RBAC: project 挂 org={org} + 授 {owner} admin")
+            _out(f"[4/8] RBAC: project 挂 org={org} + 授 {owner} admin")
         else:
-            _out("[4/6] RBAC: 跳过 (无 PG store; 单机 passthrough 无需)")
+            _out("[4/8] RBAC: 跳过 (无 PG store; 单机 passthrough 无需)")
     except Exception as exc:  # noqa: BLE001 — RBAC 不可用不阻断基础接入
-        _out(f"[4/6] RBAC: 跳过 (不可用: {type(exc).__name__})")
+        _out(f"[4/8] RBAC: 跳过 (不可用: {type(exc).__name__})")
 
-    # --- 5. codegraph: 写 config.json(排噪声, 可提交进仓) + gitignore db + init ---
+    # --- 5. sync rules/skills/hooks 进业务仓 .claude/(软步: 资源缺失只 warn 不阻断)---
+    try:
+        from codev_platform.cli_cmds.sync import sync_resources_to
+        _out("[5/8] sync rules/skills/hooks → 业务仓 .claude/:")
+        sync_resources_to(repo, dry_run=False)
+    except Exception as exc:  # noqa: BLE001 — 同步失败不阻断接入
+        _out(f"[5/8] sync: 跳过 (失败: {type(exc).__name__})")
+
+    # --- 6. codegraph: 写 config.json(排噪声, 可提交进仓) + gitignore db + init ---
     wrote_cfg = _write_codegraph_config(repo)
     _ensure_gitignore(repo)
     cfg_note = "config.json 已生成" if wrote_cfg else "config.json 已存在(保留)"
     if (repo / ".codegraph" / "codegraph.db").exists():
-        _out(f"[5/6] codegraph: {cfg_note}; 已初始化 (跳过 init)")
+        _out(f"[6/8] codegraph: {cfg_note}; 已初始化 (跳过 init)")
     else:
         try:
             r = subprocess.run(["codegraph", "init"], cwd=str(repo),
                                capture_output=True, text=True, timeout=60)
             ok = "init OK" if r.returncode == 0 else f"init 失败({r.stderr.strip()[:80]})"
-            _out(f"[5/6] codegraph: {cfg_note}; {ok}")
+            _out(f"[6/8] codegraph: {cfg_note}; {ok}")
         except FileNotFoundError:
-            _out(f"[5/6] codegraph: {cfg_note}; 命令未装跳过 init (不影响 graph/chroma)")
+            _out(f"[6/8] codegraph: {cfg_note}; 命令未装跳过 init (不影响 graph/chroma)")
         except Exception as exc:  # noqa: BLE001
-            _out(f"[5/6] codegraph: {cfg_note}; init 跳过 ({type(exc).__name__})")
+            _out(f"[6/8] codegraph: {cfg_note}; init 跳过 ({type(exc).__name__})")
 
-    # --- 6. reindex 入队(graph ingest + codegraph + code_vec + chroma)---
+    # --- 7. 生成业务仓 .mcp.json(不存在才写, 保用户自定义; 软步)---
+    mcp_json = repo / ".mcp.json"
+    if mcp_json.exists():
+        _out("[7/8] .mcp.json: 已存在(保留); 切源用 `codev-platform mcp-source`")
+    else:
+        try:
+            from codev_platform.mcp_serve import build_mcp_servers
+            servers = build_mcp_servers(cfg, args.mcp_source, code)
+            mcp_json.write_text(
+                json.dumps({"mcpServers": servers}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8")
+            _out(f"[7/8] .mcp.json 已生成 ({args.mcp_source} 源, {len(servers)} 套端点)")
+        except Exception as exc:  # noqa: BLE001 — 生成失败不阻断接入
+            _out(f"[7/8] .mcp.json: 跳过 (失败: {type(exc).__name__})")
+
+    # --- 8. reindex 入队(graph ingest + codegraph + code_vec + chroma)---
     if args.no_index:
-        _out(f"[6/6] reindex: 跳过 (--no-index); 手动 `reindex-queue enqueue {code} --kind all`")
+        _out(f"[8/8] reindex: 跳过 (--no-index); 手动 `reindex-queue enqueue {code} --kind all`")
     else:
         try:
             from codev_platform.reindex import open_default_queue
@@ -166,19 +189,20 @@ def cmd_onboard(args: argparse.Namespace) -> int:
             kinds = ["ingest", "codegraph", "code_vec", "chroma"]
             for k in kinds:
                 q.enqueue(code, k)
-            _out(f"[6/6] reindex 入队: {', '.join(kinds)} (worker 后台串行消费)")
+            _out(f"[8/8] reindex 入队: {', '.join(kinds)} (worker 后台串行消费)")
         except Exception as exc:  # noqa: BLE001 — 队列不可用是真错(接入不完整)
-            _err(f"[6/6] reindex 入队失败: {exc}")
+            _err(f"[8/8] reindex 入队失败: {exc}")
             return 1
 
     _out("")
     _out(f"OK: {code} 接入完成。")
     _out("  下一步:")
-    _out("  - **把 .claude/project.json + .codegraph/config.json + .gitignore 提交进仓**"
-         "(配置随 git 走, 别人/重 clone 也带得上)")
+    _out("  - **把 .claude/{project.json,rules,skills,hooks,settings.json} + .codegraph/config.json"
+         " + .gitignore + .mcp.json 提交进仓**(配置随 git 走, 别人/重 clone 也带得上)")
     _out("  - `reindex-queue status` 看索引进度")
     _out("  - codegraph 索引完后让端点认新项目: `serve-mcp start`(或重启 codegraph 端点)")
-    _out("  - token 模式: 给该项目仓 .mcp.json 配 token(header 形式)")
+    _out("  - token 模式: 给 .mcp.json 各 server 补 headers.Authorization(Bearer <token>);"
+         " 切 local/platform 源用 `mcp-source`")
     return 0
 
 
@@ -192,5 +216,7 @@ def register(subparsers) -> None:
     p.add_argument("--org", default="default", help="归属 org (默认 default)")
     p.add_argument("--owner", default="root", help="授 admin 的 owner user_id (默认 root)")
     p.add_argument("--name", default=None, help="display_name (默认 = code)")
+    p.add_argument("--mcp-source", choices=["local", "platform"], default="platform",
+                   help=".mcp.json 端点源 (platform=平台服务器 / local=本机本地实例; 默认 platform)")
     p.add_argument("--no-index", action="store_true", help="只登记不入队索引")
     p.set_defaults(func=cmd_onboard)

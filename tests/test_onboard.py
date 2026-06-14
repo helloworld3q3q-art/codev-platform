@@ -12,7 +12,8 @@ from codev_platform.ops.onboard import cmd_onboard
 
 
 def _args(code, repo, **kw):
-    base = dict(code=code, repo=str(repo), org="default", owner="root", name=None, no_index=True)
+    base = dict(code=code, repo=str(repo), org="default", owner="root", name=None,
+                mcp_source="platform", no_index=True)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -84,6 +85,50 @@ def test_onboard_rejects_missing_repo(tmp_path, monkeypatch):
 def test_onboard_rejects_bad_project_id(tmp_path):
     rc = cmd_onboard(_args("Bad ID!", tmp_path))
     assert rc == 1  # 非法 project_id
+
+
+def test_onboard_wires_sync_resources(tmp_path, monkeypatch):
+    """sync 软步: onboard 调 sync_resources_to(repo)(接线钉死, spy 避免真拷大量资源)。"""
+    repo = tmp_path / "r"
+    repo.mkdir()
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr("codev_platform.core.config.save_config", lambda c: None)
+    monkeypatch.setattr("codev_platform.cli.PLATFORM_META_PROJECTS", tmp_path / "meta")
+    called: dict = {}
+    import codev_platform.cli_cmds.sync as sync_mod
+    monkeypatch.setattr(sync_mod, "sync_resources_to",
+                        lambda r, **kw: called.setdefault("repo", r) is None)
+    rc = cmd_onboard(_args("p", repo))
+    assert rc == 0 and called["repo"] == repo.resolve()
+
+
+def test_onboard_generates_mcp_json(tmp_path, monkeypatch):
+    """.mcp.json 软步: onboard 经 build_mcp_servers 写 <repo>/.mcp.json。"""
+    repo = tmp_path / "r"
+    repo.mkdir()
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr("codev_platform.core.config.save_config", lambda c: None)
+    monkeypatch.setattr("codev_platform.cli.PLATFORM_META_PROJECTS", tmp_path / "meta")
+    import codev_platform.mcp_serve as ms
+    monkeypatch.setattr(ms, "build_mcp_servers",
+                        lambda cfg, target, pid: {"graph": {"type": "sse", "url": f"u/{pid}/{target}"}})
+    rc = cmd_onboard(_args("p", repo))
+    assert rc == 0
+    data = json.loads((repo / ".mcp.json").read_text(encoding="utf-8"))
+    assert data["mcpServers"]["graph"]["url"] == "u/p/platform"
+
+
+def test_onboard_preserves_existing_mcp_json(tmp_path, monkeypatch):
+    """已有 .mcp.json 不覆盖(保用户自定义/token header)。"""
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / ".mcp.json").write_text('{"mcpServers": {"custom": 1}}', encoding="utf-8")
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr("codev_platform.core.config.save_config", lambda c: None)
+    monkeypatch.setattr("codev_platform.cli.PLATFORM_META_PROJECTS", tmp_path / "meta")
+    rc = cmd_onboard(_args("p", repo))
+    assert rc == 0
+    assert json.loads((repo / ".mcp.json").read_text(encoding="utf-8")) == {"mcpServers": {"custom": 1}}
 
 
 def test_onboard_custom_name_and_org(tmp_path, monkeypatch):

@@ -112,6 +112,43 @@ def _merge_grep_hook(settings: dict) -> bool:
     return True
 
 
+def _apply_grep_hook(settings_path: Path, dry_run: bool) -> str | None:
+    """读 settings.json + 幂等 merge MCP-first(Grep) hook + 写回。返回状态串;解析失败返 None。
+
+    接 path 参数(不硬编 cwd)→ `cmd_sync_hooks`(cwd)与 `sync_resources_to`(onboard 的 repo)共用。"""
+    settings: dict = {}
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            _eprint(f"WARN: {settings_path} 解析失败, 跳过 hook merge: {exc!s}")
+            return None
+    changed = _merge_grep_hook(settings)
+    if changed and not dry_run:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if not changed:
+        return "hook 已存在(幂等跳过)"
+    return "[dry-run] hook 将加" if dry_run else "hook 已加"
+
+
+def sync_resources_to(repo: Path, *, dry_run: bool = False) -> bool:
+    """把 rules/skills/hooks 同步到 `<repo>/.claude/` + merge MCP-first hook(onboard 编排复用)。
+
+    接 repo 参数(非 cwd)→ 与 onboard 的 `--repo` 对齐;复用 `_sync_dir`/`_apply_grep_hook` 不复制逻辑。
+    任一源目录缺失返 False(软步, 调用方 warn 不阻断接入)。"""
+    claude = repo / ".claude"
+    ok = True
+    for src, name in ((_RULES_SRC, "rules"), (_SKILLS_SRC, "skills"), (_HOOKS_SRC, "hooks")):
+        if _sync_dir(src, claude / name, name, dry_run) < 0:
+            ok = False
+    state = _apply_grep_hook(claude / "settings.json", dry_run)
+    if state:
+        _print(f"  settings.json: {state}")
+    return ok
+
+
 def cmd_sync_hooks(args: argparse.Namespace) -> int:
     """复制 resources/hooks/ 脚本到 <cwd>/.claude/hooks/ + 幂等 merge MCP-first 护栏到
     <cwd>/.claude/settings.json (项目级, commit; 保留业务仓现有 settings 不覆盖)."""
@@ -121,20 +158,8 @@ def cmd_sync_hooks(args: argparse.Namespace) -> int:
     n = _sync_dir(_HOOKS_SRC, dst_hooks, "hooks", args.dry_run)
     if n < 0:
         return 1
-    settings_path = cwd / ".claude" / "settings.json"
-    settings: dict = {}
-    if settings_path.is_file():
-        try:
-            settings = json.loads(settings_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            _eprint(f"FATAL: {settings_path} 解析失败, 不覆盖: {exc!s}")
-            return 1
-    changed = _merge_grep_hook(settings)
-    if changed and not args.dry_run:
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(
-            json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    state = "hook 已加" if changed else "hook 已存在(幂等跳过)"
-    prefix = "  [dry-run] " if (changed and args.dry_run) else "  "
-    _print(f"{prefix}settings.json: {state}")
+    state = _apply_grep_hook(cwd / ".claude" / "settings.json", args.dry_run)
+    if state is None:
+        return 1
+    _print(f"  settings.json: {state}")
     return 0

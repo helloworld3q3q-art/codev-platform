@@ -233,6 +233,16 @@ def mcp_source_url(cfg: dict, target: str, tool: str, project_id: str) -> str:
     return f"http://{host}:{port}/sse?project_id={project_id}"
 
 
+def build_mcp_servers(cfg: dict, target: str, project_id: str) -> dict:
+    """生成 `.mcp.json` 的 `mcpServers` 块: 4 套 sse 端点, url 经 `mcp_source_url` 派生(纯函数)。
+
+    onboard 接入时写**初始** `.mcp.json`(不存在才写, 保用户自定义); `mcp-source` 切源改已存在的 —
+    两者复用同一 url 派生不漂移。token 模式的 `headers.Authorization` 需用户后配(onboard 末尾提示;
+    见记忆 mcp-token-auth-header-not-query)。"""
+    return {tool: {"type": "sse", "url": mcp_source_url(cfg, target, tool, project_id)}
+            for tool in MCP_SOURCE_TOOLS}
+
+
 def iter_endpoints(cfg: dict) -> list[MCPEndpoint]:
     """从 config 枚举应常驻的 MCP 端点 (纯函数, 不 spawn)。
 

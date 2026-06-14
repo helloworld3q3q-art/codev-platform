@@ -45,3 +45,17 @@ def test_merge_coexists_with_other_pretooluse_hook():
     assert changed is True
     matchers = [e["matcher"] for e in settings["hooks"]["PreToolUse"]]
     assert "Bash" in matchers and "Grep" in matchers
+
+
+def test_sync_resources_to_repo(tmp_path):
+    """sync_resources_to: rules/skills/hooks 同步进 <repo>/.claude/ + settings 装 MCP-first hook(repo-aware)。"""
+    import json as _json
+    from codev_platform.cli_cmds.sync import sync_resources_to
+    repo = tmp_path / "biz"
+    repo.mkdir()
+    assert sync_resources_to(repo) is True
+    claude = repo / ".claude"
+    assert any((claude / "rules").glob("*.md"))                 # 真资源拷贝
+    assert (claude / "hooks" / "mcp-first-guard.js").is_file()
+    settings = _json.loads((claude / "settings.json").read_text(encoding="utf-8"))
+    assert any(e.get("matcher") == "Grep" for e in settings["hooks"]["PreToolUse"])

@@ -229,3 +229,13 @@ def test_check_port_consistency_clean_when_derived():
 def test_check_port_consistency_clean_when_explicit_matches_bind():
     cfg = {"mcp_sources": {"local": {"graph": 27092}}, "mcp": {"graph_sse_port": 27092}}
     assert ms.check_port_consistency(cfg) == []
+
+
+def test_build_mcp_servers_derives_all_tools():
+    # 生成 .mcp.json 的 mcpServers 块: 4 套 sse, url 经 mcp_source_url 派生(不漂移)
+    servers = ms.build_mcp_servers({}, "platform", "myproj")
+    assert set(servers) == set(ms.MCP_SOURCE_TOOLS)
+    for spec in servers.values():
+        assert spec["type"] == "sse"
+        assert spec["url"].startswith("http://") and "project_id=myproj" in spec["url"]
+    assert "19083" in servers["platform-docs"]["url"]   # platform 源默认端口, 与 endpoint 一致
