@@ -53,6 +53,8 @@ export default [
   // "系统管理" 分组只在菜单 (src/menus.tsx) 体现, 不影响路由结构。
   { name: '组织管理', path: '/orgs', icon: 'TeamOutlined', component: './orgs' },
   { name: '用户管理', path: '/users', icon: 'UserOutlined', component: './users' },
+  // 接入令牌: PG agent token 签发/列出/吊销, 仅管理员 (后端 require_org_role admin 兜底), 归 "系统管理" 组。
+  { name: '接入令牌', path: '/tokens', icon: 'KeyOutlined', component: './tokens' },
   // 审计日志归 "系统管理" 组 (菜单按角色显隐, 见 src/menus.tsx); 路由扁平不挂 /system 下。
   { name: '审计日志', path: '/audit', icon: 'AuditOutlined', component: './system/audit' },
   // Token 用量审计: per-query token+缓存+成本明细 (读 agent_trace), 同 "系统管理" 组, 仅管理员。

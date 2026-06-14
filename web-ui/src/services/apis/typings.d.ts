@@ -463,6 +463,24 @@ interface CommonResult_SessionInfo_ {
   requestId?: any;
 }
 
+// CommonResult_TokenActionResult_ 接口
+interface CommonResult_TokenActionResult_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_TokenIssueResult_ 接口
+interface CommonResult_TokenIssueResult_ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
 // CommonResult_TokenPair_ 接口
 interface CommonResult_TokenPair_ {
   result?: number;
@@ -546,6 +564,15 @@ interface CommonResult_list_SessionItem__ {
 
 // CommonResult_list_SessionMessageItem__ 接口
 interface CommonResult_list_SessionMessageItem__ {
+  result?: number;
+  message?: string;
+  data?: any;
+  errors?: ErrorItem[];
+  requestId?: any;
+}
+
+// CommonResult_list_TokenItem__ 接口
+interface CommonResult_list_TokenItem__ {
   result?: number;
   message?: string;
   data?: any;
@@ -810,7 +837,7 @@ interface MemberActionResult {
 // 加成员 (幂等 upsert; org_admin 管本 org)。role 对齐 MemberRoleEnum。
 interface MemberAddRequest {
   code: string; // 组织编码
-  username: string; // 成员用户���
+  username: string; // 成员用户名
   role?: string; // 成员角色 (MemberRoleEnum: viewer|member|admin)
 }
 
@@ -1104,10 +1131,53 @@ interface TableUsageRequest {
   table: string;
 }
 
+// revoke 写操作回执(不含敏感字段)。
+interface TokenActionResult {
+  revoked?: number; // 受影响 token 数
+}
+
+// 签发 PG token(org admin)。org_id 不在此 —— 路由取 session.org_id(防越权, 见 docstring)。
+interface TokenIssueRequest {
+  targetUser: string; // token 归属用户 (须已存在)
+  projects?: any; // 项目访问白名单: '*' 全部 | 'pid1,pid2' 逗号分隔 | 缺省=无项目权(安全默认)
+  label?: any; // 人读备注 (如 'alice laptop')
+  expires?: any; // 有效期 30d/12h/90m/45s; 缺省/空=永久
+}
+
+// 签发回执 —— **明文 token 只此一次返回**, 不可再得(库里只存 hash, security.md)。
+interface TokenIssueResult {
+  token: string; // 明文 token (只此一次; 用作 Bearer; 关闭即不可再得)
+  userId: string;
+  orgId: string;
+  projects?: any;
+  expiresAt?: any; // 过期 epoch 秒; None=永久
+}
+
+// token 列表项 —— **不含明文**(只有 hash 前缀, security.md)。
+interface TokenItem {
+  userId: string;
+  orgId: string;
+  projects?: any;
+  label?: any;
+  status?: string;
+  expiresAt?: any;
+  tokenHashPrefix?: string; // token hash 前缀 (吊销用; 明文不可得)
+}
+
+// 列 token。targetUser 给定则只列该用户; org_admin 只见本 org(service 按 org 过滤)。
+interface TokenListRequest {
+  targetUser?: any; // 只列该用户的 token; 缺省=本 org 全部
+}
+
 // 登录 / 刷新返回的 token 对。
 interface TokenPair {
   accessToken: string;
   refreshToken: string;
+}
+
+// 吊销 token(按 hash 前缀)。service 校验命中 token 属本 org 方可吊销(防跨 org 越权)。
+interface TokenRevokeRequest {
+  tokenHashPrefix: string; // token hash 前缀 (token-list 可见)
 }
 
 // UnifiedGraphEdge 接口

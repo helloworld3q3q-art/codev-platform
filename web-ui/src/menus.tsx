@@ -7,6 +7,7 @@ import {
   FileOutlined,
   FolderOutlined,
   FundOutlined,
+  KeyOutlined,
   PartitionOutlined,
   RobotOutlined,
   SafetyOutlined,
@@ -55,6 +56,8 @@ export const MENU_ITEMS: MenuDataItem[] = [
     children: [
       { name: '组织管理', path: '/orgs', icon: <TeamOutlined /> },
       { name: '用户管理', path: '/users', icon: <UserOutlined /> },
+      // 接入令牌: 签发 PG agent token, 敏感 (= 发凭据), 仅管理员可见 (ADMIN_ONLY_PATHS)。
+      { name: '接入令牌', path: '/tokens', icon: <KeyOutlined /> },
       // 审计日志: 仅管理员可见 (org admin / platform admin), 见 getVisibleMenuItems; 后端 require_org_role 兜底。
       { name: '审计日志', path: '/audit', icon: <AuditOutlined /> },
       // Token 用量审计: 仅管理员 (平台级跨会话计量, 后端 require_platform_admin 兜底)。
@@ -64,7 +67,7 @@ export const MENU_ITEMS: MenuDataItem[] = [
 ];
 
 // 仅管理员可见的菜单路径 (审计日志 / Token 用量); 非管理员从菜单隐藏, 后端 require_*_admin 仍是真正闸口。
-const ADMIN_ONLY_PATHS = new Set<string>(['/audit', '/usage']);
+const ADMIN_ONLY_PATHS = new Set<string>(['/audit', '/usage', '/tokens']);
 
 // 按角色过滤菜单: 非管理员剔除 ADMIN_ONLY_PATHS 项 (含 children 递归)。供 app.tsx menu.request 调用。
 export function getVisibleMenuItems(roles: string[] | undefined): MenuDataItem[] {
