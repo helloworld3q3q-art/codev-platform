@@ -326,16 +326,26 @@ def cmd_recall_stats(args: argparse.Namespace) -> int:
     rep = recall_latency_report(data_root() / "recall_trace")
     if getattr(args, "json", False):
         _print(json.dumps(rep, ensure_ascii=False, indent=2))
-        return 0
-    w = rep["last7d"]
-    if not w["queries"]:
-        _print("(近 7 天无 recall trace; 跑些 recall 查询后再看, 或确认在平台机器上运行)")
-        return 0
-    _print(f"recall 近 7 天: {w['queries']} 查询 | P50 {w['p50Ms']}ms / P95 {w['p95Ms']}ms | "
-           f"无证据率 {w['noEvidenceRate']:.1%}")
-    for lane in w["byLane"]:
-        _print(f"  [{lane['lane']}] 命中率 {lane['hitRate']:.1%} | "
-               f"P50 {lane['p50Ms']}ms / P95 {lane['p95Ms']}ms ({lane['runs']} 跑)")
+    else:
+        w = rep["last7d"]
+        if not w["queries"]:
+            _print("(近 7 天无 recall trace; 跑些 recall 查询后再看, 或确认在平台机器上运行)")
+            return 0
+        _print(f"recall 近 7 天: {w['queries']} 查询 | P50 {w['p50Ms']}ms / P95 {w['p95Ms']}ms | "
+               f"无证据率 {w['noEvidenceRate']:.1%}")
+        for lane in w["byLane"]:
+            _print(f"  [{lane['lane']}] 命中率 {lane['hitRate']:.1%} | "
+                   f"P50 {lane['p50Ms']}ms / P95 {lane['p95Ms']}ms ({lane['runs']} 跑)")
+    # latency budget gate (可选, Phase 8 回归红线): 传 --budget-p95-ms 才检查, 超标非零退出。
+    # 默认不传 = 只报告(latency 受 GPU 负载波动, 非强制硬门禁避免 flaky 误报)。
+    budget = getattr(args, "budget_p95_ms", None)
+    if budget is not None:
+        from codev_platform.recall.observability import check_latency_budget
+        chk = check_latency_budget(rep, p95_budget_ms=budget)
+        if not chk["ok"]:
+            _eprint(f"LATENCY BUDGET 超标: last7d P95 {chk['p95Ms']}ms > {budget}ms ({chk['queries']} 查询)")
+            return 1
+        _print(f"latency budget OK: last7d P95 {chk['p95Ms']}ms <= {budget}ms")
     return 0
 
 
@@ -441,6 +451,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp_rs = sub.add_parser("recall-stats",
                            help="recall 查询观测 baseline (Phase 8: P50/P95 / 无证据率 / 每 lane 命中率)")
     sp_rs.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
+    sp_rs.add_argument("--budget-p95-ms", type=float, default=None,
+                       help="可选 latency 回归红线: last7d 总 P95 超此值非零退出 (默认只报告不检查)")
     sp_rs.set_defaults(func=cmd_recall_stats)
 
     sp_dae = sub.add_parser("daemon", help="chroma daemon 生命周期 (status / stop)")

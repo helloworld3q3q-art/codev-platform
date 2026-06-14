@@ -13,8 +13,9 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 def _trace_dir() -> Path:
@@ -135,4 +136,20 @@ def recall_latency_report(trace_dir: str | Path, now_ts: float | None = None) ->
     return {
         "last7d": _accumulate(records, now - 7 * 86400),
         "allTime": _accumulate(records, 0),
+    }
+
+
+def check_latency_budget(report: dict[str, Any], *, p95_budget_ms: float,
+                         window: str = "last7d") -> dict[str, Any]:
+    """检查某窗口 recall 总 P95 是否在 budget 内(Phase 8 latency 回归红线)。
+
+    返回 {ok, window, p95Ms, budgetMs, queries}。**空数据(queries=0)→ ok=True**(无样本不判
+    违规, 同 graph audit 空目录不报错)。纯函数可测; 调用方据 ok 决定退出码。latency 受 GPU 负载
+    波动 → 建议作**可选** gate(非强制 pre-push), 阈值取 baseline×容忍。"""
+    w = report.get(window) or {}
+    p95 = float(w.get("p95Ms", 0) or 0)
+    queries = int(w.get("queries", 0) or 0)
+    return {
+        "ok": queries == 0 or p95 <= p95_budget_ms,
+        "window": window, "p95Ms": p95, "budgetMs": float(p95_budget_ms), "queries": queries,
     }

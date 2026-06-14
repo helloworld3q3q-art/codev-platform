@@ -6,6 +6,7 @@ import json
 from codev_platform.recall.observability import (
     RecallTrace,
     _percentile,
+    check_latency_budget,
     recall_latency_report,
 )
 
@@ -81,3 +82,30 @@ def test_recall_trace_finish_never_raises(monkeypatch):
         raise OSError("disk full")
     monkeypatch.setattr("codev_platform.recall.observability._trace_dir", _boom)
     RecallTrace("q", "p").finish(0)                # 不抛即通过
+
+
+# ---- latency budget 回归红线(Phase 8)----
+
+def test_check_latency_budget_within():
+    chk = check_latency_budget({"last7d": {"queries": 50, "p95Ms": 4000.0}}, p95_budget_ms=8000)
+    assert chk["ok"] is True and chk["p95Ms"] == 4000.0 and chk["budgetMs"] == 8000.0
+
+
+def test_check_latency_budget_exceeded():
+    chk = check_latency_budget({"last7d": {"queries": 50, "p95Ms": 9000.0}}, p95_budget_ms=8000)
+    assert chk["ok"] is False and chk["queries"] == 50
+
+
+def test_check_latency_budget_boundary_equal_is_ok():
+    assert check_latency_budget({"last7d": {"queries": 9, "p95Ms": 8000.0}}, p95_budget_ms=8000)["ok"] is True
+
+
+def test_check_latency_budget_empty_data_never_violates():
+    # 无样本(queries=0)不判违规, 即使 budget 极小 —— 同 audit 空目录不报错。
+    assert check_latency_budget({"last7d": {"queries": 0, "p95Ms": 0.0}}, p95_budget_ms=1)["ok"] is True
+
+
+def test_check_latency_budget_window_selectable():
+    rep = {"last7d": {"queries": 5, "p95Ms": 100.0}, "allTime": {"queries": 99, "p95Ms": 9999.0}}
+    assert check_latency_budget(rep, p95_budget_ms=500, window="last7d")["ok"] is True
+    assert check_latency_budget(rep, p95_budget_ms=500, window="allTime")["ok"] is False
