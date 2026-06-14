@@ -9,8 +9,9 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [platform-productization-plan-2026-06-14.md](platform-productization-plan-2026-06-14.md) | 主 plan:P1 onboard / P2 多组织 web 签发 / P3 多仓多根索引 / P4 Phase 10 治理 | P1✅ P4✅ P2🚧 P3 待 |
+| [platform-productization-plan-2026-06-14.md](platform-productization-plan-2026-06-14.md) | 主 plan:P1 onboard / P2 多组织 web 签发 / P3 多仓多根索引 / P4 Phase 10 治理 | P1✅ P4✅ P2✅ P3 待 |
 | [daily-summary-2026-06-14.md](daily-summary-2026-06-14.md) | 产品化迭代 Day 1:onboard/治理/token 起步 + 贯穿教训"先核实避免重造" | 日报 |
+| [daily-summary-2026-06-15.md](daily-summary-2026-06-15.md) | Day 2:P2 token web 化收尾(后端路由+前端页)+ Hibernate HBM/HQL 图谱抽取(影响面根治:db_table 0→1117,实体类名→表桥) | 日报 |
 
 ## 四项速览(优先级序)
 
@@ -18,7 +19,7 @@
 |---|---|---|---|
 | 1 | **P1 onboard**(加项目 8 步→1 步)✅**已交付** `76d5ea8`(onboard 命令已存在,补 sync+.mcp.json 2 软步)| 轻 | roadmap-2026-06-07 Phase 10 |
 | 2 | **P4 Phase 10 治理** ✅**已交付**(接入指南重写成一键 onboard;治理看板已存在;能力矩阵 enabled 伪需求不做)| 轻 | roadmap-2026-06-07 Phase 10 |
-| 3 | **P2 多组织 web 签发 UI** 🚧**进行中**(核实:唯一缺 token 签发 web 化;`issue_token` 共享已交付 `379f42c`,web 路由设计就绪)| 轻(收窄) | roadmap-2026-06-10 多组织 Phase 2(解冻)|
+| 3 | **P2 多组织 web 签发 UI** ✅**已交付**(token 签发/列出/吊销 后端路由 `a6bc08f` + 前端页 `6260396` + openapi dev 放行 `2e977a5`;list/revoke 补 org 隔离)| 轻(收窄) | roadmap-2026-06-10 多组织 Phase 2(解冻)|
 | 4 | **P3 多仓多根索引**(codegraph/code_vec fan-out,最重)| 重 | roadmap-2026-06-10 多仓 Phase 2(解冻)|
 
 ## 关联
