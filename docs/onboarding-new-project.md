@@ -1,90 +1,78 @@
-# 接入新项目到 codev-platform(Mac)
+# 接入新项目到 codev-platform
 
-> 把**任意一个你自己的项目**接进 codev-platform 的三套 AI 检索 MCP(代码图谱 / 文档检索 / 全栈链路)。
-> 前提:codev-platform 本体已在本机装好(见 [onboarding-mac.md](onboarding-mac.md)):`<CODEV>/.venv` 装了 `[runtime]`、`~/models/Qwen3-Embedding-0.6B` 在、`codegraph` 已全局装(`/usr/local/bin/codegraph`)。
-> 记号:`<CODEV>` = codev-platform 仓绝对路径(本机 `/Users/huangyuchuan/Documents/other/codev-platform`)。
+> 把**任意一个你自己的项目**接进 codev-platform 的代码智能 MCP(代码图谱 / 文档检索 / 全栈链路 / 代码向量召回)。
+> **一条 `onboard` 命令搞定**,不用手敲那 8 步。
+> 前提:codev-platform 本体已在本机/服务器装好(`.venv` 装了 `[runtime]`、嵌入模型在、`codegraph` 已装)。
 
 ---
 
 ## 模型(30 秒)
 
-codev-platform 是**装一次、多项目共用**的工具栈,**按 `project_id` 多租户隔离**:
+codev-platform 是**装一次、多项目共用**的平台,按 `project_id` **多租户隔离**:
 
-- 每个项目仓根放 `.claude/project.json`(一个 `project_id`)。
-- Claude Code 打开哪个仓,server 就按那个仓的 `project_id` + 该仓 `data/` 提供检索 —— 各项目互不串。
-- 三套 server 复用 `<CODEV>/.venv`(不用每个项目重装几个 GB torch)。
-
-> **为什么 `.mcp.json` 里写绝对路径、不绕环境变量**:Mac 上"靠 launchctl 注入 env 给 VSCode"这条链很脆 —— GUI 启动的 VSCode 不读 `~/.zshrc`,且 VSCode app 进程会**缓存启动时的 env、之后改 launchctl 不刷新**(实测踩过)。所以新项目直接在 `.mcp.json` 写死命令最稳,Claude Code 一读就生效。
+- 每个项目仓根放 `.claude/project.json`(一个 `project_id`),各项目索引/图谱互不串。
+- 平台 MCP 走 **SSE 服务**(`serve-mcp` 常驻拉起 4 端点),业务仓 `.mcp.json` 用 `type:sse` 连端点 —— 多机/多人共享同一平台。
+- 索引(chroma/codegraph/code_vec/graph)由平台 **reindex worker** 后台串行构建。
 
 ---
 
-## 接入步骤
+## 一键接入
 
-### 1. project_id(自动生成 `.claude/project.json`,不用手写)
+在平台机器上(能读到你的项目仓路径)跑:
+
 ```bash
-cd <你的项目仓>
-<CODEV>/.venv/bin/codev-platform init <project-id> --display-name "<Name>"   # project-id: 小写字母/数字/连字符
+codev-platform onboard <project-id> --repo <你的项目仓路径>
 ```
 
-### 2. `.mcp.json` —— 直写命令(把 `<CODEV>` 换成你的绝对路径)
-仓里**没有** `.mcp.json` → 新建下面这份;**已有**(脚手架常预置占位)→ 把 3 个 server 的 `command/args` 填成下面这样(键名沿用你仓已有的,如 `code-graph`/`doc-search`/`graph` 均可):
+`onboard` **一条命令自动完成 8 步**(每步幂等,失败可重跑;软步失败 warn 不阻断):
 
-```json
-{
-  "mcpServers": {
-    "code-graph": {
-      "command": "/usr/local/bin/codegraph",
-      "args": ["serve", "--mcp"]
-    },
-    "doc-search": {
-      "command": "sh",
-      "args": ["-c", "cd \"$CLAUDE_PROJECT_DIR\" && exec \"<CODEV>/.venv/bin/python\" -m codev_platform.chroma.server"],
-      "timeout": 90000
-    },
-    "graph": {
-      "command": "sh",
-      "args": ["-c", "cd \"$CLAUDE_PROJECT_DIR\" && exec \"<CODEV>/.venv/bin/python\" -m codev_platform.graph.mcp_server"],
-      "timeout": 30000
-    }
-  }
-}
-```
-> `$CLAUDE_PROJECT_DIR` 由 Claude Code 注入、sh 运行时展开 —— 它保证 server 在**你打开的仓根**解析 project_id + 数据,不靠 spawn 时的 cwd(那个不可靠)。
->
-> ⚠️ **`graph`(统一图谱)默认别放**。graph 提供前端↔接口↔表跨层链路(`find_table_usage` / `find_api_callers` / `search_nodes` 等 8 工具),只适用建过统一图谱的全栈项目(Java+Flyway SQL+Python / 前端组件依赖)。纯文档项目放了它,一调就报图谱数据不存在。只在确为该类项目时才加这第三个 server。
->
-> 注:cross-link MCP(原 `business-link` / `cross_link.server` / 19086 端点)已于 2026-06-05 退役删包,其跨层链路能力并入 graph(统一图谱)。新项目一律走 graph,不再配 cross-link。
+| 步 | 做什么 |
+|---|---|
+| 1 | `config.projects.<id>` 写 repo_path + org_id(reindex worker 据此解析仓) |
+| 2 | `<repo>/.claude/project.json`(project_id 真值源) |
+| 3 | `platform_meta/projects/<id>/meta.json`(list-projects / web 列表可见) |
+| 4 | RBAC:project 挂 org + 授 owner admin(无 PG 单机自动跳过) |
+| 5 | **sync rules/skills/hooks → 业务仓 `.claude/`**(平台规则/skill/MCP-first 护栏) |
+| 6 | codegraph:写 `.codegraph/config.json`(排噪声)+ gitignore db + `codegraph init` |
+| 7 | **生成 `.mcp.json`**(指向平台 SSE 端点,4 套多租户)|
+| 8 | reindex 入队(graph ingest + codegraph + code_vec + chroma,worker 后台跑)|
 
-### 3. doc_patterns —— 文档不在默认位置时必做
-默认只扫 `CLAUDE.md` / `README.md` / `docs/**`。**设计文档在根目录或别处**(如 `PRD.md`、`prompts/*.md`)就建 `<你的仓>/.claude/index.json`:
-```json
-{ "doc_patterns": ["*.md", "docs/**/*.md", "prompts/*.md", ".claude/rules/*.md"] }
-```
-不建的话 chroma 只索引到极少文件。
+**可选参数**:
+- `--org <org>` / `--owner <user>` / `--name "<显示名>"`
+- `--mcp-source platform|local`(默认 `platform`=平台服务器端点;`local`=本机本地实例)
+- `--no-index`(只登记不入队索引)
 
-### 4. 建索引(⚠️ 用 `reindex`,别裸跑 indexer)
-```bash
-cd <你的项目仓>
-<CODEV>/.venv/bin/codev-platform reindex --chroma --force   # 文档 → 本仓 data/chroma(collection <project-id>__platform_docs)
-codegraph init -i                                          # 代码图谱 → 本仓 .codegraph/
-```
-> 别用 `python -m codev_platform.chroma.indexer`:它 `PLATFORM_ROOT` 默认指向 codev-platform 包所在地,会去索引 codev 自己。`reindex` 会把 `PLATFORM_ROOT` 设成你的仓。
+---
 
-### 5. gitignore
-```bash
-echo "data/chroma/" >> .gitignore   # chroma 索引机器本地, 别提交(.codegraph 的 db 它自带 .gitignore 忽略)
-```
+## 接入后(3 件事 + 验证)
 
-### 6. 验证
-让 Claude Code 重读 `.mcp.json`:**Cmd+Shift+P → "Developer: Reload Window"**(或 Cmd+Q 重开)→ `/mcp` 三个 server 应 **connected**,检索的是你这个项目的内容。
+1. **提交配置进仓**(随 git 走,别人/重 clone 也带得上):
+   ```bash
+   git add .claude/project.json .claude/rules .claude/skills .claude/hooks .claude/settings.json \
+           .codegraph/config.json .gitignore .mcp.json
+   ```
+2. **看索引进度**:`codev-platform reindex-queue status`(worker 串行消费;codegraph/code_vec 大仓需几分钟)。
+3. **起平台 MCP 端点**(首次 / 重启电脑后跑一次):
+   ```bash
+   codev-platform serve-mcp start      # 拉起 4 端点(chroma 预热 ~30-60s)
+   codev-platform serve-mcp status     # 确认全 OK
+   ```
+4. **token 模式**(多人/远程):给 `.mcp.json` 各 server 补 `headers.Authorization: "Bearer <token>"`
+   (token 由 `codev-platform gateway pg-token-add` 签发;**header 形式,不要只用 `?token=`** —— 见记忆/排错)。
+5. **验证**:重启 Claude Code(Reload Window,不是 /clear)→ `/mcp` 4 套应 **connected**,检索的是你这个项目的内容。
 
 ---
 
 ## 说明 / 边界
 
-- **数据隔离**:`~/.codev-platform/config.json` 的 `data.platform_data_dir=null` 时,每个项目索引存各自仓 `data/`(gitignored),互不影响。
-- **graph(统一图谱)是进阶项,默认不放**:需 Flyway + Java mapper/controller(+前端/Python)全栈结构或前端组件依赖,且要在 `platform_meta/projects/<id>/meta.json` 配 `health.*_patterns` 后单独建图。**非该类项目放了它,调用即报图谱数据不存在** —— 直接从 .mcp.json 删掉。(原 cross-link MCP 已退役,链路能力并入 graph。)
-- **日常维护**:改完重建 —— 在仓里 `codev-platform reindex --chroma --force` / `codegraph sync`;装了 `codev-platform install-hooks` 则 commit 自动重建。
+- **doc_patterns**:默认只扫 `CLAUDE.md` / `README.md` / `docs/**`。设计文档在别处(`PRD.md` / `prompts/*.md`)→ 建 `<仓>/.claude/index.json`:
+  ```json
+  { "doc_patterns": ["*.md", "docs/**/*.md", "prompts/*.md", ".claude/rules/*.md"] }
+  ```
+- **graph(统一图谱)**:提供前端↔接口↔表跨层链路(`find_table_usage`/`find_api_callers`/`search_nodes` 等),适用全栈项目(Java+Flyway+前端 / Python+FastAPI)。纯文档项目用不上,调了会报图谱数据不存在 —— onboard 仍会建,空着无害。
+- **数据隔离**:`~/.codev-platform/config.json` 的 `data.platform_data_dir` 决定索引落哪;多项目按 `project_id` 隔离。
+- **日常维护**:改完 commit 自动重建(装了 post-commit hook),或手动 `reindex-queue enqueue <id> --kind all`。
+- **多仓项目**:前端/后端分仓的项目,主仓 `meta.json` 加 `extra_repos: ["<另一仓 pid>"]`(graph 跨仓连边;codegraph/code_vec 多根 fan-out 见 roadmap-2026-06-14 P3)。
 
 ---
 
@@ -92,7 +80,11 @@ echo "data/chroma/" >> .gitignore   # chroma 索引机器本地, 别提交(.code
 
 | 现象 | 处理 |
 |---|---|
-| `/mcp` doc-search/graph failed | `.mcp.json` 里 `<CODEV>` 是否换成真实绝对路径;`<CODEV>/.venv/bin/python` 是否存在;Reload Window |
-| `current` 报无法解析 project_id | 没跑步骤 1,或不在仓根 → `codev-platform init <id>` |
-| search 返回空 | 该仓没建索引 / doc_patterns 没覆盖 → 看步骤 3、4 |
-| code-graph failed | `which codegraph` 空就装(`npm i -g @colbymchenry/codegraph`) |
+| `/mcp` 全红(连不上端点)| 平台端点没常驻 → `codev-platform serve-mcp start`(重启电脑后必跑一次)|
+| 单独某 server 红 | `serve-mcp status` 看哪个 down;codegraph 端点需 ~2-5s 起 |
+| `/mcp` 401(token 模式)| `.mcp.json` 各 server 缺 `headers.Authorization`(Bearer),`?token=` 不够 |
+| `current` 报无法解析 project_id | 不在仓根 / 没跑 onboard → 确认 `<repo>/.claude/project.json` 在 |
+| search 返回空 | 索引还没建完(`reindex-queue status`)/ doc_patterns 没覆盖(建 `.claude/index.json`)|
+| codegraph 索引空 | `which codegraph` 确认已装;onboard 的 `[6/8]` 看 init 是否 OK |
+
+> **从零装平台机器**见 [onboarding-mac.md](onboarding-mac.md) / [ai-toolchain-guide.md](ai-toolchain-guide.md)。本文只讲"平台已就绪后,接入一个新项目"。

@@ -69,6 +69,11 @@
 
 ## P4 — Phase 10 治理收尾(接入指南 + 能力矩阵 + 治理看板)【轻,文档+聚合】
 
+> ✅ **已交付(2026-06-14)**。代码核实又是"大部分已存在",三子项诚实修正:
+> - **接入指南**:`docs/onboarding-new-project.md` 已存在但 **stale**(讲老手动 8 步 + stdio .mcp.json)→ **重写成一键 `onboard` 流程**(配套 P1)+ SSE 服务模式。✅ 真活,做完。
+> - **能力矩阵 enabled**:❌ **伪需求**。`describe_capabilities` 是**语言栈插件(默认全开)**,加 enabled 恒 True 无意义;CLI `plugins list` 已展示栈能力。**不做**。
+> - **治理看板**:✅ **已存在且完整**。`web-ui/src/pages/dashboard/index.tsx` 已组合 IndexFreshness(P1)/GraphHealth(P3)/SoftQuality/TokenUsage(P8)/McpUsage + 平台健康 + 图谱统计 5+ 卡片。唯一缺 recall 延迟卡(Phase 8 数据无 web 端点)→ 看板已基本全 + CLI `recall-stats` 可看,**记可选触发不堆码**。
+
 **目标**:让接入者"看得懂平台支持什么、索引/图谱健不健康"。
 
 **设计(派生视图 + 文档,几乎不加机制)**:
