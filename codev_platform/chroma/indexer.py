@@ -33,6 +33,10 @@ from codev_platform.chroma._index_config import PLATFORM_ROOT, logger  # noqa: E
 # 确保多 project 写到 SHARED chroma DB, 而非各自 PLATFORM_ROOT/data/chroma.
 from codev_platform.core.project_id import ProjectIdError, resolve_local
 from codev_platform.core.paths import chroma_collection_name, chroma_dir, chroma_docs_dir
+from codev_platform.core.index_handoff import (
+    begin_build, commit_build, gc_builds, new_build_id, resolve_current,
+)
+from codev_platform.index_manifest import git_head
 
 try:
     PROJECT_ID = resolve_local(PLATFORM_ROOT)
@@ -77,7 +81,8 @@ MANIFEST_VERSION = 1
 # per-project manifest：COLLECTION_NAME 是 <project_id>__platform_docs，manifest 也必须按 project 隔离，
 # 否则多项目轮流 reindex 会互相覆盖同一份全局 manifest，导致增量退化 / 留孤儿。
 # 旧全局 index_manifest.json 自然废弃（首次 per-project reindex 重建，留着无害）。
-MANIFEST_PATH = PERSIST_DIR / f"index_manifest.{PROJECT_ID}.json"
+_MANIFEST_NAME = f"index_manifest.{PROJECT_ID}.json"   # manifest 跟 build dir 走(atomic handoff)
+_DOCS_KEEP = 2   # full handoff 保最近 2 个 build(current + 上代, 给 reader 旧连接读完)
 
 # logging 配置 + logger 已抽到 _index_config.py (见上方 import)。
 
@@ -162,12 +167,12 @@ def _empty_manifest() -> dict:
     return {"version": MANIFEST_VERSION, "params": {}, "files": {}}
 
 
-def _load_manifest() -> tuple[dict, bool]:
-    """读 manifest,返回 (manifest, 是否来自有效文件)。"""
-    if not MANIFEST_PATH.exists():
+def _load_manifest(manifest_path: Path) -> tuple[dict, bool]:
+    """读 manifest,返回 (manifest, 是否来自有效文件)。manifest_path 跟 build dir 走(handoff)。"""
+    if not manifest_path.exists():
         return _empty_manifest(), False
     try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("manifest root is not object")
         data.setdefault("version", MANIFEST_VERSION)
@@ -179,9 +184,9 @@ def _load_manifest() -> tuple[dict, bool]:
         return _empty_manifest(), False
 
 
-def _save_manifest(manifest: dict) -> None:
-    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(
+def _save_manifest(manifest: dict, manifest_path: Path) -> None:
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
@@ -250,54 +255,28 @@ def index(force: bool = False) -> tuple[int, int]:
     """
     import chromadb
 
-    PERSIST_DIR.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(PERSIST_DIR))
-    from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁 (chromadb 默认 delete 模式会独占)
-    ensure_wal(PERSIST_DIR)
+    base = PERSIST_DIR                        # handoff base 根(.last_build 戳 / .reindex.lock 落这)
+    base.mkdir(parents=True, exist_ok=True)
+    from codev_platform.chroma import ensure_wal  # 写时 search 读不被锁(chromadb 默认 delete 模式会独占)
 
+    # 读 manifest 从**当前 build**(handoff: 无 pointer 退 base); force 直接全量不读。
+    # full → 新 side 本空, 故全程**无 delete_collection**(旧 collection 留旧 build, commit 后由 gc 清)。
+    current_dir = resolve_current(base)
     if force:
-        try:
-            client.delete_collection(COLLECTION_NAME)
-            logger.info("--force：已删除旧 collection %s", COLLECTION_NAME)
-        except Exception as exc:
-            logger.debug("--force 删除 collection %s 跳过(可能不存在): %s", COLLECTION_NAME, exc)
-        # 清 manifest,后续走 full rebuild 路径
-        manifest = _empty_manifest()
-        manifest_loaded = False
+        manifest, manifest_loaded = _empty_manifest(), False
     else:
-        # 多项目迁移期: 当前 project 写 prefixed collection, legacy unprefixed `platform_docs`
-        # 可能仍存在 (旧索引备份)。提示用户确认无问题后手动 prune,避免占双倍磁盘。
-        try:
-            legacy_names = [c.name for c in client.list_collections()
-                            if c.name == "platform_docs" and c.name != COLLECTION_NAME]
-            if legacy_names:
-                logger.info(
-                    "提示: legacy collection 'platform_docs' 仍存在 (与本次写入 %s 不同)。"
-                    "确认 prefixed collection 工作正常后可手动 prune: "
-                    "python -c \"import chromadb; "
-                    "chromadb.PersistentClient(path='data/chroma').delete_collection('platform_docs')\"",
-                    COLLECTION_NAME,
-                )
-        except Exception as exc:
-            logger.debug("legacy collection 探测跳过: %s", exc)
-        manifest, manifest_loaded = _load_manifest()
+        manifest, manifest_loaded = _load_manifest(current_dir / _MANIFEST_NAME)
 
     files = discover_files()
     logger.info("发现 %d 个 markdown 文件", len(files))
 
     # 首次接入 manifest 或 manifest 损坏时,旧 collection 可能包含已删除文件 /
     # 旧 chunk 策略留下的残留 ids。清 collection 后全量回填,避免旧知识继续可搜。
-    bootstrap_full_rebuild = force or not manifest_loaded
-    if bootstrap_full_rebuild and not force:
-        try:
-            client.delete_collection(COLLECTION_NAME)
-            logger.info("manifest 不存在或不可用: 已清空旧 collection,准备全量回填")
-        except Exception as exc:
-            logger.debug("bootstrap 清空 collection %s 跳过(可能不存在): %s", COLLECTION_NAME, exc)
+    full_rebuild = force or not manifest_loaded   # 统一 full 标志(后续 params 不一致再置位)
 
     # 先用文件内容 sha256 算变更 — 不加载模型,纯 IO 操作 ~毫秒级
     changed_files, deleted_rels, new_sha_map = _scan_changes(files, manifest)
-    if bootstrap_full_rebuild:
+    if full_rebuild:
         changed_files = list(files)
         deleted_rels = []
     elif not changed_files and not deleted_rels and not _manifest_static_params_match(manifest):
@@ -340,10 +319,7 @@ def index(force: bool = False) -> tuple[int, int]:
         logger.warning("manifest params 不一致(可能升级模型 / 改 chunk 配置),触发 full rebuild")
         logger.warning("  旧: %s", manifest_params)
         logger.warning("  新: %s", current_params)
-        try:
-            client.delete_collection(COLLECTION_NAME)
-        except Exception as exc:
-            logger.debug("params 不一致 rebuild 删 collection %s 跳过(可能不存在): %s", COLLECTION_NAME, exc)
+        full_rebuild = True
         manifest = _empty_manifest()
         changed_files = list(files)
         deleted_rels = []
@@ -358,6 +334,19 @@ def index(force: bool = False) -> tuple[int, int]:
         "max_seq_length": int(max_seq_length) if max_seq_length else 0,
         "query_prompt_enabled": query_prompt_enabled,
     }
+
+    # ---- 唯一一处决定 build_dir(full 判定全部完成后)----
+    if full_rebuild:
+        gc_builds(base, keep=_DOCS_KEEP)          # 建新 side 前清旧(reader 那时已 reload)
+        bid = new_build_id(git_head(PLATFORM_ROOT), str(int(time.time())))
+        build_dir = begin_build(base, bid)        # full → 干净 side; reader 仍读旧 current
+    else:
+        bid = None
+        build_dir = resolve_current(base)         # 增量 → 当前 build 原地改, 不 commit
+    build_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = build_dir / _MANIFEST_NAME
+    client = chromadb.PersistentClient(path=str(build_dir))
+    ensure_wal(build_dir)
 
     col = client.get_or_create_collection(
         name=COLLECTION_NAME,
@@ -446,7 +435,7 @@ def index(force: bool = False) -> tuple[int, int]:
         }
     manifest["params"] = current_params
     manifest["version"] = MANIFEST_VERSION
-    _save_manifest(manifest)
+    _save_manifest(manifest, manifest_path)
 
     # 写构建戳:总文件 / 总 chunks 从 manifest 算(不只是本次变更的)
     total_files = len(manifest["files"])
@@ -469,6 +458,12 @@ def index(force: bool = False) -> tuple[int, int]:
 
     _write_build_stamp(files_count=total_files, chunks=total_chunks,
                        dim=dim, model_name=model_name)
+
+    # 发布: full 才原子切 current → 新 build。reader 经 .last_build 戳 mtime 探到 reload,
+    # 下次 _ensure_project → _get_client → chroma_docs_data_dir(resolve_current)读到新 build。
+    # 增量原地改 current 无需切。异常(未到此)→ side 孤儿不影响 current, 由下次 full 的 gc 兜底。
+    if full_rebuild and bid is not None:
+        commit_build(base, bid)
 
     return len(changed_files), total
 

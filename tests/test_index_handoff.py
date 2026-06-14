@@ -139,3 +139,33 @@ def test_begin_build_rejects_unsafe_id(tmp_path, bad):
 def test_commit_rejects_unsafe_id(tmp_path, bad):
     with pytest.raises(ValueError):
         ih.commit_build(tmp_path, bad)
+
+
+# ----------------------------- new_build_id -----------------------------
+
+def test_new_build_id_deterministic_and_format():
+    # commit 截 12 位 + unique_suffix; 同输入 → 同 id(确定性)
+    assert ih.new_build_id("abc123def4567890", "1700000000") == "abc123def456-1700000000"
+    assert ih.new_build_id(None, "1700000000") == "nogit-1700000000"
+    assert ih.new_build_id("", "42") == "nogit-42"
+
+
+def test_new_build_id_rejects_unsafe():
+    with pytest.raises(ValueError):
+        ih.new_build_id("a/b", "1")   # commit 含分隔符 → 拼出非法 id 被 _safe_id 拒
+
+
+# ----------------------------- reader 接线: chroma_docs_data_dir -----------------------------
+
+def test_chroma_docs_data_dir_follows_handoff(tmp_path, monkeypatch):
+    """reader 侧 paths.chroma_docs_data_dir: 无 pointer 退回 base(向后兼容), commit 后切到 build。"""
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    from codev_platform.core.paths import chroma_docs_data_dir, chroma_docs_dir
+    pid = "handoff-test-proj"
+    base = chroma_docs_dir(pid)
+    # 无 pointer → reader 读 base 本身(旧布局零迁移)
+    assert chroma_docs_data_dir(pid) == base
+    # writer 建 + commit 一个 build → reader 自动切到 builds/<id>
+    ih.begin_build(base, "b1")
+    ih.commit_build(base, "b1")
+    assert chroma_docs_data_dir(pid) == base / "builds" / "b1"

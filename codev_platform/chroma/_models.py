@@ -86,8 +86,8 @@ def _get_client(project_id: str | None = None):
             _client = chromadb.PersistentClient(path=str(DATA_DIR))
             ensure_wal(DATA_DIR)
         return _client
-    from codev_platform.core.paths import chroma_docs_dir
-    path = chroma_docs_dir(project_id)
+    from codev_platform.core.paths import chroma_docs_data_dir
+    path = chroma_docs_data_dir(project_id)   # atomic handoff: 读当前 build(无 pointer 退回 base)
     key = str(path)
     cl = _clients.get(key)
     if cl is None:

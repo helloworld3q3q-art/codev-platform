@@ -144,18 +144,7 @@ def test_build_rejects_malicious_project_id():
         build_code_vector_index("../../../etc")   # validate 在 embedder/rmtree 前就拦下
 
 
-# ---- R1: rmtree 残留 fail-fast + query client 缓存 ----
-
-def test_warn_persist_residue_does_not_raise(tmp_path, caplog):
-    # R1 修正: 单 collection 库上重灌安全, 残留只 warn 不抛(硬抛会误判同进程重复全量, 验证 panel 实证)。
-    import logging
-    from codev_platform.recall.code_vector_store import _warn_persist_residue
-    _warn_persist_residue(tmp_path)                      # 干净 → 无 warn 无抛
-    (tmp_path / "chroma.sqlite3").write_text("x", encoding="utf-8")
-    with caplog.at_level(logging.WARNING):
-        _warn_persist_residue(tmp_path)                  # 残留 → 只 warn, 不抛
-    assert any("残留" in r.message for r in caplog.records)
-
+# ---- query client 缓存 ----
 
 def test_get_query_client_caches_per_path(monkeypatch):
     import codev_platform.recall.code_vector_store as m

@@ -25,8 +25,15 @@ import json
 import logging
 
 from codev_platform.core.paths import chroma_collection_name, chroma_dir
+from codev_platform.core.index_handoff import (
+    begin_build, commit_build, gc_builds, new_build_id, resolve_current,
+)
 
 logger = logging.getLogger(__name__)
+
+# code_vec 库大(19万节点级); full handoff 切换瞬间已并存 2 份库, gc keep=1 只保 current 压磁盘峰值。
+# (reader 是 per-query 短连接, 非常驻 daemon, 故 keep=1 比 docs 的 keep=2 安全 —— 撞读窗口仅单次查询。)
+_CODE_VEC_KEEP = 1
 
 _MANIFEST_NAME = ".manifest.json"        # id -> text sha1, 增量重建用(在 per-project persist 目录内)
 _MANIFEST_META_NAME = ".manifest.meta.json"   # build 参数指纹 {enrich: bool}(与 manifest 分离, 不进 _diff)
@@ -290,17 +297,6 @@ def _read_enrich_mode(meta_path) -> bool | None:
         return None
 
 
-def _warn_persist_residue(persist) -> None:
-    """全量重建 rmtree 后探测残留(诊断, 不阻断)。rmtree(ignore_errors)在 Windows 被句柄占用会
-    **静默失败**留旧 chroma.sqlite3。**只 warn 不抛**: code_vec 是每项目**单 collection** 库, 在
-    残留 collection 上 get_or_create + 多批 upsert 实测安全(522 仅多 collection 库触发, 见
-    incident 2026-06-05); 硬抛会把"同进程重复全量"这种 pre-fix 可正常 reopen 的场景误判为失败
-    (验证 panel 实证)。生产 worker 走 subprocess-per-job, 句柄随子进程死, 几乎不残留。"""
-    if (persist / "chroma.sqlite3").exists():
-        logger.warning("[code_vec] rmtree 后仍残留 sqlite: %s(疑似存活句柄/Windows 静默失败); "
-                       "单 collection 库上重灌安全, 继续。", persist)
-
-
 def _get_query_client(persist_path: str):
     """query 侧 PersistentClient 进程内单例(per path)。chromadb 本就 per-path 单例, 显式缓存避免
     每次查询重建 client 反复 attach segment。"""
@@ -343,7 +339,7 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     """
     if k <= 0:                 # chromadb 对 n_results<=0 抛 TypeError; 正常边界值直接空返
         return [], {}
-    persist = _code_vec_persist_dir(project_id)
+    persist = resolve_current(_code_vec_persist_dir(project_id))   # handoff: 读**当前 build**(无 pointer 退 base)
     # 廉价 fs 探活: 无**成功构建标记** _MANIFEST_NAME(仅成功 build 写)= 该项目没建好 code_vec →
     # 快速空返, **不 import chromadb / 不建 client**(省首次 PersistentClient 冷启动 ~700ms-1s)。
     # 注意不能只看 chroma.sqlite3: 空库/半建会留 0-collection 的 chroma.sqlite3(实测 codev-platform
@@ -417,46 +413,55 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
             "embedder 不可用: 装 sentence-transformers + 配 models.embed_path(qwen-local), "
             "或设 recall.code_vec.embed_backend=remote 接 chroma daemon /embed。")
 
-    import shutil
+    import time
 
     import chromadb
 
     from codev_platform.chroma import ensure_wal
 
-    manifest_path = persist / _MANIFEST_NAME
-    meta_path = persist / _MANIFEST_META_NAME
+    base = persist                          # handoff base(.reindex.lock 落这, 锁仍挂 base 互斥整项目)
+    current_dir = resolve_current(base)     # 读旧 manifest/meta + 探活 都看**当前 build**(无 pointer 退 base)
+    cur_manifest_path = current_dir / _MANIFEST_NAME
+    cur_meta_path = current_dir / _MANIFEST_META_NAME
     repo = _resolve_repo(project_id)   # 读源码片段补语义; None → 退基础文本(降级不崩)
     enrich_now = bool(repo)
-    # 定 full(读 manifest/meta 在 rmtree 前): 无 manifest / manifest 损坏 / 富化模式翻转 都退全量 ——
-    # **必须 rmtree 拿干净库**, 否则"全量重嵌 onto 既有 segment"正是 chromadb 多 flush 522 触发条件。
-    full = (not incremental) or (not manifest_path.exists())
+    # 定 full(读 manifest/meta 从当前 build): 无 manifest / 损坏 / 富化翻转 / 探活坏 都退全量。
+    # handoff: full **不再 rmtree 库**, 而是 begin_build 到干净 side(下面), 旧 build 留给 reader, commit 后 gc。
+    full = (not incremental) or (not cur_manifest_path.exists())
     old_manifest: dict = {}
     if not full:
         try:
-            old_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001 — manifest 损坏 → 转全量(rmtree), 不在旧 segment 上重灌
-            logger.warning("[code_vec] manifest 损坏(%s), 转全量重建(rmtree)", exc)
+            old_manifest = json.loads(cur_manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 — manifest 损坏 → 转全量(新 side), 不在旧 segment 上重灌
+            logger.warning("[code_vec] manifest 损坏(%s), 转全量重建", exc)
             full = True
     # R3: 源码富化模式(repo 是否可解析)是 build 参数, 非节点内容。模式翻转(on<->off)会让每个
     # _embed_text 变化 → 当增量会把全部节点误标 changed + 谎报 incremental + 文本降级。检测翻转显式
     # 转全量(诚实记录), _diff_manifest 仍是纯 id->hash 不被污染(指纹存独立 meta 文件)。
     if not full and incremental:
-        old_enrich = _read_enrich_mode(meta_path)
+        old_enrich = _read_enrich_mode(cur_meta_path)
         if old_enrich is not None and old_enrich != enrich_now:
             logger.warning("[code_vec] %s: 源码富化模式 %s->%s(repo 解析翻转), 强制全量重建"
                            "(否则会误报 incremental 且检索文本降级)", project_id, old_enrich, enrich_now)
             full = True
-    # R5(2026-06-12): 增量续跑前探活既有库 —— 被 SIGKILL(worker 超时)中断的库 sqlite/segment 半
-    # 写坏, 再 upsert 会触发 compaction 522/malformed 彻底崩。探到坏即退全量 rmtree 拿干净库自愈。
-    if not full and incremental and not _existing_chroma_healthy(persist):
-        logger.warning("[code_vec] %s: 既有库探活失败(疑似被中断写坏), 转全量重建(rmtree)", project_id)
+    # R5(2026-06-12): 增量续跑前探活当前 build —— 被 SIGKILL(worker 超时)中断的库 sqlite/segment 半
+    # 写坏, 再 upsert 会触发 compaction 522/malformed 彻底崩。探到坏即退全量(新 side)拿干净库自愈。
+    if not full and incremental and not _existing_chroma_healthy(current_dir):
+        logger.warning("[code_vec] %s: 当前 build 探活失败(疑似被中断写坏), 转全量重建", project_id)
         full = True
+    # ---- 唯一一处决定 build_dir(full 判定全部完成后)----
     if full:
-        shutil.rmtree(persist, ignore_errors=True)
-        _warn_persist_residue(persist)   # R1: rmtree 静默失败留残留 → 只 warn(单 collection 重灌安全)
-    persist.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(persist))
-    ensure_wal(persist)
+        gc_builds(base, keep=_CODE_VEC_KEEP)            # 建新 side 前清旧(峰值压到 2 份库)
+        bid = new_build_id(None, str(int(time.time())))
+        build_dir = begin_build(base, bid)              # full → 干净 side(替代旧 rmtree(persist))
+    else:
+        bid = None
+        build_dir = resolve_current(base)               # 增量 → 当前 build 原地改, 不 commit
+    build_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = build_dir / _MANIFEST_NAME          # manifest/meta 跟 build dir 走
+    meta_path = build_dir / _MANIFEST_META_NAME
+    client = chromadb.PersistentClient(path=str(build_dir))
+    ensure_wal(build_dir)
     name = code_vec_collection_name(project_id)
     col = client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
 
@@ -517,6 +522,9 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     # 收尾: 写完整 manifest (= 当前全部节点; persisted 此时已等同, 这步是精确兜底)。
     manifest_path.write_text(json.dumps(new_manifest, ensure_ascii=False), encoding="utf-8")
     meta_path.write_text(json.dumps({"enrich": enrich_now}, ensure_ascii=False), encoding="utf-8")
+    # 发布: full 才原子切 current → 新 build(reader query 经 resolve_current 读到)。增量原地无需切。
+    if full and bid is not None:
+        commit_build(base, bid)
     logger.info("[code_vec] %s: %s, 变更 %d / 删除 %d / 总 %d 节点 → %s",
                 project_id, "full" if full else "incremental",
                 len(changed), len(deleted), len(new_manifest), name)

@@ -50,6 +50,16 @@ def _safe_id(build_id: str) -> str:
     return bid
 
 
+def new_build_id(commit: str | None, unique_suffix: str) -> str:
+    """派生唯一 build_id = `<commit12>-<unique_suffix>`。
+
+    纯函数(不内嵌 time/random 保可测): `unique_suffix` 由调用方传唯一值(时间戳/计数器)
+    保证每次构建唯一 —— 故同 commit 多次 full rebuild **不会复用 id 撞掉正被 reader 读的
+    current**。失败 side build 由 writer 异常路径显式 rmtree 清(不靠 gc)。"""
+    head = ((commit or "nogit").strip()[:12]) or "nogit"
+    return _safe_id(f"{head}-{unique_suffix}")
+
+
 def read_pointer(base: Path) -> str | None:
     """当前 build_id(无 pointer / 损坏 json → None, fail-soft)。"""
     p = _pointer_path(base)

@@ -99,6 +99,18 @@ def chroma_docs_dir(project_id: str) -> Path:
     return chroma_dir() / "docs" / project_id
 
 
+def chroma_docs_data_dir(project_id: str) -> Path:
+    """platform_docs **当前可用库目录**(atomic handoff 解析后)。
+
+    reader(daemon client)与增量 writer 经此拿"当前 build"; 无 handoff pointer
+    (旧布局/首次)→ 退回 `chroma_docs_dir` 本身(100% 向后兼容)。full rebuild
+    不走这(writer 经 `index_handoff.begin_build` 建 side, commit 后才被这解析到)。
+    `.last_build` 戳 / `.reindex.lock` 等**控制路径仍用 `chroma_docs_dir`(base 根)**。
+    见 docs/plans/roadmap-2026-06-07/phase1-atomic-handoff-plan-2026-06-14.md。"""
+    from codev_platform.core.index_handoff import resolve_current
+    return resolve_current(chroma_docs_dir(project_id))
+
+
 def chroma_collection_name(project_id: str, base: str) -> str:
     """带 project_id 前缀的 collection 名。例 (openclaw-stock, platform_docs) -> 'openclaw-stock__platform_docs'。"""
     project_id = _validate_project_id(project_id)  # 防 collection 名污染 (任意 caller)

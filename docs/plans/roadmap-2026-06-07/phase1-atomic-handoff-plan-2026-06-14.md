@@ -69,7 +69,8 @@ chroma/_models.py 等 reader   零改(经 chroma_docs_dir 自动拿 current)
 
 ## 四、关键决策
 
-**① full rebuild 走 side+swap,增量原地** —— atomic handoff 与增量索引(变更0→0.9s)冲突:每次 side full rebuild 会丧失增量价值。故只 full rebuild(`--force` / 参数指纹变 / 库损坏自愈)走 blue-green;增量改少量 chunk、撞读窗口极小(chromadb WAL 下 reader 读快照),保持原地。**这是"必要才上"的切片边界**。
+**① full rebuild 走 side+swap;增量原地改 _当前 build_(非 base 根)** —— atomic handoff 与增量索引(变更0→0.9s)冲突:每次 side full rebuild 会丧失增量价值。故只 full rebuild(`--force` / 参数指纹变 / 库损坏自愈)`begin_build` 到新 side;**增量走 `resolve_current(base)` 定位当前 build 原地改**(撞读窗口极小,chromadb WAL 下 reader 读快照)。
+> 🔴 **风险兄弟纠正(2026-06-14)**:增量的"原地"是 **current 指向的 build 内原地**,**绝不是 base 根**。若 full 切到 `builds/<id>/` 后增量仍写 base 根 → reader 读 side build → **增量改动静默不可见**(不报错/不崩,search_docs 返陈旧结果)。平台 99% 流量是 post-commit 增量,这是最阴的炸点。`build_dir = begin_build(...) if full else resolve_current(base)` 是 writer 唯一库目录解析点。
 
 **② build_id 由调用方传入,模块不自产** —— `index_handoff` 纯函数可测(不引 `time`/`random` 不确定源);indexer 传 `git_commit[:12]`,无 commit 时传调用方给的时间戳串。
 
@@ -102,3 +103,70 @@ chroma/_models.py 等 reader   零改(经 chroma_docs_dir 自动拿 current)
 - 不引 symlink / 目录 rename —— 不跨平台。
 - 不做引用计数精确 GC —— keep=2 足够,过度设计。
 - 不做 Phase 1 的 depends_on/toposort、dashboard、count 回填 —— 面板判 YAGNI / trigger-gated。
+
+## 八、三兄弟评审纠正(2026-06-14,阶段 2 实现前)
+
+派实现/YAGNI/风险三兄弟对抗评审阶段 2。结论:**blue-green 必要且已是最轻形态**,但纠正实现细节。
+
+**YAGNI 兄弟 —— 更轻替代全证伪,blue-green 不可约**:
+- 内存层 handoff:chromadb collection 是**懒句柄非内存快照**,rmtree 删文件后 `col.query()` 即崩。
+- 目录 rename swap:目录 rename 跨平台**不原子**(两步,中间窗口)+ Windows reader 持 sqlite 句柄时 rename `PermissionError`。
+- chromadb 原生:无 snapshot/事务;且它自己(1.5.9 多 flush compaction)就是损坏源。
+- `.building` 标志:**SIGKILL 杀 writer 没机会清标志** → 永久残留。
+- 不可约内核:故障 = SIGKILL + 旧 build 有活跃 reader 句柄 → 唯一出路 = 新库写**不同路径** + reader 经 **pointer 间接**。pointer 文件 + `os.replace` 已是该内核最小实现。
+
+**实现兄弟 —— 最小侵入改法(净简化)**:
+- `PERSIST_DIR`/`MANIFEST_PATH` 是 indexer **私有模块级常量、无外部 import** → 安全降为 `index()` 局部 `build_dir`。
+- **3 处 `client.delete_collection` 全删**(side 库本就空,无需清旧)→ 净 **-18 行**;改完约 531~536 行,**稳 ≤600,无需抽 helper 文件**。
+- 3 处 full 判定(force/bootstrap/params)统一成**单布尔 `full_rebuild`,只置位**;`begin_build` 在 params 检测**之后**、`get_or_create_collection` 之前**唯一调用一次**。
+- `commit_build` + `gc` 放 `_save_manifest`+integrity 探针**全部成功之后、return 之前**;异常路径自然跳过 commit → side build 成孤儿但 current 不动(**不 try/except 吞异常**)。
+- 早返回(无变更)/ 增量分支**绝不 `begin_build`/`commit`/`gc`**(否则建空目录留垃圾 / gc 误删)。
+
+**风险兄弟 —— 上线失败模式 + 缓解(纳入实现)**:
+| 失败模式 | 缓解(已纳入) |
+|---|---|
+| **🔴 增量退化(最阴)** | 增量走 `resolve_current(base)` 改当前 build,非 base 根(见 §四①纠正) |
+| gc 删正被读的旧 build | **gc 延到下次 `begin_build` 前**(reader 那时已 reload),不在 commit 后立即 gc;keep=2 |
+| 磁盘翻倍(大项目 ×2~3) | keep 可配 + 大项目建前预检 `df`(本切片先记,大项目触发再加) |
+| pointer 丢失 fail-soft 退 base 读陈旧残留 | 首次 commit 后清 base 根残留库;pointer 退 base 是向后兼容代价,记风险 |
+| reader reload 不看 pointer | commit 后写/touch base 根 `.last_build` 戳 → daemon `_maybe_reload_project` 探 mtime → evict → 下次 `_get_client` 经 `resolve_current` 拿新 build(天然串联,无需改 reload 逻辑) |
+
+**真机验证清单(WSL,核心是 SIGKILL 模拟)**:full rebuild 建到 `builds/<id>/` 非根库 / 改 .md 增量后 search_docs 立即命中(验增量未退化)/ `kill -9` 重建中途的 worker 后 current 仍指旧 build、search_docs 不中断(验 handoff 生效)/ 连切两次 full 后 gc 不删正被读目录。
+
+## 九、scope 扩到 code_vec + 第二轮兄弟评审(2026-06-14)
+
+用户指出 chroma 不止 docs 一类库。核实:chroma 系**两类 per-project 库都要接**(覆盖完整 chroma 系)——
+- `chroma/docs/<pid>/`(platform_docs,reader=`_models._get_client`,writer=`indexer.index`)
+- `chroma/code_vec/<pid>/`(代码向量,reader=`query_code_vectors`,writer=`_build_locked`)
+- `chroma/`(根,agent-memory)**不做**(主在 PG,本地 fallback,reindex 频率极低)。
+codegraph/graph(sqlite WAL 已隔离)仍不做。
+
+第二轮派三兄弟(抽象接缝/YAGNI/高可用)评审"两库怎么复用 handoff 核"。**裁决 + 修正**:
+
+**① 放弃 context manager,用显式调核原语**(YAGNI+高可用兄弟):
+- commit 是**发布主效果**,藏进 CM 退出路径 → 看不出"这里原子切库";`code_vec._build_locked` 已有 `try_acquire_reindex_lock` + try/finally,再套 CM = 两套生命周期交错。核已在 `index_handoff`(单一真值),显式调原语零抽象税,重复的是编排顺序非逻辑。
+- **锁绝不吞进封装**(职责正交:锁=互斥/handoff=可见性);**锁继续挂 base 根**(下移 build dir → 两进程各拿各锁=互斥失效),handoff 在锁内。
+
+**② 三个真漏洞(必须纳入,否则上线炸)**:
+| 漏洞 | 后果 | 修法 |
+|---|---|---|
+| 🔴 reader 探活路径未改 | `query_code_vectors:352` 探 `persist/_MANIFEST_NAME` → handoff 后 base 根无 manifest → **code_vec lane 全项目静默空返**(fail-soft 无报错) | 探活 + client 走 `resolve_current(persist)`;同 PR 加断言测试 |
+| 🔴 `shutil.rmtree(persist)`(code_vec:455) | persist 变 handoff base → rmtree 连 `builds/`+`current.json` 删掉 → reader 读空 | 删整行,写库改 `begin_build(persist, bid)` |
+| 🔴 孤儿 side dir | writer 异常 → side 留盘,gc 按 mtime 删不掉最新失败 side → 堆积 | 异常路径显式 `rmtree(side)` 清,不靠 gc |
+
+**③ 其余纳入**:keep 按库类型(docs=2 / code_vec 大库=1,side ×2~3 磁盘);R5 `_existing_chroma_healthy` 走 `resolve_current`(探当前 build,坏退 full→begin 新 side);code_vec reader 进程内单例 client 以 `resolve_current` 路径为 key(current 变→path 变→新 client,旧自然弃)。
+
+**④ 显式编排形态(两库各自,调同一组核原语)**:
+```
+if full_rebuild:
+    gc_builds(base, keep=K)                  # 建新前清旧(reader 已 reload)
+    bid = new_build_id(commit)               # 确定性(失败重试复用同 id, begin 自清)
+    build_dir = begin_build(base, bid)
+    try: ...写 build_dir...
+    except: rmtree(build_dir); raise         # 清孤儿
+    commit_build(base, bid)                   # 发布主效果, 显式可见
+else:
+    build_dir = resolve_current(base)        # 增量原地, 不 commit
+    ...写 build_dir...
+```
+`new_build_id` 是 index_handoff 新增的确定性 helper(调用方传 commit/时间戳,不内嵌不确定源)。
