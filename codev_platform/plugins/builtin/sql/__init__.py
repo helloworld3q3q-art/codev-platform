@@ -130,6 +130,10 @@ from codev_platform.plugins.builtin.sql.xml_mapper import (
     _scan_xml_mapper,
     is_mybatis_mapper,
 )
+from codev_platform.plugins.builtin.sql.hbm import (
+    _scan_hbm,
+    is_hbm_mapping,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,13 +176,13 @@ class SqlPlugin(AnalyzerPlugin):
                 continue
             if _RE_JAVA_SQL_ANN.search(text):
                 return True
-        # 5) MyBatis XML Mapper (*.xml 含 <mapper ...> 根标签) 也算 DB 栈。
+        # 5) MyBatis XML Mapper (*.xml 含 <mapper>) 或 Hibernate HBM (*.xml 含 <hibernate-mapping>) 也算 DB 栈。
         for f in _stack_scan._iter_files(repo, (".xml",)):
             try:
                 text = f.read_text(encoding="utf-8")
             except OSError:
                 continue
-            if is_mybatis_mapper(text):
+            if is_mybatis_mapper(text) or is_hbm_mapping(text):
                 return True
         return False
 
@@ -248,6 +252,20 @@ class SqlPlugin(AnalyzerPlugin):
             # declarative 扫描漏它)。廉价短路: 仅含 'Table(' 的文件才 AST 解析。
             if "Table(" in src:
                 _absorb(*_scan_python_core_tables(src, rel, project_id))
+
+        # Pass 3.6: Hibernate HBM XML 表定义 (<class>/<joined-subclass> table=... -> db_table)。
+        # 在 DDL 定义相 (known_tables 计算前): 让后续 Java DML/MyBatis 访问边能连到真 hbm 表而非
+        # 建 inferred stub。纯 Hibernate 仓 (无 .sql/注解, 如 ideas-v2) 的整个 DB 层全靠这一 pass。
+        for f in _stack_scan._iter_files(repo, (".xml",)):
+            try:
+                src = f.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.warning("read fail %s: %s", f, exc)
+                continue
+            rel = _stack_scan._rel(f, repo)
+            if _is_test_path(rel) or not is_hbm_mapping(src):
+                continue
+            _absorb(*_scan_hbm(src, rel, project_id))
 
         # Pass 4: .py DML 读写血缘 —— **必须在所有 DDL 之后** (known_tables 完整, 才能
         # 区分"已定义表 (连边)"与"未定义表 (建 inferred stub)", 不会用 stub 覆盖真表)。

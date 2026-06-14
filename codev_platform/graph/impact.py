@@ -211,6 +211,20 @@ def _resolve(g: ImpactGraph, ref: str, kind: str | None) -> tuple[GraphNode | No
         return matches[0], []
     if len(matches) > 1:
         return None, matches  # 歧义
+    # 实体类名 → 表 fallback (ORM 映射桥): 人/agent 自然用**实体类名** (OmsInboundOrder) 指代表,
+    # 而库里是表名 (OMS_INBOUND_ORDER)。db_table 节点 meta["entity_class"] 由 ORM 抽取器 (hbm /
+    # mybatis-plus) 写入, 名字未命中时据此把类名解析到表节点 (根治"拿类名查影响面 found:false")。
+    if kind in (None, NodeKind.DB_TABLE.value):
+        low = ref.strip().lower()
+        by_entity = [
+            n for n in g.nodes.values()
+            if n.kind == NodeKind.DB_TABLE.value
+            and str((n.meta or {}).get("entity_class") or "").lower() == low
+        ]
+        if len(by_entity) == 1:
+            return by_entity[0], []
+        if len(by_entity) > 1:
+            return None, by_entity  # 多实体映射同名 (罕见) → 歧义, 让调用方用表名/id 消歧
     return None, []
 
 

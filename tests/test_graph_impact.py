@@ -66,6 +66,47 @@ def test_find_table_usage_by_name(conn):
     assert ids == {_EP, _FN, _FE}
 
 
+@pytest.fixture
+def conn_entity(tmp_path):
+    """db_table 节点带 meta.entity_class (ORM 抽取器写入), 验"拿实体类名查影响面"桥。"""
+    pid = "e"
+    c = open_store(pid, path=tmp_path / "e.sqlite")
+    tb = f"{pid}:db_table:oms_inbound_order"
+    fn = f"{pid}:backend_function:repo.java:saveInbound"
+    nodes = [
+        GraphNode(id=tb, kind=NodeKind.DB_TABLE.value, name="OMS_INBOUND_ORDER",
+                  project_id=pid, meta={"source": "hibernate-hbm", "entity_class": "OmsInboundOrder"}),
+        GraphNode(id=fn, kind=NodeKind.BACKEND_FUNCTION.value, name="saveInbound", project_id=pid,
+                  file="repo.java"),
+    ]
+    edges = [GraphEdge(source=fn, target=tb, kind=EdgeKind.WRITES_TABLE.value)]
+    c.upsert_result(pid, AnalyzerResult(nodes=nodes, edges=edges, plugin="test"))
+    return c, pid, tb, fn
+
+
+def test_table_usage_resolves_by_entity_class(conn_entity):
+    """拿**实体类名** OmsInboundOrder (非表名) 查 table_usage → 经 meta.entity_class 解析到表。"""
+    c, pid, tb, fn = conn_entity
+    r = find_table_usage(c, pid, "OmsInboundOrder")
+    assert r["found"] and r["table"]["id"] == tb
+    ids = {n["id"] for layer in r["usage"]["byLayer"].values() for n in layer}
+    assert fn in ids
+
+
+def test_find_impact_resolves_by_entity_class(conn_entity):
+    """find_impact 拿实体类名也能起步 (同一 _resolve 桥, 根治 ideas-v2 found:false)。"""
+    c, pid, tb, fn = conn_entity
+    r = find_impact(c, pid, "OmsInboundOrder")
+    assert r["found"] and r["target"]["id"] == tb
+    assert fn in {n["id"] for layer in r["impact"]["byLayer"].values() for n in layer}
+
+
+def test_real_table_name_still_resolves(conn_entity):
+    """桥不破原行为: 真表名 OMS_INBOUND_ORDER 仍直接命中 (entity fallback 只在名字未命中时)。"""
+    c, pid, tb, _fn = conn_entity
+    assert find_table_usage(c, pid, "oms_inbound_order")["table"]["id"] == tb
+
+
 def test_find_impacted_pages_transitive(tmp_path):
     # 前端依赖图: page --imports--> barrel --imports--> PermissionButton。
     # 改 PermissionButton, 反向(谁 import 它, 含传递)只取 is_page 模块 = 受影响页面。
