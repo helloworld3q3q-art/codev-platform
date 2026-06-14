@@ -72,3 +72,28 @@ assistant 气泡挂 `contentRender: renderMarkdown` 返回 `<XMarkdown>`(**JSX �
 
 ## 结论
 `/agent` 这条线闭环:**逐字打字 ✓ / 工具步实时 ToolFlow ✓ / 不超时 ✓ / markdown 最终渲染 ✓ / 高度铺满 ✓**。两个真 bug(contextvar 跨线程、contentRender 关闭原生 typing)都不在用户最初怀疑的 proxy —— 实测与读源码定位,胜过对着现象/参考项目猜。
+
+---
+
+# 续(同日晚)—— roadmap 收尾大轮:atomic handoff 交付 + 残项数据驱证伪 + Phase 8 收口
+
+> 从"roadmap 还剩什么"出发, 把代码智能平台线逐项用真实数据证实做/不做。commit 链
+> `821cb37`(handoff 代码)→`32bfb2d`(handoff 真机验证记录)→`4fa4266`(latency gate)。全程
+> measure-first + 多轮三兄弟对抗面板, 守"判做前证实理由 / 不堆码 / 不写未来代码"。
+
+## 八、Phase 1 atomic handoff 交付上线(多机 arc 唯一真需求)
+两轮三兄弟面板(YAGNI/架构纯度/多机 ROI)纠正切片方向(**砍 depends_on 排序, atomic handoff 才是刚需**)+ 否决 context manager(commit 是发布主效果不该藏 + code_vec 已有 try/finally 锁再套 CM 嵌套打架)+ 抓 3 真漏洞。落地 blue-green 双缓冲(`core/index_handoff.py` 纯核 + docs/code_vec 两库 writer/reader 显式编排), full→side build+原子切 pointer, 增量原地, reader 走 `resolve_current`(无 pointer 退 base 零迁移)。**WSL 真机验证全过**: 2057 chunk 真嵌入建 builds/+current.json、reader 读到 side、SIGKILL 崩溃 current 不变 reader 读旧不撞半成品、gc keep、code_vec 探活修复。重启 3 服务上线(向后兼容, 下次 full rebuild 激活)。详见 [`phase1-atomic-handoff-plan-2026-06-14.md`](phase1-atomic-handoff-plan-2026-06-14.md)。
+
+## 九、残项逐个数据驱动证伪(不盲目堆代码)
+- **df 磁盘预检**: 实测磁盘 **930G free** vs 最大库 1.6G(×3=5G, 占 0.5%)→ 纯 YAGNI, 不做, 记触发条件(磁盘<库×3)。
+- **多 reader keep 调优**: 多机第二台**未部署**(单机 WSL 模拟)→ config 化 keep 无真实消费方=未接线 flag, 不做。
+- **phantom 库 bug**: 发现 `code_vec/入库订单 列表 InboundOrder list/`(中文 query 当 project_id 建的空库)。查根因=reader 在 **fs 探活优化前**无 manifest 仍开 PersistentClient 副作用建空库; 现 fs 探活(无 manifest 早返回)+ handoff 改动已根治(实测假 pid `dir_created False`)。清理遗留库, **判无需改码**(根因已修 + 生产入口 pid 来自路由 + 加校验 YAGNI)。
+
+## 十、Phase 8 响应性能收口(measure-first)
+- **实测延迟**: 近 7 天 100 查询总 P50 337ms / **P95 4024ms < 8s budget** → 达标。
+- **cache 层判 YAGNI**: 在 budget 内无热点, cache 失效复杂度不值。
+- **vector 长尾诊断**: P50 152ms 但 P95 2660ms(17×), **96% 是 ideas-v2 大库**, 双峰跨多时段 = GPU 争用特征。根因=query 嵌入走 remote /embed 的**串行 GPU 信号量**(8GB 卡)与索引/search_docs 争用。**硬件约束非代码问题**, 上云大卡自然解, 不堆代码。
+- **latency budget gate 交付**(`4fa4266`): 复用 `recall_latency_report` 加纯函数 `check_latency_budget` + `recall-stats --budget-p95-ms` 可选 flag(超标非零退出, 复用 graph audit gate 范式)。**可选非强制**(latency 受 GPU 负载波动, 不硬挂 pre-push 避免 flaky)。5 单测 + WSL 真机验证(8000 pass exit0 / 2000 fail exit1)。
+
+## 十一、收口判定
+代码智能平台线**整体到平台期**: 所有 trigger-gated 残项逐个用真实数据证实"现在不该做"(磁盘探测/延迟实测/多机未部署), 唯一真需求 atomic handoff 已交付。真正还有价值的只剩 **Phase 10 治理产品化**(需业务仓接入触发)。主线转多机/多组织 arc。

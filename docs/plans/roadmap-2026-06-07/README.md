@@ -51,18 +51,20 @@
 | Phase | 真实状态(代码核实) | 证据 |
 |---|---|---|
 | 0 评测基线 | ✅ 做完 | `eval/suites/` 多 suite + golden set |
-| 1 IndexManifest | 🟡 MVP 做完 | `index_manifest.py`(BuildRecord)+ `index status` CLI + web 端点 + dashboard 卡。**重型 DAG/atomic handoff/parser_ir 未做** |
+| 1 IndexManifest + atomic handoff | 🟡 MVP + handoff 做完 | `index_manifest.py` MVP + **atomic handoff(blue-green 双缓冲)2026-06-14 交付上线**(`core/index_handoff.py` + docs/code_vec 两库 writer/reader, WSL 真机 SIGKILL 验过, 见 [`phase1-atomic-handoff-plan-2026-06-14.md`](phase1-atomic-handoff-plan-2026-06-14.md))。**DAG 砍(YAGNI)/ df 预检·keep 调优实测无压力不做(磁盘 930G free + 多机未部署)/ parser_ir 未做** |
 | **2 统一 IR 解析引擎** | ❌ **完全未启动** | codegraph 查无 IR 归一层(只命中前端 `unifiedgraph` 可视化页)。被 Phase 9 插件协议族替代, 刻意不建 |
 | 3 provenance/审计/冲突 | ✅ 主体做完 | `stamp_provenance` + `graph/audit.py` + `edge_resolve.py` 冲突消解(`910ea21`)。`source_line`/`index_manifest_id` 落每边判低 ROI 冗余跳过 |
 | **4 社区检测** | ✅ **做完**(README 旧写"否") | `graph/community.py:detect_communities` + `CommunityAnalyzer`(已注册)+ 2 MCP 工具; 实时图谱 34 社区 |
 | **5 路径评分** | ✅ 做完(README 旧写"未") | `find_impact_paths` + `impact.py:_KIND_WEIGHT` + 深度衰减。社区因子 gate 默认关 / 新鲜度因子未做(数据不现成) |
 | 6 联合召回 | ✅ 做完 | `recall/{fusion,service,weights}` + vector lane + reranker(默认关); bm25/memory 刻意 drop |
 | 7 Query Planner | ✅ 做完 | keyword planner 上线 + LLM planner 默认关(双否证伪)+ e2e eval E1-E4 |
-| 8 响应性能/可观测 | 🟡 观测层做完 | `recall/observability.py:recall_latency_report` + `recall-stats` CLI + token 用量看板 + `codegraph_trace`。**latency budget/cache 等广义延迟优化未做** |
+| 8 响应性能/可观测 | ✅ 主体做完(measure-first 收口) | 观测层 + SSE streaming + token 看板 + `codegraph_trace` + **latency budget gate(`check_latency_budget` + `recall-stats --budget-p95-ms`, 2026-06-14 真机验过)**。**cache 层实测 P95 4s<8s 判 YAGNI; vector 长尾诊断=ideas-v2 大库 8GB GPU 争用硬约束(上云大卡解, 非代码问题)** |
 | **9 多语言 adapter** | ✅ 框架做完(README 旧写"未") | `plugins/capabilities.py:describe_capabilities` + `ownership.py:kind_owners`(produces 派生)。新栈(Node/Angular/.NET full)按需补 |
 | 10 治理产品化 | 🟡 ~25% | CLI(`index status`/`graph audit`/`plugins list`)+ dashboard 卡有; **业务仓接入指南/adapter 开发指南/治理看板未做** |
 
-**真正"还没做"的口径**:① 完全没建 = **Phase 2 统一 IR**(刻意, 插件范式替代);② 只差重型部分 = Phase 1(DAG)/ Phase 8(延迟优化)/ Phase 10(治理产品化);③ 刻意跳过 = Phase 3 残留(低 ROI)。**无"想做却拖着"的活债** —— 全是按真实需求触发的范围决策。代码状态比旧 README 更完整, 不是更欠。
+**真正"还没做"的口径(2026-06-14 收口后)**:① 完全没建 = **Phase 2 统一 IR**(刻意, 插件范式替代);② 唯一有真实价值潜力 = **Phase 10 治理产品化**(~25%, 需"第二个业务仓接入"真实触发);③ 实测/数据驱动判不做 = Phase 1 DAG(YAGNI)·df 预检·keep 调优(磁盘 930G free + 多机未部署)/ Phase 8 cache(P95 4s<8s 达标)/ Phase 3 source_line(低 ROI)/ vector 长尾(8GB GPU 硬约束, 上云解)。**无"想做却拖着"的活债**。
+
+> **2026-06-14 收口**:代码智能平台线把所有 trigger-gated 残项**逐个用真实数据证实"现在不该做"**(磁盘探测/延迟实测/多机未部署),唯一真需求 **atomic handoff 已交付上线**, Phase 8 latency gate 补上。这条线判定**整体到平台期**。主线已转多机/多组织服务器 arc。详见 [`daily-summary-2026-06-14.md`](daily-summary-2026-06-14.md)。
 
 ## 背景
 
