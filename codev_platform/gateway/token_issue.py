@@ -10,6 +10,41 @@ import secrets
 import time
 from typing import Any
 
+# 时长单位 → 秒(CLI --expires / web expires 共用,见 parse_duration)。
+_DURATION_UNITS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+
+
+def parse_duration(spec: str | None) -> int | None:
+    """时长串 → 秒(纯函数,CLI + web 共用)。"30d"/"12h"/"90m"/"45s" → 秒;""/None → None(永久)。
+
+    单位 d/h/m/s,前缀为正整数。非法格式抛 ValueError(调用方决定提示)。
+    """
+    if spec is None:
+        return None
+    s = spec.strip().lower()
+    if s == "":
+        return None
+    unit = s[-1]
+    if unit not in _DURATION_UNITS:
+        raise ValueError(f"非法时长 {spec!r}: 单位须为 d/h/m/s (如 30d/12h/90m)")
+    num = s[:-1]
+    if not num.isdigit() or int(num) <= 0:
+        raise ValueError(f"非法时长 {spec!r}: 须为正整数 + 单位 (如 30d)")
+    return int(num) * _DURATION_UNITS[unit]
+
+
+def coerce_projects(raw: str | None) -> Any:
+    """项目白名单串 → ACL 值(纯函数,CLI + web 共用)。
+
+    `"*"` → `"*"`(全部);`"pid1,pid2"` → `["pid1", "pid2"]`;`None`/空/全空白 → `None`(无项目权,
+    安全默认)。调用方据返回 `None` 决定是否提示"无项目权"。
+    """
+    if raw is None or raw.strip() == "":
+        return None
+    if raw.strip() == "*":
+        return "*"
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
 
 def issue_token(
     store: Any, user_id: str, org_id: str, *,

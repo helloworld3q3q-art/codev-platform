@@ -23,6 +23,23 @@ from sqlalchemy.engine import Engine
 from codev_platform.web.db import tables
 
 
+def build_token_store(cfg: dict | None = None) -> "PgTokenStore":
+    """从 config `memory.pg_dsn`(或 env `CODEV_PLATFORM_MEMORY_DSN`)构造 PgTokenStore。
+
+    CLI(`gateway pg-token`)与 web(tokens 路由)共用的单一构造入口 —— dsn 真值源不复制。
+    dsn 未配 → ValueError(调用方转友好错 / PlatformError)。构造不连库(engine lazy)。
+    """
+    import os
+
+    from codev_platform.core.config import get, load_config
+
+    _cfg = cfg if cfg is not None else load_config()
+    dsn = get(_cfg, "memory.pg_dsn", None) or os.environ.get("CODEV_PLATFORM_MEMORY_DSN")
+    if not dsn:
+        raise ValueError("PG token store 需 memory.pg_dsn (或 env CODEV_PLATFORM_MEMORY_DSN)")
+    return PgTokenStore(dsn, read_dsn=get(_cfg, "memory.pg_dsn_read", None))
+
+
 class PgTokenStore:
     """`agent_tokens` 表的 PG 存储。读写分离接缝同 RbacStore(写主库 / 读副本)。
 

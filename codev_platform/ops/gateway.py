@@ -20,6 +20,12 @@ import sys
 import time
 from pathlib import Path
 
+# 共享纯函数真值源(CLI + web tokens 路由共用,见 gateway/token_issue.py)。
+# parse_duration 在此 re-export 保持向后兼容(test_token_expiry 走 ops.gateway import)。
+from codev_platform.gateway.token_issue import coerce_projects, parse_duration
+
+__all__ = ["cmd_gateway", "register", "parse_duration", "coerce_projects"]
+
 
 def _out(msg: str = "") -> None:
     print(msg, flush=True)
@@ -27,28 +33,6 @@ def _out(msg: str = "") -> None:
 
 def _err(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
-
-
-_DURATION_UNITS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
-
-
-def parse_duration(spec: str | None) -> int | None:
-    """时长串 → 秒(纯函数)。"30d"/"12h"/"90m"/"45s" → 秒;""/None → None(永久)。
-
-    单位 d/h/m/s,前缀为正整数。非法格式抛 ValueError(调用方决定提示)。
-    """
-    if spec is None:
-        return None
-    s = spec.strip().lower()
-    if s == "":
-        return None
-    unit = s[-1]
-    if unit not in _DURATION_UNITS:
-        raise ValueError(f"非法时长 {spec!r}: 单位须为 d/h/m/s (如 30d/12h/90m)")
-    num = s[:-1]
-    if not num.isdigit() or int(num) <= 0:
-        raise ValueError(f"非法时长 {spec!r}: 须为正整数 + 单位 (如 30d)")
-    return int(num) * _DURATION_UNITS[unit]
 
 
 def _expires_disp(meta: dict, now: float) -> str:
@@ -66,22 +50,18 @@ def _expires_disp(meta: dict, now: float) -> str:
 
 
 def _pg_token_store():
-    """构造 PgTokenStore(config memory.pg_dsn); None(dsn 未配 / psycopg 缺)→ 打印指引, 调用方退非 0。
+    """构造 PgTokenStore(共用 build_token_store); None(dsn 未配 / psycopg 缺)→ 打印指引, 调用方退非 0。
 
     PG token 与 config token 的区别(为何另起一套): PG token→user 走库, 认证时 join users.status
     实时校验, web 禁用用户即失效; config token 是静态快照禁用不了。多 dev server 用 PG, 单机可用 config。
     """
-    from codev_platform.core.config import get, load_config
-    cfg = load_config()
-    import os
-    dsn = get(cfg, "memory.pg_dsn", None) or os.environ.get("CODEV_PLATFORM_MEMORY_DSN")
-    if not dsn:
+    from codev_platform.gateway.token_store_pg import build_token_store
+    try:
+        return build_token_store()
+    except ValueError:
         _err("FATAL: PG token 需 memory.pg_dsn (或 env CODEV_PLATFORM_MEMORY_DSN) + psycopg。")
         _err("  单机临时用可改走 config token: codev-platform gateway token-add <user> --projects '*'")
         return None
-    try:
-        from codev_platform.gateway.token_store_pg import PgTokenStore
-        return PgTokenStore(dsn, read_dsn=get(cfg, "memory.pg_dsn_read", None))
     except Exception as exc:  # noqa: BLE001 — 缺 psycopg / DSN 坏 → 友好退非 0, 不 raise
         _err(f"FATAL: PG token store 不可用: {type(exc).__name__}: {exc}")
         return None
@@ -97,14 +77,9 @@ def _cmd_pg_token(args: argparse.Namespace) -> int:
             if not args.arg:
                 _err("FATAL: pg-token issue 需 <user_id> (须先 codev-platform org add-user <user>)")
                 return 1
-            raw = args.projects
-            if raw is None or raw.strip() == "":
-                projects = None
+            projects = coerce_projects(args.projects)
+            if projects is None:
                 _out("WARN: 未指定 --projects: 此 token 无任何项目访问权 (用 --projects pid1,pid2 或 '*')")
-            elif raw.strip() == "*":
-                projects = "*"
-            else:
-                projects = [p.strip() for p in raw.split(",") if p.strip()]
             try:
                 ttl = parse_duration(getattr(args, "expires", None))
             except ValueError as exc:
@@ -191,15 +166,10 @@ def cmd_gateway(args: argparse.Namespace) -> int:
         toks = cfg.setdefault("gateway", {}).setdefault("tokens", {})
         # projects 白名单 (ACL 闸2 真值, 见 core/acl.py + gateway/auth.py):
         # "*" -> 全部; "pid1,pid2" -> list; 缺省/空 -> 不写 (安全默认: 无任何项目权)。
-        raw = args.projects
-        projects = None
-        if raw is None or raw.strip() == "":
+        projects = coerce_projects(args.projects)
+        if projects is None:
             _out("WARN: 未指定 --projects: token 模式下此 token 无任何项目访问权 "
                  "(用 --projects pid1,pid2 或 --projects '*')")
-        elif raw.strip() == "*":
-            projects = "*"
-        else:
-            projects = [p.strip() for p in raw.split(",") if p.strip()]
         try:
             ttl = parse_duration(getattr(args, "expires", None))
         except ValueError as exc:

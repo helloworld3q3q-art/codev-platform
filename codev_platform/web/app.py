@@ -22,6 +22,7 @@ from codev_platform.web.routes import (
     projects,
     recall,
     reports,
+    tokens,
     users,
 )
 
@@ -68,6 +69,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             enums.router,
             orgs.router,
             users.router,
+            tokens.router,
             projects.router,
             graph.router,
             jobs.router,
