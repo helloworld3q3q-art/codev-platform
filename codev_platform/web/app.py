@@ -61,6 +61,13 @@ def create_app(cfg: dict | None = None) -> FastAPI:
     from codev_platform.gateway import build_authenticator
     from codev_platform.web.security.session_authenticator import SessionAwareAuthenticator
 
+    # dev/test 放行 /openapi.json: 前端 codegen (pnpm run api) 免 token 拉 schema。
+    # prod 仍鉴权 (不对外暴露 API 全表结构)。schema 非业务数据, dev 放开不泄数据。
+    from codev_platform.core.config import get as _cfg_get
+    public_paths = set(_PUBLIC_PATHS)
+    if _cfg_get(_cfg, "deployment.mode", "dev") != "prod":
+        public_paths.add("/openapi.json")
+
     return build_app(
         title="codev-platform web",
         routers=[
@@ -80,7 +87,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             memory.router,
             audit.router,
         ],
-        public_paths=_PUBLIC_PATHS,
+        public_paths=public_paths,
         cfg=_cfg,
         authenticator=SessionAwareAuthenticator(build_authenticator(_cfg)),
     )
