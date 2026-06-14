@@ -170,3 +170,20 @@ else:
     ...写 build_dir...
 ```
 `new_build_id` 是 index_handoff 新增的确定性 helper(调用方传 commit/时间戳,不内嵌不确定源)。
+
+## 十、真机验证通过(2026-06-14,WSL 对标云生产)
+
+阶段 2+3 实现(commit `821cb37`)后 WSL 真机验证,全过:
+
+| 验证 | 方式 | 结果 |
+|---|---|---|
+| docs full handoff | 临时 `PLATFORM_DATA_DIR` 真跑 `indexer.index(force=True)`(141 docs / 2057 chunk CPU 真嵌入)| `builds/<821cb37...-ts>/` + `current.json` 建; `READER_COUNT 2057`(reader 经 `chroma_docs_data_dir`→`resolve_current` 真读到 side build); integrity `count==manifest` |
+| docs 增量原地 | 同库再跑 `index(force=False)` | `INCR 0 0` + resolve 同一 build(不切库)|
+| **SIGKILL 崩溃** | 真 chroma 库: build A commit → build B 写半 **不 commit**(模拟 kill)| `resolve_current==A` / `READER count==2`(读旧 A 不撞 B 半成品)/ B 孤儿在 builds 但 current≠B |
+| gc keep=2 | build C commit 后 `gc_builds(keep=2)` | 删最老 A, 保 B+C, `current==C` |
+| code_vec reader 探活修复 | build X commit(manifest 进 build dir)| `resolve_current(base)/_MANIFEST_NAME` 命中(修复); base 根/manifest 不存在(旧 bug 会恒空返, 证实漏洞)|
+| WSL 环境 | `.venv` import + 63 单测 | 全过 |
+
+writer code_vec 与 docs **同构**(同一套核 + 同样显式编排),已单测覆盖 + docs 真机证机制等价。
+
+**待上线**(reader 新代码在线上 daemon 未生效, 向后兼容故无害): 重启 `codev-mcp-platform-docs`(docs reader)+ `codev-reindex`(worker 跑新 writer)+ `codev-agent`(code_vec reader)。现有库无 pointer → reader `resolve_current` 退 base = 现状行为; worker 下次 full rebuild 才产 pointer + builds/, handoff 自然生效。
