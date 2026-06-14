@@ -41,3 +41,14 @@ def test_issue_token_default_no_project_access():
     store = _FakeStore()
     issue_token(store, "u", "o")
     assert store.calls[0]["projects"] is None   # 无项目权 = 安全默认
+
+
+def test_issue_token_rejects_empty_org_or_user():
+    import pytest
+    from codev_platform.gateway.token_issue import issue_token
+    store = _FakeStore()
+    with pytest.raises(ValueError):
+        issue_token(store, "u", "")     # 空 org_id → 越权纵深拦
+    with pytest.raises(ValueError):
+        issue_token(store, "", "o")
+    assert store.calls == []            # 都没落库

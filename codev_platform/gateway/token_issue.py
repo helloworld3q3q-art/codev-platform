@@ -21,6 +21,10 @@ def issue_token(
     - `projects`: `"*"` | `list[str]` | `None`(None = 无项目权,安全默认)。
     - `ttl_seconds`: `None` = 永久;否则过期戳 = now + ttl。
     """
+    # 防御纵深: org_id/user_id 非空(org_id 须来自认证身份, 空串落库会让 token 绑到空 org → 越权面)。
+    # 真正的"org_id 取 session 非 client body"硬护栏在 web 路由层, 此处只兜底拦空。
+    if not user_id or not org_id:
+        raise ValueError("issue_token: user_id 与 org_id 均不可为空 (org_id 须取自认证身份)")
     from codev_platform.gateway.auth import token_hash
     tok = secrets.token_urlsafe(32)
     exp = time.time() + ttl_seconds if ttl_seconds is not None else None

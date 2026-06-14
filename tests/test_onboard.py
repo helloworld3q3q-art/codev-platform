@@ -145,3 +145,19 @@ def test_onboard_custom_name_and_org(tmp_path, monkeypatch):
     assert cfg_store["projects"]["proj2"]["org_id"] == "acme"
     meta = json.loads((meta_root / "proj2" / "meta.json").read_text(encoding="utf-8"))
     assert meta["display_name"] == "My Project"
+
+
+def test_onboard_warns_when_sync_incomplete(tmp_path, monkeypatch, capsys):
+    # sync 返 False(源缺失)→ onboard 显式 WARN + footer 不再无条件建议提交未同步的 rules(审计 B2 修复)。
+    repo = tmp_path / "r"
+    repo.mkdir()
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {"projects": {}})
+    monkeypatch.setattr("codev_platform.core.config.save_config", lambda c: None)
+    monkeypatch.setattr("codev_platform.cli.PLATFORM_META_PROJECTS", tmp_path / "meta")
+    import codev_platform.cli_cmds.sync as sync_mod
+    monkeypatch.setattr(sync_mod, "sync_resources_to", lambda r, **kw: False)
+    rc = cmd_onboard(_args("p", repo))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "未同步" in out                                              # 显式警告(不再静默报全成功)
+    assert "project.json,rules,skills,hooks,settings.json" not in out   # footer 不用"全成功"版

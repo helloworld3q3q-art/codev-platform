@@ -105,14 +105,14 @@ def cmd_onboard(args: argparse.Namespace) -> int:
     cfg = load_config()
     cfg.setdefault("projects", {})[code] = {"repo_path": str(repo), "org_id": org}
     save_config(cfg)
-    _out(f"[1/6] config projects.{code} 已写 (repo_path + org_id={org})")
+    _out(f"[1/8] config projects.{code} 已写 (repo_path + org_id={org})")
 
     # --- 2. <repo>/.claude/project.json(graph ingest 据此解析 project_id, 缺则静默跳过)---
     pj = repo / ".claude" / "project.json"
     pj.parent.mkdir(parents=True, exist_ok=True)
     pj.write_text(json.dumps({"project_id": code, "display_name": name},
                              ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    _out("[2/6] .claude/project.json 已写 (graph ingest project_id 真值源)")
+    _out("[2/8] .claude/project.json 已写 (graph ingest project_id 真值源)")
 
     # --- 3. platform_meta/projects/<code>/meta.json(list-projects / web 可见)---
     from codev_platform.cli import PLATFORM_META_PROJECTS
@@ -124,7 +124,7 @@ def cmd_onboard(args: argparse.Namespace) -> int:
         meta["repo_url"] = url
     (meta_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    _out("[3/6] meta.json 已写 (list-projects / web 列表可见)")
+    _out("[3/8] meta.json 已写 (list-projects / web 列表可见)")
 
     # --- 4. RBAC(软步: 无 PG / 单机 passthrough 跳过, 不阻断)---
     try:
@@ -140,10 +140,13 @@ def cmd_onboard(args: argparse.Namespace) -> int:
         _out(f"[4/8] RBAC: 跳过 (不可用: {type(exc).__name__})")
 
     # --- 5. sync rules/skills/hooks 进业务仓 .claude/(软步: 资源缺失只 warn 不阻断)---
+    synced_ok = False
     try:
         from codev_platform.cli_cmds.sync import sync_resources_to
         _out("[5/8] sync rules/skills/hooks → 业务仓 .claude/:")
-        sync_resources_to(repo, dry_run=False)
+        synced_ok = sync_resources_to(repo, dry_run=False)
+        if not synced_ok:   # 读返回值: 源目录缺失时 _sync_dir 已喷 FATAL, 这里显式 WARN(否则收尾误报全成功)
+            _out("  WARN: 部分资源源目录缺失(见上 FATAL), .claude/ 未完整同步 — 检查平台 resources/{rules,skills,hooks}")
     except Exception as exc:  # noqa: BLE001 — 同步失败不阻断接入
         _out(f"[5/8] sync: 跳过 (失败: {type(exc).__name__})")
 
@@ -197,7 +200,9 @@ def cmd_onboard(args: argparse.Namespace) -> int:
     _out("")
     _out(f"OK: {code} 接入完成。")
     _out("  下一步:")
-    _out("  - **把 .claude/{project.json,rules,skills,hooks,settings.json} + .codegraph/config.json"
+    _claude_set = ("project.json,rules,skills,hooks,settings.json" if synced_ok
+                   else "project.json (rules/skills/hooks 未同步全, 见上 WARN)")
+    _out(f"  - **把 .claude/{{{_claude_set}}} + .codegraph/config.json"
          " + .gitignore + .mcp.json 提交进仓**(配置随 git 走, 别人/重 clone 也带得上)")
     _out("  - `reindex-queue status` 看索引进度")
     _out("  - codegraph 索引完后让端点认新项目: `serve-mcp start`(或重启 codegraph 端点)")

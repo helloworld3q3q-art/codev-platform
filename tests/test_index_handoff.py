@@ -169,3 +169,23 @@ def test_chroma_docs_data_dir_follows_handoff(tmp_path, monkeypatch):
     ih.begin_build(base, "b1")
     ih.commit_build(base, "b1")
     assert chroma_docs_data_dir(pid) == base / "builds" / "b1"
+
+
+def test_gc_builds_fail_soft_when_rmtree_blocked(tmp_path, monkeypatch):
+    # Windows reader 句柄占用 → rmtree OSError → gc 跳过不抛(不阻断重建), 删不掉的留待下次回收。
+    import shutil
+    ih.begin_build(tmp_path, "old")
+    ih.begin_build(tmp_path, "new")
+    ih.commit_build(tmp_path, "new")
+    real = shutil.rmtree
+
+    def _boom(p, *a, **k):
+        if "old" in str(p):
+            raise OSError("WinError 32: file in use")
+        return real(p, *a, **k)
+
+    monkeypatch.setattr(shutil, "rmtree", _boom)
+    removed = ih.gc_builds(tmp_path, keep=1)               # 试删 old → OSError → 跳过, 不抛
+    assert "old" not in removed                            # 删不掉的不计入 removed
+    assert (tmp_path / "builds" / "old").is_dir()          # 仍在(待下次 gc / daemon 重启回收)
+    assert ih.resolve_current(tmp_path).name == "new"      # current 不受影响

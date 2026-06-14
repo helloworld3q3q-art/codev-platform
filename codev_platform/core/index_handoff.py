@@ -132,6 +132,12 @@ def gc_builds(base: Path, *, keep: int = 2) -> list[str]:
     for d in dirs:
         if d.name in survivors:
             continue
-        shutil.rmtree(d)
-        removed.append(d.name)
+        try:
+            shutil.rmtree(d)
+            removed.append(d.name)
+        except OSError:
+            # Windows: reader(daemon)仍持旧 build 的 sqlite 句柄 → rmtree PermissionError(WinError 32)。
+            # **fail-soft 跳过**(下次 gc 再回收, 或 daemon 重启释放句柄后): gc 是清理非关键路径,
+            # 绝不能因删不掉旧 build 而抛出阻断本次重建(commit_build 已成功, current 已切)。
+            pass
     return removed
