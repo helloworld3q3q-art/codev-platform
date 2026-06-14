@@ -14,6 +14,7 @@
 | [anti-false-premise-plan-2026-06-10.md](anti-false-premise-plan-2026-06-10.md) | 下一轮: agent 抗错误前提幻觉(validate-first 分期 A 验证→B 机制→C measure; 不重蹈 rule9)| 🔚 Phase A 证伪结案(停轮) |
 | [tiered-domain-labeler-plan-2026-06-11.md](tiered-domain-labeler-plan-2026-06-11.md) | 按客户分档业务域标注(规则/hybrid/llm); 8 视角面板 + 真图谱实测 + 设计 + 触发条件 | 🧊 搁置待做(触发: 免费/离线档需无 LLM 域名) |
 | [loop-cost-optimization-plan-2026-06-11.md](loop-cost-optimization-plan-2026-06-11.md) | agent loop 成本优化(云账单大头); 实测成本结构(miss 67%+out 25%, 随步数超线性)+ 符号级多跳工具(省 60-70% 且修多跳质量弱点)+ per-档 max_steps + A/B CI 验证 | ✅ 残留已清(2026-06-12: codegraph_trace/紧凑JSON/read_file窗口/per-租户计量/max_steps cap 机制); 激进 cap 值待 A/B |
+| [phase4-community-detection-plan-2026-06-13.md](phase4-community-detection-plan-2026-06-13.md) | Phase 4 结构社区检测实现 plan: 确定性 Louvain(纯 stdlib, 复用 Analyzer 协议)+ COMMUNITY 软层 + `find_node_community`/`list_communities` 2 MCP 工具 + Phase 5 社区因子 gate 默认关 | ✅ 已落地(2026-06-13 `907088a`→`f5020ec`: `graph/community.py` + `CommunityAnalyzer`; 实测 codev 34 / openclaw 60 / ideas 84 社区, L1/L3/L4 全链路验过) |
 
 > 多仓 operationId 契约桥课题独立成轨, 见 [`../roadmap-2026-06-10/`](../roadmap-2026-06-10/)。
 >
@@ -33,13 +34,35 @@
 | **Phase 6 联合召回(2026-06-09 续)** | 跨 lane 代码融合召回: `weighted_rrf` 核心(加权 RRF + 可解释)→ service 融 graph + codegraph(免 daemon, 每 lane fail-soft)→ planner 自动调权 → 多词分词 + 相关性分级(精确>前缀>子串)+ codegraph OR 模式 + 测试文件降权。**三消费者**: MCP 工具 `recall_code`(IDE agent)+ web 端点 `/api/v1/recall/code` + agent 工具 `code_recall`(chat) | `codev_platform/recall/{fusion,service,weights}.py` + `graph/{impact,mcp_server}.py` + `web/{routes,schemas}/recall.py` + `agent/tools/recall.py` + `eval` `recall` suite | 真机 eval: **MRR 0.357→0.917 / nDCG 0.269→0.858**; planner 权重 A/B 验证 +0.167; 单测全绿。**剩余(已清, 2026-06-11)**: vector lane ✅上线+打磨+worker 自动刷新 / reranker ✅建+默认关 / bm25 ✅drop(被 codegraph-FTS+vector 夹冗余) / memory ✅不进核心(跨 org 红线) |
 | **soft-quality 软标签诊断(2026-06-09)** | 与 audit(结构)/ eval(对 golden 准确率)正交的第三轴: A1/A2 软标签**健康度**(分布/覆盖/giant-cluster 退化), 无需 golden 任意项目可跑。CLI `graph soft-quality` + web `/api/v1/graph/soft-quality` + 平台 `health --all`。**首跑抓修双 bug**: A2 repository 64% = ①soft-quality membership 口径假阳性(Fix-A 按文件)②analyzer 给 db 节点赋代码角色(Fix-B 排除 db_table/db_column), 真实重建验证 | `codev_platform/graph/soft_quality.py` + `analyzers/architecture_layer.py` + `cli.py` + `web/routes/graph.py` + `platform_status.py` | 4 轮取证 + 3 专家面板定论; worker 重建后 `find_arch_role(列)`→空、plays_role 2263→1111、✅ healthy |
 
-**未做(刻意, plan §六纪律, trigger-gated 非欠债)**: Phase 1 重型(DAG 编排/atomic handoff/dashboard/count 回填)/ Phase 3 重型剩余(`source_line`/`index_manifest_id` 落每边 + 同 endpoint 多 parser **冲突消解**)/ Phase 2 统一 IR 解析引擎 / Phase 4 社区检测(实测复核: Louvain 可行但 A1 已 95% 覆盖业务域→无需求驱动否)/ Phase 5 path scoring(find_impact_paths 数据已出)/ Phase 8 响应性能(可观测层已做, 延迟优化未)/ Phase 9 多语言 adapter / Phase 10 治理。按真实业务需求触发再做。
-**已收口/证伪(不再做)**: Phase 6 vector lane/reranker ✅交付(bm25 drop / memory 不进核心);Phase 7 完整版 ✅收口(keyword planner 上线 / LLM planner 双否证伪 / agent e2e eval 已落);anti-false-premise Phase A 证伪结案。
+> ⚠️ 此表是 2026-06-08 快照。06-09~13 又交付了 Phase 3(冲突消解)/4(社区)/5(路径评分)/8(观测层)/9(adapter)—— **最新逐 Phase 状态以下方「状态对账(2026-06-14)」为准**。
+
+**未做(刻意, plan §六纪律, trigger-gated 非欠债)**: Phase 2 统一 IR 解析引擎(完全未启动, 最重)/ Phase 1 重型(DAG 编排/atomic handoff/parser_ir/count 回填; MVP 已做)/ Phase 3 重型剩余(`source_line`/`index_manifest_id` 落每边; 判低 ROI 冗余)/ Phase 8 广义延迟优化(观测层已做, latency budget/cache 未)/ Phase 10 治理产品化(CLI/audit 已有, 业务仓接入指南/adapter 开发指南/治理看板未, ~25%)。按真实业务需求触发再做。
+**已收口/证伪(不再做)**: Phase 6 vector lane/reranker ✅交付(bm25 drop / memory 不进核心);Phase 7 完整版 ✅收口(keyword planner 上线 / LLM planner 双否证伪 / agent e2e eval 已落);anti-false-premise Phase A 证伪结案;Phase 5 社区因子 gate 默认关(待 find_impact_paths 真被实战用 + A/B)。
 
 ## 收尾状态(2026-06-12)
 
-**本 roadmap 基本"做完或刻意不做"**:代码智能层(eval/recall/planner/图谱)判定到**平台期**(连续证伪 3+ 假设, grounding 两模型两项目饱和)。真正"可做但未做"的 4 残项 2026-06-12 由 2 兄弟并行清完(前端 services.ts 清理 + 后端 loop-cost 残留;soft-quality 卡/impact-paths 可视化经核查早已存在=stale TODO)。剩余全是 trigger-gated 重型地基(Phase 2/4/8/9/10),按真需求触发。
+**本 roadmap 基本"做完或刻意不做"**:代码智能层(eval/recall/planner/图谱)判定到**平台期**(连续证伪 3+ 假设, grounding 两模型两项目饱和)。真正"可做但未做"的 4 残项 2026-06-12 由 2 兄弟并行清完(前端 services.ts 清理 + 后端 loop-cost 残留;soft-quality 卡/impact-paths 可视化经核查早已存在=stale TODO)。剩余 trigger-gated 重型地基按真需求触发(**06-13 又交付了 Phase 4/5/9, 见下方对账**)。
 **主线已转**:多机/多组织**服务器 arc**(部署服务器供多人多机连用)—— PgJobQueue + graph→PG(Stage A/B 已审已验)+ 多人 auth(token/?token=/onboarding CLI/双 store 厘清)。该 arc 见 [`multi-user-server-deploy-runbook-2026-06-12.md`](multi-user-server-deploy-runbook-2026-06-12.md) + daily-summary-2026-06-11/12 + 记忆 multi-machine-platform-arc。
+
+## 状态对账(2026-06-14 代码核实)
+
+> 上方两块状态停在 06-08/06-12, 把 06-13 才建的 Phase 4/5/8观测/9 仍列为"未做/否"。本块按**代码符号核实**(codegraph 查 `detect_communities`/`_KIND_WEIGHT`/`recall_latency_report`/`describe_capabilities` 等真实存在 + graph 实时 34 社区)逐 Phase 订正。
+
+| Phase | 真实状态(代码核实) | 证据 |
+|---|---|---|
+| 0 评测基线 | ✅ 做完 | `eval/suites/` 多 suite + golden set |
+| 1 IndexManifest | 🟡 MVP 做完 | `index_manifest.py`(BuildRecord)+ `index status` CLI + web 端点 + dashboard 卡。**重型 DAG/atomic handoff/parser_ir 未做** |
+| **2 统一 IR 解析引擎** | ❌ **完全未启动** | codegraph 查无 IR 归一层(只命中前端 `unifiedgraph` 可视化页)。被 Phase 9 插件协议族替代, 刻意不建 |
+| 3 provenance/审计/冲突 | ✅ 主体做完 | `stamp_provenance` + `graph/audit.py` + `edge_resolve.py` 冲突消解(`910ea21`)。`source_line`/`index_manifest_id` 落每边判低 ROI 冗余跳过 |
+| **4 社区检测** | ✅ **做完**(README 旧写"否") | `graph/community.py:detect_communities` + `CommunityAnalyzer`(已注册)+ 2 MCP 工具; 实时图谱 34 社区 |
+| **5 路径评分** | ✅ 做完(README 旧写"未") | `find_impact_paths` + `impact.py:_KIND_WEIGHT` + 深度衰减。社区因子 gate 默认关 / 新鲜度因子未做(数据不现成) |
+| 6 联合召回 | ✅ 做完 | `recall/{fusion,service,weights}` + vector lane + reranker(默认关); bm25/memory 刻意 drop |
+| 7 Query Planner | ✅ 做完 | keyword planner 上线 + LLM planner 默认关(双否证伪)+ e2e eval E1-E4 |
+| 8 响应性能/可观测 | 🟡 观测层做完 | `recall/observability.py:recall_latency_report` + `recall-stats` CLI + token 用量看板 + `codegraph_trace`。**latency budget/cache 等广义延迟优化未做** |
+| **9 多语言 adapter** | ✅ 框架做完(README 旧写"未") | `plugins/capabilities.py:describe_capabilities` + `ownership.py:kind_owners`(produces 派生)。新栈(Node/Angular/.NET full)按需补 |
+| 10 治理产品化 | 🟡 ~25% | CLI(`index status`/`graph audit`/`plugins list`)+ dashboard 卡有; **业务仓接入指南/adapter 开发指南/治理看板未做** |
+
+**真正"还没做"的口径**:① 完全没建 = **Phase 2 统一 IR**(刻意, 插件范式替代);② 只差重型部分 = Phase 1(DAG)/ Phase 8(延迟优化)/ Phase 10(治理产品化);③ 刻意跳过 = Phase 3 残留(低 ROI)。**无"想做却拖着"的活债** —— 全是按真实需求触发的范围决策。代码状态比旧 README 更完整, 不是更欠。
 
 ## 背景
 
