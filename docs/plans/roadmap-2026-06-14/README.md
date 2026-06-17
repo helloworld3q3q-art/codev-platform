@@ -12,6 +12,7 @@
 | [platform-productization-plan-2026-06-14.md](platform-productization-plan-2026-06-14.md) | 主 plan:P1 onboard / P2 多组织 web 签发 / P3 多仓多根索引 / P4 Phase 10 治理 | P1✅ P4✅ P2✅ P3 待 |
 | [daily-summary-2026-06-14.md](daily-summary-2026-06-14.md) | 产品化迭代 Day 1:onboard/治理/token 起步 + 贯穿教训"先核实避免重造" | 日报 |
 | [daily-summary-2026-06-15.md](daily-summary-2026-06-15.md) | Day 2:P2 token web 化收尾(后端路由+前端页)+ Hibernate HBM/HQL 图谱抽取(影响面根治:db_table 0→1117,实体类名→表桥) | 日报 |
+| [daily-summary-2026-06-17.md](daily-summary-2026-06-17.md) | 前端体验线:统一图谱/节点图谱大图渲染优化(批量渲染 draw call 5万→2、取景/标签修复、层级聚类球团、曲线边、Orbit 平移);共用 Graph3DCanvas 一处两页受益 | 日报 |
 
 ## 四项速览(优先级序)
 
