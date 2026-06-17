@@ -91,6 +91,18 @@ export function unifiedLayerOf(kind?: string): string {
   return KIND_LAYER[kind as UnifiedNodeKind] ?? '其他';
 }
 
+// 层级聚类偏移: 主链路三层沿 X 轴排开 (数据库 → 后端 → 前端), 每层聚成一个 3D 球团。
+// 文档/外部、其他 不参与 (返回 undefined → 自由力导)。复用 unifiedLayerOf 单一真值源。
+const CLUSTER_OFFSET: Record<string, number> = {
+  数据库: -1,
+  后端: 0,
+  前端: 1,
+};
+
+export function unifiedClusterOf(kind?: string): number | undefined {
+  return CLUSTER_OFFSET[unifiedLayerOf(kind)];
+}
+
 // 边 kind → 中文标签 (节点详情面板里分组展示关联节点)。
 export const EDGE_LABEL: Record<string, string> = {
   contains: '包含',
