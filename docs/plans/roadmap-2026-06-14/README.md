@@ -13,6 +13,7 @@
 | [daily-summary-2026-06-14.md](daily-summary-2026-06-14.md) | 产品化迭代 Day 1:onboard/治理/token 起步 + 贯穿教训"先核实避免重造" | 日报 |
 | [daily-summary-2026-06-15.md](daily-summary-2026-06-15.md) | Day 2:P2 token web 化收尾(后端路由+前端页)+ Hibernate HBM/HQL 图谱抽取(影响面根治:db_table 0→1117,实体类名→表桥) | 日报 |
 | [daily-summary-2026-06-17.md](daily-summary-2026-06-17.md) | 前端体验线:统一图谱/节点图谱大图渲染优化(批量渲染 draw call 5万→2、取景/标签修复、层级聚类球团、曲线边、Orbit 平移);共用 Graph3DCanvas 一处两页受益 | 日报 |
+| [daily-summary-2026-06-21.md](daily-summary-2026-06-21.md) | 运维事故线:platform-docs MCP CUDA daemon 故障修复(cudaErrorUnknown 上下文损坏致进程假活/双绿但搜索全死);两步闭环 restart daemon + 重启客户端;教训"进程绿灯≠服务可用,判活必实调" | 日报 |
 
 ## 四项速览(优先级序)
 
