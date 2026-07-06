@@ -12,6 +12,7 @@ from typing import Any
 
 from codev_platform.agent.brain import ToolResult
 from codev_platform.agent.tools.base import Tool
+from codev_platform.core.repos import RepoSpec, project_repo_specs
 
 _MAX_ROWS = 20
 
@@ -57,6 +58,35 @@ def _find_db(project_id: str | None = None) -> Path | None:
     return None
 
 
+def _find_dbs(project_id: str | None = None) -> list[tuple[RepoSpec, Path]]:
+    """定位一个逻辑项目的全部 codegraph.db。主仓保持旧路径语义, extra repo 走 repo/.codegraph。"""
+    if project_id:
+        out: list[tuple[RepoSpec, Path]] = []
+        try:
+            specs = project_repo_specs(project_id)
+        except Exception:
+            specs = []
+        for spec in specs:
+            cand = spec.codegraph_db
+            if cand.is_file():
+                out.append((spec, cand))
+                continue
+            if spec.is_main:
+                # 兼容集中路径但业务仓 .codegraph junction 尚未存在的旧部署。
+                from codev_platform.core.paths import codegraph_db_path
+                central = codegraph_db_path(project_id)
+                if central.is_file():
+                    out.append((spec, central))
+        if out:
+            return out
+
+    db = _find_db(project_id)
+    if db is None:
+        return []
+    root = db.parent.parent if db.parent.name == "codegraph" else db.parent.parent
+    return [(RepoSpec(root=root, is_main=True, source_project_id=project_id), db)]
+
+
 def _connect(project_id: str | None = None) -> sqlite3.Connection:
     db = _find_db(project_id)
     if db is None:
@@ -67,11 +97,19 @@ def _connect(project_id: str | None = None) -> sqlite3.Connection:
     return con
 
 
-def _node_brief(r: sqlite3.Row) -> dict[str, Any]:
+def _connect_db(db: Path) -> sqlite3.Connection:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def _node_brief(r: sqlite3.Row, spec: RepoSpec | None = None) -> dict[str, Any]:
+    file_path = r["file_path"]
+    loc_file = spec.local_file(file_path) if spec is not None else file_path
     return {
         "name": r["name"],
         "kind": r["kind"],
-        "loc": f"{r['file_path']}:{r['start_line']}",
+        "loc": f"{loc_file}:{r['start_line']}",
         "signature": (r["signature"] or "").strip()[:200] or None,
     }
 
@@ -93,41 +131,49 @@ class CodegraphSearchTool(Tool):
         if not q:
             return ToolResult(call_id="", content="缺少 query 参数", is_error=True)
         try:
-            con = _connect(self.project_id)
-            try:
-                rows = con.execute(
-                    "SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.id "
-                    "WHERE nodes_fts MATCH ? LIMIT ?",
-                    (_fts_query(q), _MAX_ROWS),
-                ).fetchall()
-                if not rows:
-                    # 回退:按最后一个标识符 token 做 LIKE(应对 FTS 分词不命中)
-                    import re as _re
-                    toks = _re.findall(r"[A-Za-z0-9_]+", q)
-                    needle = toks[-1] if toks else q
-                    rows = con.execute(
-                        "SELECT * FROM nodes WHERE name LIKE ? LIMIT ?",
-                        (f"%{needle}%", _MAX_ROWS),
+            rows: list[tuple[sqlite3.Row, RepoSpec]] = []
+            for spec, db in _find_dbs(self.project_id):
+                con = _connect_db(db)
+                try:
+                    got = con.execute(
+                        "SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.id "
+                        "WHERE nodes_fts MATCH ? LIMIT ?",
+                        (_fts_query(q), _MAX_ROWS),
                     ).fetchall()
-            finally:
-                con.close()
+                    if not got:
+                        # 回退:按最后一个标识符 token 做 LIKE(应对 FTS 分词不命中)
+                        import re as _re
+                        toks = _re.findall(r"[A-Za-z0-9_]+", q)
+                        needle = toks[-1] if toks else q
+                        got = con.execute(
+                            "SELECT * FROM nodes WHERE name LIKE ? LIMIT ?",
+                            (f"%{needle}%", _MAX_ROWS),
+                        ).fetchall()
+                    rows.extend((r, spec) for r in got)
+                finally:
+                    con.close()
+            if not rows:
+                dbs = _find_dbs(self.project_id)
+                if not dbs:
+                    hint = f"project '{self.project_id}' " if self.project_id else ""
+                    raise FileNotFoundError(f"未找到 {hint}.codegraph/codegraph.db(codegraph 未建索引?)")
         except Exception as e:  # noqa: BLE001
             return ToolResult(call_id="", content=f"codegraph 查询失败: {e}", is_error=True)
-        if not rows:
-            return ToolResult(call_id="", content=f"未找到符号: {q}")
         # 排序:精确名命中 > 名字含 query token > 其余;同档 file/import 排后(优先 class/function/method)
         import re as _re
         toks = [t.lower() for t in _re.findall(r"[A-Za-z0-9_]+", q)]
         kind_rank = {"class": 0, "function": 0, "method": 0, "interface": 0}
 
-        def _score(r: sqlite3.Row) -> tuple:
+        def _score(item: tuple[sqlite3.Row, RepoSpec]) -> tuple:
+            r, spec = item
             nm = (r["name"] or "").lower()
             exact = 0 if nm in toks else 1
             contains = 0 if any(t in nm for t in toks) else 1
-            return (exact, contains, kind_rank.get(r["kind"], 5))
+            repo_rank = 0 if spec.is_main else 1
+            return (exact, contains, kind_rank.get(r["kind"], 5), repo_rank)
 
-        rows = sorted(rows, key=_score)
-        out = [_node_brief(r) for r in rows]
+        rows = sorted(rows, key=_score)[:_MAX_ROWS]
+        out = [_node_brief(r, spec) for r, spec in rows]
         return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 
 
@@ -140,32 +186,43 @@ def _relations(name: str, incoming: bool, project_id: str | None = None) -> Tool
     if "." in name:
         candidates.append(name.rsplit(".", 1)[1])
     try:
-        con = _connect(project_id)
-        try:
-            ids: list[Any] = []
-            for cand in candidates:
-                ids = [r["id"] for r in con.execute("SELECT id FROM nodes WHERE name = ? LIMIT 5", (cand,))]
-                if ids:
-                    break
-            if not ids:
-                return ToolResult(call_id="", content=f"未找到符号: {name}")
-            ph = ",".join("?" * len(ids))
-            if incoming:
-                sql = (f"SELECT n.name, n.kind, n.file_path, n.start_line, e.kind AS edge "
-                       f"FROM edges e JOIN nodes n ON n.id = e.source WHERE e.target IN ({ph}) LIMIT ?")
-            else:
-                sql = (f"SELECT n.name, n.kind, n.file_path, n.start_line, e.kind AS edge "
-                       f"FROM edges e JOIN nodes n ON n.id = e.target WHERE e.source IN ({ph}) LIMIT ?")
-            rows = con.execute(sql, (*ids, _MAX_ROWS)).fetchall()
-        finally:
-            con.close()
+        dbs = _find_dbs(project_id)
+        if not dbs:
+            hint = f"project '{project_id}' " if project_id else ""
+            raise FileNotFoundError(f"未找到 {hint}.codegraph/codegraph.db(codegraph 未建索引?)")
+        rows: list[tuple[sqlite3.Row, RepoSpec]] = []
+        found_symbol = False
+        for spec, db in dbs:
+            con = _connect_db(db)
+            try:
+                ids: list[Any] = []
+                for cand in candidates:
+                    ids = [r["id"] for r in con.execute("SELECT id FROM nodes WHERE name = ? LIMIT 5", (cand,))]
+                    if ids:
+                        break
+                if not ids:
+                    continue
+                found_symbol = True
+                ph = ",".join("?" * len(ids))
+                if incoming:
+                    sql = (f"SELECT n.name, n.kind, n.file_path, n.start_line, e.kind AS edge "
+                           f"FROM edges e JOIN nodes n ON n.id = e.source WHERE e.target IN ({ph}) LIMIT ?")
+                else:
+                    sql = (f"SELECT n.name, n.kind, n.file_path, n.start_line, e.kind AS edge "
+                           f"FROM edges e JOIN nodes n ON n.id = e.target WHERE e.source IN ({ph}) LIMIT ?")
+                rows.extend((r, spec) for r in con.execute(sql, (*ids, _MAX_ROWS)).fetchall())
+            finally:
+                con.close()
     except Exception as e:  # noqa: BLE001
         return ToolResult(call_id="", content=f"codegraph 查询失败: {e}", is_error=True)
+    if not found_symbol:
+        return ToolResult(call_id="", content=f"未找到符号: {name}")
     if not rows:
         rel = "调用方" if incoming else "被调用项"
         return ToolResult(call_id="", content=f"{name} 无{rel}记录。")
-    out = [{"name": r["name"], "kind": r["kind"], "loc": f"{r['file_path']}:{r['start_line']}", "edge": r["edge"]}
-           for r in rows]
+    out = [{"name": r["name"], "kind": r["kind"],
+            "loc": f"{spec.local_file(r['file_path'])}:{r['start_line']}", "edge": r["edge"]}
+           for r, spec in rows[:_MAX_ROWS]]
     return ToolResult(call_id="", content=json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 
 
@@ -180,42 +237,55 @@ def _trace(name: str, incoming: bool, depth: int, project_id: str | None = None)
     if "." in name:
         candidates.append(name.rsplit(".", 1)[1])
     try:
-        con = _connect(project_id)
-        try:
-            frontier: list[Any] = []
-            for cand in candidates:
-                frontier = [r["id"] for r in con.execute(
-                    "SELECT id FROM nodes WHERE name = ? LIMIT 5", (cand,))]
-                if frontier:
-                    break
-            if not frontier:
-                return ToolResult(call_id="", content=f"未找到符号: {name}")
-            visited = set(frontier)
-            levels: list[list[dict[str, Any]]] = []
-            for _hop in range(depth):
+        dbs = _find_dbs(project_id)
+        if not dbs:
+            hint = f"project '{project_id}' " if project_id else ""
+            raise FileNotFoundError(f"未找到 {hint}.codegraph/codegraph.db(codegraph 未建索引?)")
+        levels: list[list[dict[str, Any]]] = []
+        found_symbol = False
+        for spec, db in dbs:
+            con = _connect_db(db)
+            try:
+                frontier: list[Any] = []
+                for cand in candidates:
+                    frontier = [r["id"] for r in con.execute(
+                        "SELECT id FROM nodes WHERE name = ? LIMIT 5", (cand,))]
+                    if frontier:
+                        break
                 if not frontier:
-                    break
-                ph = ",".join("?" * len(frontier))
-                col_in, col_out = ("e.target", "e.source") if incoming else ("e.source", "e.target")
-                sql = (f"SELECT n.id, n.name, n.kind, n.file_path, n.start_line, e.kind AS edge "
-                       f"FROM edges e JOIN nodes n ON n.id = {col_out} "
-                       f"WHERE {col_in} IN ({ph}) LIMIT ?")
-                rows = con.execute(sql, (*frontier, _MAX_ROWS)).fetchall()
-                level: list[dict[str, Any]] = []
-                nxt: list[Any] = []
-                for r in rows:
-                    if r["id"] in visited:
-                        continue
-                    visited.add(r["id"])
-                    nxt.append(r["id"])
-                    level.append({"name": r["name"], "kind": r["kind"],
-                                  "loc": f"{r['file_path']}:{r['start_line']}", "edge": r["edge"]})
-                if not level:
-                    break
-                levels.append(level)
-                frontier = nxt
-        finally:
-            con.close()
+                    continue
+                found_symbol = True
+                visited = set(frontier)
+                for hop in range(depth):
+                    if not frontier:
+                        break
+                    ph = ",".join("?" * len(frontier))
+                    col_in, col_out = ("e.target", "e.source") if incoming else ("e.source", "e.target")
+                    sql = (f"SELECT n.id, n.name, n.kind, n.file_path, n.start_line, e.kind AS edge "
+                           f"FROM edges e JOIN nodes n ON n.id = {col_out} "
+                           f"WHERE {col_in} IN ({ph}) LIMIT ?")
+                    rows = con.execute(sql, (*frontier, _MAX_ROWS)).fetchall()
+                    level: list[dict[str, Any]] = []
+                    nxt: list[Any] = []
+                    for r in rows:
+                        if r["id"] in visited:
+                            continue
+                        visited.add(r["id"])
+                        nxt.append(r["id"])
+                        level.append({"name": r["name"], "kind": r["kind"],
+                                      "loc": f"{spec.local_file(r['file_path'])}:{r['start_line']}",
+                                      "edge": r["edge"]})
+                    if not level:
+                        break
+                    while len(levels) <= hop:
+                        levels.append([])
+                    levels[hop].extend(level)
+                    frontier = nxt
+            finally:
+                con.close()
+        if not found_symbol:
+            return ToolResult(call_id="", content=f"未找到符号: {name}")
+        levels = [level[:_MAX_ROWS] for level in levels if level]
     except Exception as e:  # noqa: BLE001
         return ToolResult(call_id="", content=f"codegraph 查询失败: {e}", is_error=True)
     if not levels:
