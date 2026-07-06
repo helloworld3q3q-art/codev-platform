@@ -1,0 +1,10 @@
+{
+  "_comment": "Codex does not consume Claude Code hook settings. This file is a migration note, not an active hook configuration.",
+  "codex_rules": {
+    "entry": "AGENTS.md",
+    "workflow": ".codex/rules/workflow.md",
+    "mcp": ".codex/rules/ai-tools-mcp.md"
+  },
+  "legacy_claude_settings": ".claude/settings.json",
+  "active_mcp_config": ".codex/config.toml"
+}

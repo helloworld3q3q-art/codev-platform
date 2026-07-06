@@ -30,18 +30,35 @@ def is_excluded(path: Path) -> bool:
     return any(part in EXCLUDE_PARTS for part in path.parts)
 
 
+def _index_config_candidates() -> list[Path]:
+    """Project index config lookup order.
+
+    The order is configurable so deployments can switch agent surfaces without
+    code changes. Defaults are Codex first, Claude compatibility second.
+    """
+    from codev_platform.core.config import list_env_or_config, load_config
+
+    relpaths = list_env_or_config(
+        "CODEV_PLATFORM_INDEX_CONFIG_PATHS",
+        load_config(),
+        "project.index_config_paths",
+        (".codex/index.json", ".claude/index.json"),
+    )
+    return [PLATFORM_ROOT / relpath for relpath in relpaths]
+
+
 def _load_project_index_config() -> tuple[list[str], list[str]]:
-    """读 <PLATFORM_ROOT>/.claude/index.json (若存在), 返回 (doc_patterns, external_doc_paths).
+    """读项目 index.json (若存在), 返回 (doc_patterns, external_doc_paths).
 
     - doc_patterns: 相对 PLATFORM_ROOT 的 glob (默认走 DOC_PATTERNS hardcode 列表)
     - external_doc_paths: 跨仓真值源 glob, 支持相对路径 (基于 PLATFORM_ROOT) 或绝对路径
       例(相对, 推荐): "../codev-platform/rules/*.md"  → 跨机器 portable
       例(绝对, 兼容): "D:/WorkSpace/codev-platform/rules/*.md"  → 机器绑定 (违反 feedback_no_absolute_paths)
     """
-    cfg = PLATFORM_ROOT / ".claude" / "index.json"
     patterns: list[str] = list(DOC_PATTERNS)
     external: list[str] = []
-    if not cfg.is_file():
+    cfg = next((p for p in _index_config_candidates() if p.is_file()), None)
+    if cfg is None:
         return patterns, external
     try:
         data = json.loads(cfg.read_text(encoding="utf-8"))
@@ -126,6 +143,8 @@ def infer_module(path: str) -> str:
         return "stock-admin-api"
     if p.startswith("apps/stock-admin-web/"):
         return "stock-admin-web"
+    if p.startswith("web-ui/"):
+        return "web-ui"
     if p.startswith("python/stock-pipeline/"):
         return "stock-pipeline"
     return "platform"

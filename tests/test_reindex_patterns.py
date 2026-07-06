@@ -46,6 +46,18 @@ def test_claude_md_matches_doc_via_generic_default():
     assert "doc" in _scope_of("CLAUDE.md", {})
 
 
+def test_codex_rules_match_doc_via_generic_default():
+    assert "doc" in _scope_of(".codex/rules/workflow.md", {})
+
+
+def test_web_ui_codex_rules_match_doc_via_generic_default():
+    assert "doc" in _scope_of("web-ui/.codex/rules/code-quality.md", {})
+
+
+def test_agents_md_matches_doc_via_generic_default():
+    assert "doc" in _scope_of("web-ui/AGENTS.md", {})
+
+
 def test_random_txt_matches_nothing():
     assert _scope_of("random.txt", OPENCLAW_HEALTH) == set()
 

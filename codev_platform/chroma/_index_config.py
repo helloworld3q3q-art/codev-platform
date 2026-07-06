@@ -15,11 +15,14 @@ PLATFORM_ROOT = Path(os.getenv("PLATFORM_ROOT", str(_DEFAULT_ROOT))).expanduser(
 
 # DEFAULT_DOC_PATTERNS: 任何项目通用的 markdown 位置 (不含业务专属路径).
 # 业务专属路径 (apps/stock-admin-* / python/stock-pipeline 等) 走各业务仓
-# <repo>/.claude/index.json:doc_patterns override (见 _discover._load_project_index_config).
+# <repo>/.codex/index.json:doc_patterns override; 迁移期 fallback 到 .claude/index.json
+# (见 _discover._load_project_index_config).
 DOC_PATTERNS = [
-    "CLAUDE.md",
     "AGENTS.md",
     "README.md",
+    ".codex/rules/*.md",
+    ".codex/skills/**/*.md",
+    "CLAUDE.md",
     ".claude/rules/*.md",
     ".claude/skills/**/*.md",
     "docs/**/*.md",

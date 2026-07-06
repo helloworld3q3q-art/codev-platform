@@ -93,6 +93,14 @@ DEFAULTS: dict[str, Any] = {
         # 会话存储后端: "memory" (默认, 进程内, 重启丢) | "pg" (持久化到 memory.pg_dsn).
         "session_backend": "memory",
     },
+    "project": {
+        # Agent 项目配置查找顺序。迁移期默认 Codex 优先、Claude fallback。
+        # 要切回 Claude 优先, 在 ~/.codev-platform/config.json 改为:
+        # {"project": {"project_config_paths": [".claude/project.json", ".codex/project.json"]}}
+        "project_config_paths": [".codex/project.json", ".claude/project.json"],
+        # 文档索引配置查找顺序。避免把某个 agent 目录写死在代码里。
+        "index_config_paths": [".codex/index.json", ".claude/index.json"],
+    },
 }
 
 
@@ -156,6 +164,28 @@ def env_or_config(env_var: str, cfg: dict[str, Any], dotted_key: str, default: A
     if v is not None and v != "":
         return v
     return get(cfg, dotted_key, default)
+
+
+def list_env_or_config(
+    env_var: str,
+    cfg: dict[str, Any],
+    dotted_key: str,
+    default: list[str] | tuple[str, ...],
+) -> list[str]:
+    """从 env/config 读取字符串列表。
+
+    env 用分隔符列表,Windows 常用 `;`,其它平台按 `os.pathsep`。JSON config 推荐用字符串数组。
+    """
+    raw = os.environ.get(env_var)
+    if raw:
+        sep = ";" if ";" in raw else os.pathsep
+        return [part.strip() for part in raw.split(sep) if part.strip()]
+    value = get(cfg, dotted_key, list(default))
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(part).strip() for part in value if str(part).strip()]
+    return list(default)
 
 
 def save_config(cfg: dict[str, Any], path: Path | None = None) -> Path:

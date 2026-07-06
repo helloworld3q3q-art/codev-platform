@@ -71,13 +71,14 @@ def resolve_repo(repo: str | os.PathLike | None = None) -> Path:
 
 
 def project_id_of(repo: Path) -> str | None:
-    """Read project_id from <repo>/.claude/project.json."""
-    pj = repo / ".claude" / "project.json"
-    if pj.is_file():
+    """Read project_id from Codex config first, then Claude compatibility config."""
+    for pj in (repo / ".codex" / "project.json", repo / ".claude" / "project.json"):
+        if not pj.is_file():
+            continue
         try:
             return json.loads(pj.read_text(encoding="utf-8")).get("project_id")
         except Exception:
-            return None
+            continue
     return None
 
 
@@ -99,7 +100,9 @@ def meta_health(project_id: str | None) -> dict[str, Any]:
 # Generic project-name-free defaults; each project EXTENDS via meta.
 # ----------------------------------------------------------------------
 DEFAULT_DOC_PATTERNS = [
-    r"^docs/.*\.md$", r"^\.claude/(rules|skills)/.*\.md$",
+    r"^docs/.*\.md$", r"^\.codex/(rules|skills)/.*\.md$",
+    r"^web-ui/\.codex/(rules|skills)/.*\.md$",
+    r"^\.claude/(rules|skills)/.*\.md$",
     r"^apps/[^/]+/\.claude/rules/.*\.md$", r"^tools/.*\.md$",
     r".*CLAUDE\.md$", r".*AGENTS\.md$", r"^README\.md$",
 ]

@@ -2,7 +2,7 @@
 
 支持两种解析模式 (本地原型 + server 部署共用):
 - resolve_local(): launcher / CLI / index script 在本机跑
-    优先级: env PLATFORM_PROJECT_ID > .claude/project.json > 硬失败
+    优先级: env PLATFORM_PROJECT_ID > configured project_config_paths > 硬失败
 - resolve_from_request(headers): daemon HTTP handler 处理 client 请求
     优先级: X-Project-Id header > 硬失败 (调用方转 400)
 
@@ -21,7 +21,9 @@ from pathlib import Path
 
 
 ENV_VAR = "PLATFORM_PROJECT_ID"
-CONFIG_RELPATH = ".claude/project.json"
+CONFIG_PATHS_ENV_VAR = "CODEV_PLATFORM_PROJECT_CONFIG_PATHS"
+DEFAULT_CONFIG_RELPATHS = (".codex/project.json", ".claude/project.json")
+CONFIG_RELPATH = DEFAULT_CONFIG_RELPATHS[0]
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
@@ -46,20 +48,29 @@ def validate(project_id: str) -> str:
 
 
 def _read_repo_config(start: Path) -> tuple[str, Path] | None:
-    """从 start 目录向上查找 .claude/project.json, 返回 (project_id, file_path)。"""
+    """从 start 目录向上查找 project.json, 返回 (project_id, file_path)。"""
+    from codev_platform.core.config import list_env_or_config, load_config
+
+    relpaths = list_env_or_config(
+        CONFIG_PATHS_ENV_VAR,
+        load_config(),
+        "project.project_config_paths",
+        DEFAULT_CONFIG_RELPATHS,
+    )
     current = start.resolve()
     for parent in [current, *current.parents]:
-        candidate = parent / CONFIG_RELPATH
-        if candidate.is_file():
-            try:
-                data = json.loads(candidate.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                raise ProjectIdError(
-                    f"{candidate} JSON 解析失败: {exc!s}"
-                ) from exc
-            pid = data.get("project_id")
-            if pid:
-                return str(pid), candidate
+        for relpath in relpaths:
+            candidate = parent / relpath
+            if candidate.is_file():
+                try:
+                    data = json.loads(candidate.read_text(encoding="utf-8"))
+                except json.JSONDecodeError as exc:
+                    raise ProjectIdError(
+                        f"{candidate} JSON 解析失败: {exc!s}"
+                    ) from exc
+                pid = data.get("project_id")
+                if pid:
+                    return str(pid), candidate
     return None
 
 
@@ -79,8 +90,9 @@ def resolve_local(cwd: Path | None = None) -> str:
         "无法解析 project_id。请二选一:\n"
         f"  (a) 设环境变量: $env:{ENV_VAR}='<your-project-id>'  (PowerShell)\n"
         f"                  set {ENV_VAR}=<your-project-id>      (cmd)\n"
-        f"  (b) 在仓库根创建 {CONFIG_RELPATH}: "
+        f"  (b) 在仓库根创建 {DEFAULT_CONFIG_RELPATHS[0]}: "
         '{"project_id": "<your-project-id>"}\n'
+        f"  (c) 或配置 project.project_config_paths / {CONFIG_PATHS_ENV_VAR} 改查找顺序\n"
         "  project_id 格式: 小写字母/数字/连字符 (例 openclaw-stock)"
     )
 

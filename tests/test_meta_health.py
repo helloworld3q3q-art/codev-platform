@@ -58,6 +58,26 @@ def test_project_id_of_reads_value(tmp_path):
     assert common.project_id_of(tmp_path) == "openclaw-stock"
 
 
+def test_project_id_of_prefers_codex_value(tmp_path):
+    claude = tmp_path / ".claude" / "project.json"
+    claude.parent.mkdir(parents=True)
+    claude.write_text(json.dumps({"project_id": "legacy"}), encoding="utf-8")
+    codex = tmp_path / ".codex" / "project.json"
+    codex.parent.mkdir(parents=True)
+    codex.write_text(json.dumps({"project_id": "codex"}), encoding="utf-8")
+    assert common.project_id_of(tmp_path) == "codex"
+
+
+def test_project_id_of_falls_back_when_codex_corrupt(tmp_path):
+    codex = tmp_path / ".codex" / "project.json"
+    codex.parent.mkdir(parents=True)
+    codex.write_text("{ broken", encoding="utf-8")
+    claude = tmp_path / ".claude" / "project.json"
+    claude.parent.mkdir(parents=True)
+    claude.write_text(json.dumps({"project_id": "legacy"}), encoding="utf-8")
+    assert common.project_id_of(tmp_path) == "legacy"
+
+
 def test_project_id_of_missing_file_returns_none(tmp_path):
     assert common.project_id_of(tmp_path) is None
 
