@@ -18,6 +18,7 @@ from pathlib import Path
 
 from codev_platform.core.config import get as _cfg_get, load_config
 from codev_platform.core.errors import ErrorCode
+from codev_platform.core.repos import impacted_project_ids_for_repo
 
 DEFAULT_WEBHOOK_PORT = 18099
 # 8MB 请求体上限, 防超大 payload 拖垮 reindex 队列 / OOM。
@@ -60,9 +61,16 @@ def _scopes_for(pid: str, changed: list[str]) -> list[str]:
     (reindex_patterns 删了该 key), 故无需再过滤; webhook 与本地 hook 同源。
     """
     from codev_platform.ops import _common as C
-    from codev_platform.ops.reindex import classify_scopes
+    from codev_platform.ops.reindex.dispatch import _expand_scopes, classify_scopes
     pats = C.reindex_patterns(C.meta_health(pid))
-    return list(classify_scopes(changed, pats))
+    scoped = classify_scopes(changed, pats)
+    return _expand_scopes(scoped)
+
+
+def _target_projects_for(cfg: dict, pid: str) -> list[str]:
+    """webhook repo 映射到的 project → 受影响逻辑项目集合。"""
+    repo_path = _cfg_get(cfg, f"projects.{pid}.repo_path")
+    return impacted_project_ids_for_repo(repo_path, primary_project_id=pid, cfg=cfg)
 
 
 def webhook_port(cfg: dict | None = None) -> int:
@@ -122,22 +130,27 @@ def build_app(middleware=None):
         if pid is None:
             _log(f"[{name}] repo '{event.repo}' 未映射 project (配 projects.<pid>.webhook_repo)")
             return JSONResponse({"ok": True, "skipped": f"unmapped repo {event.repo}"})
-        scopes = _scopes_for(pid, event.changed_files)
-        if not scopes:
+        plan: list[tuple[str, list[str]]] = []
+        for target_pid in _target_projects_for(cfg, pid):
+            scopes = _scopes_for(target_pid, event.changed_files)
+            if scopes:
+                plan.append((target_pid, scopes))
+        if not plan:
             _log(f"[{name}] {event.repo} -> {pid}: {len(event.changed_files)} 文件改动但无 reindex scope 命中, 跳过")
-            return JSONResponse({"ok": True, "project_id": pid, "skipped": "no scope match"})
-        # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest + 代码向量 lane (与本地 hook 同源)。
-        # append 在 codegraph 之后入队 → 串行 worker 保证 ingest/code_vec 读到新鲜 codegraph.db。
-        if "codegraph" in scopes:
-            if "ingest" not in scopes:
-                scopes.append("ingest")
-            if "code_vec" not in scopes:
-                scopes.append("code_vec")
+            return JSONResponse({"ok": True, "project_id": pid, "projects": _target_projects_for(cfg, pid),
+                                 "skipped": "no scope match"})
         q = open_default_queue()
-        for kind in scopes:
-            q.enqueue(pid, kind)
-        _log(f"[{name}] {event.repo} -> {pid} enqueue {scopes} ({len(event.changed_files)} files changed)")
-        return JSONResponse({"ok": True, "project_id": pid, "enqueued": scopes})
+        all_scopes: list[str] = []
+        for target_pid, scopes in plan:
+            for kind in scopes:
+                q.enqueue(target_pid, kind)
+                if kind not in all_scopes:
+                    all_scopes.append(kind)
+        summary = "; ".join(f"{target_pid}:{'+'.join(scopes)}" for target_pid, scopes in plan)
+        _log(f"[{name}] {event.repo} -> {summary} enqueue ({len(event.changed_files)} files changed)")
+        return JSONResponse({"ok": True, "project_id": pid,
+                             "projects": [target_pid for target_pid, _ in plan],
+                             "enqueued": all_scopes})
 
     async def healthz(_request):
         # PUBLIC 存活探针: 仅最小信息 (审计 #4 — 与三套 MCP 对齐, 不在存活面暴露

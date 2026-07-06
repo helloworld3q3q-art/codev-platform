@@ -4,6 +4,8 @@ starlette.TestClient 会按 body 自动带 Content-Length, 命中 server 的早�
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 starlette = pytest.importorskip("starlette")
@@ -32,3 +34,40 @@ def test_normal_size_passes_body_limit():
 def test_unknown_provider_404_before_body_check():
     resp = _client().post("/nope", content=b"x")
     assert resp.status_code == 404
+
+
+def test_webhook_extra_repo_enqueues_parent_project(tmp_path, monkeypatch):
+    child = tmp_path / "child"; child.mkdir()
+    parent = tmp_path / "parent"; parent.mkdir()
+    enq: list[tuple[str, str]] = []
+
+    class _Q:
+        def enqueue(self, pid, kind):
+            enq.append((pid, kind))
+
+    cfg = {
+        "webhook": {"allow_insecure": True},
+        "projects": {
+            "child-proj": {"repo_path": str(child), "webhook_repo": "org/child"},
+            "parent-proj": {"repo_path": str(parent), "extra_repos": [str(child)]},
+        },
+    }
+    monkeypatch.setattr(server, "load_config", lambda: cfg)
+    monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+
+    payload = {
+        "repository": {"full_name": "org/child"},
+        "commits": [{"modified": ["apps/web/src/Foo.java"], "added": [], "removed": []}],
+    }
+    resp = _client().post(
+        "/gitea",
+        content=json.dumps(payload).encode("utf-8"),
+        headers={"X-Gitea-Event": "push", "Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 200
+    assert ("child-proj", "codegraph") in enq
+    assert ("parent-proj", "codegraph") in enq
+    parent_order = [kind for pid, kind in enq if pid == "parent-proj"]
+    assert parent_order == ["codegraph", "ingest", "code_vec"]

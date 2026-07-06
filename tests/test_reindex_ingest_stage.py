@@ -206,6 +206,31 @@ def test_dispatch_enqueues_code_vec_on_code_change(tmp_path, monkeypatch):
     assert order.index("code_vec") > order.index("codegraph")
 
 
+def test_dispatch_enqueues_parent_project_for_extra_repo_change(tmp_path, monkeypatch):
+    enq: list[tuple[str, str]] = []
+
+    class _Q:
+        def enqueue(self, pid, kind):
+            enq.append((pid, kind))
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+    monkeypatch.setattr(R.C, "project_id_of", lambda repo: "child-proj")
+    monkeypatch.setattr(R.C, "config", lambda: {})
+    monkeypatch.setattr(R.C, "meta_health", lambda pid: {})
+    monkeypatch.setattr(
+        "codev_platform.ops.reindex.dispatch.impacted_project_ids_for_repo",
+        lambda repo, **kw: ["child-proj", "parent-proj"],
+    )
+
+    rc = R._dispatch_reindex(tmp_path, ["apps/web/src/Foo.java"],
+                             foreground=False, trigger_line="t", banner="test")
+
+    assert rc == 0
+    assert [pid for pid, kind in enq if kind == "codegraph"] == ["child-proj", "parent-proj"]
+    parent_order = [kind for pid, kind in enq if pid == "parent-proj"]
+    assert parent_order == ["codegraph", "ingest", "code_vec"]
+
+
 def test_code_vec_runner_registered():
     from codev_platform.reindex.runners import kinds
     assert "code_vec" in kinds()

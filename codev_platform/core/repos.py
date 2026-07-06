@@ -98,6 +98,45 @@ def _read_meta(project_id: str) -> dict:
         return {}
 
 
+def _known_project_ids(cfg: dict) -> list[str]:
+    """本机可见 project_id: config 登记 + platform_meta 声明。"""
+    ids: list[str] = []
+
+    def add(pid: str) -> None:
+        pid = str(pid).strip()
+        if pid and pid not in ids:
+            ids.append(pid)
+
+    projects = _cfg_get(cfg, "projects") or {}
+    if isinstance(projects, dict):
+        for pid in projects:
+            add(pid)
+
+    root = Path(__file__).resolve().parents[2]
+    meta_root = root / "platform_meta" / "projects"
+    try:
+        for p in meta_root.iterdir():
+            if p.is_dir() and (p / "meta.json").is_file():
+                add(p.name)
+    except OSError:
+        pass
+    return ids
+
+
+def _raw_extra_refs(project_id: str, cfg: dict) -> list[str]:
+    """不解析路径的 extra_repos 原始条目, 用于 project-id 反向依赖。"""
+    refs: list[str] = []
+    for entries in (
+        _cfg_get(cfg, f"projects.{project_id}.extra_repos", []) or [],
+        _read_meta(project_id).get("extra_repos") or [],
+    ):
+        for e in entries or []:
+            raw = str(e).strip()
+            if raw and raw not in refs:
+                refs.append(raw)
+    return refs
+
+
 def meta_extra_repos(project_id: str, cfg: dict) -> list[str]:
     """meta.json 的 extra_repos(git 版本化可移植跨仓声明)→ 解析成路径。无声明 → []。"""
     return resolve_meta_extra_entries(_read_meta(project_id).get("extra_repos") or [], cfg)
@@ -177,3 +216,50 @@ def project_repo_specs(project_id: str, *, main_repo: Path | str | None = None,
         RepoSpec(root=root, tag=tag, is_main=(i == 0), source_project_id=source_ids[i])
         for i, (root, tag) in enumerate(zip(roots, tags))
     ]
+
+
+def impacted_project_ids_for_repo(repo: Path | str | None, *,
+                                  primary_project_id: str | None = None,
+                                  cfg: dict | None = None) -> list[str]:
+    """给定发生变更的仓, 返回需要刷新的逻辑项目。
+
+    用于 post-commit/webhook 入队边界: extra repo 自己变更时, 除了刷新它自身, 还要刷新把它
+    挂为 extra_repos 的父项目。只返回 project_id, 不碰队列/runner。
+    """
+    cfg = load_config() if cfg is None else cfg
+    known = _known_project_ids(cfg)
+    out: list[str] = []
+
+    def add(pid: str | None) -> None:
+        pid = str(pid or "").strip()
+        if pid and pid not in out:
+            out.append(pid)
+
+    add(primary_project_id)
+
+    repo_root: Path | None = None
+    if repo is not None:
+        try:
+            repo_root = Path(repo).expanduser().resolve()
+        except OSError:
+            repo_root = None
+
+    if repo_root is not None:
+        for pid in known:
+            try:
+                specs = project_repo_specs(pid, cfg=cfg)
+            except Exception as exc:  # noqa: BLE001 - 反查失败不应阻断 hook/webhook
+                logger.warning("[repos] 反查项目 %s 的 repo specs 失败: %s", pid, exc)
+                continue
+            if any(spec.root.resolve() == repo_root for spec in specs):
+                add(pid)
+
+    i = 0
+    while i < len(out):
+        child = out[i]
+        for pid in known:
+            if pid != child and child in _raw_extra_refs(pid, cfg):
+                add(pid)
+        i += 1
+
+    return out

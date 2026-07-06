@@ -246,6 +246,37 @@ def test_project_repo_specs_dedupes_extra_basename_tags(tmp_path):
     assert [s.tag for s in specs] == ["", "dup", "dup-2"]
 
 
+def test_impacted_project_ids_for_repo_includes_extra_parent_by_path(tmp_path, monkeypatch):
+    from codev_platform.core.repos import impacted_project_ids_for_repo
+    parent = tmp_path / "parent"; parent.mkdir()
+    child = tmp_path / "child"; child.mkdir()
+    monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
+    cfg = {
+        "projects": {
+            "parent-proj": {"repo_path": str(parent), "extra_repos": [str(child)]},
+            "child-proj": {"repo_path": str(child)},
+        }
+    }
+
+    assert impacted_project_ids_for_repo(
+        child, primary_project_id="child-proj", cfg=cfg
+    ) == ["child-proj", "parent-proj"]
+
+
+def test_impacted_project_ids_for_repo_includes_parent_by_project_ref(tmp_path, monkeypatch):
+    from codev_platform.core.repos import impacted_project_ids_for_repo
+    child = tmp_path / "child"; child.mkdir()
+    monkeypatch.setattr(
+        "codev_platform.core.repos._read_meta",
+        lambda pid: {"extra_repos": ["child-proj"]} if pid == "parent-proj" else {},
+    )
+    cfg = {"projects": {"parent-proj": {}, "child-proj": {"repo_path": str(child)}}}
+
+    assert impacted_project_ids_for_repo(
+        child, primary_project_id="child-proj", cfg=cfg
+    ) == ["child-proj", "parent-proj"]
+
+
 def test_multiroot_merges_both_repos_no_overwrite(tmp_path):
     clear_registry()
     register_plugin(_RepoNodePlugin())

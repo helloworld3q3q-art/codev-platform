@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from codev_platform.core.repos import impacted_project_ids_for_repo
 from codev_platform.ops import _common as C
 
 from .logs import _append_log, _now, _reindex_log
@@ -23,18 +24,7 @@ def classify_scopes(changed: list[str], pats: dict) -> dict[str, list[str]]:
     return {k: v for k, v in buckets.items() if v}
 
 
-def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
-                      trigger_line: str, banner: str) -> int:
-    """共享: 按改动文件分 scope → 写 log header → spawn 对应 reindex + 健康快照刷新。
-
-    post-commit / post-merge / post-checkout 三个 hook 复用本体, 只是 changed 算法 +
-    trigger_line + banner 不同。无命中则静默 no-op。NEVER raise(hook 永不 fail)。
-    """
-    pid = C.project_id_of(repo)
-    pats = C.reindex_patterns(C.meta_health(pid))
-    scoped = classify_scopes(changed, pats)
-    if not scoped:
-        return 0  # silent no-op
+def _expand_scopes(scoped: dict[str, list[str]]) -> list[str]:
     scopes = list(scoped)
     # 代码改动 (codegraph scope) → 顺带刷统一图谱 ingest + 代码向量 lane (插件/嵌入重跑落库)。
     # 二者失败隔离在 reindex --ingest / --code-vec 内, 不影响 codegraph 自身索引。
@@ -44,11 +34,34 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
             scopes.append("ingest")
         if "code_vec" not in scopes:
             scopes.append("code_vec")
+    return scopes
+
+
+def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
+                      trigger_line: str, banner: str) -> int:
+    """共享: 按改动文件分 scope → 写 log header → spawn 对应 reindex + 健康快照刷新。
+
+    post-commit / post-merge / post-checkout 三个 hook 复用本体, 只是 changed 算法 +
+    trigger_line + banner 不同。无命中则静默 no-op。NEVER raise(hook 永不 fail)。
+    """
+    pid = C.project_id_of(repo)
+    cfg = C.config()
+    target_pids = impacted_project_ids_for_repo(repo, primary_project_id=pid, cfg=cfg)
+    plan: list[tuple[str, dict[str, list[str]], list[str]]] = []
+    for target_pid in target_pids:
+        pats = C.reindex_patterns(C.meta_health(target_pid))
+        scoped = classify_scopes(changed, pats)
+        if scoped:
+            plan.append((target_pid, scoped, _expand_scopes(scoped)))
+    if not plan:
+        return 0  # silent no-op
     log_file = _reindex_log(repo)
-    all_matched = sorted({p for paths in scoped.values() for p in paths})
+    all_scopes = sorted({scope for _, _, scopes in plan for scope in scopes})
+    all_matched = sorted({p for _, scoped, _ in plan for paths in scoped.values() for p in paths})
     header = "\n".join(
         ["", f"===== reindex started at {_now()} =====", trigger_line,
-         f"scopes:         {', '.join(scopes)}", "matched paths:"] + all_matched
+         f"projects:       {', '.join(pid for pid, _, _ in plan)}",
+         f"scopes:         {', '.join(all_scopes)}", "matched paths:"] + all_matched
     ) + "\n"
     _append_log(log_file, header)
 
@@ -57,10 +70,12 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
     # scoped 的 key (chroma/graph/codegraph) 即 runner kind, 直接入队。
     from codev_platform.reindex import open_default_queue
     q = open_default_queue()
-    for kind in scopes:
-        q.enqueue(pid, kind)
-    _append_log(log_file, f"enqueued -> codev-reindex worker: {pid} -> {', '.join(scopes)}\n")
-    C.out(f"[{banner}] {'+'.join(scopes)} changed → 入队 (codev-reindex worker 串行消费)")
+    for target_pid, _, scopes in plan:
+        for kind in scopes:
+            q.enqueue(target_pid, kind)
+        _append_log(log_file, f"enqueued -> codev-reindex worker: {target_pid} -> {', '.join(scopes)}\n")
+    summary = "; ".join(f"{target_pid}:{'+'.join(scopes)}" for target_pid, _, scopes in plan)
+    C.out(f"[{banner}] {summary} changed → 入队 (codev-reindex worker 串行消费)")
 
     if foreground:
         # 前台调用 (手动 / 调试): 当场串行 drain, 不依赖常驻 worker
