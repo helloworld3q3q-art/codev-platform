@@ -83,6 +83,22 @@ def _deprioritize_tests(refs_meta: list[tuple[str, str | None, str | None]]) -> 
     return impl + tests
 
 
+def _merge_ranked_groups(groups: list[list[str]]) -> list[str]:
+    """多个 repo 的 lane 内排序 → round-robin 合并, 组内顺序不变。
+
+    不把 extra repo 整组压在主仓所有结果之后; 同时不引入跨 DB 打分归一化复杂度。
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    max_len = max((len(g) for g in groups), default=0)
+    for i in range(max_len):
+        for g in groups:
+            if i < len(g) and g[i] not in seen:
+                seen.add(g[i])
+                out.append(g[i])
+    return out
+
+
 def _graph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult | None, dict]:
     """graph 邻域 lane: search_nodes 直读 graph store(免 daemon)。失败/空 → (None, {})。"""
     try:
@@ -104,17 +120,38 @@ def _graph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult 
 def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult | None, dict]:
     """codegraph 符号 lane: FTS search 直读 codegraph.db(免 daemon)。失败/空 → (None, {})。"""
     try:
+        from codev_platform.core.repos import project_repo_specs
         from codev_platform.web.integrations.codegraph_client import CodegraphClient
-        with CodegraphClient(project_id) as cg:
-            # match_mode='or': verbose 多词 query(混入 function/definition 等描述词)AND 会
-            # 全灭, OR 让目标符号被 bm25 顶上来(与 graph lane 分词宽松召回同理)。
-            rows = cg.search(query, None, None, per_lane, match_mode="or")
     except Exception as exc:  # noqa: BLE001 — codegraph db 未建等 → 跳过该 lane
         logger.warning("[recall] codegraph lane failed: %r", exc)
         return None, {}
-    details = {r["id"]: {"name": r.get("name"), "kind": r.get("kind"), "file": r.get("filePath")}
-               for r in rows}
-    ranked = _deprioritize_tests([(r["id"], r.get("name"), r.get("filePath")) for r in rows])
+    details: dict = {}
+    groups: list[list[str]] = []
+    specs = project_repo_specs(project_id)
+    for spec in specs:
+        try:
+            with CodegraphClient(db_path=spec.codegraph_db) as cg:
+                # match_mode='or': verbose 多词 query(混入 function/definition 等描述词)AND 会
+                # 全灭, OR 让目标符号被 bm25 顶上来(与 graph lane 分词宽松召回同理)。
+                rows = cg.search(query, None, None, per_lane, match_mode="or")
+        except Exception as exc:  # noqa: BLE001 — extra 仓 fail-soft; 主仓失败则该 lane 退化
+            if spec.is_main:
+                logger.warning("[recall] codegraph lane failed: %r", exc)
+                return None, {}
+            logger.warning("[recall] codegraph extra repo skipped (%s): %r", spec.root, exc)
+            continue
+        refs_meta: list[tuple[str, str | None, str | None]] = []
+        for r in rows:
+            ref = spec.local_ref(r["id"])
+            file = spec.local_file(r.get("filePath"))
+            details[ref] = {"name": r.get("name"), "kind": r.get("kind"), "file": file}
+            refs_meta.append((ref, r.get("name"), file))
+        ranked_group = _deprioritize_tests(refs_meta)
+        if ranked_group:
+            groups.append(ranked_group)
+    ranked = _merge_ranked_groups(groups)
+    if not ranked:
+        return None, {}
     return LaneResult(CODEGRAPH_LANE, ranked), details
 
 

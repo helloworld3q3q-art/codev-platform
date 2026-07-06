@@ -6,10 +6,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from codev_platform.recall.code_vector_store import (
     _BASE_FIELD_MAX,
     _CHUNK_BODY_CHARS,
     _DEFAULT_SKIP_KINDS,
+    _collect_node_chunks,
     _existing_chroma_healthy,
     _node_chunks,
     _node_id_of,
@@ -139,6 +142,97 @@ def test_resolve_skip_kinds_empty_list_skips_nothing():
     """显式空 list = 不排除任何 kind = 全量嵌(区别于 None=默认)。"""
     cfg = {"recall": {"code_vec": {"skip_kinds": []}}}
     assert _resolve_skip_kinds(cfg) == frozenset()
+
+
+def test_collect_node_chunks_localizes_extra_repo_refs(tmp_path, monkeypatch):
+    """多仓 code_vec: 主仓 ref 不变, extra 仓 ref/file 加 tag, 同 node id 不碰撞。"""
+    from codev_platform.core.repos import RepoSpec
+
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    specs = [
+        RepoSpec(root=main.resolve(), tag="", is_main=True, source_project_id="demo"),
+        RepoSpec(root=extra.resolve(), tag="extra", is_main=False, source_project_id="extra-proj"),
+    ]
+
+    class FakeCodegraphClient:
+        def __init__(self, *, db_path):
+            self.db_path = Path(db_path)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def iter_nodes(self):
+            repo_name = self.db_path.parents[1].name
+            return iter([
+                {
+                    "id": "same-id",
+                    "kind": "function",
+                    "name": f"fn_{repo_name}",
+                    "filePath": "src/app.py",
+                }
+            ])
+
+    monkeypatch.setattr(
+        "codev_platform.web.integrations.codegraph_client.CodegraphClient",
+        FakeCodegraphClient,
+    )
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store._node_chunks",
+        lambda node, repo: [(node["id"], f"text from {Path(repo).name}")],
+    )
+
+    manifest, text_by_id, meta_by_id = _collect_node_chunks(specs, frozenset())
+
+    assert set(manifest) == {"same-id", "extra::same-id"}
+    assert text_by_id["same-id"] == "text from main"
+    assert text_by_id["extra::same-id"] == "text from extra"
+    assert meta_by_id["same-id"]["node"] == "same-id"
+    assert meta_by_id["same-id"]["file"] == "src/app.py"
+    assert meta_by_id["extra::same-id"]["node"] == "extra::same-id"
+    assert meta_by_id["extra::same-id"]["file"] == "extra::src/app.py"
+
+
+def test_collect_node_chunks_skips_missing_extra_but_not_main(tmp_path, monkeypatch):
+    from codev_platform.core.repos import RepoSpec
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+
+    class BoomCodegraphClient:
+        def __init__(self, *, db_path):
+            self.db_path = Path(db_path)
+
+        def __enter__(self):
+            if self.db_path.parents[1].name == "extra":
+                raise RuntimeError("missing db")
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def iter_nodes(self):
+            return iter([{"id": "main-id", "kind": "function", "filePath": "a.py"}])
+
+    monkeypatch.setattr(
+        "codev_platform.web.integrations.codegraph_client.CodegraphClient",
+        BoomCodegraphClient,
+    )
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store._node_chunks",
+        lambda node, repo: [(node["id"], "text")],
+    )
+
+    manifest, _, _ = _collect_node_chunks([
+        RepoSpec(root=main.resolve(), is_main=True),
+        RepoSpec(root=extra.resolve(), tag="extra"),
+    ], frozenset())
+    assert set(manifest) == {"main-id"}
+
+    with pytest.raises(RuntimeError):
+        _collect_node_chunks([RepoSpec(root=extra.resolve(), is_main=True)], frozenset())
 
 
 # ---- 增量续跑前探活(被中断写坏的库 → 退全量自愈) ----

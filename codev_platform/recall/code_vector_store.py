@@ -128,16 +128,10 @@ _SNIPPET_MAX_CHARS = 1500   # 源码片段截断(够含 docstring + 函数体, �
 
 
 def _resolve_repo(project_id: str):
-    """从 config.projects.<pid>.repo_path 解析仓 checkout 路径(读源码用)。缺/不存在 → None。"""
-    from pathlib import Path
-
-    from codev_platform.core.config import get as _get
-    from codev_platform.core.config import load_config
-    rp = _get(load_config(), f"projects.{project_id}.repo_path")
-    if not rp:
-        return None
-    p = Path(rp).expanduser()
-    return p if p.exists() else None
+    """从 core.repos 解析主仓 checkout 路径(兼容旧单仓调用)。缺/不存在 → None。"""
+    from codev_platform.core.repos import project_repo_specs
+    specs = project_repo_specs(project_id)
+    return specs[0].root if specs else None
 
 
 def _source_snippet(repo, node: dict, max_chars: int = _SNIPPET_MAX_CHARS) -> str:
@@ -367,6 +361,50 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     return ranked, {nid: details[nid] for nid in ranked}
 
 
+def _collect_node_chunks(repo_specs, skip_kinds: frozenset) -> tuple[dict, dict, dict]:
+    """按 RepoSpec 枚举 codegraph 节点并生成 localized chunk 数据。
+
+    返回 (manifest, text_by_id, meta_by_id)。主仓 id 原样; extra 仓 id/file 加 repo tag。
+    extra 仓缺 codegraph 时 fail-soft 跳过; 主仓缺失保持旧语义抛错。
+    """
+    from codev_platform.web.integrations.codegraph_client import CodegraphClient
+
+    new_manifest: dict = {}
+    text_by_id: dict[str, str] = {}
+    meta_by_id: dict[str, dict] = {}
+    for spec in repo_specs:
+        try:
+            cg_ctx = CodegraphClient(db_path=spec.codegraph_db)
+            with cg_ctx as cg:
+                for node in cg.iter_nodes():
+                    nid = node.get("id")
+                    if node.get("kind") in skip_kinds:
+                        continue
+                    if not nid:
+                        continue
+                    nid = str(nid)
+                    ref = spec.local_ref(nid)
+                    for chunk_id, text in _node_chunks(node, spec.root):
+                        if not text.strip():
+                            continue
+                        localized_chunk_id = spec.local_ref(chunk_id)
+                        new_manifest[localized_chunk_id] = _node_hash(text)
+                        text_by_id[localized_chunk_id] = text
+                        meta_by_id[localized_chunk_id] = {
+                            "name": node.get("name") or "",
+                            "kind": node.get("kind") or "",
+                            "file": spec.local_file(node.get("filePath")) or "",
+                            "node": ref,
+                            "repo_tag": spec.tag,
+                            "repo_root": str(spec.root),
+                        }
+        except Exception as exc:  # noqa: BLE001 — extra 仓缺 codegraph 可降级; 主仓保持旧语义
+            if spec.is_main:
+                raise
+            logger.warning("[code_vec] extra repo %s codegraph 不可用, 跳过: %s", spec.root, exc)
+    return new_manifest, text_by_id, meta_by_id
+
+
 class CodeVecLockBusy(RuntimeError):
     """另一个 code_vec 重建正占用同一 persist 目录(写侧互斥)。调用侧映射 rc=2 让 worker 重试。"""
 
@@ -404,8 +442,6 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     """
     from codev_platform.agent.embed.registry import build_code_vec_embedder
     from codev_platform.core.config import load_config
-    from codev_platform.web.integrations.codegraph_client import CodegraphClient
-
     # 索引侧用专用 embedder(默认本机 qwen-local + GPU 直跑), 不经共享 daemon /embed —— 大批量
     # 打 daemon 会长占其串行 GPU 信号量甚至死锁(连带打挂在线 search_docs)。build 与服务解耦。
     _cfg = load_config()
@@ -426,8 +462,11 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     current_dir = resolve_current(base)     # 读旧 manifest/meta + 探活 都看**当前 build**(无 pointer 退 base)
     cur_manifest_path = current_dir / _MANIFEST_NAME
     cur_meta_path = current_dir / _MANIFEST_META_NAME
-    repo = _resolve_repo(project_id)   # 读源码片段补语义; None → 退基础文本(降级不崩)
-    enrich_now = bool(repo)
+    from codev_platform.core.repos import project_repo_specs
+
+    repo_specs = project_repo_specs(project_id)   # 主仓 + extra 仓; 单仓项目返回 1 项
+    repo = repo_specs[0].root if repo_specs else None
+    enrich_now = bool(repo_specs)
     # 定 full(读 manifest/meta 从当前 build): 无 manifest / 损坏 / 富化翻转 / 探活坏 都退全量。
     # handoff: full **不再 rmtree 库**, 而是 begin_build 到干净 side(下面), 旧 build 留给 reader, commit 后 gc。
     full = (not incremental) or (not cur_manifest_path.exists())
@@ -469,30 +508,9 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     col = client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
 
     # 枚举节点 → 收 text/meta + 算新 manifest(跳过低价值 kind 与空文本)
-    logger.info("[code_vec] %s: repo=%s (源码富化 %s)", project_id, repo, "on" if repo else "off")
-    new_manifest: dict = {}
-    text_by_id: dict[str, str] = {}
-    meta_by_id: dict[str, dict] = {}
-    with CodegraphClient(project_id) as cg:
-        for node in cg.iter_nodes():
-            nid = node.get("id")
-            if node.get("kind") in skip_kinds:   # 低价值 kind 不入向量库(默认 import/file/variable)
-                continue
-            if not nid:
-                continue
-            nid = str(nid)
-            # kind 感知切割: 一个节点可能产出多块(长方法滑窗); chunk_id 含 '#k' 后缀。
-            for chunk_id, text in _node_chunks(node, repo):
-                if not text.strip():
-                    continue
-                new_manifest[chunk_id] = _node_hash(text)
-                text_by_id[chunk_id] = text
-                meta_by_id[chunk_id] = {
-                    "name": node.get("name") or "",
-                    "kind": node.get("kind") or "",
-                    "file": node.get("filePath") or "",
-                    "node": nid,   # 召回去重回节点 + RRF 对齐 codegraph ref 空间
-                }
+    logger.info("[code_vec] %s: repos=%s (源码富化 %s)",
+                project_id, [str(s.root) for s in repo_specs], "on" if repo_specs else "off")
+    new_manifest, text_by_id, meta_by_id = _collect_node_chunks(repo_specs, skip_kinds)
 
     changed, deleted = _diff_manifest(old_manifest, new_manifest)
 

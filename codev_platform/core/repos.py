@@ -11,6 +11,7 @@ extra_repos 两个来源合并:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
@@ -18,6 +19,57 @@ from pathlib import Path
 from codev_platform.core.config import get as _cfg_get, load_config
 
 logger = logging.getLogger(__name__)
+
+_REPO_TAG_SEP = "::"
+
+
+@dataclass(frozen=True)
+class RepoSpec:
+    """一个逻辑项目下的一座代码仓。
+
+    主仓 tag 固定为空字符串, 让既有单仓 ref/file 保持不变。extra 仓用稳定 tag
+    做命名空间, 只在跨仓可能碰撞的索引/召回 ref 上加前缀。
+    """
+
+    root: Path
+    tag: str = ""
+    is_main: bool = False
+    source_project_id: str | None = None
+
+    @property
+    def codegraph_db(self) -> Path:
+        """该仓本地 codegraph sqlite。若 .codegraph 是 junction/symlink, 路径仍透明可读。"""
+        return self.root / ".codegraph" / "codegraph.db"
+
+    def local_ref(self, ref: str) -> str:
+        """仓内 codegraph node id → 逻辑项目全局 ref。主仓不改, extra 仓加 tag。"""
+        return f"{self.tag}{_REPO_TAG_SEP}{ref}" if self.tag else ref
+
+    def local_file(self, file: str | None) -> str | None:
+        """仓内相对文件路径 → 逻辑项目全局文件标识。主仓不改, extra 仓加 tag。"""
+        if not file:
+            return file
+        return f"{self.tag}{_REPO_TAG_SEP}{file}" if self.tag else file
+
+
+def _stable_tags(repos: list[Path]) -> list[str]:
+    """主仓 tag='', extra 仓 tag=basename, basename 撞时缀序号。"""
+    tags: list[str] = []
+    used: set[str] = set()
+    for i, repo in enumerate(repos):
+        if i == 0:
+            tags.append("")
+            used.add("")
+            continue
+        base = repo.name or f"repo{i}"
+        tag = base
+        n = 1
+        while tag in used:
+            n += 1
+            tag = f"{base}-{n}"
+        tags.append(tag)
+        used.add(tag)
+    return tags
 
 
 def resolve_meta_extra_entries(entries: list, cfg: dict) -> list[str]:
@@ -51,6 +103,18 @@ def meta_extra_repos(project_id: str, cfg: dict) -> list[str]:
     return resolve_meta_extra_entries(_read_meta(project_id).get("extra_repos") or [], cfg)
 
 
+def _resolve_extra_entries_with_source(entries: list, cfg: dict) -> list[tuple[str, str | None]]:
+    """extra_repos 条目 → (path_or_raw, source_project_id)。无 IO, 保留 project-id 来源。"""
+    out: list[tuple[str, str | None]] = []
+    for e in entries or []:
+        raw = str(e).strip()
+        if not raw:
+            continue
+        rp = _cfg_get(cfg, f"projects.{raw}.repo_path")
+        out.append((rp, raw) if rp else (raw, None))
+    return out
+
+
 def _main_repo_root(project_id: str, cfg: dict) -> Path | None:
     """主仓根: config projects.<pid>.repo_path 优先(机器级正确), 再 fallback meta.json repo_path
     (committed, 跨平台可能不符 → is_dir 校验)。存在的目录才取, 都拿不到 → None。"""
@@ -70,14 +134,31 @@ def project_repo_roots(project_id: str, *, main_repo: Path | str | None = None) 
     无 extra 声明 / 单仓项目 → 只返主仓(零影响)。
     """
     cfg = load_config()
+    return [s.root for s in project_repo_specs(project_id, main_repo=main_repo, cfg=cfg)]
+
+
+def project_repo_specs(project_id: str, *, main_repo: Path | str | None = None,
+                       cfg: dict | None = None) -> list[RepoSpec]:
+    """项目的全部仓描述(主仓 + extra_repos), 去重 + 稳定 tag。
+
+    这是多仓 codegraph/code_vec/recall 的中性真值源。旧调用只需要 Path 时继续用
+    project_repo_roots()。
+    """
+    cfg = load_config() if cfg is None else cfg
     roots: list[Path] = []
+    source_ids: list[str | None] = []
     main = Path(main_repo).resolve() if main_repo else _main_repo_root(project_id, cfg)
     if main and main.is_dir():
         roots.append(main)
-    from_cfg = _cfg_get(cfg, f"projects.{project_id}.extra_repos", []) or []
-    from_meta = meta_extra_repos(project_id, cfg)
+        source_ids.append(project_id)
+
+    from_cfg = _resolve_extra_entries_with_source(
+        _cfg_get(cfg, f"projects.{project_id}.extra_repos", []) or [], cfg)
+    from_meta = _resolve_extra_entries_with_source(_read_meta(project_id).get("extra_repos") or [], cfg)
+
     seen = {p.resolve() for p in roots}
-    for r in list(from_cfg) + [x for x in from_meta if x not in from_cfg]:
+    seen_entries = {path for path, _ in from_cfg}
+    for r, source_pid in list(from_cfg) + [x for x in from_meta if x[0] not in seen_entries]:
         p = Path(r).expanduser()
         # 相对路径按进程 CWD 解析 = 不确定 + 与"可移植声明"初衷相悖(应是绝对路径或已登记 project-id
         # ref)。fail-closed 丢弃: 不把服务 CWD 下偶然同名目录拉进 agent 可读白名单(项目隔离防御)。
@@ -89,4 +170,10 @@ def project_repo_roots(project_id: str, *, main_repo: Path | str | None = None) 
             if rp not in seen:
                 seen.add(rp)
                 roots.append(rp)
-    return roots
+                source_ids.append(source_pid)
+
+    tags = _stable_tags(roots)
+    return [
+        RepoSpec(root=root, tag=tag, is_main=(i == 0), source_project_id=source_ids[i])
+        for i, (root, tag) in enumerate(zip(roots, tags))
+    ]

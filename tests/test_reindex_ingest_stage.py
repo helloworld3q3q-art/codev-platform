@@ -72,6 +72,34 @@ def test_ingest_only_skips_other_stages(_repo, monkeypatch):
     assert ran["run"] is False  # codegraph/chroma 一律没跑
 
 
+def test_codegraph_stage_syncs_all_repo_specs(_repo, tmp_path, monkeypatch):
+    from codev_platform.core.repos import RepoSpec
+    extra = tmp_path / "extra"; extra.mkdir()
+    specs = [
+        RepoSpec(root=_repo.resolve(), tag="", is_main=True, source_project_id="demo-proj"),
+        RepoSpec(root=extra.resolve(), tag="extra", is_main=False, source_project_id="extra-proj"),
+    ]
+    calls: list[Path] = []
+    links: list[tuple[str, Path]] = []
+
+    class _CP:
+        returncode = 0
+
+    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs",
+                        lambda pid, **kw: specs)
+    monkeypatch.setattr("codev_platform.ops.codegraph.ensure_codegraph_linked",
+                        lambda pid, repo, cfg: links.append((pid, Path(repo))) or {"action": "ok"})
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {})
+    monkeypatch.setattr(R.C, "run",
+                        lambda cmd, **kw: calls.append(Path(kw["cwd"])) or _CP())
+
+    rc = R.cmd_reindex(_args(repo=str(_repo), codegraph=True))
+
+    assert rc == 0
+    assert calls == [_repo.resolve(), extra.resolve()]
+    assert links == [("demo-proj", _repo.resolve()), ("extra-proj", extra.resolve())]
+
+
 def test_ingest_failure_isolated(_repo, monkeypatch):
     _stub_stages(monkeypatch)
 

@@ -186,8 +186,10 @@ def test_resolve_repos_merges_meta_extra(tmp_path, monkeypatch):
     from codev_platform.graph import ingest as _ing
     main = tmp_path / "main"; main.mkdir()
     pda = tmp_path / "pda"; pda.mkdir()
-    monkeypatch.setattr("codev_platform.core.repos.load_config", lambda: {"projects": {}})
-    monkeypatch.setattr("codev_platform.core.repos.meta_extra_repos", lambda pid, cfg: [str(pda)])
+    monkeypatch.setattr("codev_platform.core.repos.load_config",
+                        lambda: {"projects": {"ideas-pda-app": {"repo_path": str(pda)}}})
+    monkeypatch.setattr("codev_platform.core.repos._read_meta",
+                        lambda pid: {"extra_repos": ["ideas-pda-app"]})
     assert pda.resolve() in _ing._resolve_repos(main, "ideas-v2", None)
 
 
@@ -204,6 +206,44 @@ def test_project_repo_roots_skips_relative_extra_fail_closed(tmp_path, monkeypat
     assert main.resolve() in roots
     assert absx.resolve() in roots                              # 绝对路径正常纳入
     assert all("sneaky-rel" not in str(r) for r in roots)      # 相对项被 fail-closed 丢弃
+
+
+def test_project_repo_specs_keep_main_untagged_and_tag_extras(tmp_path, monkeypatch):
+    from codev_platform.core.repos import project_repo_specs
+    main = tmp_path / "main"; main.mkdir()
+    absx = tmp_path / "absx"; absx.mkdir()
+    pda = tmp_path / "pda"; pda.mkdir()
+
+    monkeypatch.setattr(
+        "codev_platform.core.repos._read_meta",
+        lambda pid: {"extra_repos": ["pda-proj"]} if pid == "demo" else {},
+    )
+    cfg = {
+        "projects": {
+            "demo": {"extra_repos": [str(absx)]},
+            "pda-proj": {"repo_path": str(pda)},
+        }
+    }
+    specs = project_repo_specs("demo", main_repo=main, cfg=cfg)
+
+    assert [s.root for s in specs] == [main.resolve(), absx.resolve(), pda.resolve()]
+    assert [s.tag for s in specs] == ["", "absx", "pda"]
+    assert specs[0].is_main is True and specs[0].local_ref("node-1") == "node-1"
+    assert specs[2].source_project_id == "pda-proj"
+    assert specs[2].local_ref("node-1") == "pda::node-1"
+    assert specs[2].local_file("src/app.ts") == "pda::src/app.ts"
+
+
+def test_project_repo_specs_dedupes_extra_basename_tags(tmp_path):
+    from codev_platform.core.repos import project_repo_specs
+    main = tmp_path / "main"; main.mkdir()
+    a = tmp_path / "a" / "dup"; a.mkdir(parents=True)
+    b = tmp_path / "b" / "dup"; b.mkdir(parents=True)
+    cfg = {"projects": {"demo": {"extra_repos": [str(a), str(b)]}}}
+
+    specs = project_repo_specs("demo", main_repo=main, cfg=cfg)
+
+    assert [s.tag for s in specs] == ["", "dup", "dup-2"]
 
 
 def test_multiroot_merges_both_repos_no_overwrite(tmp_path):

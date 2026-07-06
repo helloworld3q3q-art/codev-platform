@@ -32,6 +32,48 @@ def decide_codegraph_lock_outcome(codegraph_locked: bool, do_codevec: bool,
     return False, 0
 
 
+def _sync_codegraph_repos(repo: Path, project_id: str | None) -> tuple[bool, int]:
+    """按项目仓清单逐仓 codegraph sync。返回 (是否锁忙, rc)。
+
+    队列仍以 project_id+kind 合并; 多仓 fan-out 只在本 stage 内部展开。
+    """
+    if project_id:
+        from codev_platform.core.config import load_config
+        from codev_platform.core.repos import project_repo_specs
+        from codev_platform.ops.codegraph import ensure_codegraph_linked
+
+        cfg = load_config()
+        specs = project_repo_specs(project_id, main_repo=repo, cfg=cfg)
+    else:
+        specs = []
+
+    if not specs:
+        # 无 project_id 时保留旧行为: 只 sync 当前 repo。
+        from codev_platform.core.repos import RepoSpec
+        specs = [RepoSpec(root=repo, tag="", is_main=True)]
+
+    locked = False
+    for spec in specs:
+        label = "main" if spec.is_main else f"extra:{spec.tag}"
+        C.out(f"codegraph sync [{label}] {spec.root}")
+        if project_id:
+            # 已登记 extra project-id 用自己的 codegraph index; 字面路径 extra 不强行 link 到主项目。
+            link_pid = project_id if spec.is_main else spec.source_project_id
+            if link_pid:
+                r = ensure_codegraph_linked(link_pid, spec.root, cfg)
+                if r.get("action") == "error":
+                    C.err(f"WARN: ensure codegraph link failed ({label}, fail-soft): {r.get('note')}")
+        cp = C.run(["codegraph", "sync"], cwd=str(spec.root))
+        rc = cp.returncode
+        if rc == 2:
+            locked = True
+            C.out(f"WARN: codegraph sync skipped ({label}, MCP holds DB); continuing other repos")
+            continue
+        if rc != 0:
+            return locked, rc
+    return locked, 0
+
+
 def cmd_reindex(args: argparse.Namespace) -> int:
     """Refresh local AI indexes. Default = run all stages.
 
@@ -65,9 +107,9 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     if do_codegraph:
         C.out("")
         C.out("=== step 1/4: codegraph sync ===")
+        pid = C.project_id_of(repo)
         try:
-            cp = C.run(["codegraph", "sync"], cwd=str(repo))
-            rc = cp.returncode
+            codegraph_locked, rc = _sync_codegraph_repos(repo, pid)
         except FileNotFoundError:
             C.out("SKIP: 'codegraph' CLI not found on PATH; continuing other indexes")
             rc = 0

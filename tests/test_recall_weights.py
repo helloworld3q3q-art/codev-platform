@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from codev_platform.recall import lane_weights_for, service
 from codev_platform.recall.fusion import LaneResult
+from pathlib import Path
+
 from codev_platform.recall.service import CODEGRAPH_LANE, GRAPH_LANE, recall_code
 
 PID = "t-recall-w"
@@ -51,3 +53,54 @@ def test_recall_code_explicit_weights_override_auto(monkeypatch):
     # symbol query 本会偏 codegraph, 但显式权重强压 graph → 覆盖自动值。
     hits = recall_code("where is definition", PID, weights={GRAPH_LANE: 9.0, CODEGRAPH_LANE: 1.0})
     assert hits[0].ref == "G"
+
+
+def test_codegraph_lane_fans_out_repos_and_localizes_refs(tmp_path, monkeypatch):
+    from codev_platform.core.repos import RepoSpec
+
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    specs = [
+        RepoSpec(root=main.resolve(), tag="", is_main=True),
+        RepoSpec(root=extra.resolve(), tag="extra", is_main=False),
+    ]
+    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs", lambda pid: specs)
+
+    class FakeCodegraphClient:
+        def __init__(self, *, db_path):
+            self.db_path = Path(db_path)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def search(self, query, languages, kinds, limit, *, match_mode="and"):
+            repo_name = self.db_path.parents[1].name
+            return [
+                {
+                    "id": "same",
+                    "name": f"{repo_name}_same",
+                    "kind": "function",
+                    "filePath": "src/app.py",
+                },
+                {
+                    "id": f"{repo_name}-second",
+                    "name": f"{repo_name}_second",
+                    "kind": "function",
+                    "filePath": "src/second.py",
+                },
+            ]
+
+    monkeypatch.setattr(
+        "codev_platform.web.integrations.codegraph_client.CodegraphClient",
+        FakeCodegraphClient,
+    )
+
+    lane, details = service._codegraph_lane(PID, "same", 10)
+
+    assert lane is not None
+    assert lane.ranked == ["same", "extra::same", "main-second", "extra::extra-second"]
+    assert details["same"]["file"] == "src/app.py"
+    assert details["extra::same"]["file"] == "extra::src/app.py"
