@@ -74,6 +74,8 @@ def client(tmp_path, monkeypatch) -> TestClient:
     # 重定向 per-project 路径解析到临时库 (integration 模块内 import 的符号)。
     import codev_platform.web.integrations.codegraph_client as cgc
     monkeypatch.setattr(cgc, "codegraph_db_path", lambda pid: cg_db)
+    monkeypatch.setattr("codev_platform.web.integrations.codegraph_fanout.project_repo_specs",
+                        lambda pid: [])
     app = build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",))
     return TestClient(app)
 
@@ -132,6 +134,70 @@ def test_codegraph_search_or_mode_finds_partial(tmp_path):
         assert cg.search("run missing", None, None, 10, match_mode="and") == []   # 'missing' 不存在 → AND 灭
         names = {r["name"] for r in cg.search("run missing", None, None, 10, match_mode="or")}
         assert "runDaily" in names                                                # OR: 'run'* 仍命中
+
+
+def _rewrite_codegraph_seed(path: Path, *, node_name: str, file_path: str) -> None:
+    c = sqlite3.connect(path)
+    c.execute("UPDATE files SET path = ?", (file_path,))
+    c.execute("UPDATE nodes SET name = ?, qualified_name = ?, file_path = ? WHERE id = 'n1'",
+              (node_name, f"mod.{node_name}", file_path))
+    c.execute("UPDATE nodes SET file_path = ? WHERE id = 'n2'", (file_path,))
+    c.execute("UPDATE nodes_fts SET name = ? WHERE id = 'n1'", (node_name,))
+    c.commit()
+    c.close()
+
+
+def test_codegraph_routes_fan_out_extra_repo(tmp_path, monkeypatch):
+    from codev_platform.core.repos import RepoSpec
+
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    main_db = main / ".codegraph" / "codegraph.db"
+    extra_db = extra / ".codegraph" / "codegraph.db"
+    main_db.parent.mkdir(parents=True)
+    extra_db.parent.mkdir(parents=True)
+    _seed_codegraph(main_db)
+    _seed_codegraph(extra_db)
+    _rewrite_codegraph_seed(extra_db, node_name="runExtra", file_path="b.py")
+    specs = [
+        RepoSpec(root=main, tag="", is_main=True, source_project_id=_PID),
+        RepoSpec(root=extra, tag="extra", is_main=False, source_project_id="extra-proj"),
+    ]
+    monkeypatch.setattr("codev_platform.web.integrations.codegraph_fanout.project_repo_specs",
+                        lambda pid: specs)
+    c = TestClient(build_app(title="t", routers=[graph_routes.router], cfg=_CFG, public_paths=("/health",)))
+
+    search = c.post("/api/v1/graph/codegraph/search", headers=_HEADERS, json={"keyword": "run"})
+    assert search.status_code == 200
+    items = search.json()["data"]["items"]
+    by_name = {it["name"]: it for it in items}
+    assert by_name["runDaily"]["id"] == "n1"
+    assert by_name["runExtra"]["id"] == "extra::n1"
+    assert by_name["runExtra"]["filePath"] == "extra::b.py"
+
+    node = c.post("/api/v1/graph/codegraph/node", headers=_HEADERS, json={"id": "extra::n1"})
+    assert node.status_code == 200
+    assert node.json()["data"]["id"] == "extra::n1"
+
+    neigh = c.post("/api/v1/graph/codegraph/neighbors", headers=_HEADERS,
+                   json={"id": "extra::n1"})
+    assert neigh.status_code == 200
+    ndata = neigh.json()["data"]
+    assert ndata["center"]["id"] == "extra::n1"
+    assert ndata["nodes"][0]["id"].startswith("extra::")
+    assert ndata["edges"][0]["source"].startswith("extra::")
+
+    files = c.post("/api/v1/graph/codegraph/file-tree", headers=_HEADERS,
+                   json={"prefix": "extra::b"})
+    assert files.status_code == 200
+    assert files.json()["data"]["items"][0]["path"] == "extra::b.py"
+
+    graph = c.post("/api/v1/graph/codegraph/graph", headers=_HEADERS, json={"limit": 20})
+    assert graph.status_code == 200
+    gdata = graph.json()["data"]
+    assert gdata["totalNodes"] == 4
+    ids = {n["id"] for n in gdata["nodes"]}
+    assert "n1" in ids and "extra::n1" in ids
 
 
 # ----------------------------------------------------------------------

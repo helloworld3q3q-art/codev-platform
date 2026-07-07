@@ -16,7 +16,7 @@ from codev_platform.core.httpkit.envelope import CommonResult, ok
 from codev_platform.core.httpkit.permissions import require_project_access
 from codev_platform.graph.schema import AnalyzerResult
 from codev_platform.graph.store import GraphStore, GraphStoreUnreadable, open_store
-from codev_platform.web.integrations.codegraph_client import CodegraphClient
+from codev_platform.web.integrations.codegraph_fanout import FanoutCodegraphClient
 from codev_platform.web.schemas import graph as S
 
 router = APIRouter()
@@ -61,7 +61,7 @@ def _open_store_ro(project_id: str) -> GraphStore | None:
 def codegraph_stats(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
     try:
-        with CodegraphClient(project_id) as cli:
+        with FanoutCodegraphClient(project_id) as cli:
             data = cli.stats()
     except PlatformError as exc:
         if _is_missing(exc):
@@ -80,7 +80,7 @@ def codegraph_stats(request: Request, ctx=Depends(require_project_access)) -> Co
 def codegraph_search(request: Request, body: S.CodegraphSearchRequest,
                      ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    with CodegraphClient(project_id) as cli:
+    with FanoutCodegraphClient(project_id) as cli:
         items = cli.search(body.keyword, body.languages, body.kinds, body.limit)
     resp = S.CodegraphSearchResponse(items=[S.CodegraphNode(**n) for n in items])
     return ok(resp, request_id=_rid(request))
@@ -96,7 +96,7 @@ def codegraph_search(request: Request, body: S.CodegraphSearchRequest,
 def codegraph_node(request: Request, body: S.CodegraphNodeRequest,
                    ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    with CodegraphClient(project_id) as cli:
+    with FanoutCodegraphClient(project_id) as cli:
         node = cli.node(body.id)
     data = S.CodegraphNode(**node) if node is not None else None
     return ok(data, request_id=_rid(request))
@@ -112,7 +112,7 @@ def codegraph_node(request: Request, body: S.CodegraphNodeRequest,
 def codegraph_neighbors(request: Request, body: S.CodegraphNeighborsRequest,
                         ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
-    with CodegraphClient(project_id) as cli:
+    with FanoutCodegraphClient(project_id) as cli:
         data = cli.neighbors(body.id, body.direction, body.edgeKinds)
     resp = S.CodegraphNeighborsResponse(
         center=S.CodegraphNode(**data["center"]) if data["center"] is not None else None,
@@ -133,7 +133,7 @@ def codegraph_file_tree(request: Request, body: S.CodegraphFileTreeRequest | Non
                         ctx=Depends(require_project_access)) -> CommonResult:
     _identity, project_id = ctx
     prefix = body.prefix if body else None
-    with CodegraphClient(project_id) as cli:
+    with FanoutCodegraphClient(project_id) as cli:
         items = cli.file_tree(prefix)
     resp = S.CodegraphFileTreeResponse(items=[S.CodegraphFile(**f) for f in items])
     return ok(resp, request_id=_rid(request))
@@ -151,7 +151,7 @@ def codegraph_graph(request: Request, body: S.CodegraphGraphRequest | None = Non
     _identity, project_id = ctx
     b = body or S.CodegraphGraphRequest()
     try:
-        with CodegraphClient(project_id) as cli:
+        with FanoutCodegraphClient(project_id) as cli:
             data = cli.graph(b.limit, b.languages, b.kinds, b.edgeKinds)
     except PlatformError as exc:
         if _is_missing(exc):

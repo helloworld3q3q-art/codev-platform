@@ -56,7 +56,6 @@ git diff --check
 
 ## 四、剩余不在本次硬塞
 
-- Web GraphAPI 的 codegraph 只读接口 fan-out。
 - 外部 `codegraph.server` MCP 代理多后端合并,需先固化返回协议测试。
 
 ## 五、运行治理小步补齐
@@ -84,3 +83,29 @@ git diff --check
 结果:`50 passed, 1 warning`。warning 仍是 Starlette/TestClient 上游弃用提示。
 
 P3 当前状态:首批链路已落地,审计发现的直接缺口和三项运行治理小步已补;下一步再切 Web GraphAPI read-side fan-out 和外部 `codegraph.server` MCP 代理协议固化。
+
+## 六、Web GraphAPI read-side fan-out
+
+继续补 P3 最后一条 Web 读侧缺口。新增 `web.integrations.codegraph_fanout.FanoutCodegraphClient`,让路由仍按一个 client 使用,fan-out 和 `tag::` 命名空间只停留在 integration 边界。
+
+- `stats/search/node/neighbors/file-tree/graph` 六个 codegraph 路由改为跨 RepoSpec 读取多仓 `.codegraph/codegraph.db`。
+- 主仓 id/path 保持旧语义;extra repo 的 node id、edge source/target、file path 返回 `repoTag::...`。
+- `node/neighbors/file-tree` 支持请求 `repoTag::id/path` 精确定位 extra repo。
+- 无 RepoSpec 时继续 fallback 到 centralized `codegraph_db_path(project_id)`,兼容旧测试和旧部署。
+
+补测:
+
+- `tests/test_web_graph.py`: 路由级 search/node/neighbors/file-tree/graph 多仓 fan-out 和 extra tag 输出。
+- `tests/test_codegraph_graph_density.py`: 原图谱密度上限继续通过,防 overview 回归成发丝团。
+
+新增验证:
+
+```powershell
+python -m pytest tests/test_web_graph.py tests/test_codegraph_graph_density.py
+python -m py_compile codev_platform\web\integrations\codegraph_fanout.py codev_platform\web\routes\graph.py
+git diff --check
+```
+
+结果:`13 passed, 1 warning`。
+
+P3 当前状态:除外部 `codegraph.server` MCP 代理多后端合并外,code_vec / recall / agent 工具 / Web GraphAPI 的多仓读写主链路均已补齐。
