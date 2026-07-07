@@ -195,3 +195,22 @@ git diff --check
 ```
 
 结果:`18 passed, 1 warning`。
+
+## 十一、codegraph status Junction 判定回归测试
+
+补第二个收尾项的防回归测试。`codev-platform codegraph status` 的展示直接依赖 `ops.codegraph.link_state()`;当前生产逻辑已能把 Windows junction/reparse point 优先识别成 `linked`,不会因为 `.codegraph` 同时表现为目录而误报成“还在仓内”。
+
+本步只补测试,不改生产代码:
+
+- `tests/test_codegraph_link.py`: 覆盖 Windows junction target 带 `\??\` 前缀时仍返回 `linked`。
+- `tests/test_codegraph_link.py`: 覆盖 `os.readlink()` 读不到 junction target、但平台数据目录存在时仍返回 `linked`。
+- 既有真实 link/junction 集成用例继续覆盖 `link_project()` 后透明读平台数据和 `link_state()==linked`。
+
+验证:
+
+```powershell
+python -m pytest tests/test_codegraph_link.py tests/test_codegraph_ensure_link.py
+git diff --check
+```
+
+结果:`13 passed`。

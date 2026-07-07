@@ -33,6 +33,28 @@ def test_link_state_in_repo_then_missing(env):
     assert cg.link_state(repo_cg, plat) == "missing"
 
 
+def test_link_state_windows_junction_target_prefix_is_linked(env, monkeypatch):
+    repo_cg = env["repo"] / ".codegraph"
+    plat = codegraph_index_dir("p1")
+    plat.mkdir(parents=True)
+    monkeypatch.setattr(cg, "_is_link", lambda p: p == repo_cg)
+    monkeypatch.setattr(cg.os, "readlink", lambda p: "\\??\\" + str(plat))
+    assert cg.link_state(repo_cg, plat) == "linked"
+
+
+def test_link_state_junction_with_unreadable_target_is_linked(env, monkeypatch):
+    repo_cg = env["repo"] / ".codegraph"
+    plat = codegraph_index_dir("p1")
+    plat.mkdir(parents=True)
+    monkeypatch.setattr(cg, "_is_link", lambda p: p == repo_cg)
+
+    def _raise_readlink(path):
+        raise OSError("junction target unavailable")
+
+    monkeypatch.setattr(cg.os, "readlink", _raise_readlink)
+    assert cg.link_state(repo_cg, plat) == "linked"
+
+
 def test_link_moves_to_platform_and_junctions(env):
     plat = codegraph_index_dir("p1")
     r = cg.link_project(env["cfg"], "p1", env["repo"])
