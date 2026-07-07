@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from mcp.types import TextContent
 
 from codev_platform.codegraph import server as cg_server
+from codev_platform.core.repos import RepoSpec
 
 
 class _FakeBackend:
@@ -65,3 +66,43 @@ def test_call_tool_multi_backend_fail_soft_when_one_repo_fails(monkeypatch):
     texts = [c.text for c in content]
     assert "main-result" in texts
     assert "extra failed" not in texts
+
+
+def test_backend_slots_for_uses_repo_specs_with_existing_codegraph_db(tmp_path, monkeypatch):
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    for repo in (main, extra):
+        db = repo / ".codegraph" / "codegraph.db"
+        db.parent.mkdir(parents=True)
+        db.write_bytes(b"")
+    specs = [
+        RepoSpec(root=main, tag="", is_main=True, source_project_id="demo"),
+        RepoSpec(root=extra, tag="extra", is_main=False, source_project_id="extra-demo"),
+    ]
+    monkeypatch.setattr(cg_server, "project_repo_specs", lambda pid: specs)
+    cg_server._backends.clear()
+
+    slots = cg_server._backend_slots_for("demo")
+
+    assert [(label, be.pid, be.repo) for label, be in slots] == [
+        ("main", "demo", main),
+        ("extra", "demo:extra", extra),
+    ]
+
+
+def test_backend_slots_for_skips_repo_without_codegraph_db(tmp_path, monkeypatch):
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    db = main / ".codegraph" / "codegraph.db"
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b"")
+    specs = [
+        RepoSpec(root=main, tag="", is_main=True, source_project_id="demo"),
+        RepoSpec(root=extra, tag="extra", is_main=False, source_project_id="extra-demo"),
+    ]
+    monkeypatch.setattr(cg_server, "project_repo_specs", lambda pid: specs)
+    cg_server._backends.clear()
+
+    slots = cg_server._backend_slots_for("demo")
+
+    assert [(label, be.pid, be.repo) for label, be in slots] == [("main", "demo", main)]

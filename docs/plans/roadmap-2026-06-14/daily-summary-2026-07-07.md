@@ -138,3 +138,22 @@ git diff --check
 结果:`49 passed, 1 warning`。
 
 P3 当前状态:核心 fan-out 闭环完成。多仓项目现在覆盖 reindex/code_vec/recall/agent tools/Web GraphAPI/codegraph MCP 代理;后续更适合拿真实多仓项目做端到端验收,再按实际输出优化结构化 merge。
+
+## 八、代理 E2E 验收补测
+
+继续把真实多仓验收前置成可重复测试,避免只测 mock 合并内容:
+
+- `tests/test_codegraph_server_fanout.py` 补 `_backend_slots_for()` RepoSpec 选择测试。
+- 覆盖主仓 + extra repo 都有 `.codegraph/codegraph.db` 时生成两个 backend slot。
+- 覆盖 extra repo 没有 codegraph db 时 fail-soft 跳过,不影响主仓 slot。
+- 不启动真实 `codegraph serve --mcp`,只验证平台代理的仓选择和 key/tag 规则。
+
+验证:
+
+```powershell
+python -m pytest tests/test_codegraph_server_fanout.py tests/test_mcp_serve.py tests/test_health_split_security.py tests/test_obslog.py
+python -m py_compile codev_platform\codegraph\server.py
+git diff --check
+```
+
+结果:`51 passed, 1 warning`。
