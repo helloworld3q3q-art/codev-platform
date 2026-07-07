@@ -57,7 +57,7 @@
 
 ## P3 — 多仓多根索引 fan-out(让多仓项目完整可查)【解冻 06-10 多仓 Phase 2,最重】
 
-> 🚧 **进度(2026-07-07)**:首批低风险切片已交付并推送。`0812b8b` 建 RepoSpec 真值源 + code_vec/recall 多仓 fan-out + reindex 逐仓 codegraph sync;`0a94264` 做 extra repo 变更反向触发父项目 reindex;`d00de6f` 做 agent 内置 `codegraph_search/callers/callees/trace` 跨仓查询。今日补齐审计缺口:tagged path 文件工具、rerank 反解 `extra::ref`、集中式 codegraph fallback、extra repo sync freshness、git 输出脱敏和边界补测;随后补运行治理:PG queue webhook fail-closed、extra repo webhook health/startup 校验、fan-out metrics/alert;Web GraphAPI codegraph 六个只读接口已接入多仓 fan-out。验证 `98 passed` + `50 passed` + `13 passed` + `py_compile` + `git diff --check`。剩余:外部 `codegraph.server` MCP 代理多后端合并(需先固化返回协议测试,不贸然堆)。
+> ✅ **进度(2026-07-07)**:核心 fan-out 闭环完成。`0812b8b` 建 RepoSpec 真值源 + code_vec/recall 多仓 fan-out + reindex 逐仓 codegraph sync;`0a94264` 做 extra repo 变更反向触发父项目 reindex;`d00de6f` 做 agent 内置 `codegraph_search/callers/callees/trace` 跨仓查询。今日补齐审计缺口:tagged path 文件工具、rerank 反解 `extra::ref`、集中式 codegraph fallback、extra repo sync freshness、git 输出脱敏和边界补测;随后补运行治理:PG queue webhook fail-closed、extra repo webhook health/startup 校验、fan-out metrics/alert;Web GraphAPI codegraph 六个只读接口已接入多仓 fan-out;外部 `codegraph.server` MCP 代理按 repo 分段合并多后端。验证 `98 passed` + `50 passed` + `13 passed` + `49 passed` + `py_compile` + `git diff --check`。剩余:真实多仓项目端到端验收和按实际输出优化结构化 merge。
 
 **现状**:graph ingest 已支持 `extra_repos`(多仓前端→后端跨仓连边,RepoScope 已建);**但 codegraph / code_vec 只扫主仓**(daily-06-13:codegraph sync 按设计只扫主仓),多仓项目的关联仓代码 `code_recall` 召不到。
 

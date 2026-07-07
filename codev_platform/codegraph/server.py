@@ -37,6 +37,7 @@ from codev_platform.core.errors import ErrorCode, to_mcp_error
 from codev_platform.core.config import get as _cfg_get, load_config
 from codev_platform.core.obslog import logging_mode, redact_args
 from codev_platform.core.project_id import ProjectIdError, resolve_local
+from codev_platform.core.repos import project_repo_specs
 
 
 def _resolve_codegraph_cmd() -> str:
@@ -228,6 +229,42 @@ def _backend_for(pid: str | None) -> _Backend:
     return be
 
 
+def _backend_for_repo(key: str, repo: Path) -> _Backend:
+    be = _backends.get(key)
+    if be is None or be.repo != repo:
+        be = _Backend(key, repo)
+        _backends[key] = be
+    return be
+
+
+def _backend_slots_for(pid: str | None) -> list[tuple[str, _Backend]]:
+    """Logical project -> one or more codegraph stdio backends.
+
+    Single-repo deployments keep the old exact behavior. Multi-repo projects fan out
+    to every RepoSpec with a local codegraph.db, labeling extra repos by tag.
+    """
+    if not pid:
+        return [("main", _backend_for(pid))]
+    specs = project_repo_specs(pid)
+    slots: list[tuple[str, _Backend]] = []
+    for spec in specs:
+        if not spec.codegraph_db.is_file():
+            continue
+        label = spec.tag or "main"
+        key = pid if spec.is_main else f"{pid}:{label}"
+        slots.append((label, _backend_for_repo(key, spec.root)))
+    if slots:
+        return slots
+    return [("main", _backend_for(pid))]
+
+
+def _repo_header(label: str) -> TextContent:
+    return TextContent(
+        type="text",
+        text=json.dumps({"repo": label, "separator": True}, ensure_ascii=False),
+    )
+
+
 # ----------------------------------------------------------------------
 # MCP server: list_tools / call_tool 全部透传到 active project 的 codegraph 后端
 # ----------------------------------------------------------------------
@@ -241,7 +278,7 @@ async def list_tools() -> list[Tool]:
         return _TOOLS_CACHE
     pid = _active_pid()
     try:
-        be = _backend_for(pid)
+        _label, be = _backend_slots_for(pid)[0]
         resp = await be.request("list")
         _TOOLS_CACHE = list(resp.tools)
         _flog(f"[list_tools] discovered {len(_TOOLS_CACHE)} tools from pid={pid}")
@@ -263,18 +300,31 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     ok = True
     content: list = []
     try:
-        be = _backend_for(pid)
-        for attempt in (1, 2):  # 后端死了 → worker 已退出, ensure() 会重启, 再试一次
+        slots = _backend_slots_for(pid)
+        merged: list[TextContent] = []
+        failures: list[str] = []
+        for label, be in slots:
             try:
-                result = await be.request("call", name, args or {})
-                content = list(result.content or [])
-                ok = not bool(getattr(result, "isError", False))
-                return content
+                result = await _call_backend(be, pid, name, args)
+                part = list(result.content or [])
+                if len(slots) == 1:
+                    content = part
+                    ok = not bool(getattr(result, "isError", False))
+                    return content
+                merged.append(_repo_header(label))
+                merged.extend(part)
+                if getattr(result, "isError", False):
+                    failures.append(label)
             except Exception as exc:  # noqa: BLE001
-                if attempt == 1 and not be.alive:
-                    _flog(f"[call_tool] pid={pid} tool={name} 后端已退出, 重启重试: {exc!s}")
-                    continue
-                raise
+                failures.append(label)
+                if len(slots) == 1:
+                    raise
+                _flog(f"[call_tool] pid={pid} tool={name} repo={label} fan-out failed: {exc!s}")
+        if not merged:
+            raise RuntimeError(f"all codegraph fan-out backends failed: {', '.join(failures)}")
+        ok = not failures
+        content = merged
+        return content
     except Exception as exc:  # noqa: BLE001
         ok = False
         print(f"[codegraph] tool '{name}' pid={pid} error: {traceback.format_exc()}", file=sys.stderr)
@@ -293,6 +343,18 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
             "ok": ok,
             "elapsed_ms": round(ms, 1),
         })
+
+
+async def _call_backend(be: _Backend, pid: str | None, name: str, args: dict | None):
+    for attempt in (1, 2):  # 后端死了 → worker 已退出, ensure() 会重启, 再试一次
+        try:
+            return await be.request("call", name, args or {})
+        except Exception as exc:  # noqa: BLE001
+            if attempt == 1 and not be.alive:
+                _flog(f"[call_tool] pid={pid} tool={name} 后端已退出, 重启重试: {exc!s}")
+                continue
+            raise
+    raise RuntimeError("unreachable")
 
 
 # ----------------------------------------------------------------------

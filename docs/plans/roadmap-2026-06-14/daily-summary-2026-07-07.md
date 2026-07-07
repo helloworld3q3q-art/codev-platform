@@ -56,7 +56,7 @@ git diff --check
 
 ## 四、剩余不在本次硬塞
 
-- 外部 `codegraph.server` MCP 代理多后端合并,需先固化返回协议测试。
+- 暂无 P3 核心链路阻断项。后续只剩真实多仓项目上的端到端数据验收和更细的外部 codegraph 工具结构化 merge。
 
 ## 五、运行治理小步补齐
 
@@ -108,4 +108,33 @@ git diff --check
 
 结果:`13 passed, 1 warning`。
 
-P3 当前状态:除外部 `codegraph.server` MCP 代理多后端合并外,code_vec / recall / agent 工具 / Web GraphAPI 的多仓读写主链路均已补齐。
+P3 当前状态:除真实多仓项目端到端验收外,code_vec / recall / agent 工具 / Web GraphAPI 的多仓读写主链路均已补齐。
+
+## 七、外部 codegraph MCP 代理多后端合并
+
+最后补 `codev_platform.codegraph.server` 外部 MCP 代理层。该层原本只按逻辑项目启动一个 `codegraph serve --mcp` 后端,多仓项目通过 SSE 调 codegraph 仍只看到主仓。
+
+本次采用保守合并:
+
+- 单仓项目保持原样透传,返回内容不加 wrapper。
+- 多仓项目按 `RepoSpec` 为每个已有 `.codegraph/codegraph.db` 的仓启动/复用一个 stdio backend。
+- 多仓返回按 repo 分段:先给 `{"repo":"main|tag","separator":true}` 文本块,再接该仓原始 codegraph 工具返回内容。
+- 单个 extra repo 后端失败只记录日志并跳过,不拖垮其它仓;全部失败才返回 MCP 错误。
+- `list_tools` 仍取首个可用后端,工具集保持与外部 codegraph 一致。
+
+补测:
+
+- `tests/test_codegraph_server_fanout.py`: 单仓原样透传、多仓 repo 分段、extra 后端失败 fail-soft。
+- `tests/test_mcp_serve.py` / `tests/test_health_split_security.py` / `tests/test_obslog.py`: 端点、健康面、日志脱敏相关回归。
+
+新增验证:
+
+```powershell
+python -m pytest tests/test_codegraph_server_fanout.py tests/test_mcp_serve.py tests/test_health_split_security.py tests/test_obslog.py
+python -m py_compile codev_platform\codegraph\server.py
+git diff --check
+```
+
+结果:`49 passed, 1 warning`。
+
+P3 当前状态:核心 fan-out 闭环完成。多仓项目现在覆盖 reindex/code_vec/recall/agent tools/Web GraphAPI/codegraph MCP 代理;后续更适合拿真实多仓项目做端到端验收,再按实际输出优化结构化 merge。
