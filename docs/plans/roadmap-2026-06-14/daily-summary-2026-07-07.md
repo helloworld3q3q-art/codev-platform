@@ -238,3 +238,19 @@ git diff --check
 ```
 
 结果:`31 passed, 15 skipped`。真实 dry-run 当前列出 14 个 STALE,未删除任何任务。
+
+## 十三、队列清理与 worker 闭环
+
+按上一节新增的安全命令处理真实队列,未启动常驻 worker:
+
+- 先确认无 `reindex-queue worker` 进程,仅有 platform-docs/codegraph/graph/agent-memory 等 MCP 常驻进程。
+- 用 `prune-stale --yes --force-file` 定向清理旧项目 STALE:
+  - `openclaw-stock`: removed=4
+  - `ideas-pda-app`: removed=3
+  - `ideas-v2`: removed=3
+- 保留本仓 `codev-platform__*` 4 个任务,避免删掉刚提交后的本仓索引刷新需求。
+- 发现本机 worker 白名单未包含 `codev-platform`,所以不改用户级配置,只在一次性 Python 进程里临时给 `ReindexWorker` 注入 `codev-platform` repo_path。
+- 执行非常驻 `drain_once()`: processed=4,`chroma/codegraph/ingest/code_vec` 均 rc=0。
+- reindex 后 `health --mode light` 全绿,队列状态为“队列空”。
+
+注意:本步没有清理或提交 `codev_platform/需求.txt`。worker 闭环后发现工作树另有 8 个未知源码 dirty 文件,与本步无关,未纳入本记录提交。
