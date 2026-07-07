@@ -149,11 +149,9 @@ def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneRes
                 # match_mode='or': verbose 多词 query(混入 function/definition 等描述词)AND 会
                 # 全灭, OR 让目标符号被 bm25 顶上来(与 graph lane 分词宽松召回同理)。
                 rows = cg.search(query, None, None, per_lane, match_mode="or")
-        except Exception as exc:  # noqa: BLE001 — extra 仓 fail-soft; 主仓失败则该 lane 退化
-            if spec.is_main:
-                logger.warning("[recall] codegraph lane failed: %r", exc)
-                return None, {}
-            logger.warning("[recall] codegraph extra repo skipped (%s): %r", spec.root, exc)
+        except Exception as exc:  # noqa: BLE001 — 单 repo 失败不拖垮其它 repo
+            repo_label = "main repo" if spec.is_main else "extra repo"
+            logger.warning("[recall] codegraph %s skipped (%s): %r", repo_label, spec.root, exc)
             continue
         refs_meta: list[tuple[str, str | None, str | None]] = []
         for r in rows:

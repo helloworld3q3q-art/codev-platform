@@ -176,3 +176,22 @@ git diff --check
 
 - `ideas-v2` 主仓未初始化 codegraph 时,`recall_code` 的 codegraph lane 会因主仓缺索引跳过整个 lane,未继续读 extra repo;本次通过初始化主仓完成验收,后续可把该 lane 调整为“主仓失败也继续 extra”。
 - codegraph CLI 的 `sync/index` 对删除临时文件未清掉旧 symbol,最后用 `uninit --force` + `init -i` 重建 PDA 索引并重新 link;旧平台索引先改名备份,新索引验证后删除备份。
+
+## 十、recall_code 主仓缺索引降级修复
+
+补上上一节验收发现的降级缺口:`recall_code` 的 codegraph lane 现在按 repo 逐个 fail-soft。主仓 `.codegraph/codegraph.db` 缺失或查询失败时,只跳过该主仓并继续查询 extra repo;融合层仍只看到统一的 `tag::ref` 和 `tag::file`,不引入新的多仓真值源。
+
+补测:
+
+- `tests/test_recall_service.py`: 模拟 main repo codegraph 抛错、extra repo 正常返回,断言召回 `extra::n-extra` 且文件路径本地化为 `extra::src/extra.py`。
+- 只读审计无阻断问题;保留既有更宽的 `project_repo_specs()` 配置解析异常风险,不在本小步扩范围。
+
+验证:
+
+```powershell
+python -m pytest tests/test_recall_service.py tests/test_web_recall.py
+python -m pytest tests/test_recall_weights.py
+git diff --check
+```
+
+结果:`18 passed, 1 warning`。

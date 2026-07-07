@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from codev_platform.graph.schema import AnalyzerResult, GraphNode, NodeKind
+from codev_platform.core.repos import RepoSpec
 from codev_platform.graph.store import open_store as real_open_store
 from codev_platform.recall import service
 from codev_platform.recall.fusion import LaneResult
@@ -93,3 +94,48 @@ def test_deprioritize_tests_keeps_impl_first():
         ("t2", "test_stamp_provenance_b", "tests/test_p.py"),
     ]
     assert _deprioritize_tests(items) == ["impl", "t1", "t2"]   # 实现顶到最前, 测试组内保原序
+
+
+def test_codegraph_lane_main_repo_failure_continues_extra_repo(monkeypatch, tmp_path):
+    main = tmp_path / "main"
+    extra = tmp_path / "extra"
+    main.mkdir()
+    extra.mkdir()
+    main_spec = RepoSpec(main, tag="", is_main=True)
+    extra_spec = RepoSpec(extra, tag="extra", is_main=False)
+
+    class FakeCodegraphClient:
+        def __init__(self, *, db_path=None, project_id=None):
+            self.db_path = db_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def search(self, query, kind, path, limit, *, match_mode=None):
+            if self.db_path == main_spec.codegraph_db:
+                raise RuntimeError("main codegraph missing")
+            return [{
+                "id": "n-extra",
+                "name": "run_extra",
+                "kind": "function",
+                "filePath": "src/extra.py",
+            }]
+
+    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs",
+                        lambda project_id: [main_spec, extra_spec])
+    monkeypatch.setattr("codev_platform.web.integrations.codegraph_client.CodegraphClient",
+                        FakeCodegraphClient)
+
+    lane, details = service._codegraph_lane(PID, "run", 10)
+
+    assert lane is not None
+    assert lane.lane == service.CODEGRAPH_LANE
+    assert lane.ranked == ["extra::n-extra"]
+    assert details["extra::n-extra"] == {
+        "name": "run_extra",
+        "kind": "function",
+        "file": "extra::src/extra.py",
+    }

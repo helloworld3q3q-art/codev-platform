@@ -15,7 +15,7 @@
 | [daily-summary-2026-06-17.md](daily-summary-2026-06-17.md) | 前端体验线:统一图谱/节点图谱大图渲染优化(批量渲染 draw call 5万→2、取景/标签修复、层级聚类球团、曲线边、Orbit 平移);共用 Graph3DCanvas 一处两页受益 | 日报 |
 | [daily-summary-2026-06-21.md](daily-summary-2026-06-21.md) | 运维事故线:platform-docs MCP CUDA daemon 故障修复(cudaErrorUnknown 上下文损坏致进程假活/双绿但搜索全死);两步闭环 restart daemon + 重启客户端;教训"进程绿灯≠服务可用,判活必实调" | 日报 |
 | [daily-summary-2026-07-06.md](daily-summary-2026-07-06.md) | P3 多仓多根索引首批落地:RepoSpec 真值源、code_vec/recall fan-out、extra repo 反向触发、agent codegraph 工具跨仓查询;剩 Web GraphAPI / 外部 codegraph MCP 代理读侧待做 | 日报 |
-| [daily-summary-2026-07-07.md](daily-summary-2026-07-07.md) | P3 审计修复 + 运行治理 + Web/MCP fan-out:tagged file tools、rerank extra ref、PG queue fail-closed、extra repo webhook 体检、fan-out 指标/告警、Web codegraph 多仓读侧、外部 codegraph MCP 代理分仓合并 | 日报 |
+| [daily-summary-2026-07-07.md](daily-summary-2026-07-07.md) | P3 审计修复 + 运行治理 + Web/MCP fan-out:tagged file tools、rerank extra ref、PG queue fail-closed、extra repo webhook 体检、fan-out 指标/告警、Web codegraph 多仓读侧、外部 codegraph MCP 代理分仓合并、真实 ideas E2E、recall_code 主仓缺索引降级修复 | 日报 |
 
 ## 四项速览(优先级序)
 
