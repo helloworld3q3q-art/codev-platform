@@ -4,5 +4,11 @@
   "repo_url": "http://10.0.2.37/ideas-v2/ideas_v2.git",
   "repo_path": "/home/helloworld/work/ideas_v2",
   "extra_repos": ["ideas-pda-app"],
+  "health": {
+    "reindex_codegraph_patterns": [
+      "^(common|components|pages|store|task)/.*\\.(js|vue|ts|tsx)$",
+      "^(App|main)\\.js$"
+    ]
+  },
   "notes": "WMS 仓储系统: Java 多模块后端(1079 端点) + thorn6 Vue web 前端(同仓)。PDA app 的后端即本仓。extra_repos 以 project-id 引用声明跨仓(PDA 手持前端 ideas-pda-app), 一起 ingest 进统一图谱供前端→后端跨仓链路; 机器相关绝对路径由各机 ~/.codev-platform/config.json 的 projects.<id>.repo_path 提供。"
 }

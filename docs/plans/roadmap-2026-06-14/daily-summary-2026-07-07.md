@@ -157,3 +157,22 @@ git diff --check
 ```
 
 结果:`51 passed, 1 warning`。
+
+## 九、真实 ideas 多仓端到端验收
+
+按真实本机仓库补做 P3 验收:`ideas-v2` 主仓 + `ideas-pda-app` extra repo。
+
+- 本机 `~/.codev-platform/config.json` 补齐 `ideas-v2` / `ideas-pda-app` 的 `repo_path` 和 `webhook_repo`,并把废弃的 `daemon.port` 迁到 `mcp.platform_docs_sse_port`。`health --project ideas-v2 --mode light` 中 `webhook extra repos` 已为 OK。
+- `platform_meta/projects/ideas-v2` 和 `ideas-pda-app` 补 PDA uni-app 路径的 `reindex_codegraph_patterns`,否则 `common/js/*.js` 这类真实 extra repo 改动不会命中 webhook/hook scope。
+- 用临时 `common/js/codev_e2e_probe.js` 验证:
+  - GitLab webhook handler 返回 200,`frontend/ideas-pda-app-hb` fan-out 到 `ideas-pda-app` 和 `ideas-v2`,入队 `codegraph/ingest/code_vec`。
+  - 本地 hook 同源 dispatch 对 PDA repo 也入队同一批 scope。
+  - PDA 和 ideas-v2 codegraph 初始化并 link 到平台数据目录后,`recall_code("codevE2eProbeIdeasPdaHb20260707", "ideas-v2")` 命中 `ideas-pda-app-hb::common/js/codev_e2e_probe.js`。
+  - Web GraphAPI fan-out integration 能查到同一 extra repo node。
+  - 外部 `codegraph.server` MCP 代理真实输出为 repo 分段文本:`main` 段无结果,`ideas-pda-app-hb` 段返回 1 条函数结果。
+- 结论:当前 MCP repo 分段文本合并足够人工阅读;Web/API 已返回结构化 node。若后续需要程序消费 MCP 结果,再把 MCP merge 升级为结构化 JSON 聚合。
+
+验收发现:
+
+- `ideas-v2` 主仓未初始化 codegraph 时,`recall_code` 的 codegraph lane 会因主仓缺索引跳过整个 lane,未继续读 extra repo;本次通过初始化主仓完成验收,后续可把该 lane 调整为“主仓失败也继续 extra”。
+- codegraph CLI 的 `sync/index` 对删除临时文件未清掉旧 symbol,最后用 `uninit --force` + `init -i` 重建 PDA 索引并重新 link;旧平台索引先改名备份,新索引验证后删除备份。
