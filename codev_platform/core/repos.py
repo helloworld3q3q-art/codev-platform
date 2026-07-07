@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 
 from codev_platform.core.config import get as _cfg_get, load_config
+from codev_platform.core.project_id import validate as _validate_project_id
 
 logger = logging.getLogger(__name__)
 
@@ -300,6 +301,48 @@ def project_repo_specs(project_id: str, *, main_repo: Path | str | None = None,
                 source_ids.append(source_pid)
 
     return repo_specs_from_roots(roots, source_ids=source_ids)
+
+
+def project_codegraph_dbs(project_id: str, *, cfg: dict | None = None) -> list[tuple[RepoSpec, Path]]:
+    """Existing codegraph DBs for a logical project.
+
+    The canonical target is the platform data directory. During migration or for
+    the platform repo itself, a project may still keep `.codegraph` in its repo.
+    Read-side tools should accept both forms instead of each caller inventing a
+    different readiness check.
+    """
+    cfg = load_config() if cfg is None else cfg
+    out: list[tuple[RepoSpec, Path]] = []
+    seen: set[Path] = set()
+
+    def add(spec: RepoSpec, db: Path) -> None:
+        if not db.is_file():
+            return
+        try:
+            key = db.resolve()
+        except OSError:
+            key = db
+        if key not in seen:
+            seen.add(key)
+            out.append((spec, db))
+
+    # Project repo specs are the portable truth for main + extra repos. Their
+    # `.codegraph` path transparently works whether it is an in-repo directory or
+    # a junction/symlink to platform data.
+    for spec in project_repo_specs(project_id, cfg=cfg):
+        add(spec, spec.codegraph_db)
+
+    # Fallback for projects with platform data but no registered local repo path.
+    pid = _validate_project_id(project_id)
+    configured_data = _cfg_get(cfg, "data.platform_data_dir")
+    if configured_data:
+        data_root = Path(configured_data).expanduser().resolve()
+    else:
+        from codev_platform.core import paths as _paths
+        data_root = _paths.data_root()
+    central = data_root / "codegraph_ext" / pid / "codegraph" / "codegraph.db"
+    add(RepoSpec(root=central.parent.parent, is_main=True, source_project_id=project_id), central)
+    return out
 
 
 def impacted_project_ids_for_repo(repo: Path | str | None, *,

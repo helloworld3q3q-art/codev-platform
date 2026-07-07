@@ -101,7 +101,7 @@ def run_code_intelligence(project_id: str) -> dict:
 
     try:
         from codev_platform.graph.schema import NodeKind
-        from codev_platform.graph.store import graph_store_path, load_graph, open_store
+        from codev_platform.graph.store import graph_store_path, open_store
     except Exception as e:  # noqa: BLE001
         return {"suite": "code_intelligence", "status": "skipped",
                 "reason": f"graph 模块不可导入 ({type(e).__name__}: {e})。",
@@ -114,11 +114,8 @@ def run_code_intelligence(project_id: str) -> dict:
                           f"`codev-platform reindex` (或 graph ingest) 建图谱。",
                 "n": len(rows)}
 
-    conn = open_store(project_id)
-    try:
-        g = load_graph(conn, project_id)
-    finally:
-        conn.close()
+    with open_store(project_id, mode="ro") as store:
+        g = store.load_graph(project_id)
 
     has_arch = any(n.kind == NodeKind.ARCH_LAYER.value for n in g.nodes)
     has_domain = any(n.kind == NodeKind.BUSINESS_DOMAIN.value for n in g.nodes)

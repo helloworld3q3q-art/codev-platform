@@ -8,14 +8,28 @@ project_id 给定按项目路由, None 走 cwd 推导。
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from typing import Any
 
 from codev_platform.agent.brain import ToolResult
 from codev_platform.agent.tools.base import Tool
+from codev_platform.recall.service import CodeRecallHit
 
 _DEFAULT_LIMIT = 12
 _MAX_LIMIT = 50
+
+
+def _compact_hit(hit: CodeRecallHit) -> dict[str, Any]:
+    """Agent-facing payload: keep grounding fields, drop precision/noise that wastes context."""
+    out: dict[str, Any] = {
+        "ref": hit.ref,
+        "score": round(hit.score, 4),
+        "name": hit.name,
+        "kind": hit.kind,
+        "lanes": hit.lanes,
+    }
+    if hit.file:
+        out["file"] = hit.file
+    return out
 
 
 class CodeRecallTool(Tool):
@@ -55,7 +69,7 @@ class CodeRecallTool(Tool):
             "query": query,
             "count": len(hits),
             "lanes": sorted({lane for h in hits for lane in h.lanes}),
-            "hits": [asdict(h) for h in hits],
+            "hits": [_compact_hit(h) for h in hits],
         }
         # 紧凑 JSON(去缩进/分隔空格): tool-result 每步计入 miss, 缩进是纯格式零信息 → 压扁省
         # ~15-20% 该工具 token, grounding 不受影响(免费 win, 2026-06-11 成本面板; impact/codegraph 同)。

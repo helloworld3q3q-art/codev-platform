@@ -1,7 +1,7 @@
-"""planner suite 单测 —— 标准 golden 满分 + 硬集暴露关键词分类上限 (Phase 7 完整版依据)。
+"""planner suite 单测 —— 标准 golden + 硬集分类回归。
 
-纯逻辑, 不调 LLM。硬集准确率 < 标准 = 关键词分类对口语化/无关键词问法的真实差距, 即 LLM
-planner 的提升空间。
+纯逻辑, 不调 LLM。硬集曾用于暴露关键词分类上限; 现在已把高频口语化问法沉淀进确定性词表,
+所以硬集也作为回归门禁。
 """
 from __future__ import annotations
 
@@ -32,26 +32,25 @@ def test_standard_golden_full_accuracy():
     assert rep["metrics"]["classification_accuracy"] == 1.0   # 标准集关键词应满分(回归基线)
 
 
-def test_hard_set_exposes_keyword_ceiling():
+def test_hard_set_is_classified_by_keyword_baseline():
     rep = run_planner()
     # 硬集存在且被单独评分
     assert rep.get("n_hard", 0) >= 10
     hard = rep["metrics"]["classification_accuracy_hard"]
-    # 硬集明显低于标准集 —— 关键词分类对对抗/口语化问法有真实差距(LLM planner 的动机)
-    assert hard < rep["metrics"]["classification_accuracy"]
-    assert hard < 0.6
+    # 高频口语化/隐式问法应由确定性词表兜住, 避免误判 general 后乱读文件。
+    assert hard == 1.0
     # 逐条 details 在场, 可定位误判
     assert len(rep["details_hard"]) == rep["n_hard"]
 
 
 def test_llm_ab_measures_improvement_over_keyword():
-    # provider 注入 → 额外报 LLM 准确率 + 硬集 delta。理想 LLM (oracle) 应把硬集打满 → delta>0。
+    # provider 注入 → 额外报 LLM 准确率 + 硬集 delta。理想 LLM (oracle) 应把硬集打满。
     rep = run_planner(provider=_OracleProvider())
     m = rep["metrics"]
     assert "classification_accuracy_llm" in m
     assert "classification_accuracy_hard_llm" in m and "classification_accuracy_hard_delta" in m
     assert m["classification_accuracy_hard_llm"] == 1.0          # oracle 硬集满分
-    assert m["classification_accuracy_hard_delta"] > 0           # 相对关键词 0.267 有正增益
+    assert m["classification_accuracy_hard_delta"] == 0.0        # 关键词硬集已满分, 无额外提升
     # delta 自洽: == llm - keyword
     assert m["classification_accuracy_hard_delta"] == round(
         m["classification_accuracy_hard_llm"] - m["classification_accuracy_hard"], 3)

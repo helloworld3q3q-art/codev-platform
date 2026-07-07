@@ -30,7 +30,10 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     QueryType.OVERVIEW: (
         "概览", "总览", "整体", "干啥", "干什么", "是什么", "做什么", "用来做",
         "介绍", "项目结构", "目录结构", "技术栈", "有什么用", "这个项目", "这个仓",
+        "定位", "大局", "整体图景",
         "overview", "what does this", "what is this", "purpose of", "high level", "high-level",
+        "walk me through", "how the", "pipeline works", "bigger picture",
+        "role in the bigger picture",
     ),
     QueryType.IMPACT: (
         "影响", "波及", "牵连", "牵一发", "改动", "改了", "要改", "改哪", "改什么",
@@ -38,18 +41,24 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
         "前后端", "跨层", "链路", "改这张表", "改这个表", "改接口", "改端点",
         # 使用方/消费方查询(table_usage / api_callers / page_dependencies lane 的自然问法)
         "被哪些", "哪些函数", "哪些端点", "哪些接口", "哪些页面", "哪些前端",
-        "读写", "读取", "写入", "消费", "使用了",
+        "读写", "读取", "写入", "消费", "使用了", "删掉", "字段", "出问题",
+        "哪些模块", "依赖模块", "影响哪些模块", "列出所有依赖", "数据库表",
         "impact", "affect", "blast radius", "who uses", "who calls", "depend on", "break",
+        "data flow", "database table", "database tables", "everything that touches",
+        "touches the", "rest api", "down to the database",
     ),
     QueryType.SYMBOL: (
         "函数", "方法", "类", "定义", "签名", "实现", "在哪", "在哪里", "哪个文件",
-        "调用了谁", "调了谁", "内部调用", "callees", "callers",
+        "调用了谁", "调了谁", "内部调用", "长啥样", "代码里", "callees", "callers",
         "where is", "definition", "signature", "implemented", "calls what", "called by",
+        "call graph",
     ),
     QueryType.DOC_RULE: (
         "规则", "约定", "为什么", "为啥", "设计", "原因", "文档", "事故", "复盘",
         "操作", "手册", "怎么做", "如何", "应该遵守", "最佳实践", "规范",
+        "考量", "背后的", "提交前", "检查",
         "rule", "why", "design", "convention", "should i", "how to", "best practice", "guideline",
+        "rationale", "behind using",
     ),
 }
 

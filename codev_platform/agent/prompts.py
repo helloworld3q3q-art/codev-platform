@@ -34,51 +34,15 @@ CODE_UNDERSTANDING_SYSTEM = """你是 codev-platform 的只读代码理解 agent
 
 EXPLICIT_TOOL_SELECTION_OVERLAY = """【模型专用补充:显式工具选型】
 
-你可用的工具按用途分组如下。工具名必须照写,不要发明新工具名。
+工具名必须照写,不要发明新工具名。优先用能一次拿到证据的工具,减少手动翻文件。
 
-## 1. 链路分析(统一图谱)
+- 跨层影响/数据流: `impact_analysis` 优先;查表用 `table_usage`,查端点消费者用 `api_callers`,查页面依赖用 `page_dependencies`。
+- 代码定位: 不确定实现在哪先用 `code_recall`;已知符号名用 `codegraph_search`;多跳调用链用 `codegraph_trace`;只看一跳用 `codegraph_callers` / `codegraph_callees`。
+- 规则/设计/操作历史: 用 `search_docs`,定位到具体文档后再 `read_file`。
+- 文件: 只有已有具体路径才 `read_file`;不知道目录或路径报错时才 `list_dir`。
+- 记忆: 用户明确偏好、长期约定、关键决策、阻塞或验收条件才 `remember`,一次只记一条。
 
-| 工具 | 做什么 | 什么时候用 | 常见组合 |
-|---|---|---|---|
-| `impact_analysis(nodeRef)` | 分析某个表/端点/函数/前端节点变化后的跨层影响面和风险 | 改表、改接口、改核心函数、改前端入口前 | `table_usage`、`api_callers`、`page_dependencies` |
-| `table_usage(table)` | 查一张表被哪些后端函数读写、哪些端点暴露、哪些前端消费 | 改表结构、查数据来源/去向、追踪存储依赖 | `impact_analysis`、`page_dependencies` |
-| `api_callers(endpointRef)` | 查一个后端端点被哪些前端页面/组件调用 | 改接口前找消费者;从端点反查前端 | `impact_analysis`、`table_usage` |
-| `page_dependencies(pageRef)` | 查前端页/组件依赖哪些端点、后端函数和表 | 从前端入口理解完整功能链路 | `api_callers`、`table_usage` |
-
-## 2. 文档检索
-
-| 工具 | 做什么 | 什么时候用 | 常见组合 |
-|---|---|---|---|
-| `search_docs(query, category?, module?)` | 语义搜索规则、设计文档、事故复盘、操作手册 | 查规则、设计原因、操作步骤、历史决策 | 定位文档后用 `read_file` 读原文 |
-
-## 3. 代码符号检索
-
-| 工具 | 做什么 | 什么时候用 | 常见组合 |
-|---|---|---|---|
-| `codegraph_search(query)` | 按名称找函数/类/方法/变量,返回定义位置和签名 | 已知或猜到符号名,先定位定义 | `codegraph_callers`、`codegraph_callees`、`read_file` |
-| `codegraph_callers(name)` | 找符号被谁调用/引用 | 改函数/类/方法前评估直接影响面 | `codegraph_search`、`impact_analysis` |
-| `codegraph_callees(name)` | 找符号内部调用了谁 | 理解实现依赖和下游链路 | `codegraph_search`、`read_file` |
-
-## 4. 文件读取 / 结构浏览
-
-| 工具 | 做什么 | 什么时候用 | 常见组合 |
-|---|---|---|---|
-| `read_file(path, max_bytes?)` | 读取项目仓内某个文件内容 | 前面工具已经定位到文件后,核对完整实现/配置/文档原文 | `codegraph_search`、`search_docs` |
-| `list_dir(path?)` | 列项目仓内目录 | 不知道目录结构、确认模块是否存在、修正无效路径 | `read_file` |
-
-## 5. 记忆
-
-| 工具 | 做什么 | 什么时候用 |
-|---|---|---|
-| `remember(content, kind?, task_state?, topic_key?)` | 写入跨轮/跨会话长期记忆 | 用户明确偏好、长期约定、关键决策、阻塞、验收条件;一次只记一条 |
-
-## 执行优先级
-
-1. 涉及跨层影响 / 数据流 / 前后端或存储链路:先用 `impact_analysis` / `table_usage` / `api_callers` / `page_dependencies`。
-2. 涉及规则 / 设计 / 操作手册 / 历史原因:先用 `search_docs`。
-3. 涉及代码符号 / 调用链:用 `codegraph_search` 后接 `codegraph_callers` 或 `codegraph_callees`。
-4. 只有定位到具体文件后,才用 `read_file`;不知道目录时先 `list_dir`。
-5. 找不到时如实说未找到或索引可能未覆盖,不要靠猜目录、猜函数名硬编答案。
+顺序: 影响面题先 graph 工具;文档题先 `search_docs`;代码题先 `code_recall` 或 `codegraph_search`;够用就回答。找不到时说明未找到或索引可能未覆盖,不要猜文件、猜函数。
 """
 
 

@@ -28,6 +28,17 @@ CODEGRAPH_LANE = "codegraph"
 VECTOR_LANE = "vector"
 _PER_LANE = 30   # 每 lane 融合前取前 N(plan 'lane-specific top_k')
 _LIMIT = 20      # 最终返回上限
+_LOGGED_LANE_FAILURES: set[tuple[str, str, str, str]] = set()
+
+
+def _log_lane_failure(lane: str, project_id: str, exc: Exception) -> None:
+    """Warn once per stable lane failure; repeated optional-lane misses stay debug-only."""
+    key = (lane, project_id, type(exc).__name__, str(exc))
+    if key in _LOGGED_LANE_FAILURES:
+        logger.debug("[recall] %s lane still unavailable: %r", lane, exc)
+        return
+    _LOGGED_LANE_FAILURES.add(key)
+    logger.warning("[recall] %s lane failed: %r", lane, exc)
 
 
 @dataclass
@@ -108,7 +119,7 @@ def _graph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult 
         with open_store(project_id, mode="ro") as store:
             res = search_nodes(store, project_id, query, limit=per_lane)
     except Exception as exc:  # noqa: BLE001 — 单 lane 失败不拖垮整体(高可用)
-        logger.warning("[recall] graph lane failed: %r", exc)
+        _log_lane_failure(GRAPH_LANE, project_id, exc)
         return None, {}
     hits = res.get("hits", [])
     details = {h["id"]: {"name": h.get("name"), "kind": h.get("kind"), "file": h.get("file")}
@@ -123,7 +134,7 @@ def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneRes
         from codev_platform.core.repos import project_repo_specs
         from codev_platform.web.integrations.codegraph_client import CodegraphClient
     except Exception as exc:  # noqa: BLE001 — codegraph db 未建等 → 跳过该 lane
-        logger.warning("[recall] codegraph lane failed: %r", exc)
+        _log_lane_failure(CODEGRAPH_LANE, project_id, exc)
         return None, {}
     details: dict = {}
     groups: list[list[str]] = []
@@ -133,7 +144,7 @@ def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneRes
             with CodegraphClient(project_id=project_id) as cg:
                 rows = cg.search(query, None, None, per_lane, match_mode="or")
         except Exception as exc:  # noqa: BLE001 — legacy 集中库也不可用 → 跳过该 lane
-            logger.warning("[recall] codegraph lane failed: %r", exc)
+            _log_lane_failure(CODEGRAPH_LANE, project_id, exc)
             return None, {}
         refs_meta = []
         for r in rows:
@@ -178,7 +189,7 @@ def _vector_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult
         from codev_platform.recall.code_vector_store import query_code_vectors
         ranked_ids, details = query_code_vectors(project_id, query, per_lane)
     except Exception as exc:  # noqa: BLE001 — collection 未建 / 依赖缺 → 跳过该 lane(高可用)
-        logger.warning("[recall] vector lane failed: %r", exc)
+        _log_lane_failure(VECTOR_LANE, project_id, exc)
         return None, {}
     if not ranked_ids:
         return None, {}

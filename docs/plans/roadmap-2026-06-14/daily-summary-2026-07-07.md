@@ -276,3 +276,47 @@ git diff --check -- codev_platform/codegraph/server.py tests/test_codegraph_serv
 ```
 
 结果:`53 passed, 1 warning`。另做只读复审,结论为无阻断问题;复审补跑 `python -m pytest tests/test_codegraph_server_fanout.py -q`,结果 `7 passed`。
+
+## 十五、代码智能可用性与 token 成本收口
+
+按“实际项目开发更有用、代码更可用、少浪费 token”的方向,补了一轮平台自用工具链收敛,重点不扩新功能面,先修正会误导开发者判断的状态/评测/上下文问题。
+
+已落地:
+
+- `health --all` / platform status 的 Chroma chunks 统计改为解析 atomic handoff `current.json`,避免 full rebuild 后真实可搜索但状态显示 0 chunks。
+- `project_codegraph_dbs()` 统一接受仓内 `.codegraph/codegraph.db` 与平台集中库,eval / recall preflight 不再因为迁移期路径差异误判“未建索引”。
+- `eval/run_eval.py` 在 Windows 终端强制 UTF-8 输出,避免 planner human 输出遇中文标签时报 `cp1252` 编码错误。
+- `code_intelligence` eval 改用当前 `GraphStore.load_graph()` API,不再导入已废弃的 `load_graph`。
+- planner 确定性词表补齐常见口语化/隐式开发问法,hard 集从低命中提升到 1.0;同时收窄 `模块` 误伤,保证“这个模块是做什么的”仍走 overview。
+- `explicit_tool_selection` overlay 从 1860 字符压到 562 字符,并补齐 `code_recall` / `codegraph_trace`,减少启用显式工具选型 provider 的每轮 system prompt 成本。
+- `code_recall` agent 工具输出裁掉长浮点和空字段,保留排序、名称、kind、file、lane 等 grounding 信息。
+- recall optional lane 缺依赖时同一错误只 warning 一次,避免长评测被重复 `chromadb` warning 淹没。
+
+独立复审发现并已修复:
+
+- `platform_status` handoff 解析不能绕过传入 data root 去全局路径取库。
+- `project_codegraph_dbs(cfg=...)` central fallback 不能绕过 cfg 去全局 data root。
+- planner 不能用宽泛 `模块` 关键词压过 overview。
+- Chroma docs 下残留/非法目录的 handoff 解析异常必须 per-dir fail-soft。
+
+验证:
+
+```powershell
+python -m pytest tests/test_platform_status_soft_labels.py tests/test_paths.py tests/test_eval_recall.py tests/test_eval_code_intelligence.py tests/test_agent_tools.py tests/test_recall_service.py tests/test_eval_planner.py tests/test_agent_planner.py tests/test_agent_prompt_context.py tests/test_agent_chat_service.py tests/test_agent_registry.py tests/test_agent_recall_tool.py tests/test_agent_recall_invariants.py tests/test_agent_recall_pipeline.py
+python -m py_compile codev_platform\platform_status.py codev_platform\core\repos.py eval\suites\codegraph.py eval\suites\recall.py eval\suites\code_intelligence.py eval\run_eval.py codev_platform\agent\planner.py codev_platform\agent\prompts.py codev_platform\agent\tools\recall.py codev_platform\recall\service.py
+python eval/run_eval.py --suite planner --json
+python eval/run_eval.py --suite codegraph --json
+python eval/run_eval.py --suite recall --project codev-platform --json
+codev-platform serve-mcp status
+codev-platform health --all
+git diff --check
+```
+
+结果:
+
+- 目标测试:`154 passed, 5 skipped`。
+- planner eval:standard=1.0, hard=1.0。
+- codegraph eval:hit_rate=1.0, MRR=1.0。
+- recall eval:ok, weighted MRR 0.347 vs uniform 0.291。
+- MCP 四端点全 OK;`health --all` 合计 Chroma 6892 chunks。
+- `git diff --check` 无 whitespace error,仅提示 `tests/test_paths.py` 下次 Git touch 会 CRLF→LF。

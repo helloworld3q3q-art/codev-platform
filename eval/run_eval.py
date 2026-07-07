@@ -96,6 +96,14 @@ def _print_human(results: list[dict]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows terminals can default to legacy code pages. Human output contains
+    # Chinese suite labels, so force UTF-8 when the stream supports it.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     ap = argparse.ArgumentParser(description="codev-platform eval harness")
     ap.add_argument("--suite", choices=[*_RUNNERS, "all"], default="all")
     ap.add_argument("--project", default=None, help="project_id 覆盖 (默认按 suite 选)")

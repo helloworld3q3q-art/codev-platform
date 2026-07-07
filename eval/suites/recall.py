@@ -43,7 +43,7 @@ def _recall_per_query(hits: list, expect: str) -> tuple[list[str], set[str], int
 
 
 def run_recall(project_id: str, k: int = 5) -> dict:
-    from codev_platform.core.paths import codegraph_db_path
+    from codev_platform.core.repos import project_codegraph_dbs
     from codev_platform.graph.store import graph_store_path
     from codev_platform.recall import recall_code
     from codev_platform.recall.service import CODEGRAPH_LANE, GRAPH_LANE
@@ -55,7 +55,7 @@ def run_recall(project_id: str, k: int = 5) -> dict:
     if not rows:
         return {"suite": "recall", "status": "skipped", "n": 0,
                 "reason": f"无 project={project_id} 的 recall 用例(检查 recall.jsonl 的 project_id)。"}
-    if not graph_store_path(project_id).exists() or not codegraph_db_path(project_id).exists():
+    if not graph_store_path(project_id).exists() or not project_codegraph_dbs(project_id):
         return {
             "suite": "recall", "status": "skipped", "n": len(rows),
             "reason": f"需 graph store + codegraph.db 双 lane (project={project_id}); "

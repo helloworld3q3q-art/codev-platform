@@ -28,8 +28,8 @@ def test_code_recall_serializes_hits(monkeypatch):
         lambda q, pid, **kw: [
             CodeRecallHit(ref="r1", score=0.5, name="weighted_rrf", kind="function",
                           file="codev_platform/recall/fusion.py", lanes=["codegraph"]),
-            CodeRecallHit(ref="r2", score=0.4, name="reportImpact", kind="backend_endpoint",
-                          file="web/routes/reports.py", lanes=["graph"]),
+            CodeRecallHit(ref="r2", score=0.4123456789, name="reportImpact", kind="backend_endpoint",
+                          file=None, lanes=["graph"]),
         ])
     r = CodeRecallTool("p").run({"query": "weighted rrf fusion", "limit": 5})
     assert not r.is_error
@@ -37,6 +37,8 @@ def test_code_recall_serializes_hits(monkeypatch):
     assert data["count"] == 2
     assert data["lanes"] == ["codegraph", "graph"]            # union 实际贡献 lane
     assert data["hits"][0]["name"] == "weighted_rrf" and data["hits"][0]["lanes"] == ["codegraph"]
+    assert data["hits"][1]["score"] == 0.4123                 # 裁掉无意义浮点长尾,省上下文
+    assert "file" not in data["hits"][1]                       # 空字段不进 tool-result
 
 
 def test_code_recall_failure_is_error_not_raise(monkeypatch):

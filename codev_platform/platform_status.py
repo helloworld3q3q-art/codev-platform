@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 from codev_platform.core.config import get as _cfg_get, env_or_config
-
 logger = logging.getLogger(__name__)
 
 
@@ -135,6 +134,45 @@ def _usage_7d(repo_root: Path) -> dict[str, dict[str, int]]:
     return usage
 
 
+def _collect_chroma_doc_chunks(chroma_data: Path) -> tuple[dict[str, int], list[str]]:
+    """Collect platform-docs chunk counts per project.
+
+    platform_docs uses per-project DBs under docs/<pid>/, and full rebuilds may
+    atomically hand off to docs/<pid>/builds/<id>. Readers must resolve that
+    current pointer or status dashboards report 0 chunks while search is healthy.
+    """
+    chroma_pid: dict[str, int] = {}
+    errors: list[str] = []
+    try:
+        import chromadb
+    except Exception as exc:  # noqa: BLE001
+        return chroma_pid, ["chroma:" + repr(exc)]
+
+    def collect(db_dir: Path, label: str) -> None:
+        try:
+            cl = chromadb.PersistentClient(path=str(db_dir))
+            for col in cl.list_collections():
+                if col.name.endswith("__platform_docs"):
+                    chroma_pid[col.name[: -len("__platform_docs")]] = col.count()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"chroma[{label}]:" + repr(exc))
+
+    from codev_platform.core.index_handoff import resolve_current
+
+    docs_root = chroma_data / "docs"
+    if docs_root.is_dir():
+        for pdir in sorted(p for p in docs_root.iterdir() if p.is_dir()):
+            try:
+                current = resolve_current(pdir)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"chroma[{pdir.name}]:" + repr(exc))
+                current = pdir
+            collect(current if current.is_dir() else pdir, pdir.name)
+    else:
+        collect(chroma_data, "legacy")
+    return chroma_pid, errors
+
+
 def mcp_usage_report(repo_root: Path) -> dict[str, Any]:
     """MCP 调用分析:每项目 + 合计,7 天窗 + 全时段累计,按来源(agent/dev)分桶。
 
@@ -229,27 +267,9 @@ def build_platform_status(cfg: dict) -> dict[str, Any]:
     registered = sorted(p.name for p in reg.iterdir() if p.is_dir()) if reg.is_dir() else []
 
     # chroma: platform_docs 每项目独立库 docs/<pid>/ (隔离 compaction 损坏) -> per pid chunks。
-    # 逐项目库打开 (一库一 collection); 兼容回退根库的 legacy 多 collection 布局。
-    chroma_pid: dict[str, int] = {}
-    try:
-        import chromadb
-        docs_root = chroma_data / "docs"
-        if docs_root.is_dir():
-            for pdir in sorted(p for p in docs_root.iterdir() if p.is_dir()):
-                try:
-                    cl = chromadb.PersistentClient(path=str(pdir))
-                    for col in cl.list_collections():
-                        if col.name.endswith("__platform_docs"):
-                            chroma_pid[col.name[: -len("__platform_docs")]] = col.count()
-                except Exception as e:  # noqa: BLE001
-                    errors.append(f"chroma[{pdir.name}]:" + repr(e))
-        else:  # legacy 根库布局
-            cl = chromadb.PersistentClient(path=str(chroma_data))
-            for col in cl.list_collections():
-                if col.name.endswith("__platform_docs"):
-                    chroma_pid[col.name[: -len("__platform_docs")]] = col.count()
-    except Exception as e:  # noqa: BLE001
-        errors.append("chroma:" + repr(e))
+    # full rebuild 通过 current.json 指向 builds/<id>, 统计必须解析 handoff。
+    chroma_pid, chroma_errors = _collect_chroma_doc_chunks(chroma_data)
+    errors.extend(chroma_errors)
 
     # memory PG: 按 scope 分
     mem_proj: dict[str, int] = {}

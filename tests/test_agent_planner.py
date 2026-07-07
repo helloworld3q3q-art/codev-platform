@@ -23,6 +23,7 @@ from codev_platform.agent.tools.base import Tool, ToolRegistry
 
 def test_classify_overview():
     assert classify_query("这个项目是做什么的?") == QueryType.OVERVIEW
+    assert classify_query("这个模块是做什么的?") == QueryType.OVERVIEW
     assert classify_query("give me an overview of this project") == QueryType.OVERVIEW
 
 

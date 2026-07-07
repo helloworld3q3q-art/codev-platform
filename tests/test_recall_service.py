@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import logging
+
 from codev_platform.graph.schema import AnalyzerResult, GraphNode, NodeKind
 from codev_platform.core.repos import RepoSpec
 from codev_platform.graph.store import open_store as real_open_store
@@ -139,3 +141,16 @@ def test_codegraph_lane_main_repo_failure_continues_extra_repo(monkeypatch, tmp_
         "kind": "function",
         "file": "extra::src/extra.py",
     }
+
+
+def test_lane_failure_warning_is_deduplicated(caplog):
+    service._LOGGED_LANE_FAILURES.clear()
+    caplog.set_level(logging.WARNING, logger=service.logger.name)
+
+    exc = ModuleNotFoundError("No module named 'chromadb'")
+    service._log_lane_failure(service.VECTOR_LANE, PID, exc)
+    service._log_lane_failure(service.VECTOR_LANE, PID, exc)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    service._LOGGED_LANE_FAILURES.clear()
