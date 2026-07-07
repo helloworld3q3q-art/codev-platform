@@ -196,6 +196,44 @@ def test_collect_node_chunks_localizes_extra_repo_refs(tmp_path, monkeypatch):
     assert meta_by_id["extra::same-id"]["file"] == "extra::src/app.py"
 
 
+def test_collect_node_chunks_skip_kinds_case_insensitive(tmp_path, monkeypatch):
+    from codev_platform.core.repos import RepoSpec
+    main = tmp_path / "main"; main.mkdir()
+
+    class FakeCodegraphClient:
+        def __init__(self, *, db_path):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def iter_nodes(self):
+            return iter([
+                {"id": "file-id", "kind": "File", "name": "a", "filePath": "a.py"},
+                {"id": "var-id", "kind": "VARIABLE", "name": "b", "filePath": "b.py"},
+                {"id": "fn-id", "kind": "Function", "name": "c", "filePath": "c.py"},
+            ])
+
+    monkeypatch.setattr(
+        "codev_platform.web.integrations.codegraph_client.CodegraphClient",
+        FakeCodegraphClient,
+    )
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store._node_chunks",
+        lambda node, repo: [(node["id"], "text")],
+    )
+
+    manifest, _, _ = _collect_node_chunks(
+        [RepoSpec(root=main.resolve(), is_main=True)],
+        frozenset({"file", "variable"}),
+    )
+
+    assert set(manifest) == {"fn-id"}
+
+
 def test_collect_node_chunks_skips_missing_extra_but_not_main(tmp_path, monkeypatch):
     from codev_platform.core.repos import RepoSpec
     main = tmp_path / "main"; main.mkdir()

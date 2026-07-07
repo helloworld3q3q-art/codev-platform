@@ -113,6 +113,23 @@ def test_read_file_finds_in_extra_repo(multirepo):
     assert not r.is_error and "scan" in r.content
 
 
+def test_read_file_resolves_tagged_extra_path(multirepo):
+    # codegraph/recall 会返回 repoTag::path; read_file 必须能反解到对应 extra 仓。
+    r = fs.ReadFileTool("ideas-v2").run({"path": "pda::pages/pick/scan.vue"})
+    assert not r.is_error and "scan" in r.content
+    assert r.content.startswith("# pda::pages/pick/scan.vue")
+
+
+def test_read_file_unknown_repo_tag_rejected(multirepo):
+    r = fs.ReadFileTool("ideas-v2").run({"path": "nope::pages/pick/scan.vue"})
+    assert r.is_error and "未知仓 tag" in r.content
+
+
+def test_tagged_path_traversal_still_blocked(multirepo):
+    r = fs.ReadFileTool("ideas-v2").run({"path": "pda::../../../etc/passwd"})
+    assert r.is_error and "穿越" in r.content
+
+
 def test_read_file_finds_in_main_repo(multirepo):
     r = fs.ReadFileTool("ideas-v2").run({"path": "ideas-private/Ctrl.java"})
     assert not r.is_error and "class Ctrl" in r.content
@@ -133,6 +150,11 @@ def test_list_dir_root_merges_all_repos(multirepo):
 
 def test_list_dir_subpath_in_extra_repo(multirepo):
     r = fs.ListDirTool("ideas-v2").run({"path": "pages/pick"})
+    assert not r.is_error and "f scan.vue" in r.content
+
+
+def test_list_dir_resolves_tagged_extra_path(multirepo):
+    r = fs.ListDirTool("ideas-v2").run({"path": "pda::pages/pick"})
     assert not r.is_error and "f scan.vue" in r.content
 
 

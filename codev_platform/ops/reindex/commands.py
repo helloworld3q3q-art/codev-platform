@@ -57,6 +57,10 @@ def _sync_codegraph_repos(repo: Path, project_id: str | None) -> tuple[bool, int
         label = "main" if spec.is_main else f"extra:{spec.tag}"
         C.out(f"codegraph sync [{label}] {spec.root}")
         if project_id:
+            from codev_platform.reindex.git_sync import sync_repo_to_remote
+            sync = sync_repo_to_remote(spec.root)
+            C.out(f"git-sync [{label}]: pulled={sync['pulled']} ({sync['note']})")
+        if project_id:
             # 已登记 extra project-id 用自己的 codegraph index; 字面路径 extra 不强行 link 到主项目。
             link_pid = project_id if spec.is_main else spec.source_project_id
             if link_pid:

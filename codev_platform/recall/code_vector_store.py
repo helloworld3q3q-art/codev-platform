@@ -361,7 +361,8 @@ def query_code_vectors(project_id: str, query: str, k: int) -> tuple[list[str], 
     return ranked, {nid: details[nid] for nid in ranked}
 
 
-def _collect_node_chunks(repo_specs, skip_kinds: frozenset) -> tuple[dict, dict, dict]:
+def _collect_node_chunks(repo_specs, skip_kinds: frozenset,
+                         *, project_id: str | None = None) -> tuple[dict, dict, dict]:
     """按 RepoSpec 枚举 codegraph 节点并生成 localized chunk 数据。
 
     返回 (manifest, text_by_id, meta_by_id)。主仓 id 原样; extra 仓 id/file 加 repo tag。
@@ -372,19 +373,31 @@ def _collect_node_chunks(repo_specs, skip_kinds: frozenset) -> tuple[dict, dict,
     new_manifest: dict = {}
     text_by_id: dict[str, str] = {}
     meta_by_id: dict[str, dict] = {}
-    for spec in repo_specs:
+    sources = list(repo_specs)
+    if not sources and project_id:
+        from pathlib import Path
+        from codev_platform.core.repos import RepoSpec
+        sources = [RepoSpec(root=Path("."), tag="", is_main=True, source_project_id=project_id)]
+
+    for spec in sources:
         try:
-            cg_ctx = CodegraphClient(db_path=spec.codegraph_db)
+            cg_ctx = (
+                CodegraphClient(project_id=project_id)
+                if project_id and not repo_specs and spec.is_main
+                else CodegraphClient(db_path=spec.codegraph_db)
+            )
             with cg_ctx as cg:
                 for node in cg.iter_nodes():
                     nid = node.get("id")
-                    if node.get("kind") in skip_kinds:
+                    kind = str(node.get("kind") or "").lower()
+                    if kind in skip_kinds:
                         continue
                     if not nid:
                         continue
                     nid = str(nid)
                     ref = spec.local_ref(nid)
-                    for chunk_id, text in _node_chunks(node, spec.root):
+                    repo_root = spec.root if repo_specs else None
+                    for chunk_id, text in _node_chunks(node, repo_root):
                         if not text.strip():
                             continue
                         localized_chunk_id = spec.local_ref(chunk_id)
@@ -396,7 +409,7 @@ def _collect_node_chunks(repo_specs, skip_kinds: frozenset) -> tuple[dict, dict,
                             "file": spec.local_file(node.get("filePath")) or "",
                             "node": ref,
                             "repo_tag": spec.tag,
-                            "repo_root": str(spec.root),
+                            "repo_root": str(spec.root) if repo_specs else "",
                         }
         except Exception as exc:  # noqa: BLE001 — extra 仓缺 codegraph 可降级; 主仓保持旧语义
             if spec.is_main:
@@ -510,7 +523,8 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     # 枚举节点 → 收 text/meta + 算新 manifest(跳过低价值 kind 与空文本)
     logger.info("[code_vec] %s: repos=%s (源码富化 %s)",
                 project_id, [str(s.root) for s in repo_specs], "on" if repo_specs else "off")
-    new_manifest, text_by_id, meta_by_id = _collect_node_chunks(repo_specs, skip_kinds)
+    new_manifest, text_by_id, meta_by_id = _collect_node_chunks(
+        repo_specs, skip_kinds, project_id=project_id)
 
     changed, deleted = _diff_manifest(old_manifest, new_manifest)
 

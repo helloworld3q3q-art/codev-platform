@@ -52,6 +52,25 @@ class RepoSpec:
         return f"{self.tag}{_REPO_TAG_SEP}{file}" if self.tag else file
 
 
+def split_repo_tag(value: str) -> tuple[str | None, str]:
+    """把 `tag::ref/path` 拆成 (tag, local)。无 tag 返回 (None, 原值)。"""
+    tag, sep, local = str(value or "").partition(_REPO_TAG_SEP)
+    if not sep:
+        return None, str(value or "")
+    return tag, local
+
+
+def resolve_tagged_value(specs: list[RepoSpec], value: str) -> tuple[RepoSpec | None, str]:
+    """按 RepoSpec 反解 `tag::ref/path`。无 tag → (None, 原值);未知 tag → (None, 原值)。"""
+    tag, local = split_repo_tag(value)
+    if tag is None:
+        return None, local
+    for spec in specs:
+        if spec.tag == tag:
+            return spec, local
+    return None, value
+
+
 def _stable_tags(repos: list[Path]) -> list[str]:
     """主仓 tag='', extra 仓 tag=basename, basename 撞时缀序号。"""
     tags: list[str] = []
@@ -70,6 +89,17 @@ def _stable_tags(repos: list[Path]) -> list[str]:
         tags.append(tag)
         used.add(tag)
     return tags
+
+
+def repo_specs_from_roots(roots: list[Path], *,
+                          source_ids: list[str | None] | None = None) -> list[RepoSpec]:
+    """已解析仓根 → RepoSpec。供只拿到 roots 的旧调用复用同一 tag 规则。"""
+    tags = _stable_tags(roots)
+    source_ids = source_ids or [None] * len(roots)
+    return [
+        RepoSpec(root=root, tag=tag, is_main=(i == 0), source_project_id=source_ids[i])
+        for i, (root, tag) in enumerate(zip(roots, tags))
+    ]
 
 
 def resolve_meta_extra_entries(entries: list, cfg: dict) -> list[str]:
@@ -211,11 +241,7 @@ def project_repo_specs(project_id: str, *, main_repo: Path | str | None = None,
                 roots.append(rp)
                 source_ids.append(source_pid)
 
-    tags = _stable_tags(roots)
-    return [
-        RepoSpec(root=root, tag=tag, is_main=(i == 0), source_project_id=source_ids[i])
-        for i, (root, tag) in enumerate(zip(roots, tags))
-    ]
+    return repo_specs_from_roots(roots, source_ids=source_ids)
 
 
 def impacted_project_ids_for_repo(repo: Path | str | None, *,

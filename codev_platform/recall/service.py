@@ -128,6 +128,21 @@ def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneRes
     details: dict = {}
     groups: list[list[str]] = []
     specs = project_repo_specs(project_id)
+    if not specs:
+        try:
+            with CodegraphClient(project_id=project_id) as cg:
+                rows = cg.search(query, None, None, per_lane, match_mode="or")
+        except Exception as exc:  # noqa: BLE001 — legacy 集中库也不可用 → 跳过该 lane
+            logger.warning("[recall] codegraph lane failed: %r", exc)
+            return None, {}
+        refs_meta = []
+        for r in rows:
+            ref = r["id"]
+            file = r.get("filePath")
+            details[ref] = {"name": r.get("name"), "kind": r.get("kind"), "file": file}
+            refs_meta.append((ref, r.get("name"), file))
+        ranked = _deprioritize_tests(refs_meta)
+        return (LaneResult(CODEGRAPH_LANE, ranked), details) if ranked else (None, {})
     for spec in specs:
         try:
             with CodegraphClient(db_path=spec.codegraph_db) as cg:

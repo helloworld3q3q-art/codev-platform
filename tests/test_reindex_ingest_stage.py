@@ -100,6 +100,46 @@ def test_codegraph_stage_syncs_all_repo_specs(_repo, tmp_path, monkeypatch):
     assert links == [("demo-proj", _repo.resolve()), ("extra-proj", extra.resolve())]
 
 
+def test_sync_codegraph_extra_lock_busy_continues(_repo, tmp_path, monkeypatch):
+    from codev_platform.core.repos import RepoSpec
+    from codev_platform.ops.reindex.commands import _sync_codegraph_repos
+
+    busy = tmp_path / "busy"; busy.mkdir()
+    ok_extra = tmp_path / "ok-extra"; ok_extra.mkdir()
+    specs = [
+        RepoSpec(root=_repo.resolve(), tag="", is_main=True, source_project_id="demo-proj"),
+        RepoSpec(root=busy.resolve(), tag="busy", is_main=False, source_project_id="busy-proj"),
+        RepoSpec(root=ok_extra.resolve(), tag="ok-extra", is_main=False, source_project_id="ok-proj"),
+    ]
+    calls: list[Path] = []
+    syncs: list[Path] = []
+
+    class _CP:
+        def __init__(self, rc: int):
+            self.returncode = rc
+
+    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs",
+                        lambda pid, **kw: specs)
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {})
+    monkeypatch.setattr("codev_platform.ops.codegraph.ensure_codegraph_linked",
+                        lambda pid, repo, cfg: {"action": "ok"})
+    monkeypatch.setattr("codev_platform.reindex.git_sync.sync_repo_to_remote",
+                        lambda repo: syncs.append(Path(repo)) or {"pulled": True, "note": "ok"})
+
+    def _run(cmd, **kw):
+        cwd = Path(kw["cwd"])
+        calls.append(cwd)
+        return _CP(2 if cwd == busy.resolve() else 0)
+
+    monkeypatch.setattr(R.C, "run", _run)
+
+    locked, rc = _sync_codegraph_repos(_repo.resolve(), "demo-proj")
+
+    assert locked is True and rc == 0
+    assert calls == [_repo.resolve(), busy.resolve(), ok_extra.resolve()]
+    assert syncs == [_repo.resolve(), busy.resolve(), ok_extra.resolve()]
+
+
 def test_ingest_failure_isolated(_repo, monkeypatch):
     _stub_stages(monkeypatch)
 

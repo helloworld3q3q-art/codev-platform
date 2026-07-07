@@ -20,6 +20,7 @@ from typing import Any
 from codev_platform.agent.brain import ToolResult
 from codev_platform.agent.tools._project import resolve_project_id
 from codev_platform.agent.tools.base import Tool
+from codev_platform.core.repos import RepoSpec, repo_specs_from_roots, resolve_tagged_value
 from codev_platform.core.repos import project_repo_roots
 
 _MAX_BYTES = 60_000   # 单次读全文上限, 防超大文件灌爆 context
@@ -34,7 +35,7 @@ _SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".keystore")
 _SECRET_NAMES = ("id_rsa", "id_dsa", "id_ecdsa", ".env", "credentials", ".npmrc", ".pypirc")
 
 
-def _resolve_roots(project_id: str | None) -> tuple[list[Path], str]:
+def _resolve_specs(project_id: str | None) -> tuple[list[RepoSpec], str]:
     """该项目全部登记仓根(主仓 + extra_repos)。拿不到时返回 ([], 原因)。"""
     try:
         pid = resolve_project_id(project_id)
@@ -43,19 +44,24 @@ def _resolve_roots(project_id: str | None) -> tuple[list[Path], str]:
     roots = project_repo_roots(pid)
     if not roots:
         return [], f"project '{pid}' 仓根未知(config projects.{pid}.repo_path / meta.json 均无有效本机路径)"
-    return roots, ""
+    return repo_specs_from_roots(roots), ""
 
 
-def _locate(roots: list[Path], rel: str, kind: str) -> tuple[Path | None, str]:
+def _locate(specs: list[RepoSpec], rel: str, kind: str) -> tuple[Path | None, str]:
     """在**所有仓根**依次解析 rel, 返回首个落在某仓根内且为 file/dir 的 target。
 
     沙箱: target 必须 is_relative_to 某登记仓根(否则穿越)。全不命中时区分"越界穿越"与"不存在"。
     kind: 'file' | 'dir'。
     """
+    tagged_spec, local_rel = resolve_tagged_value(specs, rel)
+    if "::" in rel and tagged_spec is None:
+        return None, f"未知仓 tag: {rel.split('::', 1)[0]}"
+    search_specs = [tagged_spec] if tagged_spec is not None else specs
     sandbox_ok = False
-    for root in roots:
+    for spec in search_specs:
+        root = spec.root
         try:
-            target = (root / rel).resolve()
+            target = (root / local_rel).resolve()
         except Exception:  # noqa: BLE001 — 路径非法, 试下一个仓根
             continue
         if not target.is_relative_to(root):
@@ -98,10 +104,10 @@ class ReadFileTool(Tool):
         rel = (args or {}).get("path", "").strip()
         if not rel:
             return ToolResult(call_id="", content="缺少 path 参数", is_error=True)
-        roots, err = _resolve_roots(self.project_id)
-        if not roots:
+        specs, err = _resolve_specs(self.project_id)
+        if not specs:
             return ToolResult(call_id="", content=err, is_error=True)
-        target, err = _locate(roots, rel, "file")
+        target, err = _locate(specs, rel, "file")
         if target is None:
             return ToolResult(call_id="", content=err, is_error=True)
         if _is_secret(target):
@@ -154,15 +160,15 @@ class ListDirTool(Tool):
 
     def run(self, args: dict[str, Any]) -> ToolResult:
         rel = (args or {}).get("path", "").strip() or "."
-        roots, err = _resolve_roots(self.project_id)
-        if not roots:
+        specs, err = _resolve_specs(self.project_id)
+        if not specs:
             return ToolResult(call_id="", content=err, is_error=True)
         # 多仓项目列根目录: 合并展示所有仓根(各带 header), 让 agent 看到关联仓结构(如 PDA pages/),
         # 不再因"主仓没 pages/"误判"前端不在本项目"。非根路径走单仓定位。
-        if rel in (".", "") and len(roots) > 1:
-            blocks = [f"# {root.name}/\n{self._list_entries(root)}" for root in roots]
+        if rel in (".", "") and len(specs) > 1:
+            blocks = [f"# {spec.root.name}/\n{self._list_entries(spec.root)}" for spec in specs]
             return ToolResult(call_id="", content="\n\n".join(blocks))
-        target, err = _locate(roots, rel, "dir")
+        target, err = _locate(specs, rel, "dir")
         if target is None:
             return ToolResult(call_id="", content=err, is_error=True)
         return ToolResult(call_id="", content=self._list_entries(target) or "(空目录)")

@@ -60,9 +60,42 @@ def _seed_search_db(path, file_path, name="Target"):
     con.close()
 
 
+def _seed_relation_db(path, *, target="Target", other="Caller", incoming=True):
+    path.parent.mkdir(parents=True)
+    con = sqlite3.connect(path)
+    con.executescript(
+        """
+        CREATE TABLE nodes (
+            id TEXT PRIMARY KEY, name TEXT, kind TEXT, file_path TEXT,
+            start_line INTEGER, signature TEXT
+        );
+        CREATE TABLE edges (source TEXT, target TEXT, kind TEXT);
+        CREATE VIRTUAL TABLE nodes_fts USING fts5(id, name);
+        """
+    )
+    con.execute("INSERT INTO nodes VALUES ('target-id', ?, 'function', 'src/target.py', 1, '')", (target,))
+    con.execute("INSERT INTO nodes VALUES ('other-id', ?, 'function', 'src/other.py', 2, '')", (other,))
+    if incoming:
+        con.execute("INSERT INTO edges VALUES ('other-id', 'target-id', 'calls')")
+    else:
+        con.execute("INSERT INTO edges VALUES ('target-id', 'other-id', 'calls')")
+    con.commit()
+    con.close()
+
+
+def _patch_two_repo_specs(monkeypatch, main, extra):
+    from codev_platform.core.repos import RepoSpec
+    specs = [
+        RepoSpec(root=main, tag="", is_main=True, source_project_id="demo"),
+        RepoSpec(root=extra, tag="extra", is_main=False, source_project_id="extra-demo"),
+    ]
+    monkeypatch.setattr("codev_platform.agent.tools.codegraph.project_repo_specs",
+                        lambda pid: specs)
+    return specs
+
+
 def test_codegraph_search_fans_out_extra_repos(tmp_path, monkeypatch):
     from codev_platform.agent.tools.codegraph import CodegraphSearchTool
-    from codev_platform.core.repos import RepoSpec
 
     main = tmp_path / "main"; main.mkdir()
     extra = tmp_path / "extra"; extra.mkdir()
@@ -70,12 +103,7 @@ def test_codegraph_search_fans_out_extra_repos(tmp_path, monkeypatch):
     extra_db = extra / ".codegraph" / "codegraph.db"
     _seed_search_db(main_db, "src/main.py")
     _seed_search_db(extra_db, "src/extra.py")
-    specs = [
-        RepoSpec(root=main, tag="", is_main=True, source_project_id="demo"),
-        RepoSpec(root=extra, tag="extra", is_main=False, source_project_id="extra-demo"),
-    ]
-    monkeypatch.setattr("codev_platform.agent.tools.codegraph.project_repo_specs",
-                        lambda pid: specs)
+    _patch_two_repo_specs(monkeypatch, main, extra)
 
     res = CodegraphSearchTool("demo").run({"query": "Target"})
 
@@ -83,6 +111,40 @@ def test_codegraph_search_fans_out_extra_repos(tmp_path, monkeypatch):
     locs = {item["loc"] for item in json.loads(res.content)}
     assert "src/main.py:7" in locs
     assert "extra::src/extra.py:7" in locs
+
+
+def test_codegraph_callers_fans_out_extra_repos(tmp_path, monkeypatch):
+    from codev_platform.agent.tools.codegraph import CodegraphCallersTool
+
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    _seed_relation_db(main / ".codegraph" / "codegraph.db")
+    _seed_relation_db(extra / ".codegraph" / "codegraph.db")
+    _patch_two_repo_specs(monkeypatch, main, extra)
+
+    res = CodegraphCallersTool("demo").run({"name": "Target"})
+
+    assert not res.is_error, res.content
+    locs = {item["loc"] for item in json.loads(res.content)}
+    assert "src/other.py:2" in locs
+    assert "extra::src/other.py:2" in locs
+
+
+def test_codegraph_trace_fans_out_extra_repos(tmp_path, monkeypatch):
+    from codev_platform.agent.tools.codegraph import CodegraphTraceTool
+
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    _seed_relation_db(main / ".codegraph" / "codegraph.db", incoming=False)
+    _seed_relation_db(extra / ".codegraph" / "codegraph.db", incoming=False)
+    _patch_two_repo_specs(monkeypatch, main, extra)
+
+    res = CodegraphTraceTool("demo").run({"name": "Target", "direction": "callees", "depth": 1})
+
+    assert not res.is_error, res.content
+    locs = {item["loc"] for item in json.loads(res.content)["levels"]["hop1"]}
+    assert "src/other.py:2" in locs
+    assert "extra::src/other.py:2" in locs
 
 
 def test_registry_rejects_nameless_tool():

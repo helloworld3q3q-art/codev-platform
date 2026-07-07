@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from codev_platform.recall.rerank import _reorder_by_scores, maybe_rerank_hits
+from codev_platform.recall.rerank import _reorder_by_scores, _rerank_texts, maybe_rerank_hits
 from codev_platform.recall.service import CodeRecallHit
 
 PID = "t-recall-rerank"
@@ -74,3 +74,45 @@ def test_model_score_raises_fail_soft():
             raise RuntimeError("rerank daemon down")
     hits = [_hit("a"), _hit("b")]
     assert maybe_rerank_hits("q", PID, hits, model=_Boom()) == hits   # 失败 → 原序
+
+
+def test_rerank_texts_resolves_extra_repo_ref(monkeypatch, tmp_path):
+    from codev_platform.core.repos import RepoSpec
+
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    specs = [
+        RepoSpec(root=main, tag="", is_main=True, source_project_id=PID),
+        RepoSpec(root=extra, tag="extra", is_main=False, source_project_id="extra-proj"),
+    ]
+    seen: list[str] = []
+
+    class FakeCodegraphClient:
+        def __init__(self, project_id=None, *, db_path=None):
+            self.db_path = db_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def node(self, ref):
+            seen.append(ref)
+            return {
+                "id": ref,
+                "name": f"name-{ref}",
+                "qualifiedName": f"pkg.{ref}",
+                "signature": f"def {ref}()",
+                "docstring": "",
+            }
+
+    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs", lambda pid: specs)
+    monkeypatch.setattr("codev_platform.web.integrations.codegraph_client.CodegraphClient",
+                        FakeCodegraphClient)
+
+    texts = _rerank_texts(PID, [_hit("main-id"), _hit("extra::extra-id")])
+
+    assert "def main-id()" in texts[0]
+    assert "def extra-id()" in texts[1]
+    assert seen == ["main-id", "extra-id"]

@@ -11,9 +11,18 @@
 from __future__ import annotations
 
 import subprocess
+import re
 from pathlib import Path
 
 _PULL_TIMEOUT_SEC = 60
+_URL_USERINFO_RE = re.compile(r"(?P<scheme>https?://)[^@\s/]+@")
+_TOKEN_PAIR_RE = re.compile(r"(?i)(token|password|passwd|secret|access_token)=([^&\s]+)")
+
+
+def _redact_note(text: str) -> str:
+    """git 输出入日志前脱敏: URL userinfo / query token 类片段。"""
+    text = _URL_USERINFO_RE.sub(r"\g<scheme>***@", text)
+    return _TOKEN_PAIR_RE.sub(r"\1=***", text)
 
 
 def _git(repo: Path, *args: str, timeout: int = _PULL_TIMEOUT_SEC) -> subprocess.CompletedProcess:
@@ -58,7 +67,9 @@ def sync_repo_to_remote(repo: Path) -> dict:
         return {"pulled": False, "note": f"pull errored: {exc!s}"}
 
     if cp.returncode == 0:
-        return {"pulled": True, "note": (cp.stdout or "up to date").strip()[:200] or "up to date"}
+        note = _redact_note((cp.stdout or "up to date").strip())
+        return {"pulled": True, "note": note[:200] or "up to date"}
     # 非 ff (分叉) / 无网络 / 其它: 降级, 不阻断
     reason = (cp.stderr or cp.stdout or "non-fast-forward or network error").strip()
-    return {"pulled": False, "note": reason.splitlines()[-1][:200] if reason else "pull failed"}
+    note = _redact_note(reason.splitlines()[-1]) if reason else "pull failed"
+    return {"pulled": False, "note": note[:200]}

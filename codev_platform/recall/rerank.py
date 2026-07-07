@@ -37,20 +37,51 @@ def _rerank_texts(project_id: str, hits: list) -> list[str]:
 
     fallback = [(h.name or h.ref) for h in hits]
     try:
+        from codev_platform.core.repos import project_repo_specs, resolve_tagged_value
         from codev_platform.web.integrations.codegraph_client import CodegraphClient
-        with CodegraphClient(project_id) as cg:
-            out: list[str] = []
-            for i, h in enumerate(hits):
-                try:
-                    node = cg.node(h.ref)
-                except Exception:  # noqa: BLE001 — 单点查失败不拖垮整批
-                    node = None
-                text = build_text(node) if node else ""
-                out.append(text.strip() or fallback[i])
-            return out
+        specs = project_repo_specs(project_id)
+        if not specs:
+            with CodegraphClient(project_id) as cg:
+                return _texts_from_client(cg, hits, fallback, build_text)
+
+        out = list(fallback)
+        by_spec: dict[int, list[tuple[int, str]]] = {}
+        for i, h in enumerate(hits):
+            spec, local_ref = resolve_tagged_value(specs, h.ref)
+            if spec is None:
+                spec = specs[0]
+            by_spec.setdefault(id(spec), []).append((i, local_ref))
+
+        spec_by_id = {id(spec): spec for spec in specs}
+        for spec_id, refs in by_spec.items():
+            spec = spec_by_id[spec_id]
+            try:
+                with CodegraphClient(db_path=spec.codegraph_db) as cg:
+                    for i, ref in refs:
+                        try:
+                            node = cg.node(ref)
+                        except Exception:  # noqa: BLE001 — 单点查失败不拖垮整批
+                            node = None
+                        text = build_text(node) if node else ""
+                        out[i] = text.strip() or fallback[i]
+            except Exception:  # noqa: BLE001 — 单仓失败只退该仓命中的 name
+                continue
+        return out
     except Exception as exc:  # noqa: BLE001 — codegraph db 缺等 → 全退 name
         logger.warning("[recall.rerank] 取精排文本失败, 退回 name: %r", exc)
         return fallback
+
+
+def _texts_from_client(cg, hits: list, fallback: list[str], build_text_fn) -> list[str]:
+    out: list[str] = []
+    for i, h in enumerate(hits):
+        try:
+            node = cg.node(h.ref)
+        except Exception:  # noqa: BLE001 — 单点查失败不拖垮整批
+            node = None
+        text = build_text_fn(node) if node else ""
+        out.append(text.strip() or fallback[i])
+    return out
 
 
 def build_recall_reranker(cfg: dict | None = None):

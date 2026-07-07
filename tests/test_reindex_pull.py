@@ -70,6 +70,25 @@ def test_pull_non_ff(tmp_path, monkeypatch):
     assert "fast-forward" in r["note"].lower()
 
 
+def test_pull_failure_redacts_url_credentials(tmp_path, monkeypatch):
+    repo = _mk_git_repo(tmp_path)
+
+    def fake_run(cmd, **kw):
+        if "@{u}" in cmd:
+            return _CP(0, out="origin/main")
+        return _CP(
+            128,
+            err="fatal: Authentication failed for 'https://user:secret-token@git.local/repo.git?token=abc123'",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    r = git_sync.sync_repo_to_remote(repo)
+    assert r["pulled"] is False
+    assert "secret-token" not in r["note"]
+    assert "abc123" not in r["note"]
+    assert "https://***@git.local" in r["note"]
+
+
 def test_pull_timeout(tmp_path, monkeypatch):
     repo = _mk_git_repo(tmp_path)
 
