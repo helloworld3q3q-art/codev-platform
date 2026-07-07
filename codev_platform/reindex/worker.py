@@ -16,7 +16,7 @@ from pathlib import Path
 
 from codev_platform.core.config import get as _cfg_get
 from codev_platform.reindex import runners as _runners
-from codev_platform.reindex.queue import Job, JobQueue
+from codev_platform.reindex.queue import FileSpoolQueue, Job, JobQueue
 
 _RETRY_RC = 2          # reindex 返回 2 = 锁占用 / db busy (暂时性) → 保留重试, 不丢
 _PERIODIC_SEC = 60.0   # 周期兜底再 drain (重试 rc=2 的 job + 补漏 watch 事件)
@@ -42,13 +42,23 @@ def _log(msg: str) -> None:
 def _repo_for(cfg: dict, project_id: str) -> Path | None:
     projects = _cfg_get(cfg, "projects") or {}
     pc = projects.get(project_id)
-    if not isinstance(pc, dict):
+    repo = pc.get("repo_path") if isinstance(pc, dict) else None
+    if repo:
+        p = Path(repo).expanduser()
+        if p.exists():
+            return p.resolve()
+
+    # Fallback to platform_meta repo_path for local file queues. This keeps
+    # post-commit jobs for the platform repo processable even when the user
+    # config has a non-empty projects whitelist that omits codev-platform.
+    try:
+        from codev_platform.core.repos import project_repo_specs
+        for spec in project_repo_specs(project_id, cfg=cfg):
+            if spec.is_main and spec.root.exists():
+                return spec.root.resolve()
+    except Exception:  # noqa: BLE001 - worker must not crash on bad metadata
         return None
-    repo = pc.get("repo_path")
-    if not repo:
-        return None
-    p = Path(repo).expanduser()
-    return p if p.exists() else None
+    return None
 
 
 class ReindexWorker:
@@ -61,23 +71,23 @@ class ReindexWorker:
     def _own_projects(self) -> set[str] | None:
         """本 worker 能处理的 project 集合 = config.projects 里配了(存在的)repo_path 的 project。
 
-        多机/多 org 亲和: 传给 pending() 让 PG 后端只认领本机 project, 不抢别机/别 org 的 job
+        多机/多 org 亲和: PG 后端传给 pending() 让 worker 只认领本机 project,
+        不抢别机/别 org 的 job
         (否则认领后因本地无 repo_path 而 complete() 删掉它 = 吃掉别人的 reindex)。
 
-        **未配 projects 段时按后端 fail-open / fail-closed 分流**(审计 risk #3):
-        - file 后端(单机)→ 返 None = 认领全部(单机常态, 唯一 worker, 安全)。
-        - PG 后端(多机/多 org)→ 返 **空集 = 不认领任何 job** + WARN。fail-closed: 多机下漏配
-          projects 若退回"认领全部", 会吃掉别 org/别机 job(本 feature 要修的原始 bug)。宁可这台
-          worker 暂不干活(可见告警)也不静默删别人的 reindex。"""
+        file 后端是单机本地 spool, 不该因为用户级 config.projects 缺本仓而孤儿化本仓 hook
+        任务, 故始终返 None = 认领全部; 真正能否处理由 _repo_for(config/meta) 决定。
+
+        PG 后端(多机/多 org)必须 fail-closed: 漏配 projects 时返空集, 宁可可见不工作,
+        也不静默认领/删除别 org/别机 job。"""
+        if isinstance(self._q, FileSpoolQueue):
+            return None
         projects = _cfg_get(self._cfg, "projects")
         if isinstance(projects, dict) and projects:
             return {pid for pid in projects if _repo_for(self._cfg, pid) is not None}
-        # 无 projects 配置: PG 后端(有 reclaim_stale_own = 多机语境)fail-closed, file 后端 None=全部。
-        if hasattr(self._q, "reclaim_stale_own"):
-            _log("WARN: PG 队列后端但未配 config.projects 白名单 → 为防认领/删除别 org/别机 job, "
-                 "本 worker 暂不认领任何 job; 请配 config.projects.<pid>.repo_path")
-            return set()
-        return None
+        _log("WARN: PG 队列后端但未配 config.projects 白名单 → 为防认领/删除别 org/别机 job, "
+             "本 worker 暂不认领任何 job; 请配 config.projects.<pid>.repo_path")
+        return set()
 
     def drain_once(self) -> int:
         """跑完当前所有 pending (串行)。返回处理 job 数。

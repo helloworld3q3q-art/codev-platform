@@ -131,32 +131,20 @@ def _graph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult 
 def _codegraph_lane(project_id: str, query: str, per_lane: int) -> tuple[LaneResult | None, dict]:
     """codegraph 符号 lane: FTS search 直读 codegraph.db(免 daemon)。失败/空 → (None, {})。"""
     try:
-        from codev_platform.core.repos import project_repo_specs
+        from codev_platform.core.repos import project_codegraph_dbs
         from codev_platform.web.integrations.codegraph_client import CodegraphClient
     except Exception as exc:  # noqa: BLE001 — codegraph db 未建等 → 跳过该 lane
         _log_lane_failure(CODEGRAPH_LANE, project_id, exc)
         return None, {}
     details: dict = {}
     groups: list[list[str]] = []
-    specs = project_repo_specs(project_id)
-    if not specs:
+    dbs = project_codegraph_dbs(project_id)
+    if not dbs:
+        _log_lane_failure(CODEGRAPH_LANE, project_id, FileNotFoundError("codegraph db not found"))
+        return None, {}
+    for spec, db_path in dbs:
         try:
-            with CodegraphClient(project_id=project_id) as cg:
-                rows = cg.search(query, None, None, per_lane, match_mode="or")
-        except Exception as exc:  # noqa: BLE001 — legacy 集中库也不可用 → 跳过该 lane
-            _log_lane_failure(CODEGRAPH_LANE, project_id, exc)
-            return None, {}
-        refs_meta = []
-        for r in rows:
-            ref = r["id"]
-            file = r.get("filePath")
-            details[ref] = {"name": r.get("name"), "kind": r.get("kind"), "file": file}
-            refs_meta.append((ref, r.get("name"), file))
-        ranked = _deprioritize_tests(refs_meta)
-        return (LaneResult(CODEGRAPH_LANE, ranked), details) if ranked else (None, {})
-    for spec in specs:
-        try:
-            with CodegraphClient(db_path=spec.codegraph_db) as cg:
+            with CodegraphClient(db_path=db_path) as cg:
                 # match_mode='or': verbose 多词 query(混入 function/definition 等描述词)AND 会
                 # 全灭, OR 让目标符号被 bm25 顶上来(与 graph lane 分词宽松召回同理)。
                 rows = cg.search(query, None, None, per_lane, match_mode="or")

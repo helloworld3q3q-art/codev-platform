@@ -6,8 +6,11 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+import codev_platform.core.repos as repos
 from codev_platform.reindex.queue import FileSpoolQueue, Job
-from codev_platform.reindex.worker import ReindexWorker
+from codev_platform.reindex.worker import ReindexWorker, _repo_for
 
 
 def test_own_projects_none_when_no_projects_cfg(tmp_path):
@@ -26,7 +29,7 @@ def test_own_projects_failclosed_on_pg_backend_without_cfg():
     assert w._own_projects() == set()            # fail-closed: 不认领, 不退回"全部"
 
 
-def test_own_projects_only_those_with_existing_repo(tmp_path):
+def test_pg_own_projects_only_those_with_existing_repo(tmp_path):
     repo = tmp_path / "myrepo"
     repo.mkdir()
     cfg = {"projects": {
@@ -34,8 +37,31 @@ def test_own_projects_only_those_with_existing_repo(tmp_path):
         "no-path": {"some": "x"},                  # 无 repo_path → 排除
         "missing": {"repo_path": str(tmp_path / "nope")},  # 路径不存在 → 排除
     }}
-    w = ReindexWorker(FileSpoolQueue(tmp_path), cfg)
+    class _PgLikeQueue:
+        def pending(self, projects=None):
+            return []
+
+    w = ReindexWorker(_PgLikeQueue(), cfg)
     assert w._own_projects() == {"has-repo"}
+
+
+def test_file_queue_does_not_orphan_jobs_when_projects_cfg_omits_repo(tmp_path):
+    repo = tmp_path / "myrepo"
+    repo.mkdir()
+    cfg = {"projects": {"other": {"repo_path": str(repo)}}}
+
+    w = ReindexWorker(FileSpoolQueue(tmp_path), cfg)
+
+    assert w._own_projects() is None
+
+
+def test_repo_for_falls_back_to_project_repo_specs(monkeypatch, tmp_path):
+    repo = tmp_path / "meta-repo"
+    repo.mkdir()
+    spec = repos.RepoSpec(root=repo, tag="", is_main=True, source_project_id="demo")
+    monkeypatch.setattr(repos, "project_repo_specs", lambda project_id, cfg=None: [spec])
+
+    assert _repo_for({"projects": {"other": {"repo_path": str(tmp_path)}}}, "demo") == repo.resolve()
 
 
 def test_drain_once_passes_whitelist_to_pending(tmp_path):

@@ -126,8 +126,11 @@ def test_codegraph_lane_main_repo_failure_continues_extra_repo(monkeypatch, tmp_
                 "filePath": "src/extra.py",
             }]
 
-    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs",
-                        lambda project_id: [main_spec, extra_spec])
+    monkeypatch.setattr("codev_platform.core.repos.project_codegraph_dbs",
+                        lambda project_id: [
+                            (main_spec, main_spec.codegraph_db),
+                            (extra_spec, extra_spec.codegraph_db),
+                        ])
     monkeypatch.setattr("codev_platform.web.integrations.codegraph_client.CodegraphClient",
                         FakeCodegraphClient)
 
@@ -154,3 +157,40 @@ def test_lane_failure_warning_is_deduplicated(caplog):
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     service._LOGGED_LANE_FAILURES.clear()
+
+
+def test_codegraph_lane_uses_central_codegraph_db(monkeypatch, tmp_path):
+    central = tmp_path / "data" / "codegraph_ext" / PID / "codegraph" / "codegraph.db"
+    central.parent.mkdir(parents=True)
+    central.write_bytes(b"sqlite")
+    spec = RepoSpec(central.parent.parent, tag="", is_main=True, source_project_id=PID)
+
+    class FakeCodegraphClient:
+        def __init__(self, *, db_path=None, project_id=None):
+            self.db_path = db_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def search(self, query, kind, path, limit, *, match_mode=None):
+            assert self.db_path == central
+            return [{
+                "id": "n-central",
+                "name": "run_central",
+                "kind": "function",
+                "filePath": "src/central.py",
+            }]
+
+    monkeypatch.setattr("codev_platform.core.repos.project_codegraph_dbs",
+                        lambda project_id: [(spec, central)])
+    monkeypatch.setattr("codev_platform.web.integrations.codegraph_client.CodegraphClient",
+                        FakeCodegraphClient)
+
+    lane, details = service._codegraph_lane(PID, "run", 10)
+
+    assert lane is not None
+    assert lane.ranked == ["n-central"]
+    assert details["n-central"]["file"] == "src/central.py"

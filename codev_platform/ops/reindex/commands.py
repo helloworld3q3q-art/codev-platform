@@ -387,6 +387,45 @@ def cmd_dirty_check(args: argparse.Namespace) -> int:
 # 4. wait-for-reindex  (port of wait-for-reindex.ps1)
 # ======================================================================
 _FINISHED_RE = re.compile(r"reindex finished at .* \[(ok|warn exit=\d+|failed exit=\d+)\]")
+_ENQUEUED_RE = re.compile(r"enqueued -> codev-reindex worker: ([^ ]+) -> (.+)")
+
+
+def _queued_expected_jobs(lines: list[str], start: int, end: int) -> list[tuple[str, str]]:
+    jobs: list[tuple[str, str]] = []
+    for ln in lines[start:end]:
+        m = _ENQUEUED_RE.search(ln)
+        if not m:
+            continue
+        pid = m.group(1).strip()
+        for kind in (p.strip() for p in m.group(2).split(",")):
+            if pid and kind:
+                jobs.append((pid, kind))
+    return jobs
+
+
+def _queued_jobs_completed(expected: list[tuple[str, str]], commit: str) -> tuple[bool, str]:
+    if not expected:
+        return False, ""
+    try:
+        from codev_platform.index_manifest import read_manifest
+        from codev_platform.reindex import open_default_queue
+        pending = {(j.project_id, j.kind) for j in open_default_queue().peek()}
+    except Exception:  # noqa: BLE001 - log polling fallback remains available
+        return False, ""
+    if any(job in pending for job in expected):
+        return False, ""
+
+    statuses: list[str] = []
+    for pid, kind in expected:
+        rec = next((r for r in read_manifest(pid) if r.kind == kind), None)
+        if rec is None or rec.git_commit != commit:
+            return False, ""
+        statuses.append(rec.status)
+    if any(s == "failed" for s in statuses):
+        return True, "failed"
+    if any(s not in {"ok", "failed"} for s in statuses):
+        return False, ""
+    return True, "ok"
 
 
 def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
@@ -412,6 +451,10 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
     commit = args.commit
     if not commit:
         _rc, commit = _git_out(repo, "rev-parse", "HEAD")
+    else:
+        _rc, full_commit = _git_out(repo, "rev-parse", commit)
+        if _rc == 0 and full_commit:
+            commit = full_commit.strip()
     short = commit[: min(7, len(commit))]
 
     # Pre-check: if this commit touches NO indexable file, post-commit skips
@@ -457,6 +500,13 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
                         C.out(f"[OK] reindex finished for {short} status={m.group(1)} "
                               f"(took ~{elapsed}s)")
                         return 0
+                done, status = _queued_jobs_completed(
+                    _queued_expected_jobs(lines, trigger_idx, block_end), commit)
+                if done:
+                    elapsed = int(timeout - (deadline - time.monotonic()))
+                    C.out(f"[OK] reindex worker completed for {short} status={status} "
+                          f"(took ~{elapsed}s)")
+                    return 0
         time.sleep(poll)
 
     C.out(f"[TIMEOUT] reindex for {short} did not finish within {timeout}s")
