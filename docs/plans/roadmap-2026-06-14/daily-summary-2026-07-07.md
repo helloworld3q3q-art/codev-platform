@@ -254,3 +254,25 @@ git diff --check
 - reindex 后 `health --mode light` 全绿,队列状态为“队列空”。
 
 注意:本步没有清理或提交 `codev_platform/需求.txt`。worker 闭环后发现工作树另有 8 个未知源码 dirty 文件,与本步无关,未纳入本记录提交。
+
+## 十四、codegraph MCP 多仓结构化 merge
+
+补上外部 codegraph MCP 代理的可选机器可读合并格式。默认行为保持兼容:未传平台私有参数时,单仓仍原样返回后端 content,多仓仍按 repo header 分段文本合并。
+
+新增能力:
+
+- 调用参数支持 `_codev_merge=json` / `_codev_merge=structured`,返回单个 JSON text content。
+- JSON envelope 包含 `project_id`、`tool`、`merge=codev-fanout-v1`、`repos`、`failures`。
+- 每个 repo 保留 `ok/is_error/content`,便于上层稳定解析分仓结果。
+- `_codev_merge` 在平台代理层剥离,不会透传给底层 codegraph backend,避免破坏外部工具 schema。
+- 多仓部分失败时,成功 repo 仍进入 `repos`,失败 repo 进入 `failures`;所有后端失败继续沿用既有 `_err` 错误体,不伪造空 merge。
+
+验证:
+
+```powershell
+python -m pytest tests/test_codegraph_server_fanout.py tests/test_mcp_serve.py tests/test_health_split_security.py tests/test_obslog.py
+python -m py_compile codev_platform\codegraph\server.py
+git diff --check -- codev_platform/codegraph/server.py tests/test_codegraph_server_fanout.py
+```
+
+结果:`53 passed, 1 warning`。另做只读复审,结论为无阻断问题;复审补跑 `python -m pytest tests/test_codegraph_server_fanout.py -q`,结果 `7 passed`。

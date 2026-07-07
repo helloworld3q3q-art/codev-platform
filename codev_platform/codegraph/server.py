@@ -265,6 +265,38 @@ def _repo_header(label: str) -> TextContent:
     )
 
 
+def _split_platform_args(args: dict | None) -> tuple[dict, bool]:
+    """Strip platform-only fan-out controls before forwarding to codegraph.
+
+    External codegraph tool schemas do not know these keys. Keeping them local
+    lets programmatic callers opt into JSON merge without breaking backend
+    validation or the existing human-readable default.
+    """
+    clean = dict(args or {})
+    mode = str(clean.pop("_codev_merge", "") or "").lower()
+    return clean, mode in {"json", "structured"}
+
+
+def _content_to_json(content) -> dict:
+    if hasattr(content, "model_dump"):
+        return content.model_dump(mode="json")
+    out = {"type": getattr(content, "type", None)}
+    if hasattr(content, "text"):
+        out["text"] = getattr(content, "text")
+    return out
+
+
+def _structured_response(pid: str | None, tool: str, repos: list[dict],
+                         failures: list[dict]) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps({
+        "project_id": pid,
+        "tool": tool,
+        "merge": "codev-fanout-v1",
+        "repos": repos,
+        "failures": failures,
+    }, ensure_ascii=False))]
+
+
 # ----------------------------------------------------------------------
 # MCP server: list_tools / call_tool 全部透传到 active project 的 codegraph 后端
 # ----------------------------------------------------------------------
@@ -300,28 +332,53 @@ async def call_tool(name: str, args: dict) -> list[TextContent]:
     ok = True
     content: list = []
     try:
+        backend_args, structured = _split_platform_args(args)
         slots = _backend_slots_for(pid)
         merged: list[TextContent] = []
-        failures: list[str] = []
+        repos: list[dict] = []
+        failures: list[dict] = []
         for label, be in slots:
             try:
-                result = await _call_backend(be, pid, name, args)
+                result = await _call_backend(be, pid, name, backend_args)
                 part = list(result.content or [])
-                if len(slots) == 1:
+                is_error = bool(getattr(result, "isError", False))
+                if len(slots) == 1 and not structured:
                     content = part
-                    ok = not bool(getattr(result, "isError", False))
+                    ok = not is_error
                     return content
+                if structured:
+                    repos.append({
+                        "repo": label,
+                        "ok": not is_error,
+                        "is_error": is_error,
+                        "content": [_content_to_json(c) for c in part],
+                    })
+                    if is_error:
+                        failures.append({"repo": label, "error": "backend returned isError"})
+                    continue
                 merged.append(_repo_header(label))
                 merged.extend(part)
-                if getattr(result, "isError", False):
-                    failures.append(label)
+                if is_error:
+                    failures.append({"repo": label, "error": "backend returned isError"})
             except Exception as exc:  # noqa: BLE001
-                failures.append(label)
+                failures.append({"repo": label, "error": str(exc)})
                 if len(slots) == 1:
                     raise
                 _flog(f"[call_tool] pid={pid} tool={name} repo={label} fan-out failed: {exc!s}")
+        if structured:
+            if not repos:
+                raise RuntimeError(
+                    "all codegraph fan-out backends failed: "
+                    + ", ".join(f["repo"] for f in failures)
+                )
+            ok = not failures
+            content = _structured_response(pid, name, repos, failures)
+            return content
         if not merged:
-            raise RuntimeError(f"all codegraph fan-out backends failed: {', '.join(failures)}")
+            raise RuntimeError(
+                "all codegraph fan-out backends failed: "
+                + ", ".join(f["repo"] for f in failures)
+            )
         ok = not failures
         content = merged
         return content
