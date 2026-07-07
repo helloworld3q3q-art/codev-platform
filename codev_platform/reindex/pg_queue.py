@@ -177,6 +177,23 @@ class PgJobQueue:
             )
             return cur.rowcount > 0
 
+    def discard(self, job: Job) -> bool:
+        """管理动作: 删除 peek 到的 pending/lease-expired job, 不认领、不执行 runner。
+
+        enqueued_at 条件防 race: peek 后同 key 被重新 enqueue(时间戳更新)时不删新任务。
+        active running(lease 未过期)不删; peek 本来也不会返回它。
+        """
+        self._ensure()
+        now = time.time()
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                f"DELETE FROM {self._t} WHERE project_id = %s AND kind = %s "
+                "AND enqueued_at <= %s "
+                "AND (status = 'pending' OR (status = 'running' AND lease_expires_at < %s))",
+                (job.project_id, job.kind, job.enqueued_at, now),
+            )
+            return cur.rowcount > 0
+
     def release(self, job: Job) -> bool:
         """rc=2(.reindex.lock 被占 / db busy 等**暂时性**失败)时把自己认领的行立即复位 pending,
         不必干等 lease(默认 1800s)过期才能重领。按 **claim_token 精确匹配** —— 只复位自己那次认领,

@@ -127,6 +127,22 @@ def test_peek_no_side_effect(q):
     assert any(j.project_id == "t-pgq-pk" for j in q.pending())   # 之后 worker 仍能认领
 
 
+def test_discard_pending_job(q):
+    q.enqueue("t-pgq-drop", "chroma")
+    job = next(j for j in q.peek() if j.project_id == "t-pgq-drop")
+    assert q.discard(job) is True
+    assert not any(j.project_id == "t-pgq-drop" for j in q.peek())
+
+
+def test_discard_keeps_reenqueued_job(q):
+    q.enqueue("t-pgq-redrop", "chroma")
+    job = next(j for j in q.peek() if j.project_id == "t-pgq-redrop")
+    time.sleep(0.01)
+    q.enqueue("t-pgq-redrop", "chroma")
+    assert q.discard(job) is False
+    assert any(j.project_id == "t-pgq-redrop" for j in q.peek())
+
+
 # ---- 多 org 亲和: pending(projects=...) 白名单认领 ----
 
 def test_affinity_claims_only_whitelisted_projects(q):

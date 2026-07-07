@@ -214,3 +214,27 @@ git diff --check
 ```
 
 结果:`13 passed`。
+
+## 十二、reindex 队列 STALE 安全治理
+
+补第三个收尾项:不启动 worker、不消费旧任务,先给 `reindex-queue` 增加安全清理入口。
+
+新增能力:
+
+- `codev-platform reindex-queue prune-stale [project] [--kind ...] [--older-than-sec N]` 默认 dry-run,只列出 STALE,不删除、不认领。
+- 真删除必须加 `--yes`;破坏性打开队列时 `open_default_queue(fail_soft=False)`,避免 PG 配置不可用时静默回退 File spool 后删错后端。
+- File 后端没有 running lease,`--yes` 还必须额外加 `--force-file`,用于“已确认本机 worker 停止”的人工治理场景。
+- `--kind all` 对 prune 表示所有 peek 到的 kind,包括历史/未知 kind;显式 kind 只做路径安全过滤,不要求 runner 当前仍注册。
+- File 后端 `discard()` 用同目录原子 rename + mtime 复核,防止 peek 后重新入队的 marker 被误删;PG 后端用单条 `DELETE ... enqueued_at <= ... AND pending/lease-expired` 保持同等 race 防护。
+
+复审发现的 4 个风险均已补:File 正在跑误删门槛、File stat/unlink race、unknown kind 清理、PG→File fail-soft 回退。
+
+验证:
+
+```powershell
+python -m pytest tests/test_reindex_queue.py tests/test_reindex_queue_cli.py tests/test_reindex_worker_affinity.py tests/test_pg_queue.py tests/test_cli_parser.py
+codev-platform reindex-queue prune-stale --older-than-sec 300
+git diff --check
+```
+
+结果:`31 passed, 15 skipped`。真实 dry-run 当前列出 14 个 STALE,未删除任何任务。

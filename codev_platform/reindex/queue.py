@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 _SEP = "__"
 
@@ -60,6 +61,14 @@ class JobQueue(Protocol):
 
     def complete(self, job: Job) -> bool:
         """标记完成。返回 True=已移除; False=运行期被重新触发 (dirty), 已保留待重跑。"""
+        ...
+
+    def discard(self, job: Job) -> bool:
+        """管理动作: 丢弃一个待处理 job, 不执行 runner。
+
+        返回 True=已移除或已不存在; False=peek 后又被重新触发/状态变化, 未删除。
+        仅 CLI 诊断/清理使用; worker 正常完成仍走 complete()。
+        """
         ...
 
     def watch(self) -> AsyncIterator[None]:
@@ -141,6 +150,12 @@ class FileSpoolQueue:
         return self.pending()
 
     def complete(self, job: Job) -> bool:
+        return self._remove_if_not_refreshed(job)
+
+    def discard(self, job: Job) -> bool:
+        return self._remove_if_not_refreshed(job)
+
+    def _remove_if_not_refreshed(self, job: Job) -> bool:
         # 不重做 runner 白名单校验 —— job 已从 spool 读出, worker 丢弃未知 kind 时也要能删掉它,
         # 不能因 _path→_validate 的白名单 ValueError 崩 drain(坏 kind / 旧 spool)。
         pid, kind = str(job.project_id), str(job.kind)
@@ -159,7 +174,20 @@ class FileSpoolQueue:
         # 运行期被重新 touch (mtime 比认领时新) → 保留, 下轮重跑 (dirty, 不丢尾部提交)
         if p.stat().st_mtime > job.enqueued_at:
             return False
-        p.unlink(missing_ok=True)
+        # 先原子 rename 到同目录临时名, 再复核被移动文件的 mtime:
+        # 若 enqueue 正好发生在 stat 和 rename 之间, 新 touch 会被一起移动; 复核能识别并还原。
+        trash = self._dir / f".discarding-{p.name}-{uuid4().hex}"
+        try:
+            p.rename(trash)
+        except FileNotFoundError:
+            return True
+        if trash.stat().st_mtime > job.enqueued_at:
+            if not p.exists():
+                trash.rename(p)
+            else:
+                trash.unlink(missing_ok=True)
+            return False
+        trash.unlink(missing_ok=True)
         return True
 
     async def watch(self) -> AsyncIterator[None]:

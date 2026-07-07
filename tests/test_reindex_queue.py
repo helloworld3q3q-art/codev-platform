@@ -42,6 +42,44 @@ def test_complete_literal_dotdot_file_is_deleted(tmp_path):
     assert not f.exists()                   # 已删, 不再无限重处理
 
 
+def test_discard_removes_pending_job(tmp_path):
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("demo-proj", "chroma")
+    job = q.peek()[0]
+    assert q.discard(job) is True
+    assert q.peek() == []
+
+
+def test_discard_keeps_job_reenqueued_after_peek(tmp_path):
+    import os
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("demo-proj", "chroma")
+    job = q.peek()[0]
+    os.utime(tmp_path / "demo-proj__chroma", (job.enqueued_at + 10, job.enqueued_at + 10))
+    assert q.discard(job) is False
+    assert [j.key for j in q.peek()] == ["demo-proj__chroma"]
+
+
+def test_discard_restores_job_touched_during_rename(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("demo-proj", "chroma")
+    job = q.peek()[0]
+    marker = tmp_path / "demo-proj__chroma"
+    original_rename = Path.rename
+
+    def _race_touch_then_rename(self, target):
+        if self == marker:
+            os.utime(marker, (job.enqueued_at + 10, job.enqueued_at + 10))
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", _race_touch_then_rename)
+    assert q.discard(job) is False
+    assert marker.exists()
+    assert [j.key for j in q.peek()] == ["demo-proj__chroma"]
+
+
 def test_pending_codegraph_before_code_vec_on_SAME_mtime(tmp_path):
     """审计 B2(真修): mtime **平手**时 code_vec 必须仍排在 codegraph 之后。
 

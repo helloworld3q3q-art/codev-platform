@@ -22,7 +22,7 @@ def _subcommand_choices():
 def test_ops_subcommands_registered():
     choices = _subcommand_choices()
     for name in ("health", "reindex", "post-commit", "dirty-check",
-                 "install-hooks", "wait-for-reindex"):
+                 "install-hooks", "wait-for-reindex", "reindex-queue"):
         assert name in choices, f"{name} not registered"
 
 
@@ -44,6 +44,18 @@ def test_parser_parses_wait_for_reindex_defaults():
     args = parser.parse_args(["wait-for-reindex"])
     assert args.cmd == "wait-for-reindex"
     assert args.timeout_sec == 120
+
+
+def test_parser_parses_reindex_queue_prune_stale():
+    parser = cli.build_parser()
+    args = parser.parse_args(["reindex-queue", "prune-stale", "demo-proj",
+                              "--kind", "chroma", "--older-than-sec", "600", "--force-file"])
+    assert args.cmd == "reindex-queue"
+    assert args.action == "prune-stale"
+    assert args.project == "demo-proj"
+    assert args.kind == "chroma"
+    assert args.older_than_sec == 600
+    assert args.force_file is True
 
 
 def test_each_subcommand_has_func():
