@@ -403,7 +403,18 @@ def _queued_expected_jobs(lines: list[str], start: int, end: int) -> list[tuple[
     return jobs
 
 
-def _queued_jobs_completed(expected: list[tuple[str, str]], commit: str) -> tuple[bool, str]:
+def _commit_covers(repo: Path, target: str, indexed: str | None) -> bool:
+    if not indexed:
+        return False
+    indexed = indexed.strip()
+    if indexed == target:
+        return True
+    rc, _out = _git_out(repo, "merge-base", "--is-ancestor", target, indexed)
+    return rc == 0
+
+
+def _queued_jobs_completed(repo: Path, expected: list[tuple[str, str]],
+                           commit: str) -> tuple[bool, str]:
     if not expected:
         return False, ""
     try:
@@ -418,7 +429,7 @@ def _queued_jobs_completed(expected: list[tuple[str, str]], commit: str) -> tupl
     statuses: list[str] = []
     for pid, kind in expected:
         rec = next((r for r in read_manifest(pid) if r.kind == kind), None)
-        if rec is None or rec.git_commit != commit:
+        if rec is None or not _commit_covers(repo, commit, rec.git_commit):
             return False, ""
         statuses.append(rec.status)
     if any(s == "failed" for s in statuses):
@@ -500,7 +511,7 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
                         C.out(f"[OK] reindex finished for {short} status={m.group(1)} "
                               f"(took ~{elapsed}s)")
                         return 0
-                done, status = _queued_jobs_completed(
+                done, status = _queued_jobs_completed(repo,
                     _queued_expected_jobs(lines, trigger_idx, block_end), commit)
                 if done:
                     elapsed = int(timeout - (deadline - time.monotonic()))

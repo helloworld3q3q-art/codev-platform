@@ -327,6 +327,7 @@ git diff --check
 
 - `wait-for-reindex` 兼容队列化 reindex:旧逻辑只等 `reindex.log` 里的 finished marker,但 post-commit 现在只入队,完成状态由 worker manifest 记录。现在会从同一 trigger block 解析 `enqueued -> codev-reindex worker` 行,确认对应 job 不在队列且 manifest 已写到目标 commit,从而闭合等待语义。
 - `wait-for-reindex --commit <short>` 会先 `git rev-parse` 成完整 hash,避免短 hash 找不到日志里的完整 `trigger commit`。
+- `wait-for-reindex` 对历史 commit 采用“索引覆盖”语义:manifest commit 等于目标 commit 或者是目标 commit 的后代,都算已完成,避免后续 reindex 覆盖 manifest 后再等旧 commit 误超时。
 - file spool worker 不再因为用户级 `config.projects` 非空但漏本仓而让本仓 job 永久 pending;file 后端单机认领全部,实际 repo_path 由 config 或 `platform_meta` fallback 解析。PG 后端仍按 `config.projects` fail-closed,不抢别机/别 org job。
 - `recall_code` 的 codegraph lane 改用 `project_codegraph_dbs()` 统一真值源,与 eval preflight 一致,可读仓内 junction DB 和平台 `codegraph_ext/<pid>/codegraph.db` central fallback。
 
@@ -335,6 +336,7 @@ git diff --check
 ```powershell
 python -m pytest tests/test_wait_for_reindex_worker.py tests/test_reindex_worker_affinity.py tests/test_recall_service.py
 codev-platform wait-for-reindex --commit e7e513f --timeout-sec 10
+codev-platform wait-for-reindex --commit HEAD --timeout-sec 10
 python -m pytest tests/test_platform_status_soft_labels.py tests/test_paths.py tests/test_eval_recall.py tests/test_eval_code_intelligence.py tests/test_agent_tools.py tests/test_recall_service.py tests/test_eval_planner.py tests/test_agent_planner.py tests/test_agent_prompt_context.py tests/test_agent_chat_service.py tests/test_agent_registry.py tests/test_agent_recall_tool.py tests/test_agent_recall_invariants.py tests/test_agent_recall_pipeline.py tests/test_codegraph_server_fanout.py tests/test_mcp_serve.py tests/test_health_split_security.py tests/test_obslog.py tests/test_reindex_queue.py tests/test_reindex_queue_cli.py tests/test_reindex_worker_affinity.py tests/test_pg_queue.py tests/test_cli_parser.py tests/test_codegraph_link.py tests/test_codegraph_ensure_link.py tests/test_wait_for_reindex_worker.py
 python -m py_compile codev_platform\ops\reindex\commands.py codev_platform\reindex\worker.py codev_platform\recall\service.py
 git diff --check
@@ -344,4 +346,5 @@ git diff --check
 
 - 最小回归:`23 passed`。
 - live `wait-for-reindex --commit e7e513f`:识别 worker manifest 完成,`status=ok`。
+- 追加历史 commit 覆盖语义后,`wait-for-reindex --commit e7e513f` 与 `--commit HEAD` 均秒级 OK。
 - 宽目标测试:`257 passed, 20 skipped, 1 warning`。

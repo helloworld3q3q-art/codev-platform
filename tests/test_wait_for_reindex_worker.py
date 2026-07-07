@@ -32,7 +32,46 @@ def test_queued_jobs_completed_uses_manifest_and_empty_queue(monkeypatch, tmp_pa
 
     monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Queue())
 
-    assert commands._queued_jobs_completed([("demo", "chroma")], commit) == (True, "ok")
+    assert commands._queued_jobs_completed(tmp_path, [("demo", "chroma")], commit) == (True, "ok")
+
+
+def test_queued_jobs_completed_accepts_descendant_manifest_commit(monkeypatch, tmp_path):
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    target = "a" * 40
+    indexed = "b" * 40
+    record_build(BuildRecord(project_id="demo", kind="chroma",
+                             git_commit=indexed, status="ok"))
+
+    class _Queue:
+        def peek(self):
+            return []
+
+    def fake_git_out(repo, *args):
+        if args == ("merge-base", "--is-ancestor", target, indexed):
+            return 0, ""
+        return 1, ""
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Queue())
+    monkeypatch.setattr(commands, "_git_out", fake_git_out)
+
+    assert commands._queued_jobs_completed(tmp_path, [("demo", "chroma")], target) == (True, "ok")
+
+
+def test_queued_jobs_completed_rejects_unrelated_manifest_commit(monkeypatch, tmp_path):
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    target = "a" * 40
+    indexed = "b" * 40
+    record_build(BuildRecord(project_id="demo", kind="chroma",
+                             git_commit=indexed, status="ok"))
+
+    class _Queue:
+        def peek(self):
+            return []
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Queue())
+    monkeypatch.setattr(commands, "_git_out", lambda repo, *args: (1, ""))
+
+    assert commands._queued_jobs_completed(tmp_path, [("demo", "chroma")], target) == (False, "")
 
 
 def test_wait_for_reindex_accepts_worker_manifest_completion(monkeypatch, tmp_path):
@@ -68,8 +107,8 @@ def test_wait_for_reindex_accepts_worker_manifest_completion(monkeypatch, tmp_pa
 
     monkeypatch.setattr(commands, "_git_out", fake_git_out)
     monkeypatch.setattr(commands, "_queued_jobs_completed",
-                        lambda expected, got_commit: (expected == [("demo", "chroma")]
-                                                      and got_commit == commit, "ok"))
+                        lambda repo, expected, got_commit: (
+                            expected == [("demo", "chroma")] and got_commit == commit, "ok"))
 
     rc = commands.cmd_wait_for_reindex(SimpleNamespace(
         repo=str(tmp_path),
