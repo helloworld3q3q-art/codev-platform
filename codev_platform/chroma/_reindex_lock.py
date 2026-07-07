@@ -33,6 +33,8 @@ def _pid_alive(pid: int | None) -> bool:
     PID 复用最坏只是"不抢"(退 stale 超时), 不会误抢。"""
     if pid is None:
         return True
+    if os.name == "nt":
+        return True
     try:
         os.kill(pid, 0)        # Linux(生产 worker): 不存在 → ProcessLookupError
         return True

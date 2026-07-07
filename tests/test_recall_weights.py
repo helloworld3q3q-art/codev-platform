@@ -60,11 +60,16 @@ def test_codegraph_lane_fans_out_repos_and_localizes_refs(tmp_path, monkeypatch)
 
     main = tmp_path / "main"; main.mkdir()
     extra = tmp_path / "extra"; extra.mkdir()
+    for repo in (main, extra):
+        db_dir = repo / ".codegraph"
+        db_dir.mkdir()
+        (db_dir / "codegraph.db").touch()
     specs = [
         RepoSpec(root=main.resolve(), tag="", is_main=True),
         RepoSpec(root=extra.resolve(), tag="extra", is_main=False),
     ]
-    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs", lambda pid: specs)
+    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs",
+                        lambda pid, **kwargs: specs)
 
     class FakeCodegraphClient:
         def __init__(self, *, db_path):

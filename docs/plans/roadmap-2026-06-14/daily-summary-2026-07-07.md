@@ -348,3 +348,37 @@ git diff --check
 - live `wait-for-reindex --commit e7e513f`:识别 worker manifest 完成,`status=ok`。
 - 追加历史 commit 覆盖语义后,`wait-for-reindex --commit e7e513f` 与 `--commit HEAD` 均秒级 OK。
 - 宽目标测试:`257 passed, 20 skipped, 1 warning`。
+
+## 十七、reindex 等待 UX 与误判边界收口
+
+继续按兄弟审计结果补“别扭但不阻断”的边角:
+
+- `wait-for-reindex` 的日志块边界不再只看下一条 `trigger commit`,而是遇到任意新 reindex block 或 `trigger merge/pull` / `trigger checkout` 即截断,避免后续 hook block 的 finished marker 误判当前 commit 完成。
+- worker manifest 读取异常时保持 fail-soft,不让 sqlite locked/corrupt 直接打崩 wait 命令;继续等待日志或超时。
+- wait 成功文案从 `worker completed` 改成 `reindex manifest covers`,准确表达“目标 commit 已被该 commit 或后代索引覆盖”。
+- wait 超时提示补 `reindex-queue status` 和 worker/log 排查路径,不再只提示旧前台 reindex 时代的 `reindex.log`。
+- `index status` 的 repo_path 解析复用 `project_repo_specs()`,用户级 config 未登记本仓时也能从 `platform_meta` 找到主仓,避免 manifest 已对齐但显示 `HEAD 未知`。
+
+验证:
+
+```powershell
+python -m pytest tests/test_wait_for_reindex_worker.py tests/test_index_manifest.py tests/test_reindex_worker_affinity.py tests/test_recall_service.py
+python -m py_compile codev_platform\ops\reindex\commands.py codev_platform\ops\index_status.py
+codev-platform wait-for-reindex --commit e7e513f --timeout-sec 10
+codev-platform wait-for-reindex --commit HEAD --timeout-sec 10
+codev-platform reindex-queue status
+codev-platform index status --project codev-platform
+```
+
+结果:`35 passed`;旧提交与 HEAD 均显示 `reindex manifest covers ... status=ok`;队列空;`index status --project codev-platform` 四类索引均对齐 `HEAD@ac1be594`。
+
+追加全量验证:
+
+- 一次性 `python -m pytest tests` 在 Windows 本机会被外部中断(exit 137),因此改为按 12 个测试文件分组跑完整 `tests/`。
+- 全量暴露 3 个既有基线问题并已修:
+  - `plugins/builtin/sql/core.py` 超 600 行预算:拆出 `sql/mybatis_plus.py`,不加白名单。
+  - `psycopg_pool` 未安装时 PG 图谱读路径测试未按可选依赖 skip:补 `pytest.importorskip("psycopg_pool")`。
+  - Windows 下 `_pid_alive()` 调 `os.kill(pid, 0)` 会异步触发 `KeyboardInterrupt`:Windows 改为保守返回 alive。
+- recall fan-out 测试补真实 `.codegraph/codegraph.db` 前置文件,并兼容 `project_repo_specs(..., cfg=...)` 签名。
+
+最终结果:208 个测试文件分组全量通过;`py_compile` 通过;`git diff --check` 无错误(仅 Git CRLF 提示)。

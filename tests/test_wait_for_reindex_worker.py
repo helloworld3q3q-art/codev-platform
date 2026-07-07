@@ -20,6 +20,19 @@ def test_queued_expected_jobs_parses_worker_log_block():
     ]
 
 
+def test_reindex_block_end_stops_at_next_hook_block():
+    lines = [
+        "===== reindex started at 2026-07-07 10:00:00 =====",
+        "trigger commit: abc",
+        "enqueued -> codev-reindex worker: demo -> chroma",
+        "===== reindex started at 2026-07-07 10:00:01 =====",
+        "trigger merge/pull: ORIG_HEAD..HEAD",
+        "reindex finished at 2026-07-07 10:00:02 [ok]",
+    ]
+
+    assert commands._reindex_block_end(lines, 1) == 3
+
+
 def test_queued_jobs_completed_uses_manifest_and_empty_queue(monkeypatch, tmp_path):
     monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     commit = "a" * 40
@@ -33,6 +46,22 @@ def test_queued_jobs_completed_uses_manifest_and_empty_queue(monkeypatch, tmp_pa
     monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Queue())
 
     assert commands._queued_jobs_completed(tmp_path, [("demo", "chroma")], commit) == (True, "ok")
+
+
+def test_queued_jobs_completed_manifest_error_falls_back(monkeypatch, tmp_path):
+    commit = "a" * 40
+
+    class _Queue:
+        def peek(self):
+            return []
+
+    def boom(project_id):
+        raise RuntimeError("manifest locked")
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Queue())
+    monkeypatch.setattr("codev_platform.index_manifest.read_manifest", boom)
+
+    assert commands._queued_jobs_completed(tmp_path, [("demo", "chroma")], commit) == (False, "")
 
 
 def test_queued_jobs_completed_accepts_descendant_manifest_commit(monkeypatch, tmp_path):

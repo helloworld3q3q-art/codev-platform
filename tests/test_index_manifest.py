@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
 from codev_platform import index_manifest as im
 from codev_platform.index_manifest import BuildRecord
@@ -76,3 +77,14 @@ def test_index_command_registered():
     sub = p.add_subparsers(dest="cmd")
     ops.register_all(sub)
     assert "index" in sub.choices, "ops.register_all 应注册 index 子命令"
+
+
+def test_index_status_repo_path_falls_back_to_repo_specs(monkeypatch, tmp_path):
+    from codev_platform.ops import index_status
+
+    def fake_specs(pid, cfg=None):
+        return [SimpleNamespace(root=tmp_path, is_main=True)]
+
+    monkeypatch.setattr("codev_platform.core.repos.project_repo_specs", fake_specs)
+
+    assert index_status._repo_path({}, "p1", {}) == tmp_path

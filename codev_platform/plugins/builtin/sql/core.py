@@ -263,7 +263,6 @@ def _scan_python_core_dml(
         edges.extend(a_edges)
     return nodes, edges
 
-
 # ============================ Python DML (表读写血缘 P2) ============================
 #
 # 扫 .py 里 SQL 字符串字面量 (cursor.execute / conn.execute 等的 raw SQL), 把"哪个函数
@@ -368,8 +367,6 @@ def _scan_python_dml(
         nodes.extend(a_nodes)
         edges.extend(a_edges)
     return nodes, edges
-
-
 # ============================ Java 注解 SQL (MyBatis) DML ============================
 #
 # openclaw 等 Java 后端用 MyBatis @Select/@Insert/@Update/@Delete("...SQL...") 注解承载
@@ -538,78 +535,4 @@ def _scan_java_hql(
         )
         nodes.extend(a_nodes)
         edges.extend(a_edges)
-    return nodes, edges
-
-
-# ============================ MyBatis-Plus BaseMapper CRUD ============================
-#
-# MyBatis-Plus 的 `interface XxxMapper extends BaseMapper<YyyEntity>` 自动有 CRUD, 无显式
-# SQL。表名由实体的 `@TableName("...")` 决定。解析两跳: BaseMapper<Entity> -> Entity 类的
-# @TableName -> 表。粗粒度 (mapper 接口同时暴露读+写, 不细分到调用点) -> 读写两条边都建,
-# confidence<1 标注推断。补 openclaw 50 个 BaseMapper 走隐式 CRUD 的"表<->Java 后端"血缘。
-
-_RE_TABLENAME = re.compile(r'@TableName\s*\(\s*"([^"]+)"', re.ASCII)
-_RE_ENTITY_CLASS = re.compile(r"\bclass\s+(\w+)", re.ASCII)
-_RE_BASEMAPPER = re.compile(
-    r"\binterface\s+(?P<mapper>\w+)\b[^{]*?extends\s+\w*BaseMapper\s*<\s*(?P<entity>\w+)",
-    re.ASCII | re.S,
-)
-_MYBATIS_PLUS_CONF = 0.6  # BaseMapper CRUD 粗粒度推断, 置信度低于显式 SQL/DDL。
-
-
-def _scan_entity_tables(java_srcs: list[tuple[str, str]]) -> dict[str, str]:
-    """从 @TableName("t") + 紧随的 class X 建 {实体类名 -> 表名}。"""
-    out: dict[str, str] = {}
-    for _rel, src in java_srcs:
-        for m in _RE_TABLENAME.finditer(src):
-            table = m.group(1).strip()
-            cm = _RE_ENTITY_CLASS.search(src, m.end())
-            if cm and table:
-                out[cm.group(1)] = table
-    return out
-
-
-def _scan_mybatis_plus(
-    java_srcs: list[tuple[str, str]],
-    project_id: str,
-    known_tables: set[str],
-    entity_table: dict[str, str],
-) -> tuple[list[GraphNode], list[GraphEdge]]:
-    """BaseMapper<Entity> -> @TableName 表; mapper 接口作 backend_function, 读写边 (粗粒度)。"""
-    nodes: list[GraphNode] = []
-    edges: list[GraphEdge] = []
-    seen_func: set[str] = set()
-    seen_stub: set[str] = set()
-    for rel, src in java_srcs:
-        for m in _RE_BASEMAPPER.finditer(src):
-            mapper = m.group("mapper")
-            entity = m.group("entity")
-            table = entity_table.get(entity)
-            if not table:
-                continue
-            t = _unquote(table).lower()
-            if not _plausible_table(t):
-                continue
-            line = src.count("\n", 0, m.start()) + 1
-            func_id = f"{project_id}:backend_function:{rel}:{mapper}"
-            if func_id not in seen_func:
-                seen_func.add(func_id)
-                nodes.append(
-                    GraphNode(
-                        id=func_id,
-                        kind=NodeKind.BACKEND_FUNCTION.value,
-                        name=mapper,
-                        project_id=project_id,
-                        file=rel,
-                        line=line,
-                        language="java",
-                        meta={"db_access": True, "mybatis_plus": True, "entity": entity},
-                    )
-                )
-            a_nodes, a_edges = _emit_table_access(
-                func_id, {t}, {t}, project_id, known_tables, seen_stub,
-                confidence=_MYBATIS_PLUS_CONF,
-            )
-            nodes.extend(a_nodes)
-            edges.extend(a_edges)
     return nodes, edges

@@ -12,11 +12,18 @@ import time
 from pathlib import Path
 
 
-def _repo_path(projects: dict, pid: str) -> Path | None:
+def _repo_path(projects: dict, pid: str, cfg: dict) -> Path | None:
     pc = projects.get(pid)
     if isinstance(pc, dict) and pc.get("repo_path"):
         p = Path(pc["repo_path"]).expanduser()
         return p if p.exists() else None
+    try:
+        from codev_platform.core.repos import project_repo_specs
+        for spec in project_repo_specs(pid, cfg=cfg):
+            if spec.is_main and spec.root.exists():
+                return spec.root
+    except Exception:  # noqa: BLE001 - status should degrade to HEAD unknown
+        return None
     return None
 
 
@@ -45,7 +52,7 @@ def cmd_index_status(args: argparse.Namespace) -> int:
         print("(index manifest 为空 —— 还没有索引构建被记录; reindex 跑过后即有记录)")
         return 0
 
-    report = {pid: freshness(pid, _repo_path(projects, pid)) for pid in pids}
+    report = {pid: freshness(pid, _repo_path(projects, pid, cfg)) for pid in pids}
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

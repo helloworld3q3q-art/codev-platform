@@ -255,6 +255,7 @@ def test_pg_read_path_neutral_on_bad_dsn():
     except ImportError:
         pytest.skip("PgGraphStore 未落地")
     from codev_platform.graph.store import GraphStoreUnreadable
+    pytest.importorskip("psycopg_pool")
     bad = PgGraphStore("postgresql://nouser:nopass@127.0.0.1:5999/nodb")
     for call in (lambda: bad.load_graph(PID), lambda: bad.stats(PID),
                  lambda: bad.audit_scan(PID), lambda: bad.list_project_ids()):

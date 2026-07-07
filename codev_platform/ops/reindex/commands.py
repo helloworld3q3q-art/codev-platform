@@ -388,6 +388,8 @@ def cmd_dirty_check(args: argparse.Namespace) -> int:
 # ======================================================================
 _FINISHED_RE = re.compile(r"reindex finished at .* \[(ok|warn exit=\d+|failed exit=\d+)\]")
 _ENQUEUED_RE = re.compile(r"enqueued -> codev-reindex worker: ([^ ]+) -> (.+)")
+_BLOCK_START_RE = re.compile(r"^===== reindex started at ")
+_TRIGGER_LINE_RE = re.compile(r"^trigger (commit|merge/pull|checkout): ")
 
 
 def _queued_expected_jobs(lines: list[str], start: int, end: int) -> list[tuple[str, str]]:
@@ -401,6 +403,13 @@ def _queued_expected_jobs(lines: list[str], start: int, end: int) -> list[tuple[
             if pid and kind:
                 jobs.append((pid, kind))
     return jobs
+
+
+def _reindex_block_end(lines: list[str], trigger_idx: int) -> int:
+    for j in range(trigger_idx + 1, len(lines)):
+        if _BLOCK_START_RE.search(lines[j]) or _TRIGGER_LINE_RE.search(lines[j]):
+            return j
+    return len(lines)
 
 
 def _commit_covers(repo: Path, target: str, indexed: str | None) -> bool:
@@ -426,9 +435,17 @@ def _queued_jobs_completed(repo: Path, expected: list[tuple[str, str]],
     if any(job in pending for job in expected):
         return False, ""
 
+    manifests = {}
     statuses: list[str] = []
     for pid, kind in expected:
-        rec = next((r for r in read_manifest(pid) if r.kind == kind), None)
+        try:
+            by_kind = manifests.get(pid)
+            if by_kind is None:
+                by_kind = {r.kind: r for r in read_manifest(pid)}
+                manifests[pid] = by_kind
+            rec = by_kind.get(kind)
+        except Exception:  # noqa: BLE001 - keep waiting; log polling may still finish
+            return False, ""
         if rec is None or not _commit_covers(repo, commit, rec.git_commit):
             return False, ""
         statuses.append(rec.status)
@@ -499,11 +516,7 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
                     trigger_idx = i
                     break
             if trigger_idx >= 0:
-                block_end = len(lines)
-                for j in range(trigger_idx + 1, len(lines)):
-                    if "trigger commit: " in lines[j]:
-                        block_end = j
-                        break
+                block_end = _reindex_block_end(lines, trigger_idx)
                 for k in range(trigger_idx, block_end):
                     m = _FINISHED_RE.search(lines[k])
                     if m:
@@ -515,14 +528,15 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
                     _queued_expected_jobs(lines, trigger_idx, block_end), commit)
                 if done:
                     elapsed = int(timeout - (deadline - time.monotonic()))
-                    C.out(f"[OK] reindex worker completed for {short} status={status} "
+                    C.out(f"[OK] reindex manifest covers {short} status={status} "
                           f"(took ~{elapsed}s)")
                     return 0
         time.sleep(poll)
 
     C.out(f"[TIMEOUT] reindex for {short} did not finish within {timeout}s")
-    C.out("  Check tools/chroma/reindex.log tail for errors,")
-    C.out("  or run `codev-platform post-commit` manually to retry.")
+    C.out("  Check `codev-platform reindex-queue status` for pending/running jobs,")
+    C.out("  then inspect tools/chroma/reindex.log or worker logs if the queue is empty.")
+    C.out("  To retry the hook enqueue, run `codev-platform post-commit` manually.")
     return 1
 
 
