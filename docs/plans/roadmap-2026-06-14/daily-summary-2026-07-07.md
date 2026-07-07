@@ -56,8 +56,31 @@ git diff --check
 
 ## 四、剩余不在本次硬塞
 
-- webhook / reindex 生产者在 PG queue 不可用时是否 fail-closed,需要单独评估调用方契约。
-- extra repo 未登记或映射 stale 的 doctor/startup 校验,适合进入 health/doctor 小步。
-- fan-out 的指标、阈值和告警,等核心读写链稳定后再补。
+- Web GraphAPI 的 codegraph 只读接口 fan-out。
+- 外部 `codegraph.server` MCP 代理多后端合并,需先固化返回协议测试。
 
-P3 当前状态:首批链路已落地,审计发现的直接缺口已补;下一步再切 Web GraphAPI read-side fan-out 和外部 `codegraph.server` MCP 代理协议固化。
+## 五、运行治理小步补齐
+
+用户继续要求把三项较大运行治理项拆小步完成,本次没有改队列表结构,只补生产者语义、体检和观测。
+
+- webhook 队列 fail-closed:`open_default_queue(fail_soft=False)` 只给 webhook 使用。`reindex.queue_backend=pg` 但 PG/DSN 不可用时,webhook 返回 503,不再 HTTP 200 后悄悄回退 file spool;任一 `enqueue()` 失败也返回 503。本地 hook/onboard 仍保持默认 fail-soft。
+- extra repo doctor/startup 校验:`core.repos.webhook_extra_repo_mapping_issues()` 作为只读诊断真值源;webhook 启动期打印未映射 extra repo;`codev-platform health` 新增 `webhook extra repos` 检查。
+- fan-out 指标/告警:`metrics` 解析现有 `tools/chroma/reindex.log` 的 `projects:`/`scopes:` 块,输出 `reindex runs/fanout_runs/max_projects/max_scopes`,Prometheus 同步暴露;阈值支持 `metrics.alerts.reindex_fanout_projects_max` 和 `metrics.alerts.reindex_fanout_scopes_max`。
+
+补测:
+
+- `tests/test_webhook_body_limit.py`: queue open/enqueue 失败返回 503、严格 PG 无 DSN 抛错、startup warning。
+- `tests/test_graph_ingest.py`: extra repo webhook 映射诊断。
+- `tests/test_metrics.py`: reindex fan-out 解析、聚合和阈值告警。
+
+新增验证:
+
+```powershell
+python -m pytest tests/test_webhook_body_limit.py tests/test_graph_ingest.py tests/test_metrics.py tests/test_health_codegraph_usage.py tests/test_health_search_recall_client.py
+python -m py_compile codev_platform\reindex\__init__.py codev_platform\webhook\server.py codev_platform\core\repos.py codev_platform\ops\health\_checks.py codev_platform\ops\health\__init__.py codev_platform\ops\metrics.py
+git diff --check
+```
+
+结果:`50 passed, 1 warning`。warning 仍是 Starlette/TestClient 上游弃用提示。
+
+P3 当前状态:首批链路已落地,审计发现的直接缺口和三项运行治理小步已补;下一步再切 Web GraphAPI read-side fan-out 和外部 `codegraph.server` MCP 代理协议固化。

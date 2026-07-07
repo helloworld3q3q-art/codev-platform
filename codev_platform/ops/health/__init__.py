@@ -82,6 +82,7 @@ from ._checks import (  # noqa: F401
     _check_reranker,
     _check_rules_vs_incident,
     _check_torch,
+    _check_webhook_extra_repo_mapping,
     _daemon_port,
     _resolve_model_dir,
 )
@@ -144,6 +145,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     _check_codegraph_db(r, repo, chroma_py)
     _check_graph_store(r, project_id)
     _check_codegraph_mcp(r, repo, procs)
+    _check_webhook_extra_repo_mapping(r, cfg)
     _check_hook_missed(r, repo, health)
     _check_git_tools(r, repo)
 

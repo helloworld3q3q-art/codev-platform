@@ -167,6 +167,64 @@ def _raw_extra_refs(project_id: str, cfg: dict) -> list[str]:
     return refs
 
 
+def _project_webhook_repo(cfg: dict, project_id: str) -> str:
+    return str(_cfg_get(cfg, f"projects.{project_id}.webhook_repo") or "").strip()
+
+
+def _project_repo_path_raw(cfg: dict, project_id: str) -> str:
+    return str(_cfg_get(cfg, f"projects.{project_id}.repo_path") or "").strip()
+
+
+def _same_path(a: str, b: str) -> bool:
+    try:
+        return Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+    except OSError:
+        return str(a).strip() == str(b).strip()
+
+
+def webhook_extra_repo_mapping_issues(cfg: dict | None = None) -> list[dict[str, str]]:
+    """找出 extra_repos 无法被 webhook 反向触发的配置缺口。
+
+    webhook 入口先按 `projects.<pid>.webhook_repo` 把 VCS repo 映射到一个 project,
+    再通过 impacted_project_ids_for_repo() 找父项目。因此每个 extra repo 最好有自己的
+    project 登记和 webhook_repo。这里只做只读诊断, 不要求路径一定存在。
+    """
+    cfg = load_config() if cfg is None else cfg
+    known = _known_project_ids(cfg)
+    projects = _cfg_get(cfg, "projects") or {}
+    issues: list[dict[str, str]] = []
+
+    def add(project_id: str, raw: str, reason: str) -> None:
+        row = {"project_id": project_id, "extra": raw, "reason": reason}
+        if row not in issues:
+            issues.append(row)
+
+    for pid in known:
+        for raw in _raw_extra_refs(pid, cfg):
+            if raw in known:
+                if not _project_webhook_repo(cfg, raw):
+                    add(pid, raw, "extra project 缺 projects.<extra>.webhook_repo")
+                continue
+
+            path = raw
+            if not Path(path).expanduser().is_absolute():
+                add(pid, raw, "extra_repos 相对路径不能稳定映射 webhook")
+                continue
+
+            mapped_pid = None
+            if isinstance(projects, dict):
+                for cand_pid in projects:
+                    rp = _project_repo_path_raw(cfg, str(cand_pid))
+                    if rp and _same_path(rp, path):
+                        mapped_pid = str(cand_pid)
+                        break
+            if mapped_pid is None:
+                add(pid, raw, "extra repo 路径未登记为独立 project")
+            elif not _project_webhook_repo(cfg, mapped_pid):
+                add(pid, raw, f"mapped project {mapped_pid} 缺 webhook_repo")
+    return issues
+
+
 def meta_extra_repos(project_id: str, cfg: dict) -> list[str]:
     """meta.json 的 extra_repos(git 版本化可移植跨仓声明)→ 解析成路径。无声明 → []。"""
     return resolve_meta_extra_entries(_read_meta(project_id).get("extra_repos") or [], cfg)

@@ -447,3 +447,16 @@ def _check_git_tools(r: Report, repo: Path) -> None:
         r.line("git tools/", "OK", "clean")
     else:
         r.line("git tools/", "WARN", f"{len(o.splitlines())} uncommitted file(s)")
+
+
+def _check_webhook_extra_repo_mapping(r: Report, cfg: dict) -> None:
+    from codev_platform.core.repos import webhook_extra_repo_mapping_issues
+    issues = webhook_extra_repo_mapping_issues(cfg)
+    if not issues:
+        r.line("webhook extra repos", "OK", "all extra repos have webhook mapping or no extra_repos")
+        return
+    samples = "; ".join(
+        f"{i['project_id']} -> {i['extra']} ({i['reason']})" for i in issues[:3]
+    )
+    more = f"; +{len(issues) - 3} more" if len(issues) > 3 else ""
+    r.line("webhook extra repos", "WARN", samples + more)

@@ -32,7 +32,7 @@ def test_oversized_body_does_not_enqueue(monkeypatch):
         def enqueue(self, pid, kind):  # pragma: no cover
             raise AssertionError("oversized body must not enqueue")
 
-    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kwargs: _Q())
     big = b"x" * (server._MAX_BODY + 1)
     resp = _client().post("/gitea", content=big)
     assert resp.status_code == 413
@@ -67,7 +67,7 @@ def test_webhook_extra_repo_enqueues_parent_project(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(server, "load_config", lambda: cfg)
     monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
-    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kwargs: _Q())
 
     payload = {
         "repository": {"full_name": "org/child"},
@@ -114,7 +114,7 @@ def test_webhook_signed_push_enqueues_parent_project(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(server, "load_config", lambda: cfg)
     monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
-    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kwargs: _Q())
 
     payload = {
         "repository": {"full_name": "org/child"},
@@ -140,7 +140,7 @@ def test_webhook_bad_signature_does_not_enqueue(tmp_path, monkeypatch):
         "projects": {"child-proj": {"repo_path": str(child), "webhook_repo": "org/child"}},
     }
     monkeypatch.setattr(server, "load_config", lambda: cfg)
-    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kwargs: _Q())
 
     payload = {
         "repository": {"full_name": "org/child"},
@@ -150,3 +150,87 @@ def test_webhook_bad_signature_does_not_enqueue(tmp_path, monkeypatch):
     resp = _client().post("/gitea", content=body, headers=_signed_gitea_headers(body, "wrong-secret"))
 
     assert resp.status_code == 401
+
+
+def test_webhook_queue_open_failure_returns_503(tmp_path, monkeypatch):
+    child = tmp_path / "child"; child.mkdir()
+    cfg = {
+        "webhook": {"allow_insecure": True},
+        "projects": {"child-proj": {"repo_path": str(child), "webhook_repo": "org/child"}},
+    }
+    monkeypatch.setattr(server, "load_config", lambda: cfg)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", boom)
+
+    payload = {
+        "repository": {"full_name": "org/child"},
+        "commits": [{"modified": ["apps/web/src/Foo.java"], "added": [], "removed": []}],
+    }
+    resp = _client().post(
+        "/gitea",
+        content=json.dumps(payload).encode("utf-8"),
+        headers={"X-Gitea-Event": "push", "Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"] == "reindex queue unavailable"
+
+
+def test_open_default_queue_strict_pg_without_dsn_raises(monkeypatch):
+    from codev_platform.reindex import open_default_queue
+    monkeypatch.delenv("CODEV_PLATFORM_MEMORY_DSN", raising=False)
+    monkeypatch.setattr(
+        "codev_platform.core.config.load_config",
+        lambda: {"reindex": {"queue_backend": "pg"}, "memory": {"pg_dsn": None}},
+    )
+
+    with pytest.raises(RuntimeError, match="queue_backend=pg"):
+        open_default_queue(fail_soft=False)
+
+
+def test_webhook_enqueue_failure_returns_503(tmp_path, monkeypatch):
+    child = tmp_path / "child"; child.mkdir()
+    cfg = {
+        "webhook": {"allow_insecure": True},
+        "projects": {"child-proj": {"repo_path": str(child), "webhook_repo": "org/child"}},
+    }
+    monkeypatch.setattr(server, "load_config", lambda: cfg)
+
+    class _Q:
+        def enqueue(self, pid, kind):
+            raise RuntimeError("enqueue failed")
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kwargs: _Q())
+
+    payload = {
+        "repository": {"full_name": "org/child"},
+        "commits": [{"modified": ["apps/web/src/Foo.java"], "added": [], "removed": []}],
+    }
+    resp = _client().post(
+        "/gitea",
+        content=json.dumps(payload).encode("utf-8"),
+        headers={"X-Gitea-Event": "push", "Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"] == "reindex enqueue failed"
+
+
+def test_webhook_mapping_warnings_for_unmapped_extra_repo(tmp_path, monkeypatch):
+    parent = tmp_path / "parent"; parent.mkdir()
+    child = tmp_path / "child"; child.mkdir()
+    cfg = {
+        "projects": {
+            "parent-proj": {"repo_path": str(parent), "extra_repos": [str(child)]},
+        }
+    }
+    monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
+
+    warnings = server.webhook_mapping_warnings(cfg)
+
+    assert len(warnings) == 1
+    assert "parent-proj" in warnings[0]
+    assert "未映射" in warnings[0]

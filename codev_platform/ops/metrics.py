@@ -2,10 +2,11 @@
 
   codev-platform metrics [--since 30m|2h|1d] [--json]
 
-Reads 3 jsonl sources (already written by the running services -- we only read):
+Reads observability sources (already written by the running services -- we only read):
   - audit       : core.audit.audit_log_path()        ts/service/user_id/org_id/via/project_id/allowed/reason
   - chroma      : chroma/search_recall.jsonl          ts/project_id/query/hit/... (one row per search_docs)
   - codegraph   : codegraph/codegraph_usage.jsonl     ts/project_id/tool/ok/...
+  - reindex     : tools/chroma/reindex.log            projects/scopes fan-out blocks
 
 Pure aggregation (parse/within_since/aggregate/check_alerts) is split from the
 thin IO layer (_source_paths/load_sources/run_metrics) so it is unit-testable
@@ -122,20 +123,70 @@ def _agg_recall(records: list[dict]) -> dict:
     return {"total": len(records)}  # 召回行无 ok/tool, 只计调用次数
 
 
+def parse_reindex_log(text: str) -> list[dict]:
+    """解析 tools/chroma/reindex.log 的轻量结构, 提取每次入队的 fan-out 规模。
+
+    日志是人类可读文本, 这里只读 `reindex started at` / `projects:` / `scopes:` 三类稳定行。
+    """
+    records: list[dict] = []
+    cur: dict | None = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("===== reindex started at "):
+            if cur is not None:
+                records.append(cur)
+            raw = line.removeprefix("===== reindex started at ").removesuffix(" =====").strip()
+            cur = {"ts": raw, "projects": [], "scopes": []}
+            continue
+        if cur is None:
+            continue
+        if line.startswith("projects:"):
+            cur["projects"] = [p.strip() for p in line.partition(":")[2].split(",") if p.strip()]
+        elif line.startswith("scopes:"):
+            cur["scopes"] = [s.strip() for s in line.partition(":")[2].split(",") if s.strip()]
+    if cur is not None:
+        records.append(cur)
+    for rec in records:
+        rec["fanout_projects"] = len(rec.get("projects") or [])
+        rec["fanout_scopes"] = len(rec.get("scopes") or [])
+    return records
+
+
+def _agg_reindex(records: list[dict]) -> dict:
+    fanout = [r for r in records if int(r.get("fanout_projects") or 0) > 1]
+    max_projects = max((int(r.get("fanout_projects") or 0) for r in records), default=0)
+    max_scopes = max((int(r.get("fanout_scopes") or 0) for r in records), default=0)
+    by_scope: Counter[str] = Counter()
+    for r in records:
+        for scope in r.get("scopes") or []:
+            by_scope[str(scope)] += 1
+    return {
+        "total": len(records),
+        "fanout_runs": len(fanout),
+        "max_projects": max_projects,
+        "max_scopes": max_scopes,
+        "by_scope": dict(by_scope.most_common()),
+    }
+
+
 def aggregate(sources: dict[str, list[dict]]) -> MetricsSummary:
     """纯聚合: 每源指标 + 顶层 totals。源缺失 -> 视为空列表。"""
     audit = _agg_audit(sources.get("audit", []))
     chroma = _agg_recall(sources.get("chroma", []))
     codegraph = _agg_usage(sources.get("codegraph", []))
+    reindex = _agg_reindex(sources.get("reindex", []))
     per_source = {
         "audit": audit,
         "chroma": chroma,
         "codegraph": codegraph,
+        "reindex": reindex,
     }
     totals = {
         "audit_total": audit["total"],
         "mcp_calls": chroma["total"] + codegraph["total"],
         "mcp_errors": codegraph["errors"],
+        "reindex_runs": reindex["total"],
+        "reindex_fanout_runs": reindex["fanout_runs"],
     }
     return MetricsSummary(per_source=per_source, totals=totals)
 
@@ -184,6 +235,18 @@ def to_prometheus(summary: MetricsSummary) -> str:
     metric("codev_mcp_errors_total", "gauge", "MCP errors per service in window", err_samples)
     metric("codev_mcp_error_rate", "gauge", "MCP error rate per service in window", rate_samples)
 
+    reindex = summary.per_source.get("reindex", {})
+    metric("codev_reindex_runs_total", "gauge", "reindex runs in window",
+           [("", reindex.get("total", 0))])
+    metric("codev_reindex_fanout_runs_total", "gauge", "reindex runs targeting multiple projects",
+           [("", reindex.get("fanout_runs", 0))])
+    metric("codev_reindex_fanout_max_projects", "gauge", "max project fan-out per reindex run",
+           [("", reindex.get("max_projects", 0))])
+    metric("codev_reindex_fanout_max_scopes", "gauge", "max scope fan-out per reindex run",
+           [("", reindex.get("max_scopes", 0))])
+    for scope, cnt in reindex.get("by_scope", {}).items():
+        lines.append(f'codev_reindex_runs_by_scope{{scope="{_prom_escape(scope)}"}} {cnt}')
+
     if summary.flags:
         metric("codev_alert", "gauge", "active alert flags (1=firing)",
                [(f'name="{_prom_escape(str(f))}"', 1) for f in summary.flags])
@@ -206,6 +269,16 @@ def check_alerts(summary: MetricsSummary, thresholds: dict | None) -> list[str]:
             rate = summary.per_source.get(src, {}).get("error_rate", 0.0)
             if rate > err_max:
                 alerts.append(f"{src} error_rate {rate:.2%} > {err_max:.2%}")
+    fanout_projects_max = th.get("reindex_fanout_projects_max")
+    if fanout_projects_max is not None:
+        got = summary.per_source.get("reindex", {}).get("max_projects", 0)
+        if got > fanout_projects_max:
+            alerts.append(f"reindex fanout projects {got} > {fanout_projects_max}")
+    fanout_scopes_max = th.get("reindex_fanout_scopes_max")
+    if fanout_scopes_max is not None:
+        got = summary.per_source.get("reindex", {}).get("max_scopes", 0)
+        if got > fanout_scopes_max:
+            alerts.append(f"reindex fanout scopes {got} > {fanout_scopes_max}")
     return alerts
 
 
@@ -253,6 +326,7 @@ def _source_paths() -> dict[str, Path]:
         # codegraph 的 usage.jsonl 未迁移, 仍在包目录。
         "chroma": logs_dir() / "search_recall.jsonl",
         "codegraph": cg_dir / "codegraph_usage.jsonl",
+        "reindex": Path.cwd() / "tools" / "chroma" / "reindex.log",
     }
 
 
@@ -261,8 +335,11 @@ def load_sources(now_ts: float, since_sec: float | None) -> dict[str, list[dict]
     out: dict[str, list[dict]] = {}
     for name, path in _source_paths().items():
         try:
-            with path.open("r", encoding="utf-8") as f:
-                recs = parse_lines(f)
+            if name == "reindex":
+                recs = parse_reindex_log(path.read_text(encoding="utf-8", errors="replace"))
+            else:
+                with path.open("r", encoding="utf-8") as f:
+                    recs = parse_lines(f)
         except FileNotFoundError:
             recs = []
         except Exception:  # noqa: BLE001 -- 一源坏不拖垮整体
@@ -289,6 +366,9 @@ def _print_human(summary: MetricsSummary, alerts: list[str], since: str | None) 
                 print(f"              {tool} x{cnt}")
         else:
             print(f"{src:<11} calls={s['total']}")
+    ri = summary.per_source["reindex"]
+    print(f"reindex    runs={ri['total']}  fanout_runs={ri['fanout_runs']}  "
+          f"max_projects={ri['max_projects']}  max_scopes={ri['max_scopes']}")
     print("-" * 48)
     print(f"totals  mcp_calls={summary.totals['mcp_calls']}  "
           f"mcp_errors={summary.totals['mcp_errors']}  "

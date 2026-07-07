@@ -277,6 +277,40 @@ def test_impacted_project_ids_for_repo_includes_parent_by_project_ref(tmp_path, 
     ) == ["child-proj", "parent-proj"]
 
 
+def test_webhook_extra_repo_mapping_issues_for_project_ref(tmp_path, monkeypatch):
+    from codev_platform.core.repos import webhook_extra_repo_mapping_issues
+    child = tmp_path / "child"; child.mkdir()
+    monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
+    cfg = {
+        "projects": {
+            "parent-proj": {"extra_repos": ["child-proj"]},
+            "child-proj": {"repo_path": str(child)},
+        }
+    }
+
+    issues = webhook_extra_repo_mapping_issues(cfg)
+
+    assert issues == [{
+        "project_id": "parent-proj",
+        "extra": "child-proj",
+        "reason": "extra project 缺 projects.<extra>.webhook_repo",
+    }]
+
+
+def test_webhook_extra_repo_mapping_issues_ok_when_child_has_webhook(tmp_path, monkeypatch):
+    from codev_platform.core.repos import webhook_extra_repo_mapping_issues
+    child = tmp_path / "child"; child.mkdir()
+    monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
+    cfg = {
+        "projects": {
+            "parent-proj": {"extra_repos": ["child-proj"]},
+            "child-proj": {"repo_path": str(child), "webhook_repo": "org/child"},
+        }
+    }
+
+    assert webhook_extra_repo_mapping_issues(cfg) == []
+
+
 def test_multiroot_merges_both_repos_no_overwrite(tmp_path):
     clear_registry()
     register_plugin(_RepoNodePlugin())

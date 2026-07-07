@@ -139,13 +139,27 @@ def build_app(middleware=None):
             _log(f"[{name}] {event.repo} -> {pid}: {len(event.changed_files)} 文件改动但无 reindex scope 命中, 跳过")
             return JSONResponse({"ok": True, "project_id": pid, "projects": _target_projects_for(cfg, pid),
                                  "skipped": "no scope match"})
-        q = open_default_queue()
+        try:
+            q = open_default_queue(fail_soft=False)
+        except Exception as exc:  # noqa: BLE001 - webhook 生产者必须 fail-closed
+            _log(f"[{name}] reindex 队列不可用, 拒绝返回成功: {exc!r}")
+            return JSONResponse(
+                {"error": "reindex queue unavailable", "code": ErrorCode.DEPENDENCY_MISSING.value},
+                status_code=503,
+            )
         all_scopes: list[str] = []
-        for target_pid, scopes in plan:
-            for kind in scopes:
-                q.enqueue(target_pid, kind)
-                if kind not in all_scopes:
-                    all_scopes.append(kind)
+        try:
+            for target_pid, scopes in plan:
+                for kind in scopes:
+                    q.enqueue(target_pid, kind)
+                    if kind not in all_scopes:
+                        all_scopes.append(kind)
+        except Exception as exc:  # noqa: BLE001 - 任一入队失败都不能 200
+            _log(f"[{name}] reindex 入队失败, 本次 webhook fail-closed: {exc!r}")
+            return JSONResponse(
+                {"error": "reindex enqueue failed", "code": ErrorCode.DEPENDENCY_MISSING.value},
+                status_code=503,
+            )
         summary = "; ".join(f"{target_pid}:{'+'.join(scopes)}" for target_pid, scopes in plan)
         _log(f"[{name}] {event.repo} -> {summary} enqueue ({len(event.changed_files)} files changed)")
         return JSONResponse({"ok": True, "project_id": pid,
@@ -181,6 +195,8 @@ async def run_http(port: int | None = None) -> None:
 
     if port is None:
         port = webhook_port()
+    for issue in webhook_mapping_warnings(load_config()):
+        _log(f"[startup] {issue}")
     # webhook 无身份 (无 Auth 中间件) → 限流按 client IP (default_key_from_scope 自动回退); dev 默认关
     _mw = []
     _rl = maybe_rate_limit_middleware(load_config())
@@ -190,6 +206,15 @@ async def run_http(port: int | None = None) -> None:
     _log(f"[http] webhook receiver starting on 127.0.0.1:{port} (providers: {', '.join(providers.names())})")
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()
+
+
+def webhook_mapping_warnings(cfg: dict | None = None) -> list[str]:
+    """启动期展示 extra repo webhook 映射缺口。只读 config/meta, 不阻断服务启动。"""
+    from codev_platform.core.repos import webhook_extra_repo_mapping_issues
+    return [
+        f"extra repo webhook 未映射: project={i['project_id']} extra={i['extra']} reason={i['reason']}"
+        for i in webhook_extra_repo_mapping_issues(load_config() if cfg is None else cfg)
+    ]
 
 
 if __name__ == "__main__":

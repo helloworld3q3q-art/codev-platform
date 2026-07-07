@@ -80,6 +80,30 @@ def test_aggregate_usage_total_by_tool_and_errors():
     assert s.totals["mcp_errors"] == 1
 
 
+def test_parse_reindex_log_and_aggregate_fanout():
+    text = """
+===== reindex started at 2026-07-07 10:00:00 =====
+trigger commit: abc
+projects:       child-proj, parent-proj
+scopes:         codegraph, ingest, code_vec
+matched paths:
+apps/web/src/Foo.java
+===== reindex started at 2026-07-07 11:00:00 =====
+projects:       child-proj
+scopes:         chroma
+"""
+    recs = m.parse_reindex_log(text)
+    s = m.aggregate({"reindex": recs})
+
+    assert recs[0]["fanout_projects"] == 2
+    assert recs[0]["fanout_scopes"] == 3
+    assert s.per_source["reindex"]["total"] == 2
+    assert s.per_source["reindex"]["fanout_runs"] == 1
+    assert s.per_source["reindex"]["max_projects"] == 2
+    assert s.per_source["reindex"]["by_scope"]["codegraph"] == 1
+    assert s.totals["reindex_fanout_runs"] == 1
+
+
 def test_check_alerts_deny_rate():
     s = m.aggregate({"audit": [
         {"allowed": False, "reason": "x"},
@@ -99,6 +123,18 @@ def test_check_alerts_error_rate():
     alerts = m.check_alerts(s, {"error_rate_max": 0.1})
     assert any("codegraph" in a for a in alerts)
     assert not m.check_alerts(s, {"error_rate_max": 0.9})
+
+
+def test_check_alerts_reindex_fanout_thresholds():
+    s = m.aggregate({"reindex": [{"fanout_projects": 3, "fanout_scopes": 4, "scopes": []}]})
+
+    alerts = m.check_alerts(s, {
+        "reindex_fanout_projects_max": 2,
+        "reindex_fanout_scopes_max": 3,
+    })
+
+    assert any("fanout projects" in a for a in alerts)
+    assert any("fanout scopes" in a for a in alerts)
 
 
 def test_to_prometheus_exposition_format():
