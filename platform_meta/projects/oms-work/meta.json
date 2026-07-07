@@ -1,0 +1,14 @@
+{
+  "project_id": "oms-work",
+  "display_name": "OMS Work",
+  "repo_path": "D:\\OmsWork\\scl-sod-gateway",
+  "repo_url": "http://10.0.2.37/oms/scl-sod-gateway.git",
+  "extra_repos": [
+    "D:\\OmsWork\\scl-sod-imp-data-center",
+    "D:\\OmsWork\\scl-sod-imp-dsm",
+    "D:\\OmsWork\\scl-sod-scl-les-les",
+    "D:\\OmsWork\\scl-sod-scl-scct-lim",
+    "D:\\OmsWork\\scl-sod-system",
+    "D:\\OmsWork\\scl-www"
+  ]
+}
