@@ -410,7 +410,8 @@ def test_webhook_extra_repo_mapping_issues_ok_when_child_has_webhook(tmp_path, m
 
 def test_webhook_extra_repo_mapping_issues_dedupes_same_path_from_config_and_meta(tmp_path, monkeypatch):
     from codev_platform.core.repos import webhook_extra_repo_mapping_issues
-    child = tmp_path / "child"; child.mkdir()
+    child = tmp_path / "child"
+    child.mkdir()
     child_alt = str(child).replace("\\", "/")
     monkeypatch.setattr(
         "codev_platform.core.repos._read_meta",
@@ -449,7 +450,8 @@ def test_webhook_enabled_project_ids_skips_configured_project_without_webhook(mo
 
 def test_webhook_enabled_parent_still_warns_for_unmapped_extra(tmp_path, monkeypatch):
     from codev_platform.core.repos import webhook_enabled_project_ids, webhook_extra_repo_mapping_issues
-    child = tmp_path / "child"; child.mkdir()
+    child = tmp_path / "child"
+    child.mkdir()
     monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
     cfg = {
         "projects": {
@@ -470,7 +472,8 @@ def test_webhook_enabled_parent_still_warns_for_unmapped_extra(tmp_path, monkeyp
 
 def test_webhook_extra_repo_mapping_issues_dedupes_same_child_by_path_and_project_ref(tmp_path, monkeypatch):
     from codev_platform.core.repos import webhook_extra_repo_mapping_issues
-    child = tmp_path / "child"; child.mkdir()
+    child = tmp_path / "child"
+    child.mkdir()
     monkeypatch.setattr(
         "codev_platform.core.repos._read_meta",
         lambda pid: {"extra_repos": ["child-proj"]} if pid == "parent-proj" else {},

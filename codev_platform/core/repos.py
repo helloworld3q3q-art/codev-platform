@@ -99,7 +99,7 @@ def repo_specs_from_roots(roots: list[Path], *,
     source_ids = source_ids or [None] * len(roots)
     return [
         RepoSpec(root=root, tag=tag, is_main=(i == 0), source_project_id=source_ids[i])
-        for i, (root, tag) in enumerate(zip(roots, tags))
+        for i, (root, tag) in enumerate(zip(roots, tags, strict=True))
     ]
 
 

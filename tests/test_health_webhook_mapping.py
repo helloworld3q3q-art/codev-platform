@@ -18,7 +18,8 @@ def test_health_webhook_mapping_skips_project_without_webhook_repo(monkeypatch):
 
 
 def test_health_webhook_mapping_warns_for_enabled_parent_extra(tmp_path, monkeypatch):
-    child = tmp_path / "child"; child.mkdir()
+    child = tmp_path / "child"
+    child.mkdir()
     monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
     r = Report()
 

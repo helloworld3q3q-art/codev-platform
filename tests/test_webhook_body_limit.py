@@ -261,7 +261,8 @@ def test_webhook_mapping_warnings_skip_project_without_webhook_repo(monkeypatch)
 
 
 def test_webhook_mapping_warnings_keep_enabled_project_warning(tmp_path, monkeypatch):
-    child = tmp_path / "child"; child.mkdir()
+    child = tmp_path / "child"
+    child.mkdir()
     cfg = {
         "projects": {
             "parent-proj": {
