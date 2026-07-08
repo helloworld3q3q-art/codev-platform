@@ -138,6 +138,11 @@ from codev_platform.plugins.builtin.sql.hbm import (
     _scan_hbm,
     is_hbm_mapping,
 )
+from codev_platform.plugins.builtin.sql.java_orm import (
+    _scan_dao_service_queries,
+    _scan_java_jpa_entities,
+    is_java_jpa_or_querymodel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,13 +177,13 @@ class SqlPlugin(AnalyzerPlugin):
                 return True
             if _RE_CREATE_TABLE.search(text):
                 return True
-        # 4) Java MyBatis 注解 SQL (@Select/@Insert/... raw SQL) 也算 DB 栈。
+        # 4) Java MyBatis 注解 SQL / JPA Entity / dao-service QueryModel 也算 DB 栈。
         for f in _stack_scan._iter_files(repo, (".java",)):
             try:
                 text = _read_text(f)
             except OSError:
                 continue
-            if _RE_JAVA_SQL_ANN.search(text):
+            if _RE_JAVA_SQL_ANN.search(text) or is_java_jpa_or_querymodel(text):
                 return True
         # 5) MyBatis XML Mapper (*.xml 含 <mapper>) 或 Hibernate HBM (*.xml 含 <hibernate-mapping>) 也算 DB 栈。
         for f in _stack_scan._iter_files(repo, (".xml",)):
@@ -271,6 +276,24 @@ class SqlPlugin(AnalyzerPlugin):
                 continue
             _absorb(*_scan_hbm(src, rel, project_id))
 
+        # Pass 3.7: Java JPA 表定义 (@Entity/@Table/@Column -> db_table/db_column)。
+        # 先缓存 Java 源, 让定义相先跑完; 后续 Java DML / HQL / dao-service DSL 复用同一份源码。
+        java_srcs: list[tuple[str, str]] = []
+        for f in _stack_scan._iter_files(repo, (".java",)):
+            try:
+                src = _read_text(f)
+            except OSError as exc:
+                logger.warning("read fail %s: %s", f, exc)
+                continue
+            rel = _stack_scan._rel(f, repo)
+            if _is_test_path(rel):  # 测试夹具 .java 不当生产表/访问源
+                continue
+            java_srcs.append((rel, src))
+        jpa_nodes, jpa_edges, jpa_entity_table = _scan_java_jpa_entities(
+            java_srcs, project_id
+        )
+        _absorb(jpa_nodes, jpa_edges)
+
         # Pass 4: .py DML 读写血缘 —— **必须在所有 DDL 之后** (known_tables 完整, 才能
         # 区分"已定义表 (连边)"与"未定义表 (建 inferred stub)", 不会用 stub 覆盖真表)。
         known_tables = {
@@ -293,19 +316,6 @@ class SqlPlugin(AnalyzerPlugin):
                 src, rel, project_id, known_tables, core_table_vars
             ))
 
-        # Pass 4b/4c: .java —— 注解 SQL DML + MyBatis-Plus BaseMapper CRUD 表访问血缘。
-        java_srcs: list[tuple[str, str]] = []
-        for f in _stack_scan._iter_files(repo, (".java",)):
-            try:
-                src = _read_text(f)
-            except OSError as exc:
-                logger.warning("read fail %s: %s", f, exc)
-                continue
-            rel = _stack_scan._rel(f, repo)
-            if _is_test_path(rel):  # 测试夹具 .java 不当生产表/访问源
-                continue
-            java_srcs.append((rel, src))
-
         # Hibernate HQL 解析所需: 实体简名 -> 表名 (hbm 抽取器在 db_table.meta.entity_class 留的映射)。
         # 空 (非 Hibernate 仓) -> _scan_java_hql 自跳过, 无开销。
         entity_to_table = {
@@ -313,12 +323,22 @@ class SqlPlugin(AnalyzerPlugin):
             for n in result.nodes
             if n.kind == NodeKind.DB_TABLE.value and (n.meta or {}).get("entity_class")
         }
+        # .sql / python DDL 优先去重时, JPA table node 可能被丢弃;实体映射仍要保留给
+        # dao-service QueryModel / HQL 访问相使用。
+        for entity, table in jpa_entity_table.items():
+            entity_to_table.setdefault(entity, table)
 
         # 4b: 注解 SQL (@Select/...) + Hibernate HQL (字面量里 from <Entity>, 经 entity_class 映射回表)。
         for rel, src in java_srcs:
             if _RE_JAVA_SQL_ANN.search(src):
                 _absorb(*_scan_java_dml(src, rel, project_id, known_tables))
             _absorb(*_scan_java_hql(src, rel, project_id, entity_to_table, known_tables))
+
+        # 4b.5: dao-service QueryModel DSL (QEntity.root.select/selectCount) -> 表读边。
+        # 只使用已知实体表映射, 不按命名猜表, 避免制造跨项目误连。
+        _absorb(*_scan_dao_service_queries(
+            java_srcs, project_id, known_tables, entity_to_table
+        ))
 
         # 4c: MyBatis-Plus BaseMapper<Entity> -> @TableName 表 (隐式 CRUD, 粗粒度读写)。
         entity_table = _scan_entity_tables(java_srcs)
