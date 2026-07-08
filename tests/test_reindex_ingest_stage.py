@@ -246,6 +246,129 @@ def test_dispatch_enqueues_code_vec_on_code_change(tmp_path, monkeypatch):
     assert order.index("code_vec") > order.index("codegraph")
 
 
+def test_dispatch_auto_starts_file_worker(tmp_path, monkeypatch):
+    from codev_platform.reindex.queue import FileSpoolQueue
+    q = FileSpoolQueue(tmp_path / "spool")
+    calls = {}
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: q)
+    monkeypatch.setattr(R.C, "project_id_of", lambda repo: "demo-proj")
+    monkeypatch.setattr(R.C, "config", lambda: {})
+    monkeypatch.setattr(R.C, "meta_health", lambda pid: {})
+    monkeypatch.setattr(
+        "codev_platform.reindex.supervisor.ensure_worker_running",
+        lambda cfg, cwd=None: calls.update(cfg=cfg, cwd=cwd) or {"action": "spawned", "pid": 123},
+    )
+
+    rc = R._dispatch_reindex(tmp_path, ["apps/web/src/Foo.java"],
+                             foreground=False, trigger_line="t", banner="test")
+
+    assert rc == 0
+    assert calls["cwd"] == tmp_path
+    log = (tmp_path / "tools" / "chroma" / "reindex.log").read_text(encoding="utf-8")
+    assert "worker auto-start: spawned pid=123" in log
+
+
+def test_dispatch_auto_start_failure_is_fail_soft(tmp_path, monkeypatch, capsys):
+    from codev_platform.reindex.queue import FileSpoolQueue
+    q = FileSpoolQueue(tmp_path / "spool")
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: q)
+    monkeypatch.setattr(R.C, "project_id_of", lambda repo: "demo-proj")
+    monkeypatch.setattr(R.C, "config", lambda: {})
+    monkeypatch.setattr(R.C, "meta_health", lambda pid: {})
+
+    def _boom(cfg, cwd=None):
+        raise RuntimeError("spawn failed")
+
+    monkeypatch.setattr("codev_platform.reindex.supervisor.ensure_worker_running", _boom)
+
+    rc = R._dispatch_reindex(tmp_path, ["apps/web/src/Foo.java"],
+                             foreground=False, trigger_line="t", banner="test")
+
+    assert rc == 0
+    log = (tmp_path / "tools" / "chroma" / "reindex.log").read_text(encoding="utf-8")
+    assert "worker auto-start failed" in log
+    assert "worker auto-start failed" in capsys.readouterr().err
+
+
+def test_dispatch_auto_start_fail_action_is_fail_soft(tmp_path, monkeypatch, capsys):
+    from codev_platform.reindex.queue import FileSpoolQueue
+    q = FileSpoolQueue(tmp_path / "spool")
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: q)
+    monkeypatch.setattr(R.C, "project_id_of", lambda repo: "demo-proj")
+    monkeypatch.setattr(R.C, "config", lambda: {})
+    monkeypatch.setattr(R.C, "meta_health", lambda pid: {})
+    monkeypatch.setattr(
+        "codev_platform.reindex.supervisor.ensure_worker_running",
+        lambda cfg, cwd=None: {"action": "fail", "error": "python not found"},
+    )
+
+    rc = R._dispatch_reindex(tmp_path, ["apps/web/src/Foo.java"],
+                             foreground=False, trigger_line="t", banner="test")
+
+    assert rc == 0
+    log = (tmp_path / "tools" / "chroma" / "reindex.log").read_text(encoding="utf-8")
+    assert "worker auto-start: fail python not found" in log
+    assert "worker auto-start failed: python not found" in capsys.readouterr().err
+
+
+def test_dispatch_does_not_auto_start_pg_queue_by_default(tmp_path, monkeypatch):
+    enq: list[tuple[str, str]] = []
+
+    class _PgLikeQueue:
+        def enqueue(self, pid, kind):
+            enq.append((pid, kind))
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _PgLikeQueue())
+    monkeypatch.setattr(R.C, "project_id_of", lambda repo: "demo-proj")
+    monkeypatch.setattr(R.C, "config", lambda: {})
+    monkeypatch.setattr(R.C, "meta_health", lambda pid: {})
+
+    def _should_not_start(cfg, cwd=None):
+        raise AssertionError("PG-like queue must not auto-start by default")
+
+    monkeypatch.setattr("codev_platform.reindex.supervisor.ensure_worker_running", _should_not_start)
+
+    rc = R._dispatch_reindex(tmp_path, ["apps/web/src/Foo.java"],
+                             foreground=False, trigger_line="t", banner="test")
+
+    assert rc == 0
+    assert enq
+    log = (tmp_path / "tools" / "chroma" / "reindex.log").read_text(encoding="utf-8")
+    assert "worker auto-start" not in log
+
+
+def test_dispatch_foreground_skips_drain_when_worker_running(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path / "data"))
+    enq: list[tuple[str, str]] = []
+
+    class _Q:
+        def enqueue(self, pid, kind):
+            enq.append((pid, kind))
+
+    class _Worker:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("foreground drain must not run while worker lock is held")
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda: _Q())
+    monkeypatch.setattr("codev_platform.reindex.ReindexWorker", _Worker)
+    monkeypatch.setattr(R.C, "project_id_of", lambda repo: "demo-proj")
+    monkeypatch.setattr(R.C, "config", lambda: {})
+    monkeypatch.setattr(R.C, "meta_health", lambda pid: {})
+
+    from codev_platform.reindex import supervisor
+    with supervisor.acquire_run_lock(supervisor.new_owner_token()) as acquired:
+        assert acquired is True
+        rc = R._dispatch_reindex(tmp_path, ["apps/web/src/Foo.java"],
+                                 foreground=True, trigger_line="t", banner="test")
+
+    assert rc == 0
+    assert enq
+    assert "跳过 foreground drain" in capsys.readouterr().out
+
+
 def test_dispatch_enqueues_parent_project_for_extra_repo_change(tmp_path, monkeypatch):
     enq: list[tuple[str, str]] = []
 

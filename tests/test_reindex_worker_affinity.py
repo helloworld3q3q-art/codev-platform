@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 
 import codev_platform.core.repos as repos
@@ -111,3 +113,13 @@ def test_reclaim_stale_own_swallows_errors(tmp_path):
 
     w = ReindexWorker(_Q(), {})
     w._reclaim_stale_own()   # 失败不阻断启动
+
+
+def test_run_until_idle_exits_after_empty_queue(tmp_path):
+    class _Q:
+        def pending(self, projects=None):
+            return []
+
+    started = time.monotonic()
+    asyncio.run(ReindexWorker(_Q(), {}).run_until_idle(0.1, 0.1))
+    assert time.monotonic() - started < 1.0

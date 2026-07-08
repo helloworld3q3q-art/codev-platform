@@ -93,6 +93,14 @@ DEFAULTS: dict[str, Any] = {
         # 会话存储后端: "memory" (默认, 进程内, 重启丢) | "pg" (持久化到 memory.pg_dsn).
         "session_backend": "memory",
     },
+    "reindex": {
+        # 本机 FileSpoolQueue 默认: hook 入队后自动拉起短驻 worker。PG/服务器默认仍走
+        # systemd 常驻 worker, 需显式 opt-in 才 auto-start。
+        "worker_auto_start": True,
+        "worker_auto_start_pg": False,
+        "worker_idle_exit_sec": 600,
+        "worker_heartbeat_sec": 10,
+    },
     "project": {
         # Agent 项目配置查找顺序。迁移期默认 Codex 优先、Claude fallback。
         # 要切回 Claude 优先, 在 ~/.codev-platform/config.json 改为:

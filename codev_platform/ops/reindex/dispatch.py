@@ -81,5 +81,30 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
         # 前台调用 (手动 / 调试): 当场串行 drain, 不依赖常驻 worker
         from codev_platform.core.config import load_config
         from codev_platform.reindex import ReindexWorker
-        ReindexWorker(q, load_config()).drain_once()
+        from codev_platform.reindex import supervisor
+        owner_token = supervisor.new_owner_token()
+        with supervisor.acquire_run_lock(owner_token) as acquired:
+            if not acquired:
+                C.out(f"[{banner}] reindex worker 已在运行, 跳过 foreground drain")
+            else:
+                supervisor.record_worker_start(owner_token, mode="foreground")
+                try:
+                    ReindexWorker(q, load_config()).drain_once()
+                    supervisor.record_worker_exit(owner_token, "foreground")
+                except Exception as exc:
+                    supervisor.record_worker_exit(owner_token, "error", str(exc)[:200])
+                    raise
+    else:
+        try:
+            from codev_platform.reindex import supervisor
+            if supervisor.should_auto_start(q, cfg):
+                r = supervisor.ensure_worker_running(cfg, cwd=repo)
+                extra = f" pid={r.get('pid')}" if r.get("pid") else ""
+                note = r.get("error") or ""
+                _append_log(log_file, f"worker auto-start: {r.get('action')}{extra} {note}\n")
+                if r.get("action") == "fail":
+                    C.err(f"[{banner}] worker auto-start failed: {note}")
+        except Exception as exc:  # noqa: BLE001 - hooks must never fail commit
+            _append_log(log_file, f"worker auto-start failed (ignored): {exc!s}\n")
+            C.err(f"[{banner}] worker auto-start failed (ignored): {exc!s}")
     return 0

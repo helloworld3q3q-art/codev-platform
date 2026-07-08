@@ -13,6 +13,7 @@ import datetime
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 from codev_platform.core.config import get as _cfg_get
 from codev_platform.reindex import runners as _runners
@@ -64,9 +65,29 @@ def _repo_for(cfg: dict, project_id: str) -> Path | None:
 class ReindexWorker:
     """单 worker, 串行消费队列。多机时仍单 worker 实例 (写串行); 扩展靠换 JobQueue 实现。"""
 
-    def __init__(self, queue: JobQueue, cfg: dict) -> None:
+    def __init__(self, queue: JobQueue, cfg: dict,
+                 on_heartbeat: Callable[[], None] | None = None,
+                 on_job_event: Callable[[Job, str], None] | None = None) -> None:
         self._q = queue
         self._cfg = cfg
+        self._on_heartbeat = on_heartbeat
+        self._on_job_event = on_job_event
+
+    def _heartbeat(self) -> None:
+        if self._on_heartbeat is None:
+            return
+        try:
+            self._on_heartbeat()
+        except Exception:  # noqa: BLE001 - lifecycle telemetry must not break work
+            pass
+
+    def _job_event(self, job: Job, status: str) -> None:
+        if self._on_job_event is None:
+            return
+        try:
+            self._on_job_event(job, status)
+        except Exception:  # noqa: BLE001 - lifecycle telemetry must not break work
+            pass
 
     def _own_projects(self) -> set[str] | None:
         """本 worker 能处理的 project 集合 = config.projects 里配了(存在的)repo_path 的 project。
@@ -96,13 +117,16 @@ class ReindexWorker:
         """
         n = 0
         touched: dict[str, Path] = {}
+        self._heartbeat()
         for job in self._q.pending(self._own_projects()):
             repo = self._run_job(job)
             if repo is not None:
                 touched[job.project_id] = repo
             n += 1
+            self._heartbeat()
         for pid, repo in touched.items():
             self._refresh_health(pid, repo)
+        self._heartbeat()
         return n
 
     def _run_job(self, job: Job) -> Path | None:
@@ -111,11 +135,13 @@ class ReindexWorker:
         if runner is None:
             _log(f"未知 kind '{job.kind}' ({job.key}) — 丢弃")
             self._q.complete(job)
+            self._job_event(job, "discarded_unknown")
             return None
         repo = _repo_for(self._cfg, job.project_id)
         if repo is None:
             _log(f"project '{job.project_id}' 无 repo_path 或不存在 — 丢弃 {job.key}")
             self._q.complete(job)
+            self._job_event(job, "discarded_no_repo")
             return None
         # 索引前先把工作树追到远端 (webhook 模型下服务器 clone 常落后于 push):
         # ff-only, 降级安全, 失败不阻断 —— pulled=False 照常索引当前工作树。
@@ -123,6 +149,7 @@ class ReindexWorker:
         sync = sync_repo_to_remote(repo)
         _log(f"reindex git-sync {job.key}: pulled={sync['pulled']} ({sync['note']})")
         _log(f"reindex 开始 {job.key} (repo={repo})")
+        self._job_event(job, "running")
         started = time.time()
         try:
             rc = runner.run(job.project_id, repo, self._cfg)
@@ -130,6 +157,7 @@ class ReindexWorker:
             _log(f"reindex 异常 {job.key}: {exc!s} — 丢弃避免死循环")
             self._record_manifest(job, repo, started, "failed", note=str(exc)[:200])
             self._q.complete(job)
+            self._job_event(job, "exception")
             return None
         # rc==2 = .reindex.lock 被占 / db busy (暂时性, 与 codegraph sync rc=2 同约定):
         # 不 complete, 保留 job 下轮重试 (不丢这次 reindex)。常态下 worker 是唯一写者,
@@ -145,6 +173,7 @@ class ReindexWorker:
                     release(job)
                 except Exception as exc:  # noqa: BLE001 — 复位失败不阻断(最坏退化到等 lease 过期)
                     _log(f"release {job.key} 失败 (不阻断, 退化到等 lease 过期): {exc!s}")
+            self._job_event(job, "retry")
             return None
         # 终态 (rc==0 成功 / 其它 rc 失败): 写统一 manifest (Phase 1, best-effort 不阻断)。
         self._record_manifest(job, repo, started, "ok" if rc == 0 else "failed")
@@ -152,8 +181,10 @@ class ReindexWorker:
         dirty = not self._q.complete(job)
         if rc != 0:
             _log(f"reindex 失败 {job.key} rc={rc} — 丢弃避免死循环 (查 reindex.log)")
+            self._job_event(job, "failed")
             return None
         _log(f"reindex 完成 {job.key} rc=0" + (" (运行期又有新触发, 已重排)" if dirty else ""))
+        self._job_event(job, "ok_dirty" if dirty else "ok")
         return repo
 
     def _record_manifest(self, job: Job, repo: Path, started: float,
@@ -212,3 +243,22 @@ class ReindexWorker:
         asyncio.create_task(_periodic())
         async for _ in self._q.watch():
             self.drain_once()
+
+    async def run_until_idle(self, idle_exit_sec: float,
+                             heartbeat_sec: float = 10.0) -> None:
+        import asyncio
+        idle_exit_sec = max(float(idle_exit_sec), 0.1)
+        heartbeat_sec = max(float(heartbeat_sec), 0.1)
+        _log(f"worker 启动, 短驻模式 idle_exit={int(idle_exit_sec)}s ({type(self._q).__name__})")
+        self._reclaim_stale_own()
+        idle_since = time.monotonic()
+        while True:
+            processed = self.drain_once()
+            now = time.monotonic()
+            if processed:
+                idle_since = now
+            remaining = idle_exit_sec - (now - idle_since)
+            if remaining <= 0:
+                _log(f"worker idle {int(idle_exit_sec)}s, 退出")
+                return
+            await asyncio.sleep(min(heartbeat_sec, remaining))

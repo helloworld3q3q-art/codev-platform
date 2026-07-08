@@ -58,6 +58,22 @@ def test_parser_parses_reindex_queue_prune_stale():
     assert args.force_file is True
 
 
+def test_parser_parses_reindex_queue_drain_once():
+    parser = cli.build_parser()
+    args = parser.parse_args(["reindex-queue", "drain-once"])
+    assert args.cmd == "reindex-queue"
+    assert args.action == "drain-once"
+
+
+def test_parser_parses_reindex_queue_worker_short_lived():
+    parser = cli.build_parser()
+    args = parser.parse_args(["reindex-queue", "worker", "--idle-exit-sec", "30", "--heartbeat-sec", "2"])
+    assert args.cmd == "reindex-queue"
+    assert args.action == "worker"
+    assert args.idle_exit_sec == 30
+    assert args.heartbeat_sec == 2
+
+
 def test_each_subcommand_has_func():
     parser = cli.build_parser()
     for name in ("health", "reindex", "post-commit", "dirty-check",

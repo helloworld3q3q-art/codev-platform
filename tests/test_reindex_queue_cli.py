@@ -31,6 +31,9 @@ def _args(**kw):
         "older_than_sec": 300,
         "yes": False,
         "force_file": False,
+        "idle_exit_sec": None,
+        "heartbeat_sec": None,
+        "owner_token": None,
     }
     base.update(kw)
     return argparse.Namespace(**base)
@@ -126,3 +129,119 @@ def test_stale_jobs_filters_project_kind_and_age():
                            project_id="p1", kinds={"chroma"})
 
     assert stale == [jobs[0]]
+
+
+def test_drain_once_calls_worker(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    q = _FakeQueue([])
+
+    class _Worker:
+        def __init__(self, queue, cfg, on_heartbeat=None, on_job_event=None):
+            assert queue is q
+            assert callable(on_heartbeat)
+            assert callable(on_job_event)
+
+        def drain_once(self):
+            return 3
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kw: q)
+    monkeypatch.setattr("codev_platform.reindex.ReindexWorker", _Worker)
+
+    assert rq.cmd_reindex_queue(_args(action="drain-once")) == 0
+
+    assert "drain-once processed=3" in capsys.readouterr().out
+
+
+def test_drain_once_refuses_when_worker_lock_held(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    q = _FakeQueue([])
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kw: q)
+
+    from codev_platform.reindex import supervisor
+    with supervisor.acquire_run_lock(supervisor.new_owner_token()) as acquired:
+        assert acquired is True
+        assert rq.cmd_reindex_queue(_args(action="drain-once")) == 1
+
+    assert "already running" in capsys.readouterr().err
+
+
+def test_status_reports_worker_and_pending(monkeypatch, capsys):
+    old = Job("demo-proj", "chroma", time.time() - 1000)
+    q = _FakeQueue([old])
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kw: q)
+    monkeypatch.setattr("codev_platform.reindex.supervisor.worker_status",
+                        lambda: {"running": False, "pid": None})
+
+    assert rq.cmd_reindex_queue(_args(action="status")) == 0
+
+    out = capsys.readouterr().out
+    assert "worker running: no" in out
+    assert "queue backend: _FakeQueue" in out
+    assert "worker not running" in out
+
+
+def test_status_does_not_mark_stale_while_worker_running(monkeypatch, capsys):
+    old = Job("demo-proj", "chroma", time.time() - 1000)
+    q = _FakeQueue([old])
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kw: q)
+    monkeypatch.setattr("codev_platform.reindex.supervisor.worker_status",
+                        lambda: {"running": True, "pid": 123, "heartbeat_age_sec": 1, "mode": "short"})
+
+    assert rq.cmd_reindex_queue(_args(action="status")) == 0
+
+    out = capsys.readouterr().out
+    assert "worker running: yes" in out
+    assert "STALE" not in out
+    assert "worker not running" not in out
+
+
+def test_status_does_not_mark_real_file_spool_marker_stale_while_worker_running(monkeypatch, tmp_path, capsys):
+    q = FileSpoolQueue(tmp_path)
+    q.enqueue("demo-proj", "chroma")
+    marker = tmp_path / "demo-proj__chroma"
+    os.utime(marker, (time.time() - 1000, time.time() - 1000))
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kw: q)
+    monkeypatch.setattr("codev_platform.reindex.supervisor.worker_status",
+                        lambda: {"running": True, "pid": 123, "heartbeat_age_sec": 1, "mode": "short"})
+
+    assert rq.cmd_reindex_queue(_args(action="status")) == 0
+
+    out = capsys.readouterr().out
+    assert "queue backend: FileSpoolQueue" in out
+    assert "STALE" not in out
+
+
+def test_worker_rejects_non_positive_timing(monkeypatch, capsys):
+    q = _FakeQueue([])
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kw: q)
+
+    assert rq.cmd_reindex_queue(_args(action="worker", idle_exit_sec=0)) == 1
+    assert "--idle-exit-sec" in capsys.readouterr().err
+
+    assert rq.cmd_reindex_queue(_args(action="worker", heartbeat_sec=0)) == 1
+    assert "--heartbeat-sec" in capsys.readouterr().err
+
+
+def test_worker_short_lived_records_idle_exit_and_releases_lock(monkeypatch, tmp_path):
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    q = _FakeQueue([])
+
+    class _Worker:
+        def __init__(self, queue, cfg, on_heartbeat=None, on_job_event=None):
+            assert queue is q
+
+        async def run_until_idle(self, idle_exit_sec, heartbeat_sec):
+            assert idle_exit_sec == 0.1
+            assert heartbeat_sec == 0.1
+
+    monkeypatch.setattr("codev_platform.reindex.open_default_queue", lambda **kw: q)
+    monkeypatch.setattr("codev_platform.reindex.ReindexWorker", _Worker)
+
+    assert rq.cmd_reindex_queue(
+        _args(action="worker", idle_exit_sec=0.1, heartbeat_sec=0.1)) == 0
+
+    from codev_platform.reindex import supervisor
+    st = supervisor.worker_status()
+    assert st["exit_reason"] == "idle"
+    with supervisor.acquire_run_lock(supervisor.new_owner_token()) as acquired:
+        assert acquired is True
