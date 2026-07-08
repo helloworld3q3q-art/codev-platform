@@ -124,5 +124,5 @@ python -m pytest tests/test_mcp_serve.py tests/test_serve_mcp_diagnose.py
 - 测试审计兄弟已二次审查该修正;补齐无 token 时不发送 Authorization、首个 token 401 后继续尝试下一个候选 token 的用例。目标回归: `python -m pytest tests/test_health_all_auth.py tests/test_health_split_security.py tests/test_health_reindex_worker.py` → `11 passed`;`python -m pytest tests/test_cli_parser.py` → `9 passed`;`config.example.json` JSON 解析通过。
 - WSL 实调:`/healthz` 可达,`/platform/status` 仍 401;诊断确认交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`,后续需单独处理 WSL token 环境注入。
 - `webhook extra repos` 诊断收敛:health/webhook startup 只扫描本机配置中带 `webhook_repo`、实际会被 webhook 入口命中的项目,并对 config/meta 重复声明的同一路径或同一 child project 去重。测试审计兄弟二次审查后补齐 OMS-like、enabled 对照和 health 直接断言;Windows/WSL 运行态诊断均为 0 条,`health --mode light` 均为 READY/all green。目标回归: `python -m pytest tests/test_graph_ingest.py tests/test_webhook_body_limit.py tests/test_health_webhook_mapping.py tests/test_health_reindex_worker.py tests/test_cli_parser.py` → `53 passed`。
-- `git diff --check` 无 whitespace error,仅 `core/config.py` CRLF 提示。
+- `git diff --check` 无 whitespace error,仅 `tests/test_webhook_body_limit.py` CRLF 提示。
 - `reindex-queue status` 显示队列空,短驻 worker 已 idle 退出。
