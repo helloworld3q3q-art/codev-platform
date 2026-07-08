@@ -99,11 +99,9 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     do_chroma = args.chroma if selected else True
     do_ingest = do_ingest_flag if selected else True
     do_codevec = do_codevec_flag if selected else True
-
     if args.force or (do_codegraph and do_chroma and not selected):
         C.out("[reindex] full rebuild: run in foreground to watch progress "
               "(post-commit handles incremental in background)")
-
     started = time.monotonic()
     codegraph_locked = False   # codegraph sync 因 MCP 持锁(rc=2)未跑 → code_vec 须避开陈旧 db(R4)
 
@@ -125,9 +123,10 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         elif rc != 0:
             C.err(f"FAIL: codegraph sync exit={rc}")
             return rc
+        elif not codegraph_locked:
+            C.out("proof: codegraph ok")
     else:
         C.out("step 1/4: codegraph sync   -- skipped")
-
     # --- stage 2/4: chroma reindex ---
     if do_chroma:
         C.out("")
@@ -167,11 +166,11 @@ def cmd_reindex(args: argparse.Namespace) -> int:
                           f"[{', '.join(rep.ingested)}]")
                 else:
                     C.out("graph ingest ok: no applicable plugin produced output")
+                C.out("proof: ingest ok")
             except Exception as exc:  # noqa: BLE001 — 聚合层失败隔离, 不污染基线退出码
                 C.err(f"WARN: graph ingest failed (non-fatal, baseline indexes unaffected): {exc}")
     else:
         C.out("step 3/4: graph ingest     -- skipped")
-
     # --- stage 4/4: code vector index (vector lane) ---
     # 同 ingest: FAILURE-ISOLATED —— 向量 lane 是增强层, 异常只 warn 不改退出码。
     # 必在 codegraph sync 之后(读 codegraph.db)→ 置最后。reindex --force → 全量重建;
@@ -197,6 +196,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
                 from codev_platform.recall.code_vector_store import build_code_vector_index
                 n = build_code_vector_index(pid, incremental=not args.force)
                 C.out(f"code vector ok: {n} 节点 (re)embedded")
+                C.out("proof: code_vec ok")
             except Exception as exc:  # noqa: BLE001 — 增强层失败隔离, 不污染基线退出码
                 # 写侧锁忙(另一 build 在跑)→ rc=2 让 worker 重试(不丢); 其它异常仍 fail-soft 不改退出码。
                 from codev_platform.recall.code_vector_store import CodeVecLockBusy
@@ -212,7 +212,6 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     C.out("")
     C.out(f"total: {dur}s, reindex {'ok' if codevec_rc == 0 else 'rc=2 (will retry)'}")
     return codevec_rc
-
 
 # ======================================================================
 # 2. post-commit  (port of post-commit.ps1)
@@ -412,6 +411,13 @@ def _reindex_block_end(lines: list[str], trigger_idx: int) -> int:
     return len(lines)
 
 
+def _latest_trigger_index(lines: list[str], target_trigger: str) -> int:
+    for i in range(len(lines) - 1, -1, -1):
+        if target_trigger in lines[i]:
+            return i
+    return -1
+
+
 def _commit_covers(repo: Path, target: str, indexed: str | None) -> bool:
     if not indexed:
         return False
@@ -470,7 +476,6 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
             C.out("[FAIL] not a git repo")
             return 2
         repo = Path(top).resolve()
-
     log_file = _reindex_log(repo)
     if not log_file.exists():
         C.out(f"[FAIL] reindex.log not found at {log_file}")
@@ -497,48 +502,45 @@ def cmd_wait_for_reindex(args: argparse.Namespace) -> int:
         if not has_indexable:
             C.out(f"[OK] {short} touches no indexable file, skip wait")
             return 0
-
     timeout = args.timeout_sec
     C.out(f"[INFO] waiting for reindex of {short} (timeout {timeout}s)")
     deadline = time.monotonic() + timeout
     target_trigger = f"trigger commit: {commit}"
     poll = 3
-
     while time.monotonic() < deadline:
         try:
             lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             lines = []
         if lines:
-            trigger_idx = -1
-            for i, ln in enumerate(lines):
-                if target_trigger in ln:
-                    trigger_idx = i
-                    break
+            trigger_idx = _latest_trigger_index(lines, target_trigger)
             if trigger_idx >= 0:
                 block_end = _reindex_block_end(lines, trigger_idx)
                 for k in range(trigger_idx, block_end):
                     m = _FINISHED_RE.search(lines[k])
                     if m:
                         elapsed = int(timeout - (deadline - time.monotonic()))
-                        C.out(f"[OK] reindex finished for {short} status={m.group(1)} "
-                              f"(took ~{elapsed}s)")
+                        status = m.group(1)
+                        if status.startswith("failed"):
+                            C.out(f"[FAIL] reindex finished for {short} status={status} (took ~{elapsed}s)")
+                            return 1
+                        C.out(f"[OK] reindex finished for {short} status={status} (took ~{elapsed}s)")
                         return 0
                 done, status = _queued_jobs_completed(repo,
                     _queued_expected_jobs(lines, trigger_idx, block_end), commit)
                 if done:
                     elapsed = int(timeout - (deadline - time.monotonic()))
-                    C.out(f"[OK] reindex manifest covers {short} status={status} "
-                          f"(took ~{elapsed}s)")
+                    if status == "failed":
+                        C.out(f"[FAIL] reindex manifest covers {short} status=failed (took ~{elapsed}s)")
+                        return 1
+                    C.out(f"[OK] reindex manifest covers {short} status={status} (took ~{elapsed}s)")
                     return 0
         time.sleep(poll)
-
     C.out(f"[TIMEOUT] reindex for {short} did not finish within {timeout}s")
     C.out("  Check `codev-platform reindex-queue status` for pending/running jobs,")
     C.out("  then inspect tools/chroma/reindex.log or worker logs if the queue is empty.")
     C.out("  To retry the hook enqueue, run `codev-platform post-commit` manually.")
     return 1
-
 
 # ======================================================================
 # register

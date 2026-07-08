@@ -182,10 +182,91 @@ def test_runner_keeps_success_output_in_runner_log(monkeypatch, tmp_path):
     monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    r = runners.CliReindexRunner("ingest", "--ingest")
+    r = runners.CliReindexRunner("chroma", "--chroma")
     assert r.run("demo", Path("."), {}) == 0
 
     assert r.last_note == ""
     assert "WARN: non-fatal lane skipped" in (
-        tmp_path / "logs" / "reindex-runner" / "demo__ingest.log"
+        tmp_path / "logs" / "reindex-runner" / "demo__chroma.log"
     ).read_text(encoding="utf-8")
+
+
+def test_runner_accepts_proven_success_markers(monkeypatch, tmp_path):
+    outputs = {
+        "codegraph": "codegraph sync [main] /repo\nproof: codegraph ok\n",
+        "ingest": "graph ingest ok: 2 plugin(s) -> store [builtin.linker]\nproof: ingest ok\n",
+        "code_vec": "proof: codegraph ok\ncode vector ok: 0 节点 (re)embedded\nproof: code_vec ok\n",
+    }
+
+    def fake_run(cmd, timeout=None, **kwargs):
+        flag = next((part for part in cmd if part in {"--codegraph", "--ingest", "--code-vec"}), "")
+        kind = {"--codegraph": "codegraph", "--ingest": "ingest", "--code-vec": "code_vec"}[flag]
+        kwargs["stdout"].write(outputs[kind])
+
+        class _R:
+            returncode = 0
+
+        return _R()
+
+    _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    for kind, flag in {
+        "codegraph": "--codegraph",
+        "ingest": "--ingest",
+        "code_vec": "--code-vec",
+    }.items():
+        r = runners.CliReindexRunner(kind, flag)
+        assert r.run("demo", Path("."), {}) == 0
+        assert r.last_note == ""
+
+
+def test_runner_converts_failsoft_output_to_failure(monkeypatch, tmp_path):
+    outputs = {
+        "codegraph": "WARN: codegraph sync skipped (main, MCP holds DB); continuing other repos\n",
+        "ingest": "WARN: graph ingest failed (non-fatal, baseline indexes unaffected): boom\n",
+        "code_vec": "SKIP: 'codegraph' CLI not found on PATH; continuing other indexes\n"
+        "code vector ok: 0 节点 (re)embedded\n",
+    }
+
+    def fake_run(cmd, timeout=None, **kwargs):
+        flag = next((part for part in cmd if part in {"--codegraph", "--ingest", "--code-vec"}), "")
+        kind = {"--codegraph": "codegraph", "--ingest": "ingest", "--code-vec": "code_vec"}[flag]
+        kwargs["stdout"].write(outputs[kind])
+
+        class _R:
+            returncode = 0
+
+        return _R()
+
+    _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    for kind, flag in {
+        "codegraph": "--codegraph",
+        "ingest": "--ingest",
+        "code_vec": "--code-vec",
+    }.items():
+        r = runners.CliReindexRunner(kind, flag)
+        assert r.run("demo", Path("."), {}) == 1
+        assert "proof failed" in r.last_note
+
+
+def test_code_vec_requires_codegraph_proof_marker(monkeypatch, tmp_path):
+    def fake_run(cmd, timeout=None, **kwargs):
+        kwargs["stdout"].write("code vector ok: 0 节点 (re)embedded\nproof: code_vec ok\n")
+
+        class _R:
+            returncode = 0
+
+        return _R()
+
+    _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    r = runners.CliReindexRunner("code_vec", "--code-vec")
+    assert r.run("demo", Path("."), {}) == 1
+    assert "codegraph proof marker missing" in r.last_note

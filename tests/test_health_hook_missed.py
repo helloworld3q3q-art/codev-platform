@@ -6,6 +6,9 @@ import pytest
 
 from codev_platform.ops.health import _checks
 from codev_platform.ops.health._util import Report
+from codev_platform.index_manifest import KNOWN_KINDS
+from codev_platform.reindex.runners import kinds as runner_kinds
+from codev_platform.reindex.runners import manifest_covered_kinds
 
 
 HEAD = "abcdef1234567890"
@@ -49,7 +52,27 @@ def test_hook_missed_accepts_manifest_when_worker_mode_has_no_reindex_log(tmp_pa
     assert "covered by manifest (chroma)" in report.rows[0]["msg"]
 
 
-def test_hook_missed_rejects_codegraph_manifest_even_when_all_expected_kinds_are_fresh(tmp_path, monkeypatch):
+def test_hook_missed_accepts_full_manifest_for_mixed_doc_and_code_scope(tmp_path, monkeypatch):
+    _patch_git(monkeypatch, ["docs/plans/roadmap.md", "codev_platform/ops/health/_checks.py"])
+    _patch_manifest(monkeypatch, [
+        {"kind": "chroma", "status": "ok", "fresh": True},
+        {"kind": "codegraph", "status": "ok", "fresh": True},
+        {"kind": "ingest", "status": "ok", "fresh": True},
+        {"kind": "code_vec", "status": "ok", "fresh": True},
+    ])
+
+    report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
+
+    assert report.amber == 0
+    assert report.rows[0]["status"] == "OK"
+    assert "covered by manifest" in report.rows[0]["msg"]
+    assert "chroma" in report.rows[0]["msg"]
+    assert "codegraph" in report.rows[0]["msg"]
+    assert "ingest" in report.rows[0]["msg"]
+    assert "code_vec" in report.rows[0]["msg"]
+
+
+def test_hook_missed_accepts_full_manifest_for_code_scope(tmp_path, monkeypatch):
     _patch_git(monkeypatch, ["codev_platform/ops/health/_checks.py"])
     _patch_manifest(monkeypatch, [
         {"kind": "codegraph", "status": "ok", "fresh": True},
@@ -59,29 +82,39 @@ def test_hook_missed_rejects_codegraph_manifest_even_when_all_expected_kinds_are
 
     report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
 
-    assert report.amber == 1
-    assert report.rows[0]["status"] == "WARN"
-    assert "manifest fallback limited to chroma-only" in report.rows[0]["msg"]
-    assert "codegraph" in report.rows[0]["msg"]
-    assert "ingest" in report.rows[0]["msg"]
-    assert "code_vec" in report.rows[0]["msg"]
+    assert report.amber == 0
+    assert report.rows[0]["status"] == "OK"
+    assert "covered by manifest" in report.rows[0]["msg"]
 
 
-def test_hook_missed_still_warns_when_expected_manifest_kind_missing(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("missing", "detail"),
+    [
+        ("codegraph", "codegraph:missing"),
+        ("ingest", "ingest:missing"),
+        ("code_vec", "code_vec:missing"),
+    ],
+)
+def test_hook_missed_still_warns_when_expected_manifest_kind_missing(
+    tmp_path, monkeypatch, missing, detail,
+):
     _patch_git(monkeypatch, ["codev_platform/ops/health/_checks.py"])
-    _patch_manifest(monkeypatch, [
-        {"kind": "codegraph", "status": "ok", "fresh": True},
-        {"kind": "code_vec", "status": "ok", "fresh": True},
-    ])
+    rows = {
+        "codegraph": {"kind": "codegraph", "status": "ok", "fresh": True},
+        "ingest": {"kind": "ingest", "status": "ok", "fresh": True},
+        "code_vec": {"kind": "code_vec", "status": "ok", "fresh": True},
+    }
+    rows.pop(missing)
+    _patch_manifest(monkeypatch, list(rows.values()))
 
     report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
 
     assert report.amber == 1
     assert report.rows[0]["status"] == "WARN"
-    assert "ingest:missing" in report.rows[0]["msg"]
+    assert detail in report.rows[0]["msg"]
 
 
-def test_hook_missed_reports_chroma_failure_before_code_kind_gate(tmp_path, monkeypatch):
+def test_hook_missed_reports_manifest_failure_before_success(tmp_path, monkeypatch):
     _patch_git(monkeypatch, ["docs/plans/roadmap.md", "codev_platform/ops/health/_checks.py"])
     _patch_manifest(monkeypatch, [
         {"kind": "chroma", "status": "failed", "fresh": True},
@@ -95,6 +128,33 @@ def test_hook_missed_reports_chroma_failure_before_code_kind_gate(tmp_path, monk
     assert report.amber == 1
     assert report.rows[0]["status"] == "WARN"
     assert "chroma:failed" in report.rows[0]["msg"]
+
+
+@pytest.mark.parametrize(
+    ("row", "detail"),
+    [
+        ({"kind": "code_vec", "status": "failed", "fresh": True}, "code_vec:failed"),
+        ({"kind": "codegraph", "status": "ok", "fresh": False}, "codegraph:stale"),
+        ({"kind": "ingest", "status": "ok", "fresh": None}, "ingest:stale"),
+    ],
+)
+def test_hook_missed_warns_when_code_manifest_is_not_ok_and_fresh(
+    tmp_path, monkeypatch, row, detail,
+):
+    _patch_git(monkeypatch, ["codev_platform/ops/health/_checks.py"])
+    rows = {
+        "codegraph": {"kind": "codegraph", "status": "ok", "fresh": True},
+        "ingest": {"kind": "ingest", "status": "ok", "fresh": True},
+        "code_vec": {"kind": "code_vec", "status": "ok", "fresh": True},
+    }
+    rows[row["kind"]] = row
+    _patch_manifest(monkeypatch, list(rows.values()))
+
+    report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
+
+    assert report.amber == 1
+    assert report.rows[0]["status"] == "WARN"
+    assert detail in report.rows[0]["msg"]
 
 
 @pytest.mark.parametrize(
@@ -152,6 +212,57 @@ def test_hook_missed_keeps_legacy_reindex_log_success(tmp_path, monkeypatch):
     assert "found in reindex.log" in report.rows[0]["msg"]
 
 
+def test_hook_missed_warns_when_queue_log_found_but_manifest_failed(tmp_path, monkeypatch):
+    _patch_git(monkeypatch, ["codev_platform/ops/health/_checks.py"])
+    _patch_manifest(monkeypatch, [
+        {"kind": "codegraph", "status": "ok", "fresh": True},
+        {"kind": "ingest", "status": "ok", "fresh": True},
+        {"kind": "code_vec", "status": "failed", "fresh": True},
+    ])
+    log = tmp_path / "tools" / "chroma" / "reindex.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        "\n".join([
+            "===== reindex started at 2026-07-08 18:00:00 =====",
+            f"trigger commit: {HEAD}",
+            "enqueued -> codev-reindex worker: codev-platform -> codegraph, ingest, code_vec",
+        ]),
+        encoding="utf-8",
+    )
+
+    report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
+
+    assert report.amber == 1
+    assert report.rows[0]["status"] == "WARN"
+    assert "enqueued in reindex.log but manifest not successful" in report.rows[0]["msg"]
+    assert "code_vec:failed" in report.rows[0]["msg"]
+
+
+def test_hook_missed_uses_latest_log_block_for_same_head(tmp_path, monkeypatch):
+    _patch_git(monkeypatch, ["codev_platform/ops/health/_checks.py"])
+    _patch_manifest(monkeypatch, [
+        {"kind": "codegraph", "status": "ok", "fresh": True},
+        {"kind": "ingest", "status": "ok", "fresh": True},
+        {"kind": "code_vec", "status": "failed", "fresh": True},
+    ])
+    log = tmp_path / "tools" / "chroma" / "reindex.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        "\n".join([
+            f"done legacy {HEAD}",
+            "===== reindex started at 2026-07-08 18:00:00 =====",
+            f"trigger commit: {HEAD}",
+            "enqueued -> codev-reindex worker: codev-platform -> codegraph, ingest, code_vec",
+        ]),
+        encoding="utf-8",
+    )
+
+    report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
+
+    assert report.amber == 1
+    assert "code_vec:failed" in report.rows[0]["msg"]
+
+
 def test_hook_missed_uses_manifest_when_log_exists_but_lacks_head(tmp_path, monkeypatch):
     _patch_git(monkeypatch, ["docs/plans/roadmap.md"])
     _patch_manifest(monkeypatch, [{"kind": "chroma", "status": "ok", "fresh": True}])
@@ -164,3 +275,27 @@ def test_hook_missed_uses_manifest_when_log_exists_but_lacks_head(tmp_path, monk
     assert report.amber == 0
     assert report.rows[0]["status"] == "OK"
     assert "reindex.log lacks HEAD" in report.rows[0]["msg"]
+
+
+def test_hook_missed_uses_full_manifest_when_log_exists_but_lacks_head(tmp_path, monkeypatch):
+    _patch_git(monkeypatch, ["codev_platform/ops/health/_checks.py"])
+    _patch_manifest(monkeypatch, [
+        {"kind": "codegraph", "status": "ok", "fresh": True},
+        {"kind": "ingest", "status": "ok", "fresh": True},
+        {"kind": "code_vec", "status": "ok", "fresh": True},
+    ])
+    log = tmp_path / "tools" / "chroma" / "reindex.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("old commit\n", encoding="utf-8")
+
+    report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
+
+    assert report.amber == 0
+    assert report.rows[0]["status"] == "OK"
+    assert "reindex.log lacks HEAD" in report.rows[0]["msg"]
+
+
+def test_manifest_backed_kinds_track_registered_reindex_kinds():
+    assert _checks._MANIFEST_BACKED_KINDS == set(manifest_covered_kinds())
+    assert _checks._MANIFEST_BACKED_KINDS <= set(KNOWN_KINDS)
+    assert _checks._MANIFEST_BACKED_KINDS <= set(runner_kinds())

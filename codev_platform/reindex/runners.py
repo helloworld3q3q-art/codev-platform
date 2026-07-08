@@ -51,6 +51,12 @@ _DEFAULT_RUNNER_TIMEOUT_SEC = 1800  # 30min 上限 (大仓 chroma embedding 留�
 _TIMEOUT_RC = 124  # 与 GNU timeout 约定一致; worker 视 rc!=0 且 !=2 → 丢弃防死循环
 _FAILURE_TAIL_BYTES = 8000
 _FAILURE_NOTE_CHARS = 1200
+_PROOF_SAMPLE_BYTES = 256000
+_MANIFEST_COVERED_KINDS = ("chroma", "codegraph", "ingest", "code_vec")
+
+
+def manifest_covered_kinds() -> tuple[str, ...]:
+    return _MANIFEST_COVERED_KINDS
 
 
 def _runner_timeout(cfg: dict) -> float | None:
@@ -72,6 +78,21 @@ def _tail_output(log_file, limit: int = _FAILURE_TAIL_BYTES) -> str:
     return log_file.read().strip()
 
 
+def _sample_output(log_file, limit: int = _PROOF_SAMPLE_BYTES) -> str:
+    log_file.flush()
+    log_file.seek(0, 2)
+    size = log_file.tell()
+    if size <= limit:
+        log_file.seek(0)
+        return log_file.read()
+    half = max(1, limit // 2)
+    log_file.seek(0)
+    head = log_file.read(half)
+    log_file.seek(max(0, size - half))
+    tail = log_file.read()
+    return head + "\n...<runner log truncated>...\n" + tail
+
+
 def _failure_note(kind: str, rc: int, timeout: float | None, output: str) -> str:
     head = f"{kind} rc={rc}"
     if timeout is not None:
@@ -82,6 +103,46 @@ def _failure_note(kind: str, rc: int, timeout: float | None, output: str) -> str
     if len(text) > _FAILURE_NOTE_CHARS:
         text = "..." + text[-_FAILURE_NOTE_CHARS:]
     return f"{head}\n{text}"
+
+
+def _proof_failure(kind: str, output: str) -> str:
+    if kind == "chroma":
+        return ""
+    if "WARN: ensure codegraph link failed" in output:
+        return f"{kind} proof failed: ensure-link failed"
+    if kind == "codegraph":
+        if "SKIP: 'codegraph' CLI not found" in output:
+            return "codegraph proof failed: codegraph CLI missing"
+        if "WARN: codegraph sync skipped" in output:
+            return "codegraph proof failed: sync skipped"
+        if "FAIL: codegraph sync" in output:
+            return "codegraph proof failed: sync failed"
+        if "proof: codegraph ok" not in output:
+            return "codegraph proof failed: proof marker missing"
+        return ""
+    if kind == "ingest":
+        if "WARN: graph ingest failed" in output:
+            return "ingest proof failed: graph ingest warning"
+        if "proof: ingest ok" not in output:
+            return "ingest proof failed: proof marker missing"
+        return ""
+    if kind == "code_vec":
+        if "SKIP: 'codegraph' CLI not found" in output:
+            return "code_vec proof failed: codegraph CLI missing"
+        if "WARN: codegraph sync skipped" in output:
+            return "code_vec proof failed: codegraph sync skipped"
+        if "FAIL: codegraph sync" in output:
+            return "code_vec proof failed: codegraph sync failed"
+        if "WARN: code vector failed" in output:
+            return "code_vec proof failed: code vector warning"
+        if "code vector      -- skipped" in output:
+            return "code_vec proof failed: code vector skipped"
+        if "proof: codegraph ok" not in output:
+            return "code_vec proof failed: codegraph proof marker missing"
+        if "proof: code_vec ok" not in output:
+            return "code_vec proof failed: proof marker missing"
+        return ""
+    return ""
 
 
 def _runner_log_path(project_id: str, kind: str) -> Path:
@@ -130,6 +191,12 @@ class CliReindexRunner:
             if rc != 0:
                 self.last_note = _failure_note(self.kind, rc, None, _tail_output(log_file))
                 print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
+                return rc
+            proof_failure = _proof_failure(self.kind, _sample_output(log_file))
+            if proof_failure:
+                self.last_note = _failure_note(self.kind, 1, None, proof_failure)
+                print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
+                return 1
             return rc
 
 
@@ -137,8 +204,8 @@ class CodegraphReindexRunner(CliReindexRunner):
     """codegraph 专用 runner: sync 前先幂等 ensure .codegraph junction 指向平台。
 
     免手动 `codegraph link --all` —— 首次对某 project reindex 时自动建联接, 让 sync
-    写穿 junction 落平台。ensure-link 是 fail-soft 的(见 ops.codegraph.ensure_codegraph_linked),
-    失败只记录不中断 sync。
+    写穿 junction 落平台。ensure-link 结果仍由 ops.codegraph.ensure_codegraph_linked
+    提供; action=error 会被提升为 runner 失败,避免后续 sync 假绿。
     """
 
     def __init__(self) -> None:
@@ -148,8 +215,10 @@ class CodegraphReindexRunner(CliReindexRunner):
         from codev_platform.ops.codegraph import ensure_codegraph_linked
         r = ensure_codegraph_linked(project_id, repo, cfg)
         if r.get("action") == "error":
-            print(f"[reindex:codegraph] ensure-link 失败 (fail-soft, 继续 sync): {r.get('note')}",
-                  file=sys.stderr)
+            note = f"codegraph proof failed: ensure-link failed: {r.get('note') or ''}".strip()
+            self.last_note = _failure_note(self.kind, 1, None, note)
+            print(f"[reindex:codegraph] {self.last_note}", file=sys.stderr)
+            return 1
         return super().run(project_id, repo, cfg)
 
 

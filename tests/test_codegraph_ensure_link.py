@@ -71,6 +71,24 @@ def test_codegraph_runner_ensures_link_before_sync(tmp_path, monkeypatch):
     assert order == ["ensure", "sync"]  # ensure-link 在 sync 之前
 
 
+def test_codegraph_runner_fails_when_ensure_link_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "codev_platform.ops.codegraph.ensure_codegraph_linked",
+        lambda pid, repo, cfg: {"action": "error", "note": "junction denied"},
+    )
+    monkeypatch.setattr(
+        runners.CliReindexRunner, "run",
+        lambda self, pid, repo, cfg: (_ for _ in ()).throw(AssertionError("sync should not run")),
+    )
+
+    runner = runners.CodegraphReindexRunner()
+    rc = runner.run("p1", Path(tmp_path), {})
+
+    assert rc == 1
+    assert "ensure-link failed" in runner.last_note
+    assert "junction denied" in runner.last_note
+
+
 def test_codegraph_runner_registered():
     r = runners.get_runner("codegraph")
     assert isinstance(r, runners.CodegraphReindexRunner)

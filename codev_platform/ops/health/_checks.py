@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from codev_platform.ops._common import cfg_get, reindex_patterns
+from codev_platform.reindex.runners import manifest_covered_kinds
 
 from ._util import (
     Report,
@@ -415,6 +416,9 @@ def _expected_reindex_kinds(files: list[str], health: dict) -> set[str]:
     return set(expected_reindex_kinds(files, reindex_patterns(health)))
 
 
+_MANIFEST_BACKED_KINDS = set(manifest_covered_kinds())
+
+
 def _manifest_head_coverage(
     project_id: str | None,
     repo: Path,
@@ -442,11 +446,20 @@ def _manifest_head_coverage(
             missing_or_stale.append(f"{kind}:stale")
     if missing_or_stale:
         return False, ", ".join(missing_or_stale)
-    manifest_backed_kinds = {"chroma"}
-    unsupported = expected_kinds - manifest_backed_kinds
+    unsupported = expected_kinds - _MANIFEST_BACKED_KINDS
     if unsupported:
-        return False, "manifest fallback limited to chroma-only; " + ",".join(sorted(unsupported))
+        return False, "manifest fallback unsupported kinds; " + ",".join(sorted(unsupported))
     return True, ", ".join(sorted(expected_kinds))
+
+
+def _queued_reindex_log_block(text: str, head: str) -> bool:
+    marker = f"trigger commit: {head}"
+    idx = text.rfind(marker)
+    if idx < 0:
+        return False
+    next_block = text.find("\n===== reindex started at ", idx + len(marker))
+    block = text[idx:] if next_block < 0 else text[idx:next_block]
+    return "enqueued -> codev-reindex worker:" in block
 
 
 def _check_hook_missed(r: Report, repo: Path, health: dict,
@@ -464,11 +477,23 @@ def _check_hook_missed(r: Report, repo: Path, health: dict,
         r.line("hook missed?", "OK", f"HEAD {short} touches no indexable file")
     elif reindex_log.is_file():
         try:
-            found = head in reindex_log.read_text(encoding="utf-8", errors="replace")
+            log_text = reindex_log.read_text(encoding="utf-8", errors="replace")
+            found = head in log_text
         except OSError:
+            log_text = ""
             found = False
         if found:
-            r.line("hook missed?", "OK", f"HEAD {short} found in reindex.log")
+            if _queued_reindex_log_block(log_text, head):
+                covered, detail = _manifest_head_coverage(project_id, repo, expected_kinds)
+                if covered:
+                    r.line("hook missed?", "OK",
+                           f"HEAD {short} found in reindex.log and covered by manifest ({detail})")
+                else:
+                    suffix = f": {detail}" if detail else ""
+                    r.line("hook missed?", "WARN",
+                           f"HEAD {short} enqueued in reindex.log but manifest not successful{suffix}")
+            else:
+                r.line("hook missed?", "OK", f"HEAD {short} found in reindex.log")
         else:
             covered, detail = _manifest_head_coverage(project_id, repo, expected_kinds)
             if covered:

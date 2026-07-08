@@ -72,9 +72,20 @@ def test_ingest_only_skips_other_stages(_repo, monkeypatch):
     assert ran["run"] is False  # codegraph/chroma 一律没跑
 
 
+def test_ingest_success_emits_proof_marker(_repo, monkeypatch, capsys):
+    monkeypatch.setattr("codev_platform.graph.ingest.ingest_project",
+                        lambda r, p, **k: type("Rep", (), {"ingested": [], "summaries": {}})())
+
+    rc = R.cmd_reindex(_args(repo=str(_repo), ingest=True))
+
+    assert rc == 0
+    assert "proof: ingest ok" in capsys.readouterr().out
+
+
 def test_codegraph_stage_syncs_all_repo_specs(_repo, tmp_path, monkeypatch):
     from codev_platform.core.repos import RepoSpec
-    extra = tmp_path / "extra"; extra.mkdir()
+    extra = tmp_path / "extra"
+    extra.mkdir()
     specs = [
         RepoSpec(root=_repo.resolve(), tag="", is_main=True, source_project_id="demo-proj"),
         RepoSpec(root=extra.resolve(), tag="extra", is_main=False, source_project_id="extra-proj"),
@@ -100,12 +111,29 @@ def test_codegraph_stage_syncs_all_repo_specs(_repo, tmp_path, monkeypatch):
     assert links == [("demo-proj", _repo.resolve()), ("extra-proj", extra.resolve())]
 
 
+def test_codegraph_success_emits_proof_marker(_repo, monkeypatch, capsys):
+    class _CP:
+        returncode = 0
+
+    monkeypatch.setattr("codev_platform.ops.codegraph.ensure_codegraph_linked",
+                        lambda pid, repo, cfg: {"action": "ok"})
+    monkeypatch.setattr("codev_platform.core.config.load_config", lambda: {})
+    monkeypatch.setattr(R.C, "run", lambda cmd, **kw: _CP())
+
+    rc = R.cmd_reindex(_args(repo=str(_repo), codegraph=True))
+
+    assert rc == 0
+    assert "proof: codegraph ok" in capsys.readouterr().out
+
+
 def test_sync_codegraph_extra_lock_busy_continues(_repo, tmp_path, monkeypatch):
     from codev_platform.core.repos import RepoSpec
     from codev_platform.ops.reindex.commands import _sync_codegraph_repos
 
-    busy = tmp_path / "busy"; busy.mkdir()
-    ok_extra = tmp_path / "ok-extra"; ok_extra.mkdir()
+    busy = tmp_path / "busy"
+    busy.mkdir()
+    ok_extra = tmp_path / "ok-extra"
+    ok_extra.mkdir()
     specs = [
         RepoSpec(root=_repo.resolve(), tag="", is_main=True, source_project_id="demo-proj"),
         RepoSpec(root=busy.resolve(), tag="busy", is_main=False, source_project_id="busy-proj"),
@@ -212,6 +240,17 @@ def test_code_vec_force_is_full(_repo, monkeypatch):
     rc = R.cmd_reindex(_args(repo=str(_repo), force=True))
     assert rc == 0
     assert seen["incremental"] is False   # --force → 全量
+
+
+def test_code_vec_success_emits_proof_marker(_repo, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "codev_platform.recall.code_vector_store.build_code_vector_index",
+        lambda pid, **k: 0)
+
+    rc = R.cmd_reindex(_args(repo=str(_repo), code_vec=True))
+
+    assert rc == 0
+    assert "proof: code_vec ok" in capsys.readouterr().out
 
 
 def test_code_vec_failure_isolated(_repo, monkeypatch):
@@ -405,7 +444,11 @@ def test_code_vec_runner_syncs_codegraph_first(monkeypatch):
     cap = {}
     monkeypatch.setattr(RU, "_venv_python", lambda cfg: "py")
     monkeypatch.setattr(RU.subprocess, "run",
-                        lambda cmd, **k: cap.update(cmd=cmd) or type("C", (), {"returncode": 0})())
+                        lambda cmd, **k: (
+                            cap.update(cmd=cmd),
+                            k["stdout"].write("proof: codegraph ok\nproof: code_vec ok\n"),
+                            type("C", (), {"returncode": 0})(),
+                        )[-1])
     RU.get_runner("code_vec").run("demo-proj", Path("/repo"), {})
     assert "--codegraph" in cap["cmd"] and "--code-vec" in cap["cmd"]
     assert cap["cmd"].index("--codegraph") < cap["cmd"].index("--code-vec")   # 先 sync 后建

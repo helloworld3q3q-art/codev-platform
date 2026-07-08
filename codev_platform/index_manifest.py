@@ -7,7 +7,8 @@
 **MVP**: 一张 sqlite 表 `index_builds`, 每个 `(project_id, kind)` 一行 = **最近一次**
 构建记录 (commit / 起止时间 / 状态)。reindex worker 构建完写一行 (best-effort, 失败不阻断
 索引); 读侧给 CLI `index status` + health 用。`freshness()` 把记录里的 commit 与仓库当前
-HEAD 比, 答 "索引是否落后工作树"。
+HEAD 比, 答 "索引是否落后工作树"。code 类 job 由 runner 先把 fail-soft 输出提升为失败,
+避免把"子进程 rc=0"误当成"产物已成功刷新"。
 
 **刻意不做** (留后续 / plan 重型部分): 构建 DAG 编排、atomic handoff、dashboard、
 node/chunk 计数回填 (worker 拿不到, count 列留空, 后续 runner 补)。MVP 只解决"可信新鲜度真值"。
@@ -23,7 +24,7 @@ from pathlib import Path
 BUILDER_VERSION = "1"
 
 # 已知索引 kind (与 reindex runners / job.kind 对齐; 开放枚举, 未知 kind 也照记不报错)。
-KNOWN_KINDS = ("chroma", "codegraph", "graph", "docs")
+KNOWN_KINDS = ("chroma", "codegraph", "ingest", "code_vec")
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS index_builds (
