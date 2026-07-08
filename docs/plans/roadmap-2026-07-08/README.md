@@ -43,9 +43,13 @@
 - 新增 `reindex-queue drain-once`;前台 drain 和 drain-once 都走同一把 run lock。
 - `reindex-queue status` 改为只读队列,显示 backend、worker、heartbeat、last job、oldest age;worker 正在运行时不把 FileSpool marker 误报为 STALE。
 - `health` 与 `serve-mcp status` 接入 reindex worker 摘要,可直接指出"队列有待办但 worker 不在"。
+- `health --all` 访问受保护的 `/platform/status` 时支持 Bearer token,按 `platform.token_env` / `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` 顺序取环境变量;401 会继续尝试下一个候选 token,不再裸请求 token-mode 详情面。
+- `config.example.json` 补充 `platform.token_env` 样例,不修改用户级 `~/.codev-platform/config.json`。
 
 ## 测试审计记录
 
 - 已单独做测试覆盖审计,补齐 PG 默认不 auto-start、start/run lock 恢复、防旧 token 覆盖、foreground drain 锁冲突、短驻 worker CLI 生命周期、真实 FileSpool STALE 防误报、auto-start fail-soft 返回分支。
 - 目标回归:reindex/post-hook 相关 `93 passed`;MCP serve 相关 `43 passed`。
+- `health --all` token 鉴权经单独测试审计兄弟二次审查,补齐无 token 时不发送 Authorization、首个 token 401 后继续尝试下一个候选 token 的覆盖;目标回归 `11 passed`,CLI parser `9 passed`,配置样板 JSON 解析通过。
+- WSL 实调:`/healthz` 可达,`/platform/status` 仍 401;诊断确认交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`,后续需单独处理 WSL token 环境注入。
 - 实时状态:`reindex-queue status` 显示 FileSpoolQueue 队列空,短驻 worker 已 idle 退出。

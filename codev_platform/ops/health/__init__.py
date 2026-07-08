@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -247,15 +249,64 @@ def _platform_url(cfg: dict) -> str:
     return base.rstrip("/") + "/platform/status"
 
 
+_PLATFORM_TOKEN_ENV_FALLBACKS = ("PLATFORM_TOKEN", "CODEV_PLATFORM_MCP_TOKEN")
+
+
+def _platform_token_env_names(cfg: dict) -> list[str]:
+    names: list[str] = []
+    configured = cfg_get("platform.token_env", cfg=cfg)
+    if configured:
+        names.append(str(configured))
+    names.extend(_PLATFORM_TOKEN_ENV_FALLBACKS)
+    return list(dict.fromkeys(name for name in names if name))
+
+
+def _platform_status_requests(
+    url: str,
+    cfg: dict,
+) -> list[tuple[str | None, urllib.request.Request]]:
+    requests: list[tuple[str | None, urllib.request.Request]] = []
+    seen_tokens: set[str] = set()
+    for env_name in _platform_token_env_names(cfg):
+        token = os.environ.get(env_name)
+        if token and token not in seen_tokens:
+            seen_tokens.add(token)
+            requests.append((
+                env_name,
+                urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}),
+            ))
+    if requests:
+        return requests
+    return [(None, urllib.request.Request(url))]
+
+
+def _read_platform_status(url: str, cfg: dict) -> dict:
+    last_unauthorized: urllib.error.HTTPError | None = None
+    for _env_name, request in _platform_status_requests(url, cfg):
+        try:
+            with urllib.request.urlopen(request, timeout=20) as resp:
+                return json.loads(resp.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401:
+                raise
+            last_unauthorized = exc
+    if last_unauthorized is not None:
+        raise last_unauthorized
+    raise RuntimeError("no platform status request attempted")
+
+
 def cmd_health_all(args: argparse.Namespace) -> int:
     cfg = load_cfg()
     url = _platform_url(cfg)
     try:
-        with urllib.request.urlopen(url, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
+        data = _read_platform_status(url, cfg)
     except Exception as exc:  # noqa: BLE001
         out(f"[FAIL] 连不上平台服务: {url}")
         out(f"       {type(exc).__name__}: {exc}")
+        if isinstance(exc, urllib.error.HTTPError) and exc.code == 401:
+            envs = " / ".join(_platform_token_env_names(cfg))
+            out(f"       平台服务要求 Bearer token; 请设置 {envs} 后重试。")
+            out("       如需自定义变量名, 可配置 platform.token_env。")
         out("       平台数据一律走 HTTP。请确认 daemon 在跑(首个 Claude Code 会话自动起,")
         out("       或在任一仓 `codev-platform reindex` 触发);远程平台则配 config.platform.url。")
         return 1

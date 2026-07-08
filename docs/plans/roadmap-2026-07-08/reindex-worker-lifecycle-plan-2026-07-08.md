@@ -120,5 +120,8 @@ python -m pytest tests/test_mcp_serve.py tests/test_serve_mcp_diagnose.py
 
 - reindex/post-hook 目标集: `93 passed`。
 - MCP serve 相关: `43 passed`。
+- `health --all` token-mode 修正:支持从 `platform.token_env` / `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` 读取 Bearer token 访问 `/platform/status`;首个 token 401 时继续尝试下一个候选,失败提示只输出环境变量名,不输出 token 值。
+- 测试审计兄弟已二次审查该修正;补齐无 token 时不发送 Authorization、首个 token 401 后继续尝试下一个候选 token 的用例。目标回归: `python -m pytest tests/test_health_all_auth.py tests/test_health_split_security.py tests/test_health_reindex_worker.py` → `11 passed`;`python -m pytest tests/test_cli_parser.py` → `9 passed`;`config.example.json` JSON 解析通过。
+- WSL 实调:`/healthz` 可达,`/platform/status` 仍 401;诊断确认交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`,后续需单独处理 WSL token 环境注入。
 - `git diff --check` 无 whitespace error,仅 `core/config.py` CRLF 提示。
 - `reindex-queue status` 显示队列空,短驻 worker 已 idle 退出。
