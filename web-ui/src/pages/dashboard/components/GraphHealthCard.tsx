@@ -8,7 +8,7 @@ interface GraphHealthCardProps {
   data?: API.GraphAuditResponse;
 }
 
-function apiCoverageColor(data?: API.GraphAuditResponse): string {
+const apiCoverageColor = (data?: API.GraphAuditResponse): string => {
   if ((data?.invalidCallsApiEdges ?? 0) > 0) {
     return 'red';
   }
@@ -19,23 +19,23 @@ function apiCoverageColor(data?: API.GraphAuditResponse): string {
     return 'green';
   }
   return 'default';
-}
+};
 
-function apiCoverageText(data?: API.GraphAuditResponse): string {
+const apiCoverageText = (data?: API.GraphAuditResponse): string => {
   const frontend = data?.frontendApiCalls ?? 0;
   if (!frontend) {
     return '无前端 API';
   }
   return `${data?.linkedFrontendApiCalls ?? 0}/${frontend} 已链接`;
-}
+};
 
-function shouldShowApiCoverage(data?: API.GraphAuditResponse): boolean {
+const shouldShowApiCoverage = (data?: API.GraphAuditResponse): boolean => {
   return Boolean(
     (data?.frontendApiCalls ?? 0) > 0 ||
       (data?.backendEndpoints ?? 0) > 0 ||
       (data?.invalidCallsApiEdges ?? 0) > 0,
   );
-}
+};
 
 const GraphHealthCard = ({ data }: GraphHealthCardProps) => {
   const clean = data?.clean ?? true;
