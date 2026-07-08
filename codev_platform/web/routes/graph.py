@@ -223,7 +223,7 @@ def unified_graph(request: Request, ctx=Depends(require_project_access)) -> Comm
 def graph_audit(request: Request, ctx=Depends(require_project_access)) -> CommonResult:
     """统一图谱结构审计 (Phase 3, 纯读): 断链/串台/孤儿 plugin/重复/低置信。store 缺/空 → clean。"""
     _identity, project_id = ctx
-    from codev_platform.graph.audit import audit_graph
+    from codev_platform.graph.audit import api_link_coverage_brief, audit_graph
     store = _open_store_ro(project_id)
     if store is None:
         return ok(S.GraphAuditResponse(), request_id=_rid(request))
@@ -232,6 +232,7 @@ def graph_audit(request: Request, ctx=Depends(require_project_access)) -> Common
     finally:
         store.close()
     err, warn, tot = rep["errors"], rep["warnings"], rep["totals"]
+    api = warn["api_link_coverage"]
     resp = S.GraphAuditResponse(
         clean=rep["clean"], errorCount=rep["error_count"],
         danglingEdges=err["dangling_edges"]["count"],
@@ -240,6 +241,16 @@ def graph_audit(request: Request, ctx=Depends(require_project_access)) -> Common
         duplicateNodes=warn["duplicate_nodes"]["count"],
         lowConfidenceEdges=warn["low_confidence_edges"]["count"],
         nodes=tot["nodes"], edges=tot["edges"],
+        apiLinkStatus=api["status"],
+        apiLinkBrief=api_link_coverage_brief(rep),
+        apiLinkDiagnosis=api["diagnosis"],
+        frontendApiCalls=api["frontend_api_calls"],
+        backendEndpoints=api["backend_endpoints"],
+        callsApiEdges=api["calls_api_edges"],
+        linkedFrontendApiCalls=api["linked_frontend_api_calls"],
+        unlinkedFrontendApiCalls=api["unlinked_frontend_api_calls"],
+        invalidCallsApiEdges=api["invalid_calls_api_edges"],
+        frontendLinkRatio=api["frontend_link_ratio"],
     )
     return ok(resp, request_id=_rid(request))
 

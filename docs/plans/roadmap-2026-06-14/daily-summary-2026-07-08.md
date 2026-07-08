@@ -217,3 +217,35 @@ python -m codev_platform.cli graph audit --all --json
 ```
 
 结果:`28 passed`,ruff 通过;真实全局 audit 文本摘要可见,JSON 契约不变。
+
+## 十三、Web Dashboard 展示 API 链路覆盖
+
+- 继续收口可见性时确认:CLI 单项目和 `audit --all` 已能看到 `api_link_coverage`,但 Web Dashboard 的“图谱结构健康”卡片仍只展示结构 error/warning,看不到 OMS `0/2374` 的前后端链路缺口。
+- 设计上不新增请求、不改图谱存储、不改变 `clean/errorCount` 语义;只扩展 `/api/v1/graph/audit` 响应并在已有 Dashboard 卡片展示短摘要。
+- 通用修正:
+  - `GraphAuditResponse` 增加扁平 API 链路字段:`apiLinkStatus/apiLinkBrief/apiLinkDiagnosis/frontendApiCalls/backendEndpoints/callsApiEdges/...`。
+  - Web route 复用 `api_link_coverage_brief(report)` 输出短摘要,不在 web 层复制诊断规则。
+  - Dashboard `GraphHealthCard` 显示 API 链路 tag、已链接比例、后端 endpoint、有效 `calls_api`、畸形 `calls_api` 和 warning 诊断。
+  - `clean/errorCount` 仍只代表结构 error;API 链路不足仍是 warning。
+- 生成层处理:
+  - 正常应跑 `pnpm run api` 更新 `web-ui/src/services/apis/**`。
+  - 本步前工作区存在非本步 health OpenAPI dirty,直接生成可能把无关 schema 混入;因此只对 `typings.d.ts` 的 `GraphAuditResponse` 做最小手工同步,并用 `tsc` 校验。后续工作区干净时可再跑生成器确认零 diff。
+- 兄弟审计未发现阻断问题;按建议补:
+  - Web API fully linked 用例,断言 `apiLinkStatus=linked` 且 `apiLinkBrief=""`。
+  - Web API malformed `calls_api` 用例,断言 `clean=true/errorCount=0/invalidCallsApiEdges=1/callsApiEdges=0`。
+  - 前端 label 从 `calls_api` 改为“有效 calls_api”,降低 raw/valid 误读。
+- 真实 OMS Web 响应探针:
+  - `clean=True,errorCount=0`。
+  - `apiLinkStatus=frontend_backend_unlinked`。
+  - `apiLinkBrief=api 0/2374 linked (backend 4, calls_api 0)`。
+
+验证:
+
+```powershell
+python -m pytest tests/test_web_graph_audit.py tests/test_graph_audit.py
+python -m ruff check codev_platform\web\schemas\graph.py codev_platform\web\routes\graph.py tests\test_web_graph_audit.py
+npm --prefix web-ui run tsc
+npx eslint --ext .tsx --format=pretty src/pages/dashboard/components/GraphHealthCard.tsx src/services/apis/typings.d.ts
+```
+
+结果:`25 passed`,ruff 通过,前端 tsc 通过,定向 eslint 通过。全量 `npm --prefix web-ui run lint:js` 当前仍被非本步 `src/pages/agent/components/ChatPanel.tsx` 缩进问题阻断。

@@ -164,6 +164,16 @@ class GraphAuditResponse(BaseModel):
     lowConfidenceEdges: int = Field(0, description="低置信硬边数 (warning, fuzzy 推断)")
     nodes: int = Field(0, description="节点总数")
     edges: int = Field(0, description="边总数")
+    apiLinkStatus: str = Field("no_frontend_api", description="前端 API 到后端 endpoint 的链路状态")
+    apiLinkBrief: str = Field("", description="前后端 API 链路覆盖短摘要")
+    apiLinkDiagnosis: str = Field("", description="前后端 API 链路覆盖诊断")
+    frontendApiCalls: int = Field(0, description="前端 API 调用节点数")
+    backendEndpoints: int = Field(0, description="后端 endpoint 节点数")
+    callsApiEdges: int = Field(0, description="有效 calls_api 边数")
+    linkedFrontendApiCalls: int = Field(0, description="已链接前端 API 调用节点数")
+    unlinkedFrontendApiCalls: int = Field(0, description="未链接前端 API 调用节点数")
+    invalidCallsApiEdges: int = Field(0, description="端点类型不合法的 calls_api 边数")
+    frontendLinkRatio: float = Field(1.0, description="前端 API 链接覆盖率")
 
 
 class GraphSoftQualityResponse(BaseModel):

@@ -622,6 +622,16 @@ interface GraphAuditResponse {
   lowConfidenceEdges?: number; // 低置信硬边数 (warning, fuzzy 推断)
   nodes?: number; // 节点总数
   edges?: number; // 边总数
+  apiLinkStatus?: string; // 前端 API 到后端 endpoint 的链路状态
+  apiLinkBrief?: string; // 前后端 API 链路覆盖短摘要
+  apiLinkDiagnosis?: string; // 前后端 API 链路覆盖诊断
+  frontendApiCalls?: number; // 前端 API 调用节点数
+  backendEndpoints?: number; // 后端 endpoint 节点数
+  callsApiEdges?: number; // 有效 calls_api 边数
+  linkedFrontendApiCalls?: number; // 已链接前端 API 调用节点数
+  unlinkedFrontendApiCalls?: number; // 未链接前端 API 调用节点数
+  invalidCallsApiEdges?: number; // 端点类型不合法的 calls_api 边数
+  frontendLinkRatio?: number; // 前端 API 链接覆盖率
 }
 
 // 改某节点 → top-N 最强依赖路径分析入参。
