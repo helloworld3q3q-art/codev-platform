@@ -188,3 +188,32 @@ python -m codev_platform.cli graph audit --project oms-work
 ```
 
 结果:`18 passed` + `29 passed`,ruff 通过,diff whitespace 通过;真实 OMS audit clean 且覆盖 warning 可见。
+
+## 十二、全局 graph audit 覆盖摘要
+
+- 继续验证发现:`graph audit --project oms-work` 已能看到 `api_link_coverage`,但 `graph audit --all` 普通文本只打印 `OK clean`,会把 `oms-work` 这种结构 clean 但 API 链路覆盖为 0 的项目隐藏掉。
+- 设计上不改 JSON 契约、不改 `clean/error_count`、不把 warning 升级为门禁失败;只在全局文本行尾追加短摘要。
+- 通用修正:
+  - 在 `graph.audit` 增加 `api_link_coverage_brief(report)`,作为纯展示 helper。
+  - 全覆盖或无前端 API 时返回空串,避免全局巡检刷屏。
+  - `cli graph audit --all` 只拼接 helper 输出,不复制字段判断。
+- 兄弟审计未发现阻断问题;按建议补:
+  - 全 linked 时摘要静默的回归测试。
+  - `graph audit --all --json` parser 参数组合测试。
+  - helper 注释从 CLI 场景改为更中性的“API 覆盖短摘要”。
+- 真实全局复验:
+  - `codev-platform`:全覆盖,不显示摘要。
+  - `oms-work`:显示 `api 0/2374 linked (backend 4, calls_api 0)`。
+  - `openclaw-stock`:显示 `api 393/395 linked (backend 202, calls_api 393)`。
+  - `--all --json` 仍为纯 JSON,`total_errors=0`。
+
+验证:
+
+```powershell
+python -m pytest tests/test_graph_audit.py tests/test_cli_parser.py
+python -m ruff check codev_platform\graph\audit.py codev_platform\cli.py tests\test_graph_audit.py tests\test_cli_parser.py
+python -m codev_platform.cli graph audit --all
+python -m codev_platform.cli graph audit --all --json
+```
+
+结果:`28 passed`,ruff 通过;真实全局 audit 文本摘要可见,JSON 契约不变。

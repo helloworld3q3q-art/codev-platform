@@ -266,7 +266,11 @@ def cmd_graph(args: argparse.Namespace) -> int:
         if getattr(args, "all", False):
             # 门禁模式: 审计所有 project 的 graph store(按后端: sqlite glob / pg 枚举共享库),
             # 任一结构 error → 非零退出。无 store(机器没建图谱)→ 优雅跳过(返回 0, 不阻断 push)。
-            from codev_platform.graph.audit import audit_all_stores, reconcile_orphan_pids
+            from codev_platform.graph.audit import (
+                api_link_coverage_brief,
+                audit_all_stores,
+                reconcile_orphan_pids,
+            )
             agg = audit_all_stores()
             # 孤儿 pid: graph 有数据但未登记(退役残留 / 串台)→ warning 不计入 total_errors
             # (退役 project 遗留库不该让 push 永久红); known 源 = 登记表 meta.json(顶层组装, 解耦)。
@@ -285,8 +289,10 @@ def cmd_graph(args: argparse.Namespace) -> int:
             for ap in agg["projects"]:
                 report = agg["reports"][ap]
                 mark = "OK clean" if report["clean"] else f"{report['error_count']} ERROR"
+                api_brief = api_link_coverage_brief(report)
+                api_suffix = f"; {api_brief}" if api_brief else ""
                 _print(f"[{ap}] {mark} — nodes {report['totals']['nodes']} / "
-                       f"edges {report['totals']['edges']}")
+                       f"edges {report['totals']['edges']}{api_suffix}")
                 if not report["clean"]:
                     _print(render_markdown(report))
             if agg["orphan_pids"]:

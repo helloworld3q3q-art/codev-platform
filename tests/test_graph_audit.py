@@ -1,7 +1,12 @@
 """图谱结构审计 (Phase 3 MVP) 单测 —— 临时 store 种已知问题, 不碰真 data。"""
 from __future__ import annotations
 
-from codev_platform.graph.audit import audit_all_stores, audit_graph, render_markdown
+from codev_platform.graph.audit import (
+    api_link_coverage_brief,
+    audit_all_stores,
+    audit_graph,
+    render_markdown,
+)
 from codev_platform.graph.schema import (
     AnalyzerResult,
     EdgeKind,
@@ -54,6 +59,7 @@ def test_audit_clean_graph(tmp_path):
     assert rep["clean"] is True
     assert rep["errors"]["dangling_edges"]["count"] == 0
     assert rep["warnings"]["low_confidence_edges"]["count"] == 0
+    assert api_link_coverage_brief(rep) == ""
 
 
 def test_audit_reports_api_link_coverage(tmp_path):
@@ -97,6 +103,34 @@ def test_audit_reports_api_link_coverage(tmp_path):
     assert api["unlinked_frontend_api_calls"] == 1
     assert api["frontend_link_ratio"] == 0.5
     assert api["unlinked_samples"][0]["url"] == "/orders/delete"
+    assert api_link_coverage_brief(rep) == "api 1/2 linked (backend 1, calls_api 1)"
+
+
+def test_api_link_coverage_brief_empty_when_fully_linked(tmp_path):
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    frontend = GraphNode(
+        id=f"{PID}:frontend_api_call:src/api.ts:createOrder",
+        kind=NodeKind.FRONTEND_API_CALL.value,
+        name="createOrder",
+        project_id=PID,
+        file="src/api.ts",
+        meta={"url": "/orders", "http_method": "POST"},
+    )
+    backend = GraphNode(
+        id=f"{PID}:backend_endpoint:POST:/orders",
+        kind=NodeKind.BACKEND_ENDPOINT.value,
+        name="createOrder",
+        project_id=PID,
+        file="OrderController.java",
+        meta={"url": "/orders", "http_method": "POST"},
+    )
+    _seed(conn, [frontend, backend],
+          [GraphEdge(source=frontend.id, target=backend.id, kind=EdgeKind.CALLS_API.value)])
+    rep = audit_graph(conn, PID)
+    conn.close()
+
+    assert rep["warnings"]["api_link_coverage"]["status"] == "linked"
+    assert api_link_coverage_brief(rep) == ""
 
 
 def test_audit_reports_frontend_backend_unlinked(tmp_path):
@@ -162,6 +196,9 @@ def test_audit_ignores_malformed_calls_api_for_coverage(tmp_path):
     assert api["linked_frontend_api_calls"] == 0
     assert api["unlinked_frontend_api_calls"] == 1
     assert api["invalid_calls_api_samples"][0]["target"] == wrong_target.id
+    assert api_link_coverage_brief(rep) == (
+        "api 0/1 linked (backend 1, calls_api 0, invalid_calls_api 1)"
+    )
 
 
 def test_audit_cross_project_leak(tmp_path):

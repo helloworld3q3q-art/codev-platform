@@ -74,6 +74,15 @@ def test_parser_parses_reindex_queue_worker_short_lived():
     assert args.heartbeat_sec == 2
 
 
+def test_parser_parses_graph_audit_all_json():
+    parser = cli.build_parser()
+    args = parser.parse_args(["graph", "audit", "--all", "--json"])
+    assert args.cmd == "graph"
+    assert args.action == "audit"
+    assert args.all is True
+    assert args.json is True
+
+
 def test_each_subcommand_has_func():
     parser = cli.build_parser()
     for name in ("health", "reindex", "post-commit", "dirty-check",

@@ -376,6 +376,28 @@ def reconcile_orphan_pids(graph_pids, known_pids) -> dict:
     return {"orphan_pids": orphans, "count": len(orphans)}
 
 
+def api_link_coverage_brief(report: dict) -> str:
+    """API 链路覆盖短摘要。
+
+    只在有前端 API 未完全链接或存在畸形 calls_api 时返回内容; 全覆盖/无前端 API 返回空串,
+    避免把汇总视图刷屏。这里只做展示,不改变 clean/error_count 语义。
+    """
+    api = report.get("warnings", {}).get("api_link_coverage") or {}
+    frontend = int(api.get("frontend_api_calls") or 0)
+    linked = int(api.get("linked_frontend_api_calls") or 0)
+    backend = int(api.get("backend_endpoints") or 0)
+    calls = int(api.get("calls_api_edges") or 0)
+    invalid = int(api.get("invalid_calls_api_edges") or 0)
+    if frontend == 0 and invalid == 0:
+        return ""
+    if linked == frontend and invalid == 0:
+        return ""
+    parts = [f"api {linked}/{frontend} linked", f"backend {backend}", f"calls_api {calls}"]
+    if invalid:
+        parts.append(f"invalid_calls_api {invalid}")
+    return f"{parts[0]} ({', '.join(parts[1:])})"
+
+
 def render_markdown(report: dict) -> str:
     """把审计报告渲染成可读 markdown。"""
     if report.get("audit_error"):
