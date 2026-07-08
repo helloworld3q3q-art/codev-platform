@@ -20,6 +20,7 @@ from ._common import (
     _rel,
     logger,
 )
+from .js_request import scan_js_request_exports_text
 
 # Vue Router 路由表条目: { path: '/foo', component: Foo } / { path: '/foo', name: 'Foo' }。
 _RE_VUE_ROUTE = re.compile(
@@ -98,6 +99,8 @@ def scan_vue(repo: Path, project_id: str) -> list[GraphNode]:
         except OSError:
             continue
         rel = _rel(f, repo)
+        nodes.extend(scan_js_request_exports_text(
+            text, rel, project_id, seen_ids, language="typescript"))
         nodes.extend(
             _scan_inline_api(
                 text, rel, project_id, seen_ids, language="typescript"

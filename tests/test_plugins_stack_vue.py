@@ -178,6 +178,34 @@ def test_vue_analyze_template_only_component(tmp_path):
     assert comps[0].name == "Plain"
 
 
+def test_vue_analyze_extracts_exported_request_object_api(tmp_path):
+    """Vue 仓的 TS API 封装层 request({url, method}) 会产 frontend_api_call。"""
+    (tmp_path / "package.json").write_text(
+        '{"dependencies": {"vue": "^3.4.0"}}', encoding="utf-8"
+    )
+    api = tmp_path / "src" / "api" / "dip" / "ism"
+    api.mkdir(parents=True)
+    (api / "ImpDbLinkApi.ts").write_text(
+        "export function queryAllEnabled() {\n"
+        "  return request({\n"
+        "    url: `${daoServiceClientConfig[clientName].serverUrl}/dbLink/queryAllEnabled`,\n"
+        "    method: 'get'\n"
+        "  })\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = VuePlugin().analyze(tmp_path, "demo")
+    api_calls = [
+        n for n in result.nodes
+        if n.kind == NodeKind.FRONTEND_API_CALL.value
+    ]
+    assert len(api_calls) == 1
+    assert api_calls[0].name == "queryAllEnabled"
+    assert api_calls[0].meta["url"] == "/dbLink/queryAllEnabled"
+    assert api_calls[0].meta["http_method"] == "GET"
+
+
 # ---------------- registry: 自动发现 + run_applicable ----------------
 
 def test_vue_plugin_autoregistered():

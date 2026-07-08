@@ -100,3 +100,32 @@ python -m pytest tests/test_graph_ingest.py tests/test_repo_scope.py tests/test_
 结果:`27 passed`。
 
 后续步骤:在此基础上补通用 JS/TS `request({ url, method })` 请求对象扫描;坚持解析静态 URL 片段,不写 OMS 专用 `ContextEnum` 或 `daoServiceClientConfig` 分支。
+
+## 九、通用 JS/TS request-object API 扫描
+
+- 真实 `scl-www` 前端 API 大量使用导出函数包 `request({ url, method })`、`request<T>({ ... })`、模板前缀和字符串拼接;原 React/Vue 扫描只覆盖 `export async function` 的窄窗口和裸 `request('/x')`,导致 `frontend_api_call` 只有个位/十位级。
+- 设计上新增 `_stack_scan/js_request.py` 作为 JS/TS 请求对象扫描基础单元,由 React/Vue 复用;不新增 OMS 专用插件,不硬编码 `ContextEnum`、`daoServiceClientConfig` 或具体仓名。
+- URL 解析策略:
+  - 只提取静态路径片段,如 `${prefix}/dbLink/queryAllEnabled`、`ContextEnum.xxx + 'baseCcs/getBaseCcs?'`。
+  - 路径中出现动态段,如 `/base/${id}/detail` 或 `/base/${operate}`,不产硬 `frontend_api_call`,避免错连。
+  - 只认明确 HTTP wrapper/callee,过滤 `router.push({ url })` 等非 HTTP 对象调用。
+  - 支持 TypeScript 泛型调用 `request<Page<Row>>({})` 和 `request<{ data: Row }>({})`。
+- React 旧能力保留:内联 `axios/fetch/request('/api')` 扫描仍走原入口;React/Vue 只增加共享扫描器调用,不改变 linker 核心。
+- 真实 `D:\OmsWork\scl-www` 只读扫描验证:
+  - `scan_vue` 产 `frontend_api_call=2374`,方法分布 `POST=1685, GET=613, PUT=60, DELETE=16`。
+  - 覆盖样例:`ImpDbLinkApi.queryAllEnabled -> /dbLink/queryAllEnabled GET`,`BaseBin.saveBaseBinApi -> /baseBin/batchSaveData POST`,`BaseCcs.baseCcsQueryApi -> /ds/commonSearchHelp/query POST`。
+  - 临时 ingest 小样本验证 `queryAllEnabled` 可通过核心 linker 连到 Spring `GET /dbLink/queryAllEnabled`。
+- 兄弟审计发现并已修:
+  - 任意 `xxx({ url })` 误识别为 HTTP 调用。
+  - `/x/${id}/detail` 被误解析成 `/detail`。
+  - `export const helper` 扫描窗口吸收后续 `export function`。
+- 复审结论:阻断问题已闭环。剩余边界:`xxxRequest({ url })` 仍按 HTTP wrapper 处理,后续若遇到非 HTTP 同名模式,再考虑 wrapper 白名单配置或低置信标记,本步不提前复杂化。
+
+验证:
+
+```powershell
+python -m pytest tests/test_js_request_scan.py tests/test_plugins_stack_vue.py tests/test_plugins_stack.py tests/test_ingest_linker.py
+python -m ruff check codev_platform/plugins/builtin/_stack_scan/js_request.py codev_platform/plugins/builtin/_stack_scan/react.py codev_platform/plugins/builtin/_stack_scan/vue.py tests/test_js_request_scan.py tests/test_plugins_stack_vue.py
+```
+
+结果:`32 passed`,ruff 通过。

@@ -21,16 +21,7 @@ from ._common import (
     _rel,
     logger,
 )
-
-# axios / fetch / 项目 fetch 封装 / 生成的 services 里的 url 字面量。
-_RE_FN = re.compile(r"export\s+async\s+function\s+(\w+)\s*\(")
-_RE_URL = re.compile(
-    r"url:\s*[`'\"]\s*(?:\$\{[\w.]*\})?\s*(/[\w\-/:{}.]+)"
-)
-_HTTP_METHOD_PREFIX = {
-    "post": "POST", "get": "GET", "put": "PUT",
-    "dele": "DELETE", "del": "DELETE", "patch": "PATCH",
-}
+from .js_request import infer_http_method, scan_js_request_exports_text
 
 
 def react_detect(repo: Path) -> bool:
@@ -54,11 +45,7 @@ def react_detect(repo: Path) -> bool:
 
 
 def _infer_method(fn_name: str) -> str:
-    low = fn_name.lower()
-    for prefix, method in _HTTP_METHOD_PREFIX.items():
-        if low.startswith(prefix):
-            return method
-    return "POST"
+    return infer_http_method(fn_name)
 
 
 def scan_react(repo: Path, project_id: str) -> list[GraphNode]:
@@ -82,31 +69,9 @@ def scan_react(repo: Path, project_id: str) -> list[GraphNode]:
             continue
         rel = _rel(f, repo)
 
-        # 1) services/apis 风格: export async function xxx(...) { url: '/api/..' }
-        for m in _RE_FN.finditer(text):
-            fn = m.group(1)
-            window = text[m.end():m.end() + 2000]
-            url_m = _RE_URL.search(window)
-            if not url_m:
-                continue
-            url = _norm_url(url_m.group(1))
-            line = text.count("\n", 0, m.start()) + 1
-            node_id = f"{project_id}:frontend_api_call:{rel}:{fn}"
-            if node_id in seen_ids:
-                continue
-            seen_ids.add(node_id)
-            nodes.append(
-                GraphNode(
-                    id=node_id,
-                    kind=NodeKind.FRONTEND_API_CALL.value,
-                    name=fn,
-                    project_id=project_id,
-                    file=rel,
-                    line=line,
-                    language="typescript",
-                    meta={"url": url, "http_method": _infer_method(fn)},
-                )
-            )
+        # 1) services/apis 风格: export function xxx(...) { request({ url, method }) }。
+        nodes.extend(scan_js_request_exports_text(
+            text, rel, project_id, seen_ids, language="typescript"))
 
         # 2) 内联 axios/fetch('/api/..') 调用 (无导出函数封装)。
         for m in _RE_INLINE_URL.finditer(text):
