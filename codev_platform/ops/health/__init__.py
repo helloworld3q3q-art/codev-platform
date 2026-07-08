@@ -150,7 +150,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     _check_codegraph_mcp(r, repo, procs)
     _check_webhook_extra_repo_mapping(r, cfg)
     _check_reindex_worker(r)
-    _check_hook_missed(r, repo, health)
+    _check_hook_missed(r, repo, health, project_id)
     _check_git_tools(r, repo)
 
     r.section("")

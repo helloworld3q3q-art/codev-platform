@@ -23,6 +23,16 @@ def test_classify_scopes_empty_when_no_match():
     assert reindex.classify_scopes(["x.txt", "y.png"], pats) == {}
 
 
+def test_expected_reindex_kinds_matches_hook_expansion():
+    pats = {"doc": [r"\.md$"], "codegraph": [r"\.py$"]}
+    assert reindex.expected_reindex_kinds(["docs/a.md"], pats) == ["chroma"]
+    assert reindex.expected_reindex_kinds(["src/app.py"], pats) == [
+        "codegraph",
+        "ingest",
+        "code_vec",
+    ]
+
+
 def test_post_checkout_skips_file_checkout():
     # flag != "1"(单文件 checkout, 非切分支)→ 直接 0, 不碰 git/reindex
     args = SimpleNamespace(prev="a", new="b", flag="0", foreground=True)

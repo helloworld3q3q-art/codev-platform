@@ -14,7 +14,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from codev_platform.ops._common import cfg_get, matches_any, reindex_patterns
+from codev_platform.ops._common import cfg_get, reindex_patterns
 
 from ._util import (
     Report,
@@ -410,20 +410,53 @@ def _check_codegraph_mcp(r: Report, repo: Path, procs: list[dict[str, str]]) -> 
             r.line("codegraph cli lock", "WARN", f"probe failed: {exc!r}")
 
 
-def _check_hook_missed(r: Report, repo: Path, health: dict) -> None:
+def _expected_reindex_kinds(files: list[str], health: dict) -> set[str]:
+    from codev_platform.ops.reindex import expected_reindex_kinds
+    return set(expected_reindex_kinds(files, reindex_patterns(health)))
+
+
+def _manifest_head_coverage(
+    project_id: str | None,
+    repo: Path,
+    expected_kinds: set[str],
+) -> tuple[bool, str]:
+    if not expected_kinds:
+        return False, ""
+    if not project_id or project_id == "unknown":
+        return False, "project_id unknown"
+    try:
+        from codev_platform.index_manifest import freshness
+        rows = freshness(project_id, repo)
+    except Exception as exc:  # noqa: BLE001 - health check should degrade to WARN
+        return False, f"manifest unreadable: {exc!r}"
+
+    by_kind = {str(row.get("kind")): row for row in rows if row.get("kind")}
+    missing_or_stale: list[str] = []
+    for kind in sorted(expected_kinds):
+        row = by_kind.get(kind)
+        if row is None:
+            missing_or_stale.append(f"{kind}:missing")
+        elif row.get("status") != "ok":
+            missing_or_stale.append(f"{kind}:{row.get('status') or 'unknown'}")
+        elif row.get("fresh") is not True:
+            missing_or_stale.append(f"{kind}:stale")
+    if missing_or_stale:
+        return False, ", ".join(missing_or_stale)
+    return True, ", ".join(sorted(expected_kinds))
+
+
+def _check_hook_missed(r: Report, repo: Path, health: dict,
+                       project_id: str | None = None) -> None:
     rc, head = _git(repo, "rev-parse", "HEAD")
     if rc != 0 or not head:
         r.line("hook missed?", "WARN", "git not available / no HEAD")
         return
     rc2, files_txt = _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
     files = [f for f in files_txt.splitlines() if f.strip()]
-    # default indexable scope = doc + codegraph patterns (parity with .ps1 defaults)
-    pats = reindex_patterns(health)
-    indexable = pats["doc"] + pats["codegraph"]
-    should = any(matches_any(f, indexable) for f in files)
+    expected_kinds = _expected_reindex_kinds(files, health)
     reindex_log = repo / "tools" / "chroma" / "reindex.log"
     short = head[:7]
-    if not should:
+    if not expected_kinds:
         r.line("hook missed?", "OK", f"HEAD {short} touches no indexable file")
     elif reindex_log.is_file():
         try:
@@ -433,10 +466,23 @@ def _check_hook_missed(r: Report, repo: Path, health: dict) -> None:
         if found:
             r.line("hook missed?", "OK", f"HEAD {short} found in reindex.log")
         else:
-            r.line("hook missed?", "WARN",
-                   f"HEAD {short} touches indexable files but NOT in reindex.log - retry post-commit")
+            covered, detail = _manifest_head_coverage(project_id, repo, expected_kinds)
+            if covered:
+                r.line("hook missed?", "OK",
+                       f"HEAD {short} covered by manifest ({detail}); reindex.log lacks HEAD")
+            else:
+                suffix = f"; manifest: {detail}" if detail else ""
+                r.line("hook missed?", "WARN",
+                       f"HEAD {short} touches indexable files but NOT in reindex.log"
+                       f" - retry post-commit{suffix}")
     else:
-        r.line("hook missed?", "WARN", "reindex.log missing - hook may have never run")
+        covered, detail = _manifest_head_coverage(project_id, repo, expected_kinds)
+        if covered:
+            r.line("hook missed?", "OK",
+                   f"HEAD {short} covered by manifest ({detail}); reindex.log absent in worker mode")
+        else:
+            suffix = f": {detail}" if detail else ""
+            r.line("hook missed?", "WARN", f"reindex.log missing and manifest not fresh{suffix}")
 
 
 def _check_git_tools(r: Report, repo: Path) -> None:

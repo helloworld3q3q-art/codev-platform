@@ -37,6 +37,19 @@ def _expand_scopes(scoped: dict[str, list[str]]) -> list[str]:
     return scopes
 
 
+def expand_reindex_scopes(scoped: dict[str, list[str]]) -> list[str]:
+    """Return runner kinds for a classified reindex scope map."""
+    return _expand_scopes(scoped)
+
+
+def expected_reindex_kinds(changed: list[str], pats: dict) -> list[str]:
+    """Return runner kinds required for the changed files.
+
+    Shared by hook dispatch and health checks so their scope semantics do not drift.
+    """
+    return expand_reindex_scopes(classify_scopes(changed, pats))
+
+
 def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
                       trigger_line: str, banner: str) -> int:
     """共享: 按改动文件分 scope → 写 log header → spawn 对应 reindex + 健康快照刷新。
@@ -52,7 +65,7 @@ def _dispatch_reindex(repo: Path, changed: list[str], *, foreground: bool,
         pats = C.reindex_patterns(C.meta_health(target_pid))
         scoped = classify_scopes(changed, pats)
         if scoped:
-            plan.append((target_pid, scoped, _expand_scopes(scoped)))
+            plan.append((target_pid, scoped, expand_reindex_scopes(scoped)))
     if not plan:
         return 0  # silent no-op
     log_file = _reindex_log(repo)

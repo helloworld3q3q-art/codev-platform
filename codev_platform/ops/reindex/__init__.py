@@ -36,6 +36,8 @@ from .proc import (
 from .dispatch import (
     _dispatch_reindex,
     classify_scopes,
+    expand_reindex_scopes,
+    expected_reindex_kinds,
 )
 from .commands import (
     _FINISHED_RE,
@@ -62,6 +64,8 @@ __all__ = [
     "_spawn_background",
     "_status_label",
     "classify_scopes",
+    "expand_reindex_scopes",
+    "expected_reindex_kinds",
     "cmd_dirty_check",
     "cmd_post_checkout",
     "cmd_post_commit",
