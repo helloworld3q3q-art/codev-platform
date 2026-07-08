@@ -29,13 +29,14 @@ from codev_platform.graph.schema import (
 from codev_platform.graph.store import open_store
 from codev_platform.graph.repo_scope import RepoScope
 from codev_platform.plugins.builtin import _stack_scan
-from codev_platform.plugins.registry import run_applicable
+from codev_platform.plugins.executor import ERR_NOT_APPLICABLE
+from codev_platform.plugins.registry import run_all
 # "项目→仓根集合"解析在 core.repos 单一真值源(graph ingest 与 agent 文件工具共用)。
 # 旧名 re-export 保持向后兼容(既有调用/测试不破)。
 from codev_platform.core.repos import (
-    meta_extra_repos as _meta_extra_repos,
+    meta_extra_repos as _meta_extra_repos,  # noqa: F401
     project_repo_roots,
-    resolve_meta_extra_entries as _resolve_meta_extra_entries,
+    resolve_meta_extra_entries as _resolve_meta_extra_entries,  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
@@ -100,18 +101,76 @@ def _merge_result(merged: dict[str, AnalyzerResult], node_seen: dict[str, set[st
     s["edges"] += summ.get("edges", len(ar.edges))
 
 
-def _collect_merged(repos: list[Path], project_id: str, scope: RepoScope,
-                    report: IngestReport) -> dict[str, AnalyzerResult]:
+def _collect_merged(
+    repos: list[Path],
+    project_id: str,
+    scope: RepoScope,
+    report: IngestReport,
+) -> tuple[dict[str, AnalyzerResult], set[str], set[str]]:
     """跑所有仓 × 适用插件 → 前端节点打仓维度(scope.localize 防跨仓碰撞)→ 按 plugin 合并跨仓产出。"""
     merged: dict[str, AnalyzerResult] = {}
     node_seen: dict[str, set[str]] = {}
+    seen_plugins: set[str] = set()
+    ok_plugins: set[str] = set()
+    failed_plugins: set[str] = set()
     for repo in repos:
-        for exec_result in run_applicable(repo, project_id):
+        for exec_result in run_all(repo, project_id):
+            seen_plugins.add(exec_result.plugin)
             if exec_result.result is None:
+                if exec_result.error_code != ERR_NOT_APPLICABLE:
+                    failed_plugins.add(exec_result.plugin)
                 continue
+            ok_plugins.add(exec_result.plugin)
             scope.localize(exec_result.result, repo)
             _merge_result(merged, node_seen, exec_result, report)
-    return merged
+    stale_plugins = seen_plugins - ok_plugins - failed_plugins
+    return merged, stale_plugins, failed_plugins
+
+
+def _clear_stale_plugin_results(store, project_id: str, plugins: set[str],
+                                report: IngestReport) -> None:
+    """清掉上轮适用、本轮所有仓均不适用的插件旧产物。
+
+    插件失败时不清旧图谱(保可用);只有确定 NOT_APPLICABLE 才清,避免技术栈变化或 detect 规则
+    收窄后旧节点长期残留。仅清 store 中已有 plugin,不为从未产出过的插件刷空 meta。
+    """
+    if not plugins:
+        return
+    existing = {p["plugin"] for p in store.stats(project_id).get("plugins", [])}
+    for plug in sorted(plugins & existing):
+        store.upsert_result(project_id, AnalyzerResult(plugin=plug))
+        report.summaries[plug] = {"nodes": 0, "edges": 0, "cleared_stale": True}
+
+
+def _has_existing_plugin_result(store, project_id: str, plugin: str) -> bool:
+    return any(p["plugin"] == plugin for p in store.stats(project_id).get("plugins", []))
+
+
+def _drop_partial_failed_with_stale(
+    store,
+    project_id: str,
+    merged: dict[str, AnalyzerResult],
+    failed_plugins: set[str],
+    report: IngestReport,
+) -> dict[str, AnalyzerResult]:
+    """同 plugin 多仓部分失败时,有旧结果则保守保留旧图谱。
+
+    store 写入是 plugin 粒度全量替换,无法只替换成功仓分片。若本轮某仓失败而直接 upsert 成功仓,
+    会把失败仓上轮数据一起删掉。旧结果存在时跳过该 plugin 本轮写入;旧结果不存在时仍写成功部分,
+    让首次 ingest 尽可能产出可用子集。
+    """
+    if not failed_plugins:
+        return merged
+    kept: dict[str, AnalyzerResult] = {}
+    for plug, ar in merged.items():
+        if plug in failed_plugins and _has_existing_plugin_result(store, project_id, plug):
+            report.summaries[plug] = {
+                **report.summaries.get(plug, {}),
+                "partial_failure_kept_stale": True,
+            }
+            continue
+        kept[plug] = ar
+    return kept
 
 
 def ingest_project(
@@ -144,7 +203,11 @@ def ingest_project(
     scope = RepoScope(repos)
     try:
         # 跑所有仓 × 插件 + 前端节点打仓维度 + 按 plugin 合并跨仓产出, 然后逐 plugin 落库。
-        for plug, ar in _collect_merged(repos, project_id, scope, report).items():
+        merged, stale_plugins, failed_plugins = _collect_merged(repos, project_id, scope, report)
+        _clear_stale_plugin_results(store, project_id, stale_plugins, report)
+        merged = _drop_partial_failed_with_stale(
+            store, project_id, merged, failed_plugins, report)
+        for plug, ar in merged.items():
             store.upsert_result(project_id, ar)
             report.ingested.append(plug)
 

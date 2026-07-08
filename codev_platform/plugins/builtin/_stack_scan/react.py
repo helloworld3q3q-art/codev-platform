@@ -29,6 +29,7 @@ def react_detect(repo: Path) -> bool:
 
     不局限目录名 (不写死 web-ui), 纯按内容判定。
     """
+    has_vue_package = False
     for pkg in _iter_named(repo, "package.json"):
         try:
             data = json.loads(pkg.read_text(encoding="utf-8"))
@@ -41,6 +42,9 @@ def react_detect(repo: Path) -> bool:
                 deps.update(section)
         if "react" in deps:
             return True
+        has_vue_package = has_vue_package or "vue" in deps
+    if has_vue_package:
+        return False
     return _has_file_with_suffix(repo, ".tsx")
 
 

@@ -51,6 +51,18 @@ def test_react_detect_negative(tmp_path):
     assert FrontendReactPlugin().detect(tmp_path) is False
 
 
+def test_react_detect_negative_vue_repo_with_tsx_renderer(tmp_path):
+    """Vue 项目可包含 TSX 渲染器;没有 react 依赖时不应误触 React 插件。"""
+    (tmp_path / "package.json").write_text(
+        '{"dependencies": {"vue": "^3.4.0"}}', encoding="utf-8"
+    )
+    (tmp_path / "src" / "renderer").mkdir(parents=True)
+    (tmp_path / "src" / "renderer" / "index.tsx").write_text(
+        "export default { render() { return null } }", encoding="utf-8"
+    )
+    assert FrontendReactPlugin().detect(tmp_path) is False
+
+
 def test_fastapi_detect_by_import(tmp_path):
     (tmp_path / "app.py").write_text(
         "from fastapi import FastAPI\napp = FastAPI()\n", encoding="utf-8"

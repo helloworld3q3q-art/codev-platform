@@ -20,7 +20,7 @@
 | [daily-summary-2026-06-21.md](daily-summary-2026-06-21.md) | 运维事故线:platform-docs MCP CUDA daemon 故障修复(cudaErrorUnknown 上下文损坏致进程假活/双绿但搜索全死);两步闭环 restart daemon + 重启客户端;教训"进程绿灯≠服务可用,判活必实调" | 日报 |
 | [daily-summary-2026-07-06.md](daily-summary-2026-07-06.md) | P3 多仓多根索引首批落地:RepoSpec 真值源、code_vec/recall fan-out、extra repo 反向触发、agent codegraph 工具跨仓查询;剩 Web GraphAPI / 外部 codegraph MCP 代理读侧待做 | 日报 |
 | [daily-summary-2026-07-07.md](daily-summary-2026-07-07.md) | P3 审计修复 + 运行治理 + Web/MCP fan-out:tagged file tools、rerank extra ref、PG queue fail-closed、extra repo webhook 体检、fan-out 指标/告警、Web codegraph 多仓读侧、外部 codegraph MCP 代理分仓合并与结构化 merge、真实 ideas E2E、recall_code 主仓缺索引降级修复、codegraph status Junction 判定回归测试、reindex 队列 STALE 安全治理与 worker 闭环、代码智能可用性与 token 成本收口、拉通审计修复 wait/worker/recall 闭环 | 日报 |
-| [daily-summary-2026-07-08.md](daily-summary-2026-07-08.md) | OMS 真实图谱解析收口:增强 `builtin.backend_spring` 支持接口 mapping + Controller 实现类结构;补 `builtin.sql` Java JPA/dao-service QueryModel 查询血缘;修复多仓 `frontend_deps` 命名空间导致 `frontend_bridge=0` 的通用问题;新增通用 JS/TS `request({url,method})` 前端 API 扫描;DSM graph `backend_spring` 0→3、`call_resolvers` 0→3 且 audit clean | 日报 |
+| [daily-summary-2026-07-08.md](daily-summary-2026-07-08.md) | OMS 真实图谱解析收口:增强 `builtin.backend_spring` 支持接口 mapping + Controller 实现类结构;补 `builtin.sql` Java JPA/dao-service QueryModel 查询血缘;修复多仓 `frontend_deps` 命名空间导致 `frontend_bridge=0` 的通用问题;新增通用 JS/TS `request({url,method})` 前端 API 扫描;补插件不适用旧产物清理与失败保留策略;DSM graph `backend_spring` 0→3、`call_resolvers` 0→3 且 audit clean | 日报 |
 | [../roadmap-2026-07-08/](../roadmap-2026-07-08/) | 当前主目录:reindex worker 短驻化 + 队列可观测 | 当前 |
 
 ## 四项速览(优先级序)

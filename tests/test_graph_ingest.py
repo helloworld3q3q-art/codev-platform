@@ -99,6 +99,103 @@ def test_ingest_skips_not_applicable(tmp_path: Path) -> None:
     assert "fake.skip" not in report.ingested
 
 
+def test_ingest_clears_stale_not_applicable_plugin(tmp_path: Path) -> None:
+    clear_registry()
+    store = tmp_path / "g.sqlite"
+    stale = GraphNode(
+        id="demo:project:stale",
+        kind="project",
+        name="stale",
+        project_id="demo",
+    )
+    conn = open_store("demo", path=store)
+    conn.upsert_result("demo", AnalyzerResult(nodes=[stale], plugin="fake.skip"))
+    conn.close()
+
+    register_plugin(_SkipPlugin())
+    ingest_project(tmp_path, "demo", store_path=store)
+
+    conn = open_store("demo", path=store)
+    try:
+        got = conn.load_graph("demo", plugin="fake.skip")
+    finally:
+        conn.close()
+    assert got.nodes == []
+
+
+def test_ingest_keeps_stale_data_when_plugin_crashes(tmp_path: Path) -> None:
+    clear_registry()
+    store = tmp_path / "g.sqlite"
+    stale = GraphNode(
+        id="demo:project:stale-crash",
+        kind="project",
+        name="stale-crash",
+        project_id="demo",
+    )
+    conn = open_store("demo", path=store)
+    conn.upsert_result("demo", AnalyzerResult(nodes=[stale], plugin="fake.crash"))
+    conn.close()
+
+    register_plugin(_CrashPlugin())
+    ingest_project(tmp_path, "demo", store_path=store)
+
+    conn = open_store("demo", path=store)
+    try:
+        got = conn.load_graph("demo", plugin="fake.crash")
+    finally:
+        conn.close()
+    assert [n.id for n in got.nodes] == ["demo:project:stale-crash"]
+
+
+class _PartialCrashPlugin(AnalyzerPlugin):
+    name = "fake.partial"
+    version = "1.0.0"
+
+    def detect(self, repo_path: Path) -> bool:
+        return True
+
+    def analyze(self, repo_path: Path, project_id: str) -> AnalyzerResult:
+        base = Path(repo_path).name
+        if base == "extra":
+            raise RuntimeError("boom-extra")
+        return AnalyzerResult(
+            plugin=self.name,
+            nodes=[
+                GraphNode(
+                    id=f"{project_id}:project:{base}-new",
+                    kind="project",
+                    name=f"{base}-new",
+                    project_id=project_id,
+                )
+            ],
+        )
+
+
+def test_ingest_keeps_stale_data_when_one_repo_crashes_and_other_succeeds(tmp_path: Path) -> None:
+    clear_registry()
+    main = tmp_path / "main"; main.mkdir()
+    extra = tmp_path / "extra"; extra.mkdir()
+    store = tmp_path / "g.sqlite"
+    old_nodes = [
+        GraphNode(id="demo:project:main-old", kind="project", name="main-old", project_id="demo"),
+        GraphNode(id="demo:project:extra-old", kind="project", name="extra-old", project_id="demo"),
+    ]
+    conn = open_store("demo", path=store)
+    conn.upsert_result("demo", AnalyzerResult(nodes=old_nodes, plugin="fake.partial"))
+    conn.close()
+
+    register_plugin(_PartialCrashPlugin())
+    report = ingest_project(main, "demo", store_path=store, extra_repos=[str(extra)])
+
+    conn = open_store("demo", path=store)
+    try:
+        got = conn.load_graph("demo", plugin="fake.partial")
+    finally:
+        conn.close()
+    assert {n.id for n in got.nodes} == {"demo:project:main-old", "demo:project:extra-old"}
+    assert report.summaries["fake.partial"]["partial_failure_kept_stale"] is True
+
+
 def test_ingest_idempotent(tmp_path: Path) -> None:
     clear_registry()
     register_plugin(_OkPlugin())

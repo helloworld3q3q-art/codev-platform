@@ -129,3 +129,32 @@ python -m ruff check codev_platform/plugins/builtin/_stack_scan/js_request.py co
 ```
 
 结果:`32 passed`,ruff 通过。
+
+## 十、真实 OMS 前端 ingest 验收与插件生命周期修正
+
+- 跑真实 `oms-work` ingest 后发现:`scl-www` 是 Vue/Vite 项目,但含 3 个 `.tsx` 渲染器组件;原 `react_detect` 只要看到 `.tsx` 就命中,导致 `builtin.frontend_react` 和 `builtin.vue` 同时扫描同一批 TS API,出现 2372 个重复 `frontend_api_call` warning。
+- 通用修正:
+  - `react_detect` 优先按 `package.json` 的 `react` 依赖判断;没有 React 依赖但声明 Vue 依赖时,不再用 `.tsx` fallback 误判 React。
+  - 补回归测试:Vue 项目含 TSX renderer 但无 React 依赖时,`FrontendReactPlugin.detect()` 为 false。
+- 继续验证时发现旧 `builtin.frontend_react` 产物仍留在 store:ingest 只 upsert 本轮成功插件,不会清理“上轮适用、本轮不适用”的插件旧数据。
+- 通用生命周期修正:
+  - ingest 改为收集所有插件执行结果;仅当某插件在所有仓均为 `NOT_APPLICABLE` 且 store 中有旧产物时,写空 `AnalyzerResult` 清旧结果。
+  - 插件失败不清旧图谱;多仓部分失败且该 plugin 已有旧结果时,跳过该 plugin 本轮整体 upsert,保留旧图谱,避免按 plugin 全量替换时抹掉失败仓上轮数据。
+  - 补测试覆盖:全仓不适用清旧、全仓 crash 保留旧、多仓部分成功部分失败时保留旧并记录 `partial_failure_kept_stale`。
+- 真实 OMS 复验:
+  - `python -m codev_platform.cli reindex --repo D:\OmsWork\scl-sod-gateway --ingest` 成功,约 8s。
+  - `builtin.frontend_react node_count=0`,`builtin.vue node_count=3705`,`builtin.frontend_bridge edge_count=2405`。
+  - store 探针:`frontend_api_call=2374, unique_api_ids=2374, duplicate=0, calls_api=0`。
+  - `calls_api=0` 原因确认:当前后端 endpoint 只有静态 demo `GET /` 和 DSM `/param-mapping/*` 三个接口,`scl-www` 源码无这些 `/param-mapping/*` 调用;不是桥接失败。
+  - `graph audit --project oms-work --json` 为 clean,duplicate_nodes/duplicate_edges/no_provenance 均为 0。
+
+验证:
+
+```powershell
+python -m pytest tests/test_graph_ingest.py tests/test_repo_scope.py tests/test_frontend_bridge.py tests/test_plugins_stack.py tests/test_js_request_scan.py tests/test_plugins_stack_vue.py tests/test_ingest_linker.py
+python -m ruff check codev_platform/graph/ingest.py codev_platform/plugins/builtin/_stack_scan/react.py tests/test_plugins_stack.py tests/test_js_request_scan.py tests/test_plugins_stack_vue.py
+python -m codev_platform.cli reindex --repo D:\OmsWork\scl-sod-gateway --ingest
+python -m codev_platform.cli graph audit --project oms-work --json
+```
+
+结果:`63 passed`,ruff 通过,真实 OMS audit clean。
