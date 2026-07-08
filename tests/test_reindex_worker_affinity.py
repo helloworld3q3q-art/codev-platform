@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
 
 import codev_platform.core.repos as repos
 from codev_platform.reindex.queue import FileSpoolQueue, Job
+from codev_platform.reindex import worker as worker_mod
 from codev_platform.reindex.worker import ReindexWorker, _repo_for
 
 
@@ -123,3 +123,38 @@ def test_run_until_idle_exits_after_empty_queue(tmp_path):
     started = time.monotonic()
     asyncio.run(ReindexWorker(_Q(), {}).run_until_idle(0.1, 0.1))
     assert time.monotonic() - started < 1.0
+
+
+def test_run_job_records_runner_failure_note(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    job = Job("demo", "chroma", time.time())
+    completed: list[str] = []
+    records: list[object] = []
+
+    class _Q:
+        def complete(self, done):
+            completed.append(done.key)
+            return True
+
+    class _Runner:
+        last_note = "chroma rc=1\nFAIL: chroma reindex exit=1"
+
+        def run(self, project_id, repo_path, cfg):
+            return 1
+
+    monkeypatch.setattr(worker_mod, "_repo_for", lambda cfg, project_id: repo)
+    monkeypatch.setattr("codev_platform.reindex.runners.get_runner", lambda kind: _Runner())
+    monkeypatch.setattr(
+        "codev_platform.reindex.git_sync.sync_repo_to_remote",
+        lambda repo_path: {"pulled": True, "note": "ok"},
+    )
+    monkeypatch.setattr("codev_platform.index_manifest.git_head", lambda repo_path: "abc")
+    monkeypatch.setattr("codev_platform.index_manifest.record_build", lambda rec: records.append(rec))
+
+    assert ReindexWorker(_Q(), {})._run_job(job) is None
+
+    assert completed == ["demo__chroma"]
+    assert records
+    assert records[0].status == "failed"
+    assert "FAIL: chroma reindex exit=1" in records[0].note

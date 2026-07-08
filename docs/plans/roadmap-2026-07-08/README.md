@@ -56,4 +56,5 @@
 - WSL 实调:`/healthz` 可达,`/platform/status` 仍 401;诊断确认交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`,后续需单独处理 WSL token 环境注入。
 - `webhook extra repos` 收敛经测试审计兄弟二次审查并修正扫描范围后,Windows/WSL 运行态诊断均为 0 条,`health --mode light` 均为 READY/all green;目标回归合计 `53 passed`(运行态相关 `44 passed` + CLI parser `9 passed`)。
 - `hook missed?` manifest 兜底经测试审计兄弟二次审查后收窄为 `chroma` only,补齐 `failed`/`stale`/`unknown`/unreadable/project unknown 分支、legacy log 优先级和混合 scope 下优先暴露 `chroma` 失败的覆盖;目标回归 `17 passed` + 邻近 health/manifest/CLI `33 passed`(合计 `50 passed`),ruff 目标文件通过,Windows/WSL health READY。
+- `reindex worker` runner 失败可观测性增强:每个 project/kind 的子进程输出覆盖写入 `data/logs/reindex-runner/<project>__<kind>.log`,失败/超时时 tail 写入 manifest note 并进入 worker.log detail;成功输出也保留在 runner log。测试审计兄弟复审无阻塞,目标回归 `52 passed`,ruff 目标文件通过。剩余风险:runner log 尚未做敏感串脱敏和单次日志大小上限。
 - 实时状态:`reindex-queue status` 显示 FileSpoolQueue 队列空,短驻 worker 已 idle 退出。

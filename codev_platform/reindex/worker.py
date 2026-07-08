@@ -12,8 +12,8 @@ from __future__ import annotations
 import datetime
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from codev_platform.core.config import get as _cfg_get
 from codev_platform.reindex import runners as _runners
@@ -38,6 +38,13 @@ def _log(msg: str) -> None:
     except Exception:
         pass
     print(line, file=sys.stderr, flush=True)
+
+
+def _compact_note(note: str, limit: int = 500) -> str:
+    text = " | ".join(line.strip() for line in note.splitlines() if line.strip())
+    if len(text) <= limit:
+        return text
+    return "..." + text[-limit:]
 
 
 def _repo_for(cfg: dict, project_id: str) -> Path | None:
@@ -176,11 +183,13 @@ class ReindexWorker:
             self._job_event(job, "retry")
             return None
         # 终态 (rc==0 成功 / 其它 rc 失败): 写统一 manifest (Phase 1, best-effort 不阻断)。
-        self._record_manifest(job, repo, started, "ok" if rc == 0 else "failed")
+        runner_note = str(getattr(runner, "last_note", "") or "")
+        self._record_manifest(job, repo, started, "ok" if rc == 0 else "failed", note=runner_note)
         # 其它 rc!=0 = 真失败: complete 丢弃避免死循环 (错误已在 reindex 日志, ai-health 可见)
         dirty = not self._q.complete(job)
         if rc != 0:
-            _log(f"reindex 失败 {job.key} rc={rc} — 丢弃避免死循环 (查 reindex.log)")
+            detail = f" detail={_compact_note(runner_note)}" if runner_note else ""
+            _log(f"reindex 失败 {job.key} rc={rc}{detail} — 丢弃避免死循环")
             self._job_event(job, "failed")
             return None
         _log(f"reindex 完成 {job.key} rc=0" + (" (运行期又有新触发, 已重排)" if dirty else ""))

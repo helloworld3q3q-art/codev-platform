@@ -19,10 +19,10 @@ def _patch_venv(monkeypatch) -> None:
     monkeypatch.setattr(runners, "_venv_python", lambda cfg: "python")
 
 
-def test_runner_passes_config_timeout_to_subprocess(monkeypatch):
+def test_runner_passes_config_timeout_to_subprocess(monkeypatch, tmp_path):
     captured: dict = {}
 
-    def fake_run(cmd, timeout=None):
+    def fake_run(cmd, timeout=None, **kwargs):
         captured["timeout"] = timeout
 
         class _R:
@@ -31,6 +31,7 @@ def test_runner_passes_config_timeout_to_subprocess(monkeypatch):
         return _R()
 
     _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     r = runners.CliReindexRunner("chroma", "--chroma")
@@ -40,23 +41,27 @@ def test_runner_passes_config_timeout_to_subprocess(monkeypatch):
     assert captured["timeout"] == 42.0
 
 
-def test_runner_returns_124_on_timeout(monkeypatch):
-    def fake_run(cmd, timeout=None):
+def test_runner_returns_124_on_timeout(monkeypatch, tmp_path):
+    def fake_run(cmd, timeout=None, **kwargs):
+        kwargs["stdout"].write("loading model\nstill running\n")
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
 
     _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     r = runners.CliReindexRunner("chroma", "--chroma")
     rc = r.run("demo", Path("."), {})
 
     assert rc == runners._TIMEOUT_RC == 124
+    assert "timeout" in r.last_note
+    assert "still running" in r.last_note
 
 
-def test_default_timeout_used_when_unset(monkeypatch):
+def test_default_timeout_used_when_unset(monkeypatch, tmp_path):
     captured: dict = {}
 
-    def fake_run(cmd, timeout=None):
+    def fake_run(cmd, timeout=None, **kwargs):
         captured["timeout"] = timeout
 
         class _R:
@@ -65,6 +70,7 @@ def test_default_timeout_used_when_unset(monkeypatch):
         return _R()
 
     _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     runners.CliReindexRunner("codegraph", "--codegraph").run("demo", Path("."), {})
@@ -72,10 +78,10 @@ def test_default_timeout_used_when_unset(monkeypatch):
     assert captured["timeout"] == float(runners._DEFAULT_RUNNER_TIMEOUT_SEC)
 
 
-def test_non_positive_timeout_disables_bound(monkeypatch):
+def test_non_positive_timeout_disables_bound(monkeypatch, tmp_path):
     captured: dict = {}
 
-    def fake_run(cmd, timeout=None):
+    def fake_run(cmd, timeout=None, **kwargs):
         captured["timeout"] = timeout
 
         class _R:
@@ -84,6 +90,7 @@ def test_non_positive_timeout_disables_bound(monkeypatch):
         return _R()
 
     _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     runners.CliReindexRunner("chroma", "--chroma").run(
@@ -93,10 +100,10 @@ def test_non_positive_timeout_disables_bound(monkeypatch):
     assert captured["timeout"] is None
 
 
-def test_invalid_timeout_falls_back_to_default(monkeypatch):
+def test_invalid_timeout_falls_back_to_default(monkeypatch, tmp_path):
     captured: dict = {}
 
-    def fake_run(cmd, timeout=None):
+    def fake_run(cmd, timeout=None, **kwargs):
         captured["timeout"] = timeout
 
         class _R:
@@ -105,6 +112,7 @@ def test_invalid_timeout_falls_back_to_default(monkeypatch):
         return _R()
 
     _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     runners.CliReindexRunner("chroma", "--chroma").run(
@@ -112,3 +120,72 @@ def test_invalid_timeout_falls_back_to_default(monkeypatch):
     )
 
     assert captured["timeout"] == float(runners._DEFAULT_RUNNER_TIMEOUT_SEC)
+
+
+def test_runner_records_failure_output_tail(monkeypatch, capsys, tmp_path):
+    def fake_run(cmd, timeout=None, **kwargs):
+        kwargs["stdout"].write("ok line\nFAIL: chroma reindex exit=1\n")
+
+        class _R:
+            returncode = 1
+
+        return _R()
+
+    _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    r = runners.CliReindexRunner("chroma", "--chroma")
+    rc = r.run("demo", Path("."), {})
+
+    assert rc == 1
+    assert "chroma rc=1" in r.last_note
+    assert "FAIL: chroma reindex exit=1" in r.last_note
+    assert "FAIL: chroma reindex exit=1" in capsys.readouterr().err
+    assert "FAIL: chroma reindex exit=1" in (
+        tmp_path / "logs" / "reindex-runner" / "demo__chroma.log"
+    ).read_text(encoding="utf-8")
+
+
+def test_runner_clears_previous_failure_note_on_next_run(monkeypatch, tmp_path):
+    returncodes = [1, 0]
+
+    def fake_run(cmd, timeout=None, **kwargs):
+        kwargs["stdout"].write("first failure\n")
+
+        class _R:
+            returncode = returncodes.pop(0)
+
+        return _R()
+
+    _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    r = runners.CliReindexRunner("chroma", "--chroma")
+    assert r.run("demo", Path("."), {}) == 1
+    assert r.last_note
+    assert r.run("demo", Path("."), {}) == 0
+    assert r.last_note == ""
+
+
+def test_runner_keeps_success_output_in_runner_log(monkeypatch, tmp_path):
+    def fake_run(cmd, timeout=None, **kwargs):
+        kwargs["stdout"].write("WARN: non-fatal lane skipped\n")
+
+        class _R:
+            returncode = 0
+
+        return _R()
+
+    _patch_venv(monkeypatch)
+    monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    r = runners.CliReindexRunner("ingest", "--ingest")
+    assert r.run("demo", Path("."), {}) == 0
+
+    assert r.last_note == ""
+    assert "WARN: non-fatal lane skipped" in (
+        tmp_path / "logs" / "reindex-runner" / "demo__ingest.log"
+    ).read_text(encoding="utf-8")

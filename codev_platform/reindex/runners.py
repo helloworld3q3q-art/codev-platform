@@ -49,6 +49,8 @@ def _venv_python(cfg: dict) -> str:
 # 整个队列。config 驱动: reindex.runner_timeout_sec; <=0 = 显式禁用 (无界, 老行为)。
 _DEFAULT_RUNNER_TIMEOUT_SEC = 1800  # 30min 上限 (大仓 chroma embedding 留足余量)
 _TIMEOUT_RC = 124  # 与 GNU timeout 约定一致; worker 视 rc!=0 且 !=2 → 丢弃防死循环
+_FAILURE_TAIL_BYTES = 8000
+_FAILURE_NOTE_CHARS = 1200
 
 
 def _runner_timeout(cfg: dict) -> float | None:
@@ -62,6 +64,35 @@ def _runner_timeout(cfg: dict) -> float | None:
     return t if t > 0 else None
 
 
+def _tail_output(log_file, limit: int = _FAILURE_TAIL_BYTES) -> str:
+    log_file.flush()
+    log_file.seek(0, 2)
+    size = log_file.tell()
+    log_file.seek(max(0, size - limit))
+    return log_file.read().strip()
+
+
+def _failure_note(kind: str, rc: int, timeout: float | None, output: str) -> str:
+    head = f"{kind} rc={rc}"
+    if timeout is not None:
+        head += f" timeout={timeout}s"
+    if not output:
+        return head
+    text = "\n".join(line.rstrip() for line in output.splitlines() if line.strip())
+    if len(text) > _FAILURE_NOTE_CHARS:
+        text = "..." + text[-_FAILURE_NOTE_CHARS:]
+    return f"{head}\n{text}"
+
+
+def _runner_log_path(project_id: str, kind: str) -> Path:
+    from codev_platform.core.paths import logs_dir
+    safe_project = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in project_id)
+    safe_kind = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in kind)
+    root = logs_dir() / "reindex-runner"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{safe_project}__{safe_kind}.log"
+
+
 class CliReindexRunner:
     """通用 runner: 委托 `python -m codev_platform.cli reindex <flag> --repo <repo>`。
 
@@ -71,25 +102,35 @@ class CliReindexRunner:
 
     def __init__(self, kind: str, flag) -> None:
         self.kind = kind
+        self.last_note = ""
         # flag 可为单个 str 或多个(list): code_vec 用 ['--codegraph','--code-vec'] 让同一子进程先
         # sync codegraph 再建向量, 保证读新鲜 codegraph.db(纵深, 不靠跨 job 排序)+ 使 R4 锁忙逻辑生效。
         self._flags = [flag] if isinstance(flag, str) else list(flag)
 
     def run(self, project_id: str, repo: Path, cfg: dict) -> int:
+        self.last_note = ""
         py = _venv_python(cfg)
         cmd = [py, "-m", "codev_platform.cli", "reindex", *self._flags, "--repo", str(repo)]
         timeout = _runner_timeout(cfg)
-        try:
-            return subprocess.run(cmd, timeout=timeout).returncode
-        except subprocess.TimeoutExpired:
-            # 超时 → 子进程已被 kill; 返回 rc=124 让 worker 丢弃该 job, 避免挂死任务
-            # 永久阻塞串行队列队头 (挂过一次大概率再挂, 不重试)。
-            print(
-                f"[reindex:{self.kind}] timeout {timeout}s killed "
-                f"(project={project_id}, repo={repo}) -> rc={_TIMEOUT_RC}",
-                file=sys.stderr,
-            )
-            return _TIMEOUT_RC
+        log_path = _runner_log_path(project_id, self.kind)
+        with log_path.open("w+", encoding="utf-8", errors="replace") as log_file:
+            try:
+                rc = subprocess.run(
+                    cmd,
+                    timeout=timeout,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                ).returncode
+            except subprocess.TimeoutExpired:
+                # 超时 → 子进程已被 kill; 返回 rc=124 让 worker 丢弃该 job, 避免挂死任务
+                # 永久阻塞串行队列队头 (挂过一次大概率再挂, 不重试)。
+                self.last_note = _failure_note(self.kind, _TIMEOUT_RC, timeout, _tail_output(log_file))
+                print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
+                return _TIMEOUT_RC
+            if rc != 0:
+                self.last_note = _failure_note(self.kind, rc, None, _tail_output(log_file))
+                print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
+            return rc
 
 
 class CodegraphReindexRunner(CliReindexRunner):
