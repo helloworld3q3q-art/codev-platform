@@ -224,7 +224,11 @@ def test_webhook_mapping_warnings_for_unmapped_extra_repo(tmp_path, monkeypatch)
     child = tmp_path / "child"; child.mkdir()
     cfg = {
         "projects": {
-            "parent-proj": {"repo_path": str(parent), "extra_repos": [str(child)]},
+            "parent-proj": {
+                "repo_path": str(parent),
+                "webhook_repo": "org/parent",
+                "extra_repos": [str(child)],
+            },
         }
     }
     monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
@@ -234,3 +238,42 @@ def test_webhook_mapping_warnings_for_unmapped_extra_repo(tmp_path, monkeypatch)
     assert len(warnings) == 1
     assert "parent-proj" in warnings[0]
     assert "未映射" in warnings[0]
+
+
+def test_webhook_mapping_warnings_scan_webhook_enabled_projects_only(monkeypatch):
+    cfg = {"projects": {"active-proj": {}, "hooked-proj": {"webhook_repo": "org/hooked"}}}
+    monkeypatch.setattr(
+        "codev_platform.core.repos._read_meta",
+        lambda pid: {"extra_repos": ["meta-child"]} if pid == "meta-parent" else {},
+    )
+
+    assert server.webhook_mapping_warnings(cfg) == []
+
+
+def test_webhook_mapping_warnings_skip_project_without_webhook_repo(monkeypatch):
+    cfg = {"projects": {"oms-work": {"repo_path": "/abs/oms"}}}
+    monkeypatch.setattr(
+        "codev_platform.core.repos._read_meta",
+        lambda pid: {"extra_repos": ["/abs/child"]} if pid == "oms-work" else {},
+    )
+
+    assert server.webhook_mapping_warnings(cfg) == []
+
+
+def test_webhook_mapping_warnings_keep_enabled_project_warning(tmp_path, monkeypatch):
+    child = tmp_path / "child"; child.mkdir()
+    cfg = {
+        "projects": {
+            "parent-proj": {
+                "repo_path": str(tmp_path / "parent"),
+                "webhook_repo": "org/parent",
+                "extra_repos": [str(child)],
+            }
+        }
+    }
+    monkeypatch.setattr("codev_platform.core.repos._read_meta", lambda pid: {})
+
+    warnings = server.webhook_mapping_warnings(cfg)
+
+    assert len(warnings) == 1
+    assert "parent-proj" in warnings[0]

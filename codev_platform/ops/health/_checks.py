@@ -450,8 +450,8 @@ def _check_git_tools(r: Report, repo: Path) -> None:
 
 
 def _check_webhook_extra_repo_mapping(r: Report, cfg: dict) -> None:
-    from codev_platform.core.repos import webhook_extra_repo_mapping_issues
-    issues = webhook_extra_repo_mapping_issues(cfg)
+    from codev_platform.core.repos import webhook_enabled_project_ids, webhook_extra_repo_mapping_issues
+    issues = webhook_extra_repo_mapping_issues(cfg, project_ids=webhook_enabled_project_ids(cfg))
     if not issues:
         r.line("webhook extra repos", "OK", "all extra repos have webhook mapping or no extra_repos")
         return

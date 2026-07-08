@@ -172,6 +172,23 @@ def _project_webhook_repo(cfg: dict, project_id: str) -> str:
     return str(_cfg_get(cfg, f"projects.{project_id}.webhook_repo") or "").strip()
 
 
+def configured_project_ids(cfg: dict) -> list[str]:
+    """本机 config 中显式登记的 project_id。"""
+    projects = _cfg_get(cfg, "projects") or {}
+    if not isinstance(projects, dict):
+        return []
+    return [str(pid) for pid in projects]
+
+
+def webhook_enabled_project_ids(cfg: dict) -> list[str]:
+    """本机 webhook 运行态实际可从 VCS repo 入口命中的 project_id。
+
+    health/webhook startup 的映射诊断只扫这些项目;跨项目影响反查仍使用
+    _known_project_ids(cfg),保留 platform_meta project-id 引用能力。
+    """
+    return [pid for pid in configured_project_ids(cfg) if _project_webhook_repo(cfg, pid)]
+
+
 def _project_repo_path_raw(cfg: dict, project_id: str) -> str:
     return str(_cfg_get(cfg, f"projects.{project_id}.repo_path") or "").strip()
 
@@ -183,15 +200,29 @@ def _same_path(a: str, b: str) -> bool:
         return str(a).strip() == str(b).strip()
 
 
-def webhook_extra_repo_mapping_issues(cfg: dict | None = None) -> list[dict[str, str]]:
+def _seen_extra_ref(raw: str, seen: list[str], known: list[str]) -> bool:
+    if raw in known:
+        return raw in seen
+    return any(_same_path(raw, prior) if prior not in known else raw == prior for prior in seen)
+
+
+def webhook_extra_repo_mapping_issues(
+    cfg: dict | None = None,
+    *,
+    project_ids: list[str] | None = None,
+) -> list[dict[str, str]]:
     """找出 extra_repos 无法被 webhook 反向触发的配置缺口。
 
     webhook 入口先按 `projects.<pid>.webhook_repo` 把 VCS repo 映射到一个 project,
     再通过 impacted_project_ids_for_repo() 找父项目。因此每个 extra repo 最好有自己的
     project 登记和 webhook_repo。这里只做只读诊断, 不要求路径一定存在。
+
+    默认 project_ids=None 是全量诊断(含 platform_meta 项目)。health/webhook startup
+    运行态诊断应传 webhook_enabled_project_ids(cfg),避免未启用 webhook 的本机项目刷屏。
     """
     cfg = load_config() if cfg is None else cfg
     known = _known_project_ids(cfg)
+    scan_project_ids = project_ids if project_ids is not None else known
     projects = _cfg_get(cfg, "projects") or {}
     issues: list[dict[str, str]] = []
 
@@ -200,11 +231,19 @@ def webhook_extra_repo_mapping_issues(cfg: dict | None = None) -> list[dict[str,
         if row not in issues:
             issues.append(row)
 
-    for pid in known:
+    for pid in scan_project_ids:
+        seen_refs: list[str] = []
+        seen_missing_webhook: set[tuple[str, str]] = set()
         for raw in _raw_extra_refs(pid, cfg):
+            if _seen_extra_ref(raw, seen_refs, known):
+                continue
+            seen_refs.append(raw)
             if raw in known:
                 if not _project_webhook_repo(cfg, raw):
-                    add(pid, raw, "extra project 缺 projects.<extra>.webhook_repo")
+                    key = (pid, raw)
+                    if key not in seen_missing_webhook:
+                        seen_missing_webhook.add(key)
+                        add(pid, raw, "extra project 缺 projects.<extra>.webhook_repo")
                 continue
 
             path = raw
@@ -222,7 +261,10 @@ def webhook_extra_repo_mapping_issues(cfg: dict | None = None) -> list[dict[str,
             if mapped_pid is None:
                 add(pid, raw, "extra repo 路径未登记为独立 project")
             elif not _project_webhook_repo(cfg, mapped_pid):
-                add(pid, raw, f"mapped project {mapped_pid} 缺 webhook_repo")
+                key = (pid, mapped_pid)
+                if key not in seen_missing_webhook:
+                    seen_missing_webhook.add(key)
+                    add(pid, raw, f"mapped project {mapped_pid} 缺 webhook_repo")
     return issues
 
 

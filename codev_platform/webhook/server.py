@@ -210,10 +210,11 @@ async def run_http(port: int | None = None) -> None:
 
 def webhook_mapping_warnings(cfg: dict | None = None) -> list[str]:
     """启动期展示 extra repo webhook 映射缺口。只读 config/meta, 不阻断服务启动。"""
-    from codev_platform.core.repos import webhook_extra_repo_mapping_issues
+    from codev_platform.core.repos import webhook_enabled_project_ids, webhook_extra_repo_mapping_issues
+    cfg = load_config() if cfg is None else cfg
     return [
         f"extra repo webhook 未映射: project={i['project_id']} extra={i['extra']} reason={i['reason']}"
-        for i in webhook_extra_repo_mapping_issues(load_config() if cfg is None else cfg)
+        for i in webhook_extra_repo_mapping_issues(cfg, project_ids=webhook_enabled_project_ids(cfg))
     ]
 
 

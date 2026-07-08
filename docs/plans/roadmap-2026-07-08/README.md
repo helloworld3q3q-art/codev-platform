@@ -45,6 +45,7 @@
 - `health` 与 `serve-mcp status` 接入 reindex worker 摘要,可直接指出"队列有待办但 worker 不在"。
 - `health --all` 访问受保护的 `/platform/status` 时支持 Bearer token,按 `platform.token_env` / `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` 顺序取环境变量;401 会继续尝试下一个候选 token,不再裸请求 token-mode 详情面。
 - `config.example.json` 补充 `platform.token_env` 样例,不修改用户级 `~/.codev-platform/config.json`。
+- `webhook extra repos` 诊断改为只扫描本机配置中带 `webhook_repo`、实际会被 webhook 入口命中的项目,并对 config/meta 重复声明的同一路径或同一 child project 做去重;不再让未启用 webhook 的本机项目或 meta-only 项目污染 health/startup。
 
 ## 测试审计记录
 
@@ -52,4 +53,5 @@
 - 目标回归:reindex/post-hook 相关 `93 passed`;MCP serve 相关 `43 passed`。
 - `health --all` token 鉴权经单独测试审计兄弟二次审查,补齐无 token 时不发送 Authorization、首个 token 401 后继续尝试下一个候选 token 的覆盖;目标回归 `11 passed`,CLI parser `9 passed`,配置样板 JSON 解析通过。
 - WSL 实调:`/healthz` 可达,`/platform/status` 仍 401;诊断确认交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`,后续需单独处理 WSL token 环境注入。
+- `webhook extra repos` 收敛经测试审计兄弟二次审查并修正扫描范围后,Windows/WSL 运行态诊断均为 0 条,`health --mode light` 均为 READY/all green;目标回归 `53 passed`,CLI parser `9 passed`。
 - 实时状态:`reindex-queue status` 显示 FileSpoolQueue 队列空,短驻 worker 已 idle 退出。
