@@ -1,6 +1,6 @@
 # Plan — reindex worker 短驻化与队列可观测(2026-07-08)
 
-> **状态**:🟢 P1-P4/P6 已落地,P5 暂缓
+> **状态**:🟢 P1-P6 已落地
 >
 > **主题**:修复"入队成功但无人消费"导致 MCP/索引落后的链路缺口。
 
@@ -101,6 +101,7 @@
   - supervisor 双唤醒幂等、start lock、dead pid run lock 恢复。
   - status 在"有 pending + worker 不运行"时给出明确提示,且 worker running 时不误报 FileSpool STALE。
   - post-commit 唤醒失败 fail-soft,PG-like queue 默认不 auto-start。
+  - `health` / `serve-mcp status` 输出 reindex worker 摘要。
 - 最小验证命令:
 
 ```powershell

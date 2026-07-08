@@ -460,3 +460,9 @@ def _check_webhook_extra_repo_mapping(r: Report, cfg: dict) -> None:
     )
     more = f"; +{len(issues) - 3} more" if len(issues) > 3 else ""
     r.line("webhook extra repos", "WARN", samples + more)
+
+
+def _check_reindex_worker(r: Report) -> None:
+    from codev_platform.reindex.status import format_summary, summarize
+    summary = summarize()
+    r.line("reindex worker", summary.get("severity", "WARN"), format_summary(summary))

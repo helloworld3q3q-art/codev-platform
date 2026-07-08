@@ -79,6 +79,7 @@ from ._checks import (  # noqa: F401
     _check_hook_missed,
     _check_mcp_proxy,
     _check_pd_servers,
+    _check_reindex_worker,
     _check_reranker,
     _check_rules_vs_incident,
     _check_torch,
@@ -146,6 +147,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     _check_graph_store(r, project_id)
     _check_codegraph_mcp(r, repo, procs)
     _check_webhook_extra_repo_mapping(r, cfg)
+    _check_reindex_worker(r)
     _check_hook_missed(r, repo, health)
     _check_git_tools(r, repo)
 

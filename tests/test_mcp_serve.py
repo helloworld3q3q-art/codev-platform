@@ -140,6 +140,27 @@ def test_probe_all_shape(monkeypatch):
     assert any(r["kind"] == "graph" for r in rows)
 
 
+def test_serve_mcp_reindex_worker_status_line(monkeypatch):
+    from codev_platform.cli_cmds import mcp
+    monkeypatch.setattr(
+        "codev_platform.reindex.status.summarize",
+        lambda: {
+            "severity": "WARN",
+            "running": False,
+            "worker": {"running": False, "pid": 123, "exit_reason": "idle"},
+            "queue_backend": "FileSpoolQueue",
+            "pending_count": 2,
+            "oldest_pending_age_sec": 600,
+            "stale_count": 2,
+        },
+    )
+
+    mark, line = mcp._reindex_worker_status_line()
+
+    assert mark == "WARN"
+    assert "pending=2" in line and "stale=2" in line
+
+
 # ---- P0: _bind_port 端口解析收敛(canonical > deprecated 别名 > 默认)----
 
 def test_bind_port_canonical_key_wins():

@@ -8,7 +8,7 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [reindex-worker-lifecycle-plan-2026-07-08.md](reindex-worker-lifecycle-plan-2026-07-08.md) | reindex 队列自动拉起短驻 worker、idle 退出、worker 健康状态、drain-once 运维入口 | 🟢 P1-P4/P6 已落地 |
+| [reindex-worker-lifecycle-plan-2026-07-08.md](reindex-worker-lifecycle-plan-2026-07-08.md) | reindex 队列自动拉起短驻 worker、idle 退出、worker 健康状态、drain-once 运维入口 | 🟢 P1-P6 已落地 |
 
 ## 本轮判断
 
@@ -42,6 +42,7 @@
 - `reindex-queue worker` 支持 `--idle-exit-sec`/`--heartbeat-sec`;不传仍保持常驻语义。
 - 新增 `reindex-queue drain-once`;前台 drain 和 drain-once 都走同一把 run lock。
 - `reindex-queue status` 改为只读队列,显示 backend、worker、heartbeat、last job、oldest age;worker 正在运行时不把 FileSpool marker 误报为 STALE。
+- `health` 与 `serve-mcp status` 接入 reindex worker 摘要,可直接指出"队列有待办但 worker 不在"。
 
 ## 测试审计记录
 

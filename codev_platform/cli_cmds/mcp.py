@@ -73,6 +73,9 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
                    f"{mark}     {tail}")
         for w in mcp_serve.check_port_consistency(cfg):   # 显式 local 端口 ≠ bind 口 → 提示(不阻断)
             _print(f"WARN  {w}")
+        mark, msg = _reindex_worker_status_line()
+        _print("")
+        _print(f"{'reindex-worker'.ljust(22)} {'queue'.ljust(11)} {'-'.ljust(6)} {mark}     {msg}")
         return 1 if any_down else 0
     if args.action == "start":
         results = mcp_serve.ensure_serving(cfg)
@@ -113,6 +116,13 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         return 0
     _eprint(f"unknown action: {args.action}")
     return 1
+
+
+def _reindex_worker_status_line() -> tuple[str, str]:
+    from codev_platform.reindex.status import format_summary, summarize
+    summary = summarize()
+    mark = "OK  " if summary.get("severity") == "OK" else "WARN"
+    return mark, format_summary(summary)
 
 
 def cmd_mcp_source(args: argparse.Namespace) -> int:
