@@ -6,6 +6,7 @@ systemd unit 是开机自起 + 崩溃重启的常驻保障; 任一 unit 丢了 R
 from __future__ import annotations
 
 from codev_platform import mcp_serve as ms
+from codev_platform import mcp_systemd as sysd
 
 
 def _cfg(tmp_path):
@@ -28,6 +29,44 @@ def test_all_mcp_units_have_restart_always(tmp_path):
 def test_reindex_unit_has_restart_always(tmp_path):
     _name, content = ms.render_reindex_unit(_cfg(tmp_path), user="tester")
     assert "Restart=always" in content
+
+
+def test_reindex_unit_uses_configured_environment_file(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["systemd"] = {"env_file": "/etc/codev-platform/platform.env"}
+
+    _name, content = ms.render_reindex_unit(cfg, user="tester")
+
+    assert "EnvironmentFile=-/etc/codev-platform/platform.env" in content
+    assert "Environment=PATH=/usr/local/bin:/usr/bin:/bin:" in content
+    assert content.index("EnvironmentFile=-") < content.index("Environment=PATH=")
+    assert content.index("Environment=PATH=") < content.index("ExecStart=")
+
+
+def test_reindex_unit_omits_environment_file_when_unconfigured(tmp_path):
+    _name, content = ms.render_reindex_unit(_cfg(tmp_path), user="tester")
+
+    assert "EnvironmentFile=" not in content
+
+
+def test_all_long_running_units_use_configured_environment_file(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["systemd"] = {"env_file": "/etc/codev-platform/platform.env"}
+
+    units = ms.render_systemd_units(cfg, user="tester")
+    for name, content in (
+        ms.render_reindex_unit(cfg, user="tester"),
+        ms.render_webhook_unit(cfg, user="tester"),
+        ms.render_agent_unit(cfg, user="tester"),
+    ):
+        units[name] = content
+    units.update(sysd.render_memory_maintenance_units(cfg, user="tester"))
+
+    service_units = {name: content for name, content in units.items() if name.endswith(".service")}
+    assert service_units
+    for name, content in service_units.items():
+        assert "EnvironmentFile=-/etc/codev-platform/platform.env" in content, name
+        assert "Environment=PATH=/usr/local/bin:/usr/bin:/bin:" in content, name
 
 
 def test_webhook_unit_has_restart_always(tmp_path):

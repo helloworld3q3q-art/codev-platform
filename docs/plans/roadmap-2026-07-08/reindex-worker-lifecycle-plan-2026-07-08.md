@@ -145,3 +145,22 @@ WSL 服务固化本步不新增 nohup/supervisor,因为 WSL 已接入仓内正�
 结论:WSL reindex worker 已完成服务固化,下一步不应重复铺 nohup 或另起 supervisor。后续只需在需要重装 unit 时重新生成 `~/codev-systemd/install.sh` 并由 sudo 安装。
 
 剩余风险:WSL token 环境注入仍未规范化,`health` 对 platform-docs 详情面仍只能提示 `/platform/health needs auth in token mode`;`/platform/status` token-mode 详情访问留到下一步单独处理。
+
+## 八、WSL / 服务器 token 环境注入
+
+第一步已完成仓内能力,不落明文 token:
+
+- systemd 渲染新增可选 `systemd.env_file`。配置后 MCP 端点、reindex、webhook、agent、memory maintenance 等需要运行环境变量的 service unit 包含 `EnvironmentFile=-<path>`;clock resync oneshot 不需要 token 注入。未配置时 unit 内容保持原样。
+- `EnvironmentFile` 使用 `-` 前缀,文件缺失不阻塞 service 启动,方便先发布能力再逐机落地。
+- `config.example.json` 只声明路径口径和变量名,不存 token 值。WSL 单机建议 `/home/<user>/.config/codev-platform/platform.env`;服务器建议 `/etc/codev-platform/platform.env`。
+- env 文件应为机器本地机密文件,不进 git;建议权限 `0600`,内容可放 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` / `CODEV_PLATFORM_MEMORY_DSN` 等运行环境变量。
+- 服务器部署时继续通过用户级 `~/.codev-platform/config.json` 设置 `systemd.env_file` 和 `platform.token_env`,不把服务器路径或 token 写死到代码。
+
+验证:
+
+- TDD 红灯:`test_reindex_unit_uses_configured_environment_file` 在实现前失败,因为 unit 未渲染 `EnvironmentFile`。
+- 目标回归:`python -m pytest tests/test_mcp_serve.py tests/test_systemd_restart.py tests/test_systemd_agent_clock.py tests/test_health_all_auth.py tests/test_health_split_security.py -q` → `54 passed / 1 warning`。
+- 静态检查:`python -m ruff check codev_platform/mcp_systemd.py codev_platform/core/config.py tests/test_systemd_restart.py` → passed。
+- `config.example.json` JSON 解析通过。
+
+下一步:在 WSL 本机创建受限权限 env 文件,写入实际 token,配置用户级 `systemd.env_file`,重装/restart 相关 unit,再验证 `health --all` 与 `/platform/status` 不再 401。

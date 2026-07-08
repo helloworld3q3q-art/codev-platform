@@ -26,6 +26,13 @@ from codev_platform.core.config import get as _cfg_get
 SYSTEMD_KINDS = ("chroma", "codegraph", "agent_memory", "graph")
 
 
+def _environment_file_line(cfg: dict) -> str:
+    env_file = str(_cfg_get(cfg, "systemd.env_file") or "").strip()
+    if not env_file:
+        return ""
+    return f"EnvironmentFile=-{env_file}\n"
+
+
 def render_systemd_units(cfg: dict, user: str, *, kinds=SYSTEMD_KINDS) -> dict[str, str]:
     """生成 {unit文件名: 内容}。ExecStart/WorkingDirectory 直接取自 iter_endpoints。"""
     import shlex
@@ -39,7 +46,8 @@ def render_systemd_units(cfg: dict, user: str, *, kinds=SYSTEMD_KINDS) -> dict[s
         if ep.kind not in kinds or not ep.cmd:
             continue
         execstart = " ".join(shlex.quote(c) for c in ep.cmd)
-        env_lines = f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        env_lines = _environment_file_line(cfg)
+        env_lines += f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
         workdir = ep.cwd or home
         # chroma daemon 的监听端口走 PLATFORM_DOCS_DAEMON_PORT env (server.py 不读
         # config.daemon.port, 见 server.py:main); prewarm 让 unit 起来即加载 GPU 模型,
@@ -80,6 +88,8 @@ def render_reindex_unit(cfg: dict, user: str) -> tuple[str, str]:
     venv_bin = str(_resolve_venv_scripts(cfg))
     home = str(Path.home())
     execstart = f"{shlex.quote(str(venv_py))} -m codev_platform.cli reindex-queue worker"
+    env_lines = _environment_file_line(cfg)
+    env_lines += f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
     content = (
         "[Unit]\n"
         "Description=codev reindex worker (写队列串行消费者)\n"
@@ -88,7 +98,7 @@ def render_reindex_unit(cfg: dict, user: str) -> tuple[str, str]:
         "Type=simple\n"
         f"User={user}\n"
         f"WorkingDirectory={home}\n"
-        f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        f"{env_lines}"
         f"ExecStart={execstart}\n"
         "Restart=always\n"
         "RestartSec=3\n\n"
@@ -110,6 +120,8 @@ def render_webhook_unit(cfg: dict, user: str) -> tuple[str, str]:
     venv_bin = str(_resolve_venv_scripts(cfg))
     home = str(Path.home())
     execstart = f"{shlex.quote(str(venv_py))} -m codev_platform.cli webhook serve"
+    env_lines = _environment_file_line(cfg)
+    env_lines += f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
     content = (
         "[Unit]\n"
         "Description=codev webhook receiver (VCS push -> enqueue reindex)\n"
@@ -118,7 +130,7 @@ def render_webhook_unit(cfg: dict, user: str) -> tuple[str, str]:
         "Type=simple\n"
         f"User={user}\n"
         f"WorkingDirectory={home}\n"
-        f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        f"{env_lines}"
         f"ExecStart={execstart}\n"
         "Restart=always\n"
         "RestartSec=3\n\n"
@@ -147,6 +159,8 @@ def render_agent_unit(cfg: dict, user: str) -> tuple[str, str]:
         f"{shlex.quote(str(venv_py))} -m codev_platform.cli agent serve "
         f"--host {host} --port {port}"
     )
+    env_lines = _environment_file_line(cfg)
+    env_lines += f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
     content = (
         "[Unit]\n"
         "Description=codev agent HTTP service (FastAPI; needs venv extra [agent])\n"
@@ -155,7 +169,7 @@ def render_agent_unit(cfg: dict, user: str) -> tuple[str, str]:
         "Type=simple\n"
         f"User={user}\n"
         f"WorkingDirectory={repo_root}\n"
-        f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        f"{env_lines}"
         f"ExecStart={execstart}\n"
         "Restart=always\n"
         "RestartSec=3\n\n"
@@ -212,6 +226,8 @@ def render_memory_maintenance_units(cfg: dict, user: str) -> dict[str, str]:
     repo_root = Path(__file__).resolve().parent.parent  # codev_platform 包的上一级 = 仓根
     script = repo_root / "scripts" / "run_memory_maintenance.py"
     execstart = f"{shlex.quote(str(venv_py))} {shlex.quote(str(script))}"
+    env_lines = _environment_file_line(cfg)
+    env_lines += f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
     service = (
         "[Unit]\n"
         "Description=codev memory maintenance (TTL 归档 + 向量 GC; oneshot)\n"
@@ -220,7 +236,7 @@ def render_memory_maintenance_units(cfg: dict, user: str) -> dict[str, str]:
         "Type=oneshot\n"
         f"User={user}\n"
         f"WorkingDirectory={repo_root}\n"
-        f"Environment=PATH=/usr/local/bin:/usr/bin:/bin:{venv_bin}\n"
+        f"{env_lines}"
         f"ExecStart={execstart}\n"
     )
     timer = (
