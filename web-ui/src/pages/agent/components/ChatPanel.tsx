@@ -64,8 +64,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onSend, onComp
         onTypingComplete:
           m.role === 'assistant'
             ? (): void => {
-                onComplete(m.id);
-              }
+              onComplete(m.id);
+            }
             : undefined,
         // 打字期(animating)不挂 contentRender → content 保持 string, Bubble 启用原生 typing;
         // 播完(animating=false)再挂 markdown 渲染(代码块/列表)。用户消息不渲 markdown。
