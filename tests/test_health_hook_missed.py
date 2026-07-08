@@ -78,7 +78,23 @@ def test_hook_missed_still_warns_when_expected_manifest_kind_missing(tmp_path, m
 
     assert report.amber == 1
     assert report.rows[0]["status"] == "WARN"
-    assert "manifest fallback limited to chroma-only" in report.rows[0]["msg"]
+    assert "ingest:missing" in report.rows[0]["msg"]
+
+
+def test_hook_missed_reports_chroma_failure_before_code_kind_gate(tmp_path, monkeypatch):
+    _patch_git(monkeypatch, ["docs/plans/roadmap.md", "codev_platform/ops/health/_checks.py"])
+    _patch_manifest(monkeypatch, [
+        {"kind": "chroma", "status": "failed", "fresh": True},
+        {"kind": "codegraph", "status": "ok", "fresh": True},
+        {"kind": "ingest", "status": "ok", "fresh": True},
+        {"kind": "code_vec", "status": "ok", "fresh": True},
+    ])
+
+    report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
+
+    assert report.amber == 1
+    assert report.rows[0]["status"] == "WARN"
+    assert "chroma:failed" in report.rows[0]["msg"]
 
 
 @pytest.mark.parametrize(
