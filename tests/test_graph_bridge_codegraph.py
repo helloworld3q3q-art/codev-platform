@@ -24,10 +24,13 @@ def _make_codegraph(path: Path, nodes: list[tuple], edges: list[tuple]) -> None:
     conn.close()
 
 
-def _endpoint(handler: str, file: str) -> GraphNode:
+def _endpoint(handler: str, file: str, meta_extra: dict | None = None) -> GraphNode:
+    meta = {"handler": handler}
+    if meta_extra:
+        meta.update(meta_extra)
     return GraphNode(
         id=f"p:backend_endpoint:POST:/{handler}", kind=NodeKind.BACKEND_ENDPOINT.value,
-        name=handler, project_id="p", file=file, meta={"handler": handler},
+        name=handler, project_id="p", file=file, meta=meta,
     )
 
 
@@ -133,3 +136,30 @@ def test_bridge_unique_cross_file_handler_still_links(tmp_path):
     fn = _func("repo", "repo.py")
     edges = bridge_endpoints_to_functions("p", [ep], [fn], codegraph_db=cg)
     assert len(edges) == 1 and edges[0].target == fn.id
+
+
+def test_bridge_uses_controller_file_for_interface_mapping(tmp_path):
+    # Spring 接口声明 @PostMapping, @RestController 实现类承载调用链;
+    # handler 查找必须从实现类文件起跳, 不能停在接口方法。
+    cg = tmp_path / "codegraph.db"
+    _make_codegraph(
+        cg,
+        nodes=[
+            ("cg:iface", "queryMappingValue", "api/ParamMappingConfigMicroservice.java", "method"),
+            ("cg:impl", "queryMappingValue", "server/ParamMappingConfigMicroserviceImpl.java", "method"),
+            ("cg:repo", "selectMappingValue", "server/ParamMappingConfigRepository.java", "method"),
+        ],
+        edges=[("cg:impl", "cg:repo", "calls")],
+    )
+    ep = _endpoint(
+        "queryMappingValue",
+        "api/ParamMappingConfigMicroservice.java",
+        {"controller_file": "server/ParamMappingConfigMicroserviceImpl.java"},
+    )
+    fn = _func("selectMappingValue", "server/ParamMappingConfigRepository.java")
+
+    edges = bridge_endpoints_to_functions("p", [ep], [fn], codegraph_db=cg)
+
+    assert len(edges) == 1
+    assert edges[0].source == ep.id
+    assert edges[0].target == fn.id

@@ -43,6 +43,52 @@ public class PlainService {
 }
 """
 
+_INTERFACE_MAPPING = """\
+package com.gillion.mappings.microservice;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+
+@FeignClient(value = "${service:demo}")
+public interface ParamMappingConfigMicroservice {
+
+    @PostMapping("param-mapping/queryConfigs")
+    List<ParamMappingConfigDTO> queryConfigs(@RequestBody ParamMappingQueryDTO query);
+
+    @PostMapping("param-mapping/queryAllEnabled")
+    List<ParamMappingConfigDTO> queryAllEnabled();
+
+    @PostMapping("param-mapping/queryMappingValue")
+    String queryMappingValue(@RequestBody ParamMappingValueQueryDTO query);
+}
+"""
+
+_INTERFACE_IMPL_CONTROLLER = """\
+package com.gillion.mappings.service.microservice;
+
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class ParamMappingConfigMicroserviceImpl implements ParamMappingConfigMicroservice {
+
+    @Override
+    public List<ParamMappingConfigDTO> queryConfigs(ParamMappingQueryDTO query) {
+        return null;
+    }
+
+    @Override
+    public List<ParamMappingConfigDTO> queryAllEnabled() {
+        return null;
+    }
+
+    @Override
+    public String queryMappingValue(ParamMappingValueQueryDTO query) {
+        return null;
+    }
+}
+"""
+
 
 def _write(repo: Path, rel: str, content: str) -> None:
     p = repo / rel
@@ -86,6 +132,33 @@ def test_scan_endpoints(tmp_path: Path) -> None:
 def test_plain_class_yields_nothing(tmp_path: Path) -> None:
     _write(tmp_path, "src/PlainService.java", _NON_CONTROLLER)
     assert _stack_scan.scan_spring(tmp_path, PID) == []
+
+
+def test_feign_interface_without_controller_impl_yields_nothing(tmp_path: Path) -> None:
+    _write(tmp_path, "api/ParamMappingConfigMicroservice.java", _INTERFACE_MAPPING)
+
+    assert _stack_scan.scan_spring(tmp_path, PID) == []
+
+
+def test_controller_implements_interface_mapping(tmp_path: Path) -> None:
+    _write(tmp_path, "api/ParamMappingConfigMicroservice.java", _INTERFACE_MAPPING)
+    _write(tmp_path, "server/ParamMappingConfigMicroserviceImpl.java", _INTERFACE_IMPL_CONTROLLER)
+
+    nodes = _stack_scan.scan_spring(tmp_path, PID)
+    by_url = {(n.meta["http_method"], n.meta["url"]): n for n in nodes}
+
+    assert ("POST", "/param-mapping/queryConfigs") in by_url
+    assert ("POST", "/param-mapping/queryAllEnabled") in by_url
+    assert ("POST", "/param-mapping/queryMappingValue") in by_url
+
+    node = by_url[("POST", "/param-mapping/queryMappingValue")]
+    assert node.file == "api/ParamMappingConfigMicroservice.java"
+    assert node.name == "queryMappingValue"
+    assert node.meta["operation_id"] == "queryMappingValue"
+    assert node.meta["mapping_source"] == "interface"
+    assert node.meta["implemented_interface"] == "ParamMappingConfigMicroservice"
+    assert node.meta["controller_class"] == "ParamMappingConfigMicroserviceImpl"
+    assert node.meta["controller_file"] == "server/ParamMappingConfigMicroserviceImpl.java"
 
 
 def test_node_id_matches_fastapi_shape_for_linker(tmp_path: Path) -> None:

@@ -42,6 +42,12 @@ def _norm(path: str | None) -> str:
     return s
 
 
+def _endpoint_handler_file(ep: GraphNode) -> str:
+    """返回 handler 实现文件;接口声明端点时由 scanner 在 meta 写入 controller_file。"""
+    controller_file = (ep.meta or {}).get("controller_file")
+    return _norm(controller_file if isinstance(controller_file, str) else ep.file)
+
+
 def bridge_endpoints_to_functions(
     project_id: str,
     endpoints: list[GraphNode],
@@ -92,9 +98,10 @@ def bridge_endpoints_to_functions(
             seen: set[tuple[str, str]] = set()
             for ep in endpoints:
                 handler = (ep.meta or {}).get("handler")
-                if not handler or not ep.file:
+                handler_file = _endpoint_handler_file(ep)
+                if not handler or not handler_file:
                     continue
-                start = _find_handler(name_ids, handler, _norm(ep.file))
+                start = _find_handler(name_ids, handler, handler_file)
                 if start is None:
                     continue
                 for nid in _reachable(adj, start):
@@ -121,16 +128,16 @@ def bridge_endpoints_to_functions(
 
 
 def _find_handler(
-    name_ids: dict[str, list[tuple[str, str]]], handler: str, ep_file: str
+    name_ids: dict[str, list[tuple[str, str]]], handler: str, handler_file: str
 ) -> str | None:
-    """按 handler 名找 codegraph 节点 id, 优先同文件 (端点 handler 一般定义在端点所在文件)。"""
+    """按 handler 名找 codegraph 节点 id, 优先 handler 实现文件。"""
     cands = name_ids.get(handler)
     if not cands:
         return None
     for nid, nf in cands:
-        if nf == ep_file:
+        if nf == handler_file:
             return nid
-    # 无同文件命中: 唯一同名才用 (安全); 多个同名歧义 → 放弃挂边 (宁缺毋滥, 桥接置信本就 0.7,
+    # 无指定文件命中: 唯一同名才用 (安全); 多个同名歧义 → 放弃挂边 (宁缺毋滥, 桥接置信本就 0.7,
     # 防 Java 同名方法跨 Controller 误挂)。
     return cands[0][0] if len(cands) == 1 else None
 
