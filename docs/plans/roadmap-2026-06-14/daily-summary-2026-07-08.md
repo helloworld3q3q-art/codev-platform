@@ -84,3 +84,19 @@ git diff --check
 
 - dao-service 当前只覆盖 `select()/selectCount()` 读路径;若后续遇到 update/delete/save 等 DSL,应在 `java_orm.py` 内按操作族补子扫描策略,不塞到 `SqlPlugin.analyze` 主流程。
 - 当前 scanner 仍是正则级轻量解析,适合平台低成本索引;如果后续遇到复杂 Java AST 场景,再评估引入 tree-sitter/JDT 作为可插拔 parser adapter。
+
+## 八、前端多仓桥接基础修复
+
+- 继续分析 OMS 前端图谱时确认:`frontend_module` 来自 `builtin.frontend_deps` post-pass,未经过 `RepoScope.localize`;而 `frontend_api_call/frontend_route` 已在插件 merge 阶段带 `scl-www::` 仓 tag,导致同文件匹配失效,`builtin.frontend_bridge` 为 0。
+- 设计上不改 `build_frontend_bridge_edges` 和 linker 核心,只把 `frontend_deps` post-pass 产物包成 `AnalyzerResult` 后复用既有 `RepoScope.localize`;单仓和主仓仍 no-op,extra 仓 module/imports 边与 api_call/route 使用同一文件命名空间。
+- 补多仓回归测试:主仓 + extra 仓同相对路径文件同时产 `frontend_module` 和 `frontend_api_call`,断言两个仓都生成 `contains` 桥接边;同时断言 extra 仓 `imports` 边两端会同步改写为仓 tag。
+- 兄弟审计未发现阻断问题;按建议补了 `imports` edge 端点改写集成断言。
+- 验证:
+
+```powershell
+python -m pytest tests/test_graph_ingest.py tests/test_repo_scope.py tests/test_frontend_bridge.py
+```
+
+结果:`27 passed`。
+
+后续步骤:在此基础上补通用 JS/TS `request({ url, method })` 请求对象扫描;坚持解析静态 URL 片段,不写 OMS 专用 `ContextEnum` 或 `daoServiceClientConfig` 分支。

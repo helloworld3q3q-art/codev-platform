@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from codev_platform.graph.ingest import ingest_project
-from codev_platform.graph.schema import AnalyzerResult, GraphEdge, GraphNode, NodeKind
+from codev_platform.graph.schema import AnalyzerResult, EdgeKind, GraphEdge, GraphNode, NodeKind
 from codev_platform.graph.store import open_store
 from codev_platform.plugins import clear_registry, register_plugin
 from codev_platform.plugins.base import AnalyzerPlugin
@@ -359,3 +359,84 @@ def test_multiroot_frontend_id_collision_both_survive(tmp_path):
     assert "demo:frontend_module:src/pages/index.vue" in mod_ids       # 主仓 tag='' 原样
     assert "pda::demo:frontend_module:src/pages/index.vue" in mod_ids  # extra 仓打 tag, 未被丢
     assert len(mod_ids) == 2
+
+
+class _FrontendApiCollidePlugin(AnalyzerPlugin):
+    """两仓都产同 file 的 api_call, 验 frontend_deps post-pass 同步 localize 后桥接不丢。"""
+    name = "fake.frontapi"
+    version = "1.0.0"
+
+    def detect(self, repo_path: Path) -> bool:
+        return True
+
+    def analyze(self, repo_path: Path, project_id: str) -> AnalyzerResult:
+        rel = "src/pages/index.vue"
+        return AnalyzerResult(
+            plugin=self.name,
+            nodes=[
+                GraphNode(
+                    id=f"{project_id}:frontend_api_call:{rel}:load",
+                    kind=NodeKind.FRONTEND_API_CALL.value,
+                    name="load",
+                    project_id=project_id,
+                    file=rel,
+                    meta={"url": "/api/load", "http_method": "POST"},
+                )
+            ],
+        )
+
+
+def test_multiroot_frontend_deps_localized_before_bridge(tmp_path, monkeypatch):
+    # frontend_deps 是 ingest post-pass, 不走 run_applicable 的 merge/localize。它也必须经 RepoScope
+    # 打仓 tag, 否则 extra 仓的 api_call(file 已带 tag) 找不到同文件 module, frontend_bridge=0。
+    clear_registry()
+    register_plugin(_FrontendApiCollidePlugin())
+    main = tmp_path / "web"; main.mkdir()
+    pda = tmp_path / "pda"; pda.mkdir()
+    rel = "src/pages/index.vue"
+
+    def _fake_scan(repo_path: Path, project_id: str):
+        dep_rel = "src/shared/helper.ts"
+        mod = GraphNode(
+            id=f"{project_id}:frontend_component:{rel}",
+            kind=NodeKind.FRONTEND_MODULE.value,
+            name="index",
+            project_id=project_id,
+            file=rel,
+        )
+        dep = GraphNode(
+            id=f"{project_id}:frontend_component:{dep_rel}",
+            kind=NodeKind.FRONTEND_MODULE.value,
+            name="helper",
+            project_id=project_id,
+            file=dep_rel,
+        )
+        edge = GraphEdge(source=mod.id, target=dep.id, kind=EdgeKind.IMPORTS.value)
+        return [mod, dep], [edge]
+
+    monkeypatch.setattr(
+        "codev_platform.plugins.builtin._stack_scan.scan_frontend_deps", _fake_scan
+    )
+    store = tmp_path / "g.sqlite"
+    ingest_project(main, "demo", store_path=store, extra_repos=[str(pda)])
+
+    s = open_store("demo", path=store)
+    try:
+        graph = s.load_graph("demo")
+    finally:
+        s.close()
+
+    contains = {(e.source, e.target) for e in graph.edges if e.kind == EdgeKind.CONTAINS.value}
+    assert (
+        "demo:frontend_component:src/pages/index.vue",
+        "demo:frontend_api_call:src/pages/index.vue:load",
+    ) in contains
+    assert (
+        "pda::demo:frontend_component:src/pages/index.vue",
+        "pda::demo:frontend_api_call:src/pages/index.vue:load",
+    ) in contains
+    imports = {(e.source, e.target) for e in graph.edges if e.kind == EdgeKind.IMPORTS.value}
+    assert (
+        "pda::demo:frontend_component:src/pages/index.vue",
+        "pda::demo:frontend_component:src/shared/helper.ts",
+    ) in imports

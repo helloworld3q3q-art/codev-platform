@@ -157,7 +157,7 @@ def ingest_project(
         # 覆盖)。前端依赖 post-pass: **所有根**跑(多前端各在不同仓, 内部累积一次写, 见函数注释)。
         main_repo = repos[0]
         _calls_pass(store, project_id, report, main_repo)
-        _frontend_deps_pass(store, project_id, report, repos)
+        _frontend_deps_pass(store, project_id, report, repos, scope)
 
         # 前端内部桥接 post-pass: 两个前端插件(frontend_deps 建 module / react 建 api_call/route)
         # 为同批文件建节点但 id 不相交、无边相连 → frontend_module 成孤岛(impact 滤软边后到不了
@@ -225,7 +225,8 @@ def _calls_pass(store, project_id: str, report: IngestReport, repo_path: Path) -
     report.summaries[CALLS_PLUGIN] = {"calls_edges": len(all_edges), "by_resolver": by_resolver}
 
 
-def _frontend_deps_pass(store, project_id: str, report: IngestReport, repos: list[Path]) -> None:
+def _frontend_deps_pass(store, project_id: str, report: IngestReport,
+                        repos: list[Path], scope: RepoScope) -> None:
     """前端组件依赖 post-pass: 接 dependency-cruiser 产 frontend_component 节点 + imports 边。
 
     **对所有根(主仓 + extra_repos)各扫一遍, 合并后一次写入** —— 一个项目可挂多个独立前端
@@ -235,12 +236,14 @@ def _frontend_deps_pass(store, project_id: str, report: IngestReport, repos: lis
     """
     from codev_platform.plugins.builtin._stack_scan import scan_frontend_deps
 
-    all_nodes: list[GraphNode] = []
     all_edges: list[GraphEdge] = []
+    all_nodes: list[GraphNode] = []
     for repo_path in repos:
         nodes, edges = scan_frontend_deps(repo_path, project_id)
-        all_nodes.extend(nodes)
-        all_edges.extend(edges)
+        ar = AnalyzerResult(nodes=nodes, edges=edges, plugin=FRONTEND_DEPS_PLUGIN)
+        scope.localize(ar, repo_path)
+        all_nodes.extend(ar.nodes)
+        all_edges.extend(ar.edges)
     # dependency-cruiser 真依赖图(AST 工具): src=ast
     stamp_unprovenanced(all_edges, ProvSource.AST, parser=FRONTEND_DEPS_PLUGIN)
     store.upsert_result(
