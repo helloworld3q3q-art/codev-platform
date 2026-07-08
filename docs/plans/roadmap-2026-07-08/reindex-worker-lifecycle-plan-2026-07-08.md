@@ -1,6 +1,6 @@
 # Plan — reindex worker 短驻化与队列可观测(2026-07-08)
 
-> **状态**:🟢 P1-P6 已落地
+> **状态**:🟢 P1-P6 已落地;WSL systemd 服务固化已审计
 >
 > **主题**:修复"入队成功但无人消费"导致 MCP/索引落后的链路缺口。
 
@@ -130,3 +130,18 @@ python -m pytest tests/test_mcp_serve.py tests/test_serve_mcp_diagnose.py
 - `reindex worker` runner 失败可观测性增强: `CliReindexRunner` 将子进程 stdout/stderr 覆盖写入 `data/logs/reindex-runner/<project>__<kind>.log`;失败/超时时 tail 生成 `last_note`,worker 写入 index manifest note 并在 worker.log 失败行输出压缩 detail。测试审计兄弟复审后补齐成功输出保留和测试 `PLATFORM_DATA_DIR` 隔离。目标回归: `python -m pytest tests/test_reindex_runner_timeout.py tests/test_reindex_worker_affinity.py tests/test_reindex_queue.py tests/test_reindex_queue_cli.py tests/test_health_reindex_worker.py tests/test_wait_for_reindex_worker.py` → `52 passed`;`python -m ruff check codev_platform/reindex/runners.py codev_platform/reindex/worker.py tests/test_reindex_runner_timeout.py tests/test_reindex_worker_affinity.py` → passed。
 - `runner log` 脱敏与大小上限:新增 `codev_platform/reindex/runner_logs.py`,把子进程 stdout/stderr 读入 bounded head/tail buffer 后再落盘,默认 512KiB;常见敏感形态(Authorization、token/password/secret/api key/DSN/env key、JSON quoted value、URL credentials、`sk-*`)写入前统一替换为 `<redacted>`。`CliReindexRunner` 只委托日志 helper,继续从落盘后的脱敏日志取 tail/sample 做 `last_note` 和 proof/fail-soft 判定。timeout 路径改为 Windows `taskkill /T` / Unix process group kill,避免后代进程持 stdout 导致 reader 卡住。测试审计兄弟三轮复核中发现并修正:分片长 secret 后缀泄漏、quoted secret 后缀泄漏、超长 quoted line 前缀泄漏、timeout 后代进程残留、UTF-8 head/tail 切分。目标回归: `python -m pytest tests/test_reindex_runner_logs.py tests/test_reindex_runner_timeout.py tests/test_reindex_worker_affinity.py tests/test_reindex_queue.py tests/test_reindex_queue_cli.py tests/test_health_reindex_worker.py tests/test_wait_for_reindex_worker.py tests/test_post_hooks.py tests/test_index_manifest.py tests/test_cli_parser.py` → `92 passed`;`python -m ruff check codev_platform/reindex/runners.py codev_platform/reindex/runner_logs.py tests/test_reindex_runner_logs.py tests/test_reindex_runner_timeout.py` → passed。取舍:超长无换行物理行触发 oversized marker 后丢弃该行直到换行,防泄密优先;若工具把 proof marker 拼到同一坏格式行,runner 会 fail-safe 判失败。
 - `reindex-queue status` 显示队列空,短驻 worker 已 idle 退出。
+
+## 七、WSL 服务固化审计
+
+WSL 服务固化本步不新增 nohup/supervisor,因为 WSL 已接入仓内正式 systemd 路线:
+
+- 仓内真值源:`codev_platform/mcp_systemd.py` 的 `render_reindex_unit()` 渲染 `codev-reindex.service`,语义是开机自起 + 崩溃重启 + 常驻 worker。
+- WSL 实际单元:`/etc/systemd/system/codev-reindex.service`,`User=helloworld`,`WorkingDirectory=/home/helloworld`,`ExecStart=/home/helloworld/work/codev-platform/.venv/bin/python -m codev_platform.cli reindex-queue worker`,`Restart=always`,`RestartSec=3`。
+- 安装状态:`systemctl is-enabled codev-reindex.service` 返回 `enabled`;`systemctl show ...` 返回 `ActiveState=active`,`SubState=running`,`UnitFileState=enabled`,`Restart=always`,`RestartUSec=3s`。
+- 运行状态:进程列表只看到一个由 systemd 托管的 `reindex-queue worker`;未发现额外 nohup/手动 worker 残留。
+- 生成物关系:`~/codev-systemd/` 保留 `codev-reindex.service` 与 `install.sh` 等生成产物,作为重装来源;`/etc/systemd/system/` 是实际安装目录,当前只安装正式 codev units。
+- 链路验证:`reindex-queue status` 显示 `worker running: yes`,队列后端 `FileSpoolQueue`,队列空;`health --mode light` 显示 READY,`reindex worker` OK,`hook missed?` 已由 manifest 覆盖 HEAD `0f6d61c` 的 `chroma/codegraph/ingest/code_vec`。
+
+结论:WSL reindex worker 已完成服务固化,下一步不应重复铺 nohup 或另起 supervisor。后续只需在需要重装 unit 时重新生成 `~/codev-systemd/install.sh` 并由 sudo 安装。
+
+剩余风险:WSL token 环境注入仍未规范化,`health` 对 platform-docs 详情面仍只能提示 `/platform/health needs auth in token mode`;`/platform/status` token-mode 详情访问留到下一步单独处理。

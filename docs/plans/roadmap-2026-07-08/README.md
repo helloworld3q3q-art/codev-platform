@@ -8,7 +8,7 @@
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| [reindex-worker-lifecycle-plan-2026-07-08.md](reindex-worker-lifecycle-plan-2026-07-08.md) | reindex 队列自动拉起短驻 worker、idle 退出、worker 健康状态、drain-once 运维入口 | 🟢 P1-P6 已落地 |
+| [reindex-worker-lifecycle-plan-2026-07-08.md](reindex-worker-lifecycle-plan-2026-07-08.md) | reindex 队列自动拉起短驻 worker、idle 退出、worker 健康状态、drain-once 运维入口 | 🟢 P1-P6 已落地;WSL 服务固化已审计 |
 
 ## 本轮判断
 
@@ -48,6 +48,7 @@
 - `webhook extra repos` 诊断改为只扫描本机配置中带 `webhook_repo`、实际会被 webhook 入口命中的项目,并对 config/meta 重复声明的同一路径或同一 child project 做去重;不再让未启用 webhook 的本机项目或 meta-only 项目污染 health/startup。
 - `hook missed?` 诊断复用 reindex scope 公共推导;worker/manifest 模式下对 `chroma/codegraph/ingest/code_vec` 全量 expected kind 判绿,但代码类必须先由 runner proof marker 证明成功,避免 fail-soft rc=0 假绿。
 - `reindex worker` runner log 改为统一走脱敏 + 大小上限管道:stdout/stderr 先按行脱敏再写入 head/tail bounded log,单文件默认 512KiB;超长无换行行直接写 oversized marker 并丢弃该物理行直到换行,防泄密优先。
+- WSL 服务固化审计确认 `/home/helloworld/work/codev-platform` 已在 `0f6d61c`,`codev-reindex.service` 已安装到 `/etc/systemd/system/` 且 `enabled` + `active running`;单元内容走仓内 `mcp_systemd.render_reindex_unit()` 的正式路线:`ExecStart=/home/helloworld/work/codev-platform/.venv/bin/python -m codev_platform.cli reindex-queue worker`,`Restart=always`,`RestartSec=3`。未发现额外 nohup/手动 worker 残留,`~/codev-systemd/` 仅作为生成 unit/install.sh 的重装来源。WSL 服务固化本步不新增 supervisor/nohup,不手改运行态 unit。
 
 ## 测试审计记录
 
@@ -60,4 +61,5 @@
 - `code_vec` remote `/embed` 依赖可靠化:抽出 `mcp_runtime` 承接隐藏后台启动副作用,`mcp_serve` 继续负责端点枚举/探活;`build_code_vec_embedder` 仅在默认 `remote` 且 URL 属于本机 platform-docs 时确保单个 platform-docs daemon,外部 `memory.embed.url`、`qwen-local`、`ensure_remote_daemon=false` 均不误启动。未知 backend 不再静默落 remote。测试审计兄弟复核无阻塞,非阻塞建议已补齐。post-commit 实测暴露 `reindex.supervisor` 仍引用旧 `_spawn_detached`,已改为复用 `mcp_runtime.spawn_detached` 并补 supervisor 测试。目标回归 `210 passed / 5 skipped`,ruff 目标文件通过;Windows 实测 platform-docs daemon 未运行时 `reindex --code-vec` 会自动拉起 platform-docs,未启动 codegraph/agent-memory/graph 全家桶。
 - `reindex worker` runner 失败可观测性增强:每个 project/kind 的子进程输出覆盖写入 `data/logs/reindex-runner/<project>__<kind>.log`,失败/超时时 tail 写入 manifest note 并进入 worker.log detail;成功输出也保留在 runner log。首轮测试审计后补齐成功输出保留和测试 `PLATFORM_DATA_DIR` 隔离,目标回归 `52 passed`,ruff 目标文件通过。
 - runner log 脱敏与大小上限:新增独立 `runner_logs` helper,覆盖 Authorization、token/password/secret/api key/DSN/env key、JSON quoted 值、URL credentials、`sk-*` 形态;子进程 stdout/stderr 走 bounded head/tail log,默认 512KiB,proof marker 位于正常尾部行时可保留。测试审计兄弟三轮复核中发现并修正长 secret 分片泄漏、quoted secret 后缀泄漏、超长 quoted line 前缀泄漏、timeout 后代进程持 stdout、UTF-8 切分等问题。最终目标回归 `92 passed`;ruff 目标文件通过。已明确取舍:超长无换行物理行会整行丢弃以防泄密,若 proof marker 被同一坏格式行拼接,runner 会 fail-safe 判失败。
-- 实时状态:`reindex-queue status` 显示 FileSpoolQueue 队列空,短驻 worker 已 idle 退出。
+- WSL 服务固化审计命令:`systemctl is-enabled codev-reindex.service` → `enabled`;`systemctl show codev-reindex.service -p ActiveState -p SubState -p Restart -p RestartUSec -p UnitFileState -p ExecMainPID` → `active/running`, `Restart=always`, `RestartUSec=3s`;`ps -eo ... | grep 'reindex-queue worker'` → 仅 systemd 主进程;`reindex-queue status` → worker `mode=forever`, `FileSpoolQueue`,队列空;`health --mode light` → `READY`,`reindex worker` OK,`hook missed?` 覆盖 HEAD `0f6d61c`。
+- 实时状态:Windows 本机 `reindex-queue status` 显示 FileSpoolQueue 队列空,短驻 worker 已 idle 退出;WSL `codev-reindex.service` 为 systemd 常驻 `mode=forever`,队列空,health READY。剩余风险不在服务固化链路,而是 WSL token 环境未规范注入,`/platform/status` token-mode 详情访问留到下一步单独处理。
