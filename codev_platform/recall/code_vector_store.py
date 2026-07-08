@@ -9,8 +9,10 @@
 被两 lane 命中分数叠加, 自然增强; 无需另立 chunk 体系(chunk = 一个符号节点)。
 
 接入铁律(对齐 agent-provider-architecture + agent memory 向量同源):
-- 嵌入复用平台 `Embedder`(`agent.embed.registry.build_embedder`, 默认 qwen-local/cpu), 与 agent
-  memory 向量同源、同接口; **缺依赖 / 模型 → None**, 调用侧据此 fail-soft(其它 lane 仍出结果)。
+- 构建侧复用平台 `Embedder` 接口, 经 `build_code_vec_embedder` 默认 remote 调 platform-docs
+  daemon `/embed`;专用 GPU 索引节点可 opt-in qwen-local。
+- 查询侧仍走 `build_embedder`, 与 agent memory 向量同源、同接口; **缺依赖 / 模型 → None**,
+  调用侧据此 fail-soft(其它 lane 仍出结果)。
 - collection `<pid>__code_vec`, 与 platform_docs(文档)/ agent_memory(记忆)隔离。
 - **两段职责分离**: build_code_vector_index = 写批作业(跑在 WSL, 需嵌入模型, 重型不自动跑);
   query_code_vectors = recall service 查询侧薄壳; _parse_query_result = 纯函数(脱 IO 可单测)。
@@ -455,8 +457,8 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     """
     from codev_platform.agent.embed.registry import build_code_vec_embedder
     from codev_platform.core.config import load_config
-    # 索引侧用专用 embedder(默认本机 qwen-local + GPU 直跑), 不经共享 daemon /embed —— 大批量
-    # 打 daemon 会长占其串行 GPU 信号量甚至死锁(连带打挂在线 search_docs)。build 与服务解耦。
+    # 索引侧用专用 embedder: 默认 remote 复用 platform-docs daemon 的 GPU 模型;
+    # 专用索引节点可显式切 qwen-local。缺本地 daemon 会在 registry guard 中提前保障/报错。
     _cfg = load_config()
     skip_kinds = _resolve_skip_kinds(_cfg)   # 默认 import/file/variable; config 可覆盖, 不写死
     embedder = build_code_vec_embedder(_cfg)
@@ -478,7 +480,6 @@ def _build_locked(project_id: str, persist, *, incremental: bool) -> int:
     from codev_platform.core.repos import project_repo_specs
 
     repo_specs = project_repo_specs(project_id)   # 主仓 + extra 仓; 单仓项目返回 1 项
-    repo = repo_specs[0].root if repo_specs else None
     enrich_now = bool(repo_specs)
     # 定 full(读 manifest/meta 从当前 build): 无 manifest / 损坏 / 富化翻转 / 探活坏 都退全量。
     # handoff: full **不再 rmtree 库**, 而是 begin_build 到干净 side(下面), 旧 build 留给 reader, commit 后 gc。

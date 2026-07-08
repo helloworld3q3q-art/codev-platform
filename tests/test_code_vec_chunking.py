@@ -10,7 +10,6 @@ import pytest
 
 from codev_platform.recall.code_vector_store import (
     _BASE_FIELD_MAX,
-    _CHUNK_BODY_CHARS,
     _DEFAULT_SKIP_KINDS,
     _collect_node_chunks,
     _existing_chroma_healthy,
@@ -148,8 +147,10 @@ def test_collect_node_chunks_localizes_extra_repo_refs(tmp_path, monkeypatch):
     """多仓 code_vec: 主仓 ref 不变, extra 仓 ref/file 加 tag, 同 node id 不碰撞。"""
     from codev_platform.core.repos import RepoSpec
 
-    main = tmp_path / "main"; main.mkdir()
-    extra = tmp_path / "extra"; extra.mkdir()
+    main = tmp_path / "main"
+    main.mkdir()
+    extra = tmp_path / "extra"
+    extra.mkdir()
     specs = [
         RepoSpec(root=main.resolve(), tag="", is_main=True, source_project_id="demo"),
         RepoSpec(root=extra.resolve(), tag="extra", is_main=False, source_project_id="extra-proj"),
@@ -198,7 +199,8 @@ def test_collect_node_chunks_localizes_extra_repo_refs(tmp_path, monkeypatch):
 
 def test_collect_node_chunks_skip_kinds_case_insensitive(tmp_path, monkeypatch):
     from codev_platform.core.repos import RepoSpec
-    main = tmp_path / "main"; main.mkdir()
+    main = tmp_path / "main"
+    main.mkdir()
 
     class FakeCodegraphClient:
         def __init__(self, *, db_path):
@@ -236,8 +238,10 @@ def test_collect_node_chunks_skip_kinds_case_insensitive(tmp_path, monkeypatch):
 
 def test_collect_node_chunks_skips_missing_extra_but_not_main(tmp_path, monkeypatch):
     from codev_platform.core.repos import RepoSpec
-    main = tmp_path / "main"; main.mkdir()
-    extra = tmp_path / "extra"; extra.mkdir()
+    main = tmp_path / "main"
+    main.mkdir()
+    extra = tmp_path / "extra"
+    extra.mkdir()
 
     class BoomCodegraphClient:
         def __init__(self, *, db_path):

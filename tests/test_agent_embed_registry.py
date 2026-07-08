@@ -185,13 +185,48 @@ def test_remote_rerank_failure_swallowed_by_qwen_reranker(monkeypatch):
     assert [e.id for e in out] == ["a", "b"]   # 远端崩 → 原序返回, 不丢候选不报错
 
 
-# ---- code_vec 专用 embedder: 索引侧用本机 GPU, 不经共享 daemon(防大批量死锁 daemon) ----
+# ---- code_vec 专用 embedder: 默认 remote 复用 daemon; 专用 GPU 节点可 opt-in qwen-local ----
 
-def test_code_vec_embedder_defaults_remote():
+def test_code_vec_embedder_defaults_remote(monkeypatch):
     """默认走 remote(复用共享 daemon GPU, 不在 worker 塞第二份模型; 死锁已由 daemon wait_for 根治)。"""
     from codev_platform.agent.embed.registry import build_code_vec_embedder
     from codev_platform.agent.embed.remote import RemoteEmbedder
+    from codev_platform.agent.embed import remote_ready
+
+    calls = []
+
+    def fake_ensure(cfg):
+        calls.append(cfg)
+        return {"name": "platform-docs", "action": "already-up", "status": "ok"}
+
+    monkeypatch.setattr(remote_ready, "ensure_code_vec_remote_daemon", fake_ensure)
     assert isinstance(build_code_vec_embedder({}), RemoteEmbedder)
+    assert calls == [{}]
+
+
+def test_code_vec_embedder_unknown_backend_returns_none(monkeypatch):
+    from codev_platform.agent.embed.registry import build_code_vec_embedder
+    from codev_platform.agent.embed import remote_ready
+
+    monkeypatch.setattr(remote_ready, "ensure_code_vec_remote_daemon",
+                        lambda cfg: (_ for _ in ()).throw(AssertionError("should not guard")))
+
+    assert build_code_vec_embedder({"recall": {"code_vec": {"embed_backend": "bogus"}}}) is None
+
+
+def test_code_vec_embedder_qwen_local_does_not_guard_without_dependency(monkeypatch):
+    import importlib.util as iu
+
+    from codev_platform.agent.embed.registry import build_code_vec_embedder
+    from codev_platform.agent.embed import remote_ready
+
+    real = iu.find_spec
+    monkeypatch.setattr(remote_ready, "ensure_code_vec_remote_daemon",
+                        lambda cfg: (_ for _ in ()).throw(AssertionError("should not guard")))
+    monkeypatch.setattr(iu, "find_spec",
+                        lambda name: None if name == "sentence_transformers" else real(name))
+
+    assert build_code_vec_embedder({"recall": {"code_vec": {"embed_backend": "qwen-local"}}}) is None
 
 
 @_needs_st
@@ -209,3 +244,120 @@ def test_code_vec_embedder_device_override():
     from codev_platform.agent.embed.registry import build_code_vec_embedder
     emb = build_code_vec_embedder({"recall": {"code_vec": {"embed_backend": "qwen-local", "embed_device": "cpu"}}})
     assert emb._device == "cpu"
+
+
+def test_code_vec_remote_daemon_guard_disabled():
+    from codev_platform.agent.embed.remote_ready import ensure_code_vec_remote_daemon
+
+    result = ensure_code_vec_remote_daemon(
+        {"recall": {"code_vec": {"ensure_remote_daemon": False}}}
+    )
+
+    assert result["action"] == "disabled"
+
+
+def test_code_vec_remote_daemon_guard_external_url(monkeypatch):
+    from codev_platform.agent.embed.remote_ready import ensure_code_vec_remote_daemon
+    from codev_platform.mcp_serve import MCPEndpoint
+
+    ep = MCPEndpoint(name="platform-docs", kind="chroma", port=18083, cmd=["py"])
+    monkeypatch.setattr("codev_platform.mcp_serve.iter_endpoints", lambda cfg: [ep])
+    monkeypatch.setattr("codev_platform.mcp_serve.probe",
+                        lambda endpoint: (_ for _ in ()).throw(AssertionError("should not probe")))
+
+    result = ensure_code_vec_remote_daemon({"memory": {"embed": {"url": "http://gpu-host:18083/embed"}}})
+
+    assert result["action"] == "external-url"
+
+
+def test_code_vec_remote_daemon_guard_manages_explicit_local_url(monkeypatch):
+    from codev_platform.agent.embed import remote_ready
+    from codev_platform.mcp_serve import MCPEndpoint
+
+    ep = MCPEndpoint(name="platform-docs", kind="chroma", port=28083, cmd=["py"])
+    probes = iter(["down", "ok"])
+    monkeypatch.setattr("codev_platform.mcp_serve.iter_endpoints", lambda cfg: [ep])
+    monkeypatch.setattr("codev_platform.mcp_serve.probe", lambda endpoint: next(probes))
+    monkeypatch.setattr(remote_ready, "spawn_endpoint",
+                        lambda endpoint: {"name": endpoint.name,
+                                          "action": "spawned",
+                                          "status": "starting",
+                                          "pid": 456})
+
+    result = remote_ready.ensure_code_vec_remote_daemon({
+        "mcp": {"platform_docs_sse_port": 28083},
+        "memory": {"embed": {"url": "http://localhost:28083/embed"}},
+    })
+
+    assert result["action"] == "spawned"
+    assert result["status"] == "ok"
+
+
+def test_code_vec_remote_daemon_guard_spawns_and_waits(monkeypatch):
+    from codev_platform.agent.embed import remote_ready
+    from codev_platform.mcp_serve import MCPEndpoint
+
+    ep = MCPEndpoint(name="platform-docs", kind="chroma", port=18083, cmd=["py"])
+    probes = iter(["down", "ok"])
+    monkeypatch.setattr("codev_platform.mcp_serve.iter_endpoints", lambda cfg: [ep])
+    monkeypatch.setattr("codev_platform.mcp_serve.probe", lambda endpoint: next(probes))
+    monkeypatch.setattr(remote_ready, "spawn_endpoint",
+                        lambda endpoint: {"name": endpoint.name,
+                                          "action": "spawned",
+                                          "status": "starting",
+                                          "pid": 123})
+
+    result = remote_ready.ensure_code_vec_remote_daemon({})
+
+    assert result["action"] == "spawned"
+    assert result["status"] == "ok"
+    assert result["pid"] == 123
+
+
+def test_code_vec_remote_daemon_guard_timeout(monkeypatch):
+    from codev_platform.agent.embed import remote_ready
+    from codev_platform.mcp_serve import MCPEndpoint
+
+    ep = MCPEndpoint(name="platform-docs", kind="chroma", port=18083, cmd=["py"])
+    monkeypatch.setattr("codev_platform.mcp_serve.iter_endpoints", lambda cfg: [ep])
+    monkeypatch.setattr("codev_platform.mcp_serve.probe", lambda endpoint: "down")
+    monkeypatch.setattr("codev_platform.mcp_serve.collect_facts",
+                        lambda endpoint, cfg: {
+                            "port_open": False,
+                            "healthz_ok": False,
+                            "unit_active": None,
+                            "dep_ok": True,
+                            "db_present": True,
+                        })
+    monkeypatch.setattr("codev_platform.mcp_serve.diagnose_down",
+                        lambda endpoint, **facts: "端口未监听")
+    monkeypatch.setattr(remote_ready, "spawn_endpoint",
+                        lambda endpoint: {"name": endpoint.name,
+                                          "action": "spawned",
+                                          "status": "starting",
+                                          "pid": 123})
+
+    with pytest.raises(RuntimeError, match="not ready"):
+        remote_ready.ensure_code_vec_remote_daemon(
+            {"recall": {"code_vec": {"remote_daemon_wait_sec": 0}}}
+        )
+
+
+@pytest.mark.parametrize(
+    ("spawn_result", "match"),
+    [
+        ({"name": "platform-docs", "action": "fail", "status": "down", "error": "missing exe"}, "missing exe"),
+        ({"name": "platform-docs", "action": "skip", "status": "down", "note": "external"}, "external"),
+    ],
+)
+def test_code_vec_remote_daemon_guard_spawn_failure(monkeypatch, spawn_result, match):
+    from codev_platform.agent.embed import remote_ready
+    from codev_platform.mcp_serve import MCPEndpoint
+
+    ep = MCPEndpoint(name="platform-docs", kind="chroma", port=18083, cmd=["py"])
+    monkeypatch.setattr("codev_platform.mcp_serve.iter_endpoints", lambda cfg: [ep])
+    monkeypatch.setattr("codev_platform.mcp_serve.probe", lambda endpoint: "down")
+    monkeypatch.setattr(remote_ready, "spawn_endpoint", lambda endpoint: spawn_result)
+
+    with pytest.raises(RuntimeError, match=match):
+        remote_ready.ensure_code_vec_remote_daemon({})

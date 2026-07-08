@@ -92,6 +92,27 @@ def test_ensure_worker_running_spawns_once(tmp_path, monkeypatch):
     assert "--owner-token" in spawned[0]
 
 
+def test_spawn_worker_process_uses_runtime_spawn(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_spawn(cmd, cwd, log_path, env=None):
+        captured.update({"cmd": cmd, "cwd": cwd, "log_path": log_path, "env": env})
+        return 789
+
+    monkeypatch.setattr("codev_platform.mcp_runtime.spawn_detached", fake_spawn)
+
+    pid = supervisor._spawn_worker_process(["py", "-m", "worker"], str(tmp_path),
+                                           tmp_path / "worker.log", env={"X": "1"})
+
+    assert pid == 789
+    assert captured == {
+        "cmd": ["py", "-m", "worker"],
+        "cwd": str(tmp_path),
+        "log_path": tmp_path / "worker.log",
+        "env": {"X": "1"},
+    }
+
+
 def test_ensure_worker_running_returns_already_starting_when_start_lock_held(tmp_path, monkeypatch):
     monkeypatch.setenv("PLATFORM_DATA_DIR", str(tmp_path))
     spawned: list[list[str]] = []

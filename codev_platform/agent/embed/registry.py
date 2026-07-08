@@ -132,8 +132,13 @@ def build_code_vec_embedder(cfg: dict) -> Embedder | None:
     服务、GPU 独占, 本机直跑省 HTTP 更快, 与服务彻底隔离。device 默认自动 cuda/cpu。"""
     from codev_platform.core.config import get as _get
     backend = _get(cfg, "recall.code_vec.embed_backend", "remote")
-    if backend != "qwen-local":
+    if backend == "remote":
+        from codev_platform.agent.embed.remote_ready import ensure_code_vec_remote_daemon
+        ensure_code_vec_remote_daemon(cfg)
         return _build_remote(cfg)
+    if backend != "qwen-local":
+        _log.warning("[code_vec] 未知 embed_backend %r(可用: remote, qwen-local)", backend)
+        return None
     import importlib.util
     if importlib.util.find_spec("sentence_transformers") is None:
         _log.warning("[code_vec] sentence-transformers 缺, 本机 embedder 不可用")

@@ -1,7 +1,7 @@
 """平台 MCP 端点编排 (mcp_serve) —— 纯函数单测: 端点枚举 / 命令构造 / 探测。
 
-spawn 副作用不在此测 (需真 mcp-proxy + codegraph); 只验"从 config 推导出哪些端点 +
-命令长什么样 + 探测分支正确",这正是服务化路由逻辑的核心。
+真端点副作用不在此测 (需真 mcp-proxy + codegraph); 只验"从 config 推导出哪些端点 +
+命令长什么样 + 探测分支 + spawn wrapper 入参正确",这正是服务化路由逻辑的核心。
 """
 from __future__ import annotations
 
@@ -138,6 +138,59 @@ def test_probe_all_shape(monkeypatch):
     rows = ms.probe_all({"daemon": {"port": 18083}, "projects": {}})
     assert all({"name", "kind", "port", "status", "sse_url", "self_spawned"} <= set(r) for r in rows)
     assert any(r["kind"] == "graph" for r in rows)
+
+
+def test_spawn_endpoint_chroma_sets_daemon_env(monkeypatch, tmp_path):
+    from codev_platform import mcp_runtime as rt
+
+    exe = tmp_path / "python.exe"
+    exe.write_text("", encoding="utf-8")
+    captured = {}
+
+    def fake_spawn(cmd, cwd, log_path, env=None):
+        captured.update({"cmd": cmd, "cwd": cwd, "log_path": log_path, "env": env})
+        return 42
+
+    monkeypatch.setattr(rt, "spawn_detached", fake_spawn)
+    ep = MCPEndpoint(
+        name="platform-docs",
+        kind="chroma",
+        port=28083,
+        cmd=[str(exe), "-m", "codev_platform.chroma.server", "--http"],
+    )
+
+    result = rt.spawn_endpoint(ep, log_dir=tmp_path)
+
+    assert result["action"] == "spawned" and result["pid"] == 42
+    assert captured["env"]["PLATFORM_DOCS_DAEMON_PORT"] == "28083"
+    assert captured["env"]["PLATFORM_DOCS_PREWARM"] == "true"
+    assert captured["log_path"] == tmp_path / "platform-docs.log"
+
+
+def test_ensure_serving_uses_runtime_spawn(monkeypatch, tmp_path):
+    exe = tmp_path / "python.exe"
+    exe.write_text("", encoding="utf-8")
+    ep = MCPEndpoint(
+        name="platform-docs",
+        kind="chroma",
+        port=18083,
+        cmd=[str(exe), "-m", "codev_platform.chroma.server", "--http"],
+    )
+
+    monkeypatch.setattr(ms, "iter_endpoints", lambda cfg: [ep])
+    monkeypatch.setattr(ms, "probe", lambda endpoint: "down")
+    monkeypatch.setattr(ms, "spawn_endpoint",
+                        lambda endpoint, log_dir=None: {"name": endpoint.name,
+                                                        "action": "spawned",
+                                                        "status": "starting",
+                                                        "pid": 7})
+
+    assert ms.ensure_serving({}) == [{
+        "name": "platform-docs",
+        "action": "spawned",
+        "status": "starting",
+        "pid": 7,
+    }]
 
 
 def test_serve_mcp_reindex_worker_status_line(monkeypatch):

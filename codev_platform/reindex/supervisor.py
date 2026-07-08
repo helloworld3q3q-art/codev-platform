@@ -10,10 +10,11 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from uuid import uuid4
 
 from codev_platform.core.config import get as _cfg_get, load_config
@@ -381,8 +382,8 @@ def _start_lock() -> Iterator[bool]:
 
 def _spawn_worker_process(cmd: list[str], cwd: str | None, log_path: Path,
                           env: dict[str, str] | None = None) -> int:
-    from codev_platform.mcp_serve import _spawn_detached
-    return _spawn_detached(cmd, cwd, log_path, env=env)
+    from codev_platform.mcp_runtime import spawn_detached
+    return spawn_detached(cmd, cwd, log_path, env=env)
 
 
 def ensure_worker_running(cfg: dict | None = None, *, cwd: str | Path | None = None,

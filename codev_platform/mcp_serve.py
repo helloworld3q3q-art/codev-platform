@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from codev_platform.core.config import get as _cfg_get, load_config
+from codev_platform.mcp_runtime import default_log_dir, spawn_endpoint
 
 _log = logging.getLogger(__name__)
 
@@ -514,70 +515,24 @@ def wait_until_serving(
     return rows
 
 
-def _spawn_detached(cmd: list[str], cwd: str | None, log_path: Path,
-                    env: dict[str, str] | None = None) -> int:
-    """detached spawn (会话关了仍活), 复用 chroma launcher 的 Windows creationflags。
-
-    env=None → 继承 os.environ.copy(); 传入则用调用方覆盖后的环境 (如 chroma 注入
-    PLATFORM_DOCS_DAEMON_PORT, 与 systemd unit 对齐)。
-    """
-    if sys.platform == "win32":
-        creationflags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
-    else:
-        creationflags = 0
-    spawn_env = env if env is not None else os.environ.copy()
-    log_handle = open(log_path, "ab", buffering=0)
-    try:
-        # Linux: start_new_session=True (setsid) 让子进程脱离当前会话, 避免拉起它的
-        # shell / wsl 调用退出时 SIGHUP 连带杀掉 daemon (Windows 用 creationflags 已脱离)。
-        proc = subprocess.Popen(
-            cmd, cwd=cwd, stdin=subprocess.DEVNULL,
-            stdout=log_handle, stderr=log_handle,
-            creationflags=creationflags, close_fds=False, env=spawn_env,
-            start_new_session=(sys.platform != "win32"),
-        )
-        return proc.pid
-    finally:
-        log_handle.close()
-
-
 def ensure_serving(cfg: dict | None = None) -> list[dict[str, Any]]:
     """幂等拉起所有可由本编排器 spawn 的端点 (已 reachable 则跳过)。
 
-    chroma (self_spawned) 不在此拉起 —— 它由业务仓首个 Claude 会话经 launcher 自 spawn;
-    本函数只报告其状态。返回每端点 {name, action, status, pid?}。
+    chroma 也可由本编排器拉起; self_spawned 仅表示旧 launcher 路径仍能自拉起。
+    返回每端点 {name, action, status, pid?}。
     """
     cfg = cfg if cfg is not None else load_config()
-    log_dir = Path(__file__).resolve().parent / "mcp_serve_logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = default_log_dir()
     results: list[dict[str, Any]] = []
     for ep in iter_endpoints(cfg):
         status = probe(ep)
         if status == "ok":
             results.append({"name": ep.name, "action": "already-up", "status": "ok"})
             continue
-        if ep.cmd is None:
-            results.append({"name": ep.name, "action": "skip", "status": status,
-                            "note": "无 spawn 命令(外部托管)"})
-            continue
-        # 缺 mcp-proxy / venv python 时给清晰错误, 不静默
-        exe = Path(ep.cmd[0])
-        if not exe.exists():
-            results.append({"name": ep.name, "action": "fail", "status": "down",
-                            "error": f"可执行不存在: {exe}"})
-            continue
-        # chroma: server.py 只认 env PLATFORM_DOCS_DAEMON_PORT (不读 config.daemon.port),
-        # 须显式注入 ep.port, 否则配了 daemon.port=19083 时 spawn 的 chroma 仍绑默认 18083 →
-        # 探测 ep.port 报 down。prewarm 让 daemon 起来即加载模型 (与 systemd unit 对齐)。
-        spawn_env = None
-        if ep.kind == "chroma":
-            spawn_env = {**os.environ, "PLATFORM_DOCS_DAEMON_PORT": str(ep.port),
-                         "PLATFORM_DOCS_PREWARM": "true"}
-        pid = _spawn_detached(ep.cmd, ep.cwd, log_dir / f"{ep.name.replace(':', '_')}.log",
-                              env=spawn_env)
-        note = "chroma daemon 预热模型 ~30-60s" if ep.kind == "chroma" else ""
-        results.append({"name": ep.name, "action": "spawned", "status": "starting",
-                        "pid": pid, "note": note})
+        result = spawn_endpoint(ep, log_dir=log_dir)
+        if result["action"] == "skip":
+            result["status"] = status
+        results.append(result)
     return results
 
 
