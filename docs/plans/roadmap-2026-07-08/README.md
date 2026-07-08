@@ -47,6 +47,7 @@
 - `config.example.json` 补充 `platform.token_env` 样例,不修改用户级 `~/.codev-platform/config.json`。
 - `webhook extra repos` 诊断改为只扫描本机配置中带 `webhook_repo`、实际会被 webhook 入口命中的项目,并对 config/meta 重复声明的同一路径或同一 child project 做去重;不再让未启用 webhook 的本机项目或 meta-only 项目污染 health/startup。
 - `hook missed?` 诊断复用 reindex scope 公共推导;worker/manifest 模式下对 `chroma/codegraph/ingest/code_vec` 全量 expected kind 判绿,但代码类必须先由 runner proof marker 证明成功,避免 fail-soft rc=0 假绿。
+- `reindex worker` runner log 改为统一走脱敏 + 大小上限管道:stdout/stderr 先按行脱敏再写入 head/tail bounded log,单文件默认 512KiB;超长无换行行直接写 oversized marker 并丢弃该物理行直到换行,防泄密优先。
 
 ## 测试审计记录
 
@@ -57,5 +58,6 @@
 - `webhook extra repos` 收敛经测试审计兄弟二次审查并修正扫描范围后,Windows/WSL 运行态诊断均为 0 条,`health --mode light` 均为 READY/all green;目标回归合计 `53 passed`(运行态相关 `44 passed` + CLI parser `9 passed`)。
 - `hook missed?` manifest 兜底先经测试审计兄弟二次审查收窄为 `chroma` only,后续补 runner proof 后扩展为 `chroma/codegraph/ingest/code_vec` 全链路覆盖。`cmd_reindex` 成功路径输出 `proof: <kind> ok`;runner 对 codegraph/ingest/code_vec 的 fail-soft/skip 输出提升为失败,`code_vec` 同时要求 `proof: codegraph ok` 和 `proof: code_vec ok`;`CodegraphReindexRunner` 前置 ensure-link error 直接失败。实测首次暴露 Windows code_vec 因 platform-docs daemon 未启动而失败,随后修正 health/wait 语义:队列入队日志不再等于完成,同一 commit 多段日志取最新 queued block,manifest failed 时 `health` WARN、`wait-for-reindex` 返回失败,legacy finished failed 也返回失败。测试审计复核后又补齐 `wait-for-reindex` 同一 commit 多段日志取最新 block,避免旧 OK/旧 failed 干扰重跑结果。启动 daemon 后重跑 `code_vec` 成功。终审无阻塞,目标回归 `138 passed`,ruff 目标文件通过,Windows health READY。
 - `code_vec` remote `/embed` 依赖可靠化:抽出 `mcp_runtime` 承接隐藏后台启动副作用,`mcp_serve` 继续负责端点枚举/探活;`build_code_vec_embedder` 仅在默认 `remote` 且 URL 属于本机 platform-docs 时确保单个 platform-docs daemon,外部 `memory.embed.url`、`qwen-local`、`ensure_remote_daemon=false` 均不误启动。未知 backend 不再静默落 remote。测试审计兄弟复核无阻塞,非阻塞建议已补齐。post-commit 实测暴露 `reindex.supervisor` 仍引用旧 `_spawn_detached`,已改为复用 `mcp_runtime.spawn_detached` 并补 supervisor 测试。目标回归 `210 passed / 5 skipped`,ruff 目标文件通过;Windows 实测 platform-docs daemon 未运行时 `reindex --code-vec` 会自动拉起 platform-docs,未启动 codegraph/agent-memory/graph 全家桶。
-- `reindex worker` runner 失败可观测性增强:每个 project/kind 的子进程输出覆盖写入 `data/logs/reindex-runner/<project>__<kind>.log`,失败/超时时 tail 写入 manifest note 并进入 worker.log detail;成功输出也保留在 runner log。测试审计兄弟复审无阻塞,目标回归 `52 passed`,ruff 目标文件通过。剩余风险:runner log 尚未做敏感串脱敏和单次日志大小上限。
+- `reindex worker` runner 失败可观测性增强:每个 project/kind 的子进程输出覆盖写入 `data/logs/reindex-runner/<project>__<kind>.log`,失败/超时时 tail 写入 manifest note 并进入 worker.log detail;成功输出也保留在 runner log。首轮测试审计后补齐成功输出保留和测试 `PLATFORM_DATA_DIR` 隔离,目标回归 `52 passed`,ruff 目标文件通过。
+- runner log 脱敏与大小上限:新增独立 `runner_logs` helper,覆盖 Authorization、token/password/secret/api key/DSN/env key、JSON quoted 值、URL credentials、`sk-*` 形态;子进程 stdout/stderr 走 bounded head/tail log,默认 512KiB,proof marker 位于正常尾部行时可保留。测试审计兄弟三轮复核中发现并修正长 secret 分片泄漏、quoted secret 后缀泄漏、超长 quoted line 前缀泄漏、timeout 后代进程持 stdout、UTF-8 切分等问题。最终目标回归 `92 passed`;ruff 目标文件通过。已明确取舍:超长无换行物理行会整行丢弃以防泄密,若 proof marker 被同一坏格式行拼接,runner 会 fail-safe 判失败。
 - 实时状态:`reindex-queue status` 显示 FileSpoolQueue 队列空,短驻 worker 已 idle 退出。

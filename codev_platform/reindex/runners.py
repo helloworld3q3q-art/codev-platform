@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from codev_platform.reindex import runner_logs
+
 
 @runtime_checkable
 class ReindexRunner(Protocol):
@@ -70,26 +72,30 @@ def _runner_timeout(cfg: dict) -> float | None:
     return t if t > 0 else None
 
 
-def _tail_output(log_file, limit: int = _FAILURE_TAIL_BYTES) -> str:
-    log_file.flush()
-    log_file.seek(0, 2)
-    size = log_file.tell()
-    log_file.seek(max(0, size - limit))
-    return log_file.read().strip()
+def _tail_output(log_path: Path, limit: int = _FAILURE_TAIL_BYTES) -> str:
+    if not log_path.exists():
+        return ""
+    with log_path.open("rb") as log_file:
+        log_file.seek(0, 2)
+        size = log_file.tell()
+        log_file.seek(max(0, size - limit))
+        return log_file.read().decode("utf-8", errors="replace").strip()
 
 
-def _sample_output(log_file, limit: int = _PROOF_SAMPLE_BYTES) -> str:
-    log_file.flush()
-    log_file.seek(0, 2)
-    size = log_file.tell()
-    if size <= limit:
+def _sample_output(log_path: Path, limit: int = _PROOF_SAMPLE_BYTES) -> str:
+    if not log_path.exists():
+        return ""
+    with log_path.open("rb") as log_file:
+        log_file.seek(0, 2)
+        size = log_file.tell()
+        if size <= limit:
+            log_file.seek(0)
+            return log_file.read().decode("utf-8", errors="replace")
+        half = max(1, limit // 2)
         log_file.seek(0)
-        return log_file.read()
-    half = max(1, limit // 2)
-    log_file.seek(0)
-    head = log_file.read(half)
-    log_file.seek(max(0, size - half))
-    tail = log_file.read()
+        head = log_file.read(half).decode("utf-8", errors="replace")
+        log_file.seek(max(0, size - half))
+        tail = log_file.read().decode("utf-8", errors="replace")
     return head + "\n...<runner log truncated>...\n" + tail
 
 
@@ -174,30 +180,24 @@ class CliReindexRunner:
         cmd = [py, "-m", "codev_platform.cli", "reindex", *self._flags, "--repo", str(repo)]
         timeout = _runner_timeout(cfg)
         log_path = _runner_log_path(project_id, self.kind)
-        with log_path.open("w+", encoding="utf-8", errors="replace") as log_file:
-            try:
-                rc = subprocess.run(
-                    cmd,
-                    timeout=timeout,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                ).returncode
-            except subprocess.TimeoutExpired:
-                # 超时 → 子进程已被 kill; 返回 rc=124 让 worker 丢弃该 job, 避免挂死任务
-                # 永久阻塞串行队列队头 (挂过一次大概率再挂, 不重试)。
-                self.last_note = _failure_note(self.kind, _TIMEOUT_RC, timeout, _tail_output(log_file))
-                print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
-                return _TIMEOUT_RC
-            if rc != 0:
-                self.last_note = _failure_note(self.kind, rc, None, _tail_output(log_file))
-                print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
-                return rc
-            proof_failure = _proof_failure(self.kind, _sample_output(log_file))
-            if proof_failure:
-                self.last_note = _failure_note(self.kind, 1, None, proof_failure)
-                print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
-                return 1
+        try:
+            rc = runner_logs.run_logged_process(cmd, timeout=timeout, log_path=log_path)
+        except subprocess.TimeoutExpired:
+            # 超时 → 子进程已被 kill; 返回 rc=124 让 worker 丢弃该 job, 避免挂死任务
+            # 永久阻塞串行队列队头 (挂过一次大概率再挂, 不重试)。
+            self.last_note = _failure_note(self.kind, _TIMEOUT_RC, timeout, _tail_output(log_path))
+            print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
+            return _TIMEOUT_RC
+        if rc != 0:
+            self.last_note = _failure_note(self.kind, rc, None, _tail_output(log_path))
+            print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
             return rc
+        proof_failure = _proof_failure(self.kind, _sample_output(log_path))
+        if proof_failure:
+            self.last_note = _failure_note(self.kind, 1, None, proof_failure)
+            print(f"[reindex:{self.kind}] {self.last_note}\nlog={log_path}", file=sys.stderr)
+            return 1
+        return rc
 
 
 class CodegraphReindexRunner(CliReindexRunner):
