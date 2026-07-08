@@ -56,6 +56,114 @@ def test_audit_clean_graph(tmp_path):
     assert rep["warnings"]["low_confidence_edges"]["count"] == 0
 
 
+def test_audit_reports_api_link_coverage(tmp_path):
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    frontend_linked = GraphNode(
+        id=f"{PID}:frontend_api_call:src/api.ts:createOrder",
+        kind=NodeKind.FRONTEND_API_CALL.value,
+        name="createOrder",
+        project_id=PID,
+        file="src/api.ts",
+        meta={"url": "/orders", "http_method": "POST"},
+    )
+    frontend_unlinked = GraphNode(
+        id=f"{PID}:frontend_api_call:src/api.ts:deleteOrder",
+        kind=NodeKind.FRONTEND_API_CALL.value,
+        name="deleteOrder",
+        project_id=PID,
+        file="src/api.ts",
+        meta={"url": "/orders/delete", "http_method": "POST"},
+    )
+    backend = GraphNode(
+        id=f"{PID}:backend_endpoint:POST:/orders",
+        kind=NodeKind.BACKEND_ENDPOINT.value,
+        name="createOrder",
+        project_id=PID,
+        file="OrderController.java",
+        meta={"url": "/orders", "http_method": "POST"},
+    )
+    _seed(conn, [frontend_linked, frontend_unlinked, backend],
+          [GraphEdge(source=frontend_linked.id, target=backend.id, kind=EdgeKind.CALLS_API.value)])
+    rep = audit_graph(conn, PID)
+    conn.close()
+
+    api = rep["warnings"]["api_link_coverage"]
+    assert rep["clean"] is True
+    assert api["status"] == "partial_frontend_linkage"
+    assert api["frontend_api_calls"] == 2
+    assert api["backend_endpoints"] == 1
+    assert api["calls_api_edges"] == 1
+    assert api["linked_frontend_api_calls"] == 1
+    assert api["unlinked_frontend_api_calls"] == 1
+    assert api["frontend_link_ratio"] == 0.5
+    assert api["unlinked_samples"][0]["url"] == "/orders/delete"
+
+
+def test_audit_reports_frontend_backend_unlinked(tmp_path):
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    frontend = GraphNode(
+        id=f"{PID}:frontend_api_call:src/api.ts:getUser",
+        kind=NodeKind.FRONTEND_API_CALL.value,
+        name="getUser",
+        project_id=PID,
+        file="src/api.ts",
+        meta={"url": "/users", "http_method": "GET"},
+    )
+    backend = GraphNode(
+        id=f"{PID}:backend_endpoint:POST:/orders",
+        kind=NodeKind.BACKEND_ENDPOINT.value,
+        name="createOrder",
+        project_id=PID,
+        file="OrderController.java",
+        meta={"url": "/orders", "http_method": "POST"},
+    )
+    _seed(conn, [frontend, backend], [])
+    rep = audit_graph(conn, PID)
+    conn.close()
+
+    api = rep["warnings"]["api_link_coverage"]
+    assert rep["clean"] is True
+    assert api["status"] == "frontend_backend_unlinked"
+    assert api["count"] == 1
+    assert api["calls_api_edges"] == 0
+    assert "没有 calls_api" in api["diagnosis"]
+
+
+def test_audit_ignores_malformed_calls_api_for_coverage(tmp_path):
+    conn = open_store(PID, path=tmp_path / "g.sqlite")
+    frontend = GraphNode(
+        id=f"{PID}:frontend_api_call:src/api.ts:getUser",
+        kind=NodeKind.FRONTEND_API_CALL.value,
+        name="getUser",
+        project_id=PID,
+        file="src/api.ts",
+        meta={"url": "/users", "http_method": "GET"},
+    )
+    backend = GraphNode(
+        id=f"{PID}:backend_endpoint:GET:/users",
+        kind=NodeKind.BACKEND_ENDPOINT.value,
+        name="getUser",
+        project_id=PID,
+        file="UserController.java",
+        meta={"url": "/users", "http_method": "GET"},
+    )
+    wrong_target = _node("svc", "UserService")
+    _seed(conn, [frontend, backend, wrong_target],
+          [GraphEdge(source=frontend.id, target=wrong_target.id, kind=EdgeKind.CALLS_API.value)])
+    rep = audit_graph(conn, PID)
+    conn.close()
+
+    api = rep["warnings"]["api_link_coverage"]
+    assert rep["clean"] is True
+    assert api["status"] == "frontend_backend_unlinked"
+    assert api["calls_api_edges"] == 0
+    assert api["raw_calls_api_edges"] == 1
+    assert api["invalid_calls_api_edges"] == 1
+    assert api["linked_frontend_api_calls"] == 0
+    assert api["unlinked_frontend_api_calls"] == 1
+    assert api["invalid_calls_api_samples"][0]["target"] == wrong_target.id
+
+
 def test_audit_cross_project_leak(tmp_path):
     conn = open_store(PID, path=tmp_path / "g.sqlite")
     _seed(conn, [_node("f1", "foo")], [])
@@ -202,6 +310,7 @@ def test_render_markdown_smoke(tmp_path):
     conn.close()
     md = render_markdown(rep)
     assert "graph audit" in md and "clean" in md
+    assert "frontend API link coverage" in md
 
 
 # ---- 后端分流 + 孤儿 reconcile(① 修门禁在 PG 后端扫空 / ② store 外孤儿检测)----

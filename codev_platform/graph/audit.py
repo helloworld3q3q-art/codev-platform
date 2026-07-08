@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from codev_platform.graph.schema import (
+    EdgeKind,
     NodeKind,
     edge_provenance,
     is_soft_edge_kind,
@@ -46,6 +47,95 @@ def _canonical_soft_plugin() -> str:
         return ANALYZERS_PLUGIN
     except Exception:  # noqa: BLE001
         return "builtin.analyzers"
+
+
+def _node_meta_str(node, key: str, default: str = "") -> str:
+    value = (node.meta or {}).get(key)
+    return value if isinstance(value, str) else default
+
+
+def _api_node_sample(node) -> dict:
+    return {
+        "id": node.id,
+        "name": node.name,
+        "file": node.file,
+        "url": _node_meta_str(node, "url"),
+        "http_method": _node_meta_str(node, "http_method"),
+    }
+
+
+def _api_link_status(frontend_count: int, backend_count: int,
+                     calls_api_count: int, unlinked_count: int) -> str:
+    if frontend_count == 0:
+        return "no_frontend_api"
+    if backend_count == 0:
+        return "frontend_without_backend_endpoints"
+    if calls_api_count == 0:
+        return "frontend_backend_unlinked"
+    if unlinked_count:
+        return "partial_frontend_linkage"
+    return "linked"
+
+
+def _api_link_diagnosis(status: str) -> str:
+    return {
+        "no_frontend_api": "未发现前端 API 调用节点。",
+        "frontend_without_backend_endpoints": (
+            "发现前端 API, 但没有后端 endpoint; 通常是后端源码未纳入或后端扫描器未覆盖。"
+        ),
+        "frontend_backend_unlinked": (
+            "前后端节点都存在, 但没有 calls_api; 通常是后端源码覆盖不足、URL/method 不匹配或 linker 覆盖不足。"
+        ),
+        "partial_frontend_linkage": "部分前端 API 未匹配到后端 endpoint, 建议核对未链接样本。",
+        "linked": "前端 API 均已建立 calls_api 硬边。",
+    }[status]
+
+
+def _api_link_coverage(g) -> dict:
+    """前端 API 到后端 endpoint 的确定性链路覆盖诊断。
+
+    这是读侧 warning, 不参与 clean/error 结论: 缺后端源码或扫描器不足都不该被伪装成结构错误,
+    但必须在审计里可见, 便于判断下一步是补仓库、补 parser, 还是补 linker。
+    """
+    frontend_nodes = [n for n in g.nodes if n.kind == NodeKind.FRONTEND_API_CALL.value]
+    backend_nodes = [n for n in g.nodes if n.kind == NodeKind.BACKEND_ENDPOINT.value]
+    frontend_ids = {n.id for n in frontend_nodes}
+    backend_ids = {n.id for n in backend_nodes}
+    calls_api_edges = [e for e in g.edges if e.kind == EdgeKind.CALLS_API.value]
+    valid_calls_api_edges = [
+        e for e in calls_api_edges if e.source in frontend_ids and e.target in backend_ids
+    ]
+    invalid_calls_api_edges = [
+        e for e in calls_api_edges if not (e.source in frontend_ids and e.target in backend_ids)
+    ]
+    linked_frontend_ids = {e.source for e in valid_calls_api_edges}
+    linked_backend_ids = {e.target for e in valid_calls_api_edges}
+    unlinked_nodes = [n for n in frontend_nodes if n.id not in linked_frontend_ids]
+    frontend_count = len(frontend_nodes)
+    unlinked_count = len(unlinked_nodes)
+    status = _api_link_status(
+        frontend_count, len(backend_nodes), len(valid_calls_api_edges), unlinked_count)
+    ratio = round(len(linked_frontend_ids) / frontend_count, 4) if frontend_count else 1.0
+    return {
+        "count": unlinked_count,
+        "status": status,
+        "diagnosis": _api_link_diagnosis(status),
+        "frontend_api_calls": frontend_count,
+        "backend_endpoints": len(backend_nodes),
+        "calls_api_edges": len(valid_calls_api_edges),
+        "raw_calls_api_edges": len(calls_api_edges),
+        "invalid_calls_api_edges": len(invalid_calls_api_edges),
+        "linked_frontend_api_calls": len(linked_frontend_ids),
+        "linked_backend_endpoints": len(linked_backend_ids),
+        "unlinked_frontend_api_calls": unlinked_count,
+        "frontend_link_ratio": ratio,
+        "unlinked_samples": [_api_node_sample(n) for n in unlinked_nodes[:_SAMPLE]],
+        "backend_endpoint_samples": [_api_node_sample(n) for n in backend_nodes[:_SAMPLE]],
+        "invalid_calls_api_samples": [
+            {"source": e.source, "target": e.target, "kind": e.kind}
+            for e in invalid_calls_api_edges[:_SAMPLE]
+        ],
+    }
 
 
 def audit_graph(store: GraphStore, project_id: str, *,
@@ -136,6 +226,7 @@ def audit_graph(store: GraphStore, project_id: str, *,
             "samples": [{"source": k[0], "target": k[1], "kind": k[2], "copies": c}
                         for k, c in dup_edges[:_SAMPLE]],
         },
+        "api_link_coverage": _api_link_coverage(g),
     }
     n_errors = (errors["dangling_edges"]["count"]
                 + errors["cross_project_nodes"]["count"]
@@ -177,6 +268,23 @@ def _unreadable_report(project_id: str, reason: str) -> dict:
                                      "by_kind": {}, "samples": []},
             "no_provenance_edges": {"count": 0, "by_kind": {}, "samples": []},
             "duplicate_edges": {"count": 0, "by_kind": {}, "samples": []},
+            "api_link_coverage": {
+                "count": 0,
+                "status": "unreadable",
+                "diagnosis": "store 无法审计, 无法计算前后端 API 链路覆盖。",
+                "frontend_api_calls": 0,
+                "backend_endpoints": 0,
+                "calls_api_edges": 0,
+                "raw_calls_api_edges": 0,
+                "invalid_calls_api_edges": 0,
+                "linked_frontend_api_calls": 0,
+                "linked_backend_endpoints": 0,
+                "unlinked_frontend_api_calls": 0,
+                "frontend_link_ratio": 0.0,
+                "unlinked_samples": [],
+                "backend_endpoint_samples": [],
+                "invalid_calls_api_samples": [],
+            },
         },
         "audit_error": reason,
         "error_count": 1,
@@ -309,4 +417,18 @@ def render_markdown(report: dict) -> str:
     dup = warn["duplicate_edges"]
     lines.append(f"- duplicate edges (同边多 plugin 重复/退役残留, impact 已消解): "
                  f"{dup['count']} {dict(dup['by_kind'])}")
+    api = warn["api_link_coverage"]
+    lines.append(
+        f"- frontend API link coverage: {api['linked_frontend_api_calls']}/"
+        f"{api['frontend_api_calls']} linked, backend endpoints {api['backend_endpoints']}, "
+        f"calls_api {api['calls_api_edges']} ({api['status']})"
+    )
+    if api.get("invalid_calls_api_edges"):
+        lines.append(f"    - invalid calls_api edges: {api['invalid_calls_api_edges']}")
+    if api["count"]:
+        lines.append(f"    - diagnosis: {api['diagnosis']}")
+    for s in api["unlinked_samples"][:3]:
+        lines.append(
+            f"    - unlinked {s['http_method'] or '?'} {s['url'] or s['name']} @ {s['file']}"
+        )
     return "\n".join(lines)

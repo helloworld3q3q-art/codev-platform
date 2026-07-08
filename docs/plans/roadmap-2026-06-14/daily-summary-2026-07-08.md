@@ -158,3 +158,33 @@ python -m codev_platform.cli graph audit --project oms-work --json
 ```
 
 结果:`63 passed`,ruff 通过,真实 OMS audit clean。
+
+## 十一、前后端 API 链路覆盖诊断
+
+- 继续核对真实 `D:\OmsWork` 后端仓后确认:当前纳入的 Java 后端源码只产 3 个 DSM `/param-mapping/*` endpoint,另有 1 个前端静态 demo `GET /`;`scl-www` 的 2374 个前端 API 大多没有对应 Controller 源码在当前 OMS 工作区内。
+- 结论:此时继续硬补 Spring annotation scanner 会变成项目特化/猜测式开发;真正需要先让平台可解释“为什么 `calls_api=0`”。
+- 通用修正:
+  - 在 `graph audit` 增加 `warnings.api_link_coverage`,只读统计 `frontend_api_call/backend_endpoint/calls_api` 覆盖率、未链接样本和诊断状态。
+  - `clean/error_count` 仍只看结构 error;API 覆盖不足是 warning,不变成硬门禁。
+  - 有效 `calls_api` 必须同时满足 source 是 `frontend_api_call`、target 是 `backend_endpoint`;畸形 `calls_api` 单独计入 `invalid_calls_api_edges`,避免误报覆盖完成。
+  - `_unreadable_report` 同步补齐字段,旧 schema/坏库只读审计仍 fail-soft,CLI/JSON 形状稳定。
+- 兄弟审计发现并已修:
+  - 只校验 `calls_api.source` 会把 `frontend_api_call -> backend_function` 畸形边误算为已覆盖。
+  - 已改为基于 valid edge 集合计算 linked counts,并补 wrong-kind 回归测试。
+- 真实 OMS 复验:
+  - `graph audit --project oms-work --json` 仍为 `clean=true`。
+  - `api_link_coverage`: `frontend_api_calls=2374`,`backend_endpoints=4`,`calls_api_edges=0`,`raw_calls_api_edges=0`,`invalid_calls_api_edges=0`,`frontend_link_ratio=0.0`。
+  - Markdown 输出直接展示 `frontend API link coverage: 0/2374 linked, backend endpoints 4, calls_api 0` 和未链接样本。
+
+验证:
+
+```powershell
+python -m pytest tests/test_graph_audit.py
+python -m pytest tests/test_web_graph_audit.py tests/test_graph_provenance.py tests/test_cli_parser.py
+python -m ruff check codev_platform\graph\audit.py tests\test_graph_audit.py
+git diff --check -- codev_platform\graph\audit.py tests\test_graph_audit.py
+python -m codev_platform.cli graph audit --project oms-work --json
+python -m codev_platform.cli graph audit --project oms-work
+```
+
+结果:`18 passed` + `29 passed`,ruff 通过,diff whitespace 通过;真实 OMS audit clean 且覆盖 warning 可见。
