@@ -55,6 +55,5 @@
 - `health --all` token 鉴权经单独测试审计兄弟二次审查,补齐无 token 时不发送 Authorization、首个 token 401 后继续尝试下一个候选 token 的覆盖;目标回归 `11 passed`,CLI parser `9 passed`,配置样板 JSON 解析通过。
 - WSL 实调:`/healthz` 可达,`/platform/status` 仍 401;诊断确认交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`,后续需单独处理 WSL token 环境注入。
 - `webhook extra repos` 收敛经测试审计兄弟二次审查并修正扫描范围后,Windows/WSL 运行态诊断均为 0 条,`health --mode light` 均为 READY/all green;目标回归合计 `53 passed`(运行态相关 `44 passed` + CLI parser `9 passed`)。
-- `hook missed?` manifest 兜底经测试审计兄弟二次审查后收窄为 `chroma` only,补齐 `failed`/`stale`/`unknown`/unreadable/project unknown 分支、legacy log 优先级和混合 scope 下优先暴露 `chroma` 失败的覆盖;目标回归 `17 passed` + 邻近 health/manifest/CLI `33 passed`(合计 `50 passed`),ruff 目标文件通过,Windows health READY。
-- WSL 真实 repo/data 验证:docs-only HEAD 可由 `chroma` manifest 兜底为 READY;本次代码变更 HEAD 已消费完队列,但 `codev-platform__chroma` job rc=1,health 保守 WARN;后续需补 worker runner 输出/失败定位和 codegraph/ingest/code_vec 强成功信号或独立 artifact proof。
+- `hook missed?` manifest 兜底经测试审计兄弟二次审查后收窄为 `chroma` only,补齐 `failed`/`stale`/`unknown`/unreadable/project unknown 分支、legacy log 优先级和混合 scope 下优先暴露 `chroma` 失败的覆盖;目标回归 `17 passed` + 邻近 health/manifest/CLI `33 passed`(合计 `50 passed`),ruff 目标文件通过,Windows/WSL health READY。
 - 实时状态:`reindex-queue status` 显示 FileSpoolQueue 队列空,短驻 worker 已 idle 退出。
