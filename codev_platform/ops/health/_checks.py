@@ -422,6 +422,10 @@ def _manifest_head_coverage(
 ) -> tuple[bool, str]:
     if not expected_kinds:
         return False, ""
+    manifest_backed_kinds = {"chroma"}
+    unsupported = expected_kinds - manifest_backed_kinds
+    if unsupported:
+        return False, "manifest fallback limited to chroma-only; " + ",".join(sorted(unsupported))
     if not project_id or project_id == "unknown":
         return False, "project_id unknown"
     try:

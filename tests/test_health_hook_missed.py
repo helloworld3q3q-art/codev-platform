@@ -49,7 +49,7 @@ def test_hook_missed_accepts_manifest_when_worker_mode_has_no_reindex_log(tmp_pa
     assert "covered by manifest (chroma)" in report.rows[0]["msg"]
 
 
-def test_hook_missed_accepts_codegraph_manifest_when_all_expected_kinds_are_fresh(tmp_path, monkeypatch):
+def test_hook_missed_rejects_codegraph_manifest_even_when_all_expected_kinds_are_fresh(tmp_path, monkeypatch):
     _patch_git(monkeypatch, ["codev_platform/ops/health/_checks.py"])
     _patch_manifest(monkeypatch, [
         {"kind": "codegraph", "status": "ok", "fresh": True},
@@ -59,9 +59,9 @@ def test_hook_missed_accepts_codegraph_manifest_when_all_expected_kinds_are_fres
 
     report = _run(tmp_path, {"reindex_codegraph_patterns": [r"^codev_platform/.*\.py$"]})
 
-    assert report.amber == 0
-    assert report.rows[0]["status"] == "OK"
-    assert "covered by manifest" in report.rows[0]["msg"]
+    assert report.amber == 1
+    assert report.rows[0]["status"] == "WARN"
+    assert "manifest fallback limited to chroma-only" in report.rows[0]["msg"]
     assert "codegraph" in report.rows[0]["msg"]
     assert "ingest" in report.rows[0]["msg"]
     assert "code_vec" in report.rows[0]["msg"]
@@ -78,7 +78,7 @@ def test_hook_missed_still_warns_when_expected_manifest_kind_missing(tmp_path, m
 
     assert report.amber == 1
     assert report.rows[0]["status"] == "WARN"
-    assert "ingest:missing" in report.rows[0]["msg"]
+    assert "manifest fallback limited to chroma-only" in report.rows[0]["msg"]
 
 
 @pytest.mark.parametrize(
