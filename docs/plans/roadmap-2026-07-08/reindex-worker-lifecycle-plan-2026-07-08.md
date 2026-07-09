@@ -163,4 +163,16 @@ WSL 服务固化本步不新增 nohup/supervisor,因为 WSL 已接入仓内正�
 - 静态检查:`python -m ruff check codev_platform/mcp_systemd.py codev_platform/core/config.py tests/test_systemd_restart.py` → passed。
 - `config.example.json` JSON 解析通过。
 
-下一步:在 WSL 本机创建受限权限 env 文件,写入实际 token,配置用户级 `systemd.env_file`,重装/restart 相关 unit,再验证 `health --all` 与 `/platform/status` 不再 401。
+第二步已完成 WSL 本机落地:
+
+- WSL 使用 `/home/helloworld/.config/codev-platform/platform.env` 作为机器私有 env 文件;目录权限 `0700`,env 文件权限 `0600`。
+- `~/.codev-platform/config.json` 设置 `platform.token_env=CODEV_PLATFORM_MCP_TOKEN` 和 `systemd.env_file=/home/helloworld/.config/codev-platform/platform.env`;当前 config 与历史 `config.json.bak*` 权限均为 `0600`。
+- 重新生成并安装 systemd unit 后,MCP 端点、reindex、webhook、agent 等 7 个常驻服务均 `active` + `enabled`,并确认运行进程环境中存在 `CODEV_PLATFORM_MCP_TOKEN`;memory maintenance timer 继续由 timer 触发。
+- `health --all` 客户端新增 env-file 兜底:仍优先读取真实进程环境变量;若未设置,再从 `systemd.env_file` 解析 `platform.token_env` / `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` 对应值。这样交互式 CLI 不必把 token 放进 shell profile,服务器也可复用 `/etc/codev-platform/platform.env`。
+- env 文件解析只支持 `KEY=value`、注释、可选 `export ` 前缀和简单单双引号,不执行 shell、不展开变量、不输出 token 值。
+
+验证:
+
+- TDD 红灯:`test_health_all_reads_token_from_configured_systemd_env_file` 在实现前失败,因为请求未带 Authorization;审计后补齐“任一进程 env 优先于 env-file”和“env-file shell-like 值按字面处理”两个回归。
+- 目标回归:`python -m pytest tests/test_health_all_auth.py tests/test_health_split_security.py -q` → `13 passed / 1 warning`;扩大回归 `tests/test_mcp_serve.py tests/test_systemd_restart.py tests/test_systemd_agent_clock.py tests/test_health_all_auth.py tests/test_health_split_security.py` → `57 passed / 1 warning`。
+- 静态检查:`python -m ruff check codev_platform/ops/health/__init__.py tests/test_health_all_auth.py` → passed。

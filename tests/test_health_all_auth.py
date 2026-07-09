@@ -60,6 +60,82 @@ def test_health_all_falls_back_to_codex_mcp_token(monkeypatch):
     assert seen["auth"] == "Bearer codex-token"
 
 
+def test_health_all_reads_token_from_configured_systemd_env_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "platform.env"
+    env_file.write_text(
+        "# machine-local secrets\n"
+        "CODEV_PLATFORM_MCP_TOKEN=file-token\n",
+        encoding="utf-8",
+    )
+    _patch_config(
+        monkeypatch,
+        {
+            "platform": {
+                "url": "http://platform.local",
+                "token_env": "CODEV_PLATFORM_MCP_TOKEN",
+            },
+            "systemd": {"env_file": str(env_file)},
+        },
+    )
+    monkeypatch.delenv("PLATFORM_TOKEN", raising=False)
+    monkeypatch.delenv("CODEV_PLATFORM_MCP_TOKEN", raising=False)
+    seen = {}
+
+    def fake_urlopen(req, timeout=None):
+        seen["auth"] = req.get_header("Authorization")
+        return _Resp()
+
+    monkeypatch.setattr(health_mod.urllib.request, "urlopen", fake_urlopen)
+
+    assert health_mod.cmd_health_all(object()) == 0
+    assert seen["auth"] == "Bearer file-token"
+
+
+def test_health_all_prefers_any_process_env_before_systemd_env_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "platform.env"
+    env_file.write_text("CUSTOM_PLATFORM_TOKEN=file-custom-token\n", encoding="utf-8")
+    _patch_config(
+        monkeypatch,
+        {
+            "platform": {
+                "url": "http://platform.local",
+                "token_env": "CUSTOM_PLATFORM_TOKEN",
+            },
+            "systemd": {"env_file": str(env_file)},
+        },
+    )
+    monkeypatch.delenv("CUSTOM_PLATFORM_TOKEN", raising=False)
+    monkeypatch.setenv("PLATFORM_TOKEN", "process-token")
+    seen = {}
+
+    def fake_urlopen(req, timeout=None):
+        seen["auth"] = req.get_header("Authorization")
+        return _Resp()
+
+    monkeypatch.setattr(health_mod.urllib.request, "urlopen", fake_urlopen)
+
+    assert health_mod.cmd_health_all(object()) == 0
+    assert seen["auth"] == "Bearer process-token"
+
+
+def test_health_all_treats_systemd_env_file_values_as_literals(monkeypatch, tmp_path):
+    env_file = tmp_path / "platform.env"
+    env_file.write_text("CODEV_PLATFORM_MCP_TOKEN=$(echo should-not-run)\n", encoding="utf-8")
+    _patch_config(monkeypatch, {"platform": {"url": "http://platform.local"}, "systemd": {"env_file": str(env_file)}})
+    monkeypatch.delenv("PLATFORM_TOKEN", raising=False)
+    monkeypatch.delenv("CODEV_PLATFORM_MCP_TOKEN", raising=False)
+    seen = {}
+
+    def fake_urlopen(req, timeout=None):
+        seen["auth"] = req.get_header("Authorization")
+        return _Resp()
+
+    monkeypatch.setattr(health_mod.urllib.request, "urlopen", fake_urlopen)
+
+    assert health_mod.cmd_health_all(object()) == 0
+    assert seen["auth"] == "Bearer $(echo should-not-run)"
+
+
 def test_health_all_retries_next_token_env_after_401(monkeypatch):
     _patch_config(monkeypatch)
     monkeypatch.setenv("PLATFORM_TOKEN", "stale-token")

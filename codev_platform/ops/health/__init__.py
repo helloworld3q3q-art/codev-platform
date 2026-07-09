@@ -241,8 +241,9 @@ def _write_json_snapshot(r: Report, path: Path, project_id: str | None, mode: st
 
 # ----------------------------------------------------------------------
 # platform-wide aggregate (--all): HTTP client of daemon /platform/status
-# 原则: 访问平台数据走 HTTP/HTTPS。本函数只 HTTP GET, 不读任何本地文件路径;
-# 服务端 (daemon) 跑在平台主机上聚合本机 data/+PG, 见 codev_platform/platform_status.py。
+# 原则: 平台数据走 HTTP/HTTPS;客户端只可读取本机 env/env-file 取 Bearer token,
+# 不直读平台 data/ 索引。服务端(daemon)跑在平台主机上聚合本机 data/+PG,
+# 见 codev_platform/platform_status.py。
 # ----------------------------------------------------------------------
 def _platform_url(cfg: dict) -> str:
     base = cfg_get("platform.url", cfg=cfg) or f"http://127.0.0.1:{_daemon_port(cfg)}"
@@ -261,14 +262,59 @@ def _platform_token_env_names(cfg: dict) -> list[str]:
     return list(dict.fromkeys(name for name in names if name))
 
 
+def _read_env_file_values(path: str | None, allowed_names: set[str]) -> dict[str, str]:
+    if not path:
+        return {}
+    env_path = Path(str(path)).expanduser()
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not key or not key.replace("_", "").isalnum() or key[0].isdigit():
+            continue
+        if key not in allowed_names:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def _platform_token_candidates(cfg: dict) -> list[tuple[str, str]]:
+    names = _platform_token_env_names(cfg)
+    candidates: list[tuple[str, str]] = []
+    for env_name in names:
+        token = os.environ.get(env_name)
+        if token:
+            candidates.append((env_name, token))
+    if candidates:
+        return candidates
+
+    env_file_values = _read_env_file_values(cfg_get("systemd.env_file", cfg=cfg), set(names))
+    for env_name in names:
+        token = env_file_values.get(env_name)
+        if token:
+            candidates.append((env_name, token))
+    return candidates
+
+
 def _platform_status_requests(
     url: str,
     cfg: dict,
 ) -> list[tuple[str | None, urllib.request.Request]]:
     requests: list[tuple[str | None, urllib.request.Request]] = []
     seen_tokens: set[str] = set()
-    for env_name in _platform_token_env_names(cfg):
-        token = os.environ.get(env_name)
+    for env_name, token in _platform_token_candidates(cfg):
         if token and token not in seen_tokens:
             seen_tokens.add(token)
             requests.append((
