@@ -222,14 +222,14 @@ WSL / 服务器形态结果:
 - WSL / 服务器 token 注入能力:仓内 systemd 渲染支持 `systemd.env_file`;WSL 本机 env 文件与 config 权限收紧到 `0600`;常驻服务进程已带 `CODEV_PLATFORM_MCP_TOKEN`。
 - `health --all` token-mode:优先真实进程环境,无交互环境变量时读取 `systemd.env_file`;显式移除 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` 后 WSL `health --all` 实调成功。
 - runner log 可观测性:真实失败演练写入 bounded/redacted runner log 和 failed manifest note;Windows/WSL 真实 runner log 均未超限,复扫无敏感形态命中。
+- `openclaw-stock/chroma` WSL 运行态排查已关闭:确认 WSL ext4/空间/inode 正常、`dmesg` 无真实磁盘 I/O 错误,`chroma.sqlite3` 只读 `integrity_check/quick_check` 均为 `ok`;失败触发点高度疑似为旧 Chroma current/base 在增量写入时触发 HNSW/compaction 层 `disk I/O error`。使用正式 CLI 而非手改 `data/`:先以 `PLATFORM_INDEX_FLUSH_BATCH=100000 codev-platform reindex --repo /home/helloworld/work/platform --chroma --force` 做 blue-green full rebuild,再发现一次 worker 增量导致 manifest 4914 / fresh count 4903 不一致,最终重新对 openclaw HEAD `5335c969` 做 latest force rebuild。验收结果:current build `5335c9693c7c-1783572706`,fresh Chroma count=4914,build manifest=267 files / 4914 chunks,`index_manifest.sqlite` 中 `chroma/codegraph/ingest/code_vec` 全为 `ok`,runner log 无 `FAIL`,`reindex-queue status` 队列空,WSL MCP `search_docs` 实调成功并触发 reload,`health --all` 显示 openclaw-stock Chroma=4914 chunks。说明:由于当前会话无 sudo,未重启 `codev-mcp-platform-docs.service` 清理旧 base 句柄;服务端已热加载到新 build,后续有 sudo 时可顺手重启释放旧句柄,不阻塞当前读写链路。
 
 未关闭但已拆分的后续任务:
 
-- `openclaw-stock/chroma` WSL 运行态排查:manifest 当前 `status=failed`,note 长度 `1215`,含 Chroma `disk I/O error`;`code_vec/codegraph/ingest` 均为 `ok` 且对齐 HEAD。该问题不阻塞 `codev-platform` 本轮验收,但需要单独确认 Chroma 数据目录、磁盘/WSL 文件系统状态、必要时重建 openclaw chroma 索引。
 - 生产服务器首机落地:在真实服务器使用 `/etc/codev-platform/platform.env` 或等价机密路径,设置 `systemd.env_file` 与 `platform.token_env`,安装/重启 systemd units 后验证 `health --mode light`、`health --all`、`reindex-queue status` 和 runner log 权限。不要把服务器 token 写入仓库。
 - 生产 runner failure drill:若需要在生产做失败演练,使用独立 `PLATFORM_DATA_DIR` 或明确 `runner-log-drill` 前缀,避免把合成 drill manifest/log 与业务项目运行态混淆。
 
 本轮最终运行态:
 
-- Windows:HEAD `4774c9a`,本机 `wait-for-reindex` 覆盖本次 chroma scope,`health --mode light` READY,队列空。
-- WSL:HEAD `4774c9a`,systemd worker 完成本次 chroma scope,队列空,`health --mode light` READY。
+- Windows:HEAD `6825f58`,本机 `health --mode light` READY,`dirty-check` clean,队列空。
+- WSL:codev-platform HEAD `6825f58`,systemd worker 常驻且队列空,`health --mode light` READY,`serve-mcp status` 四端点 OK;openclaw-stock HEAD `5335c969`,Chroma current build 4914 chunks 且 MCP search 可检索。
