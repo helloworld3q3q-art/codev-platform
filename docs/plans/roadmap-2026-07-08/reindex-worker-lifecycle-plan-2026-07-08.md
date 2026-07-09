@@ -1,6 +1,6 @@
 # Plan — reindex worker 短驻化与队列可观测(2026-07-08)
 
-> **状态**:🟢 P1-P6 已落地;WSL systemd 服务固化已审计
+> **状态**:🟢 P1-P6 已落地;WSL systemd/token 固化、runner log 演练、roadmap 收尾审计已完成
 >
 > **主题**:修复"入队成功但无人消费"导致 MCP/索引落后的链路缺口。
 
@@ -122,7 +122,7 @@ python -m pytest tests/test_mcp_serve.py tests/test_serve_mcp_diagnose.py
 - MCP serve 相关: `43 passed`。
 - `health --all` token-mode 修正:支持从 `platform.token_env` / `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` 读取 Bearer token 访问 `/platform/status`;首个 token 401 时继续尝试下一个候选,失败提示只输出环境变量名,不输出 token 值。
 - 测试审计兄弟已二次审查该修正;补齐无 token 时不发送 Authorization、首个 token 401 后继续尝试下一个候选 token 的用例。目标回归: `python -m pytest tests/test_health_all_auth.py tests/test_health_split_security.py tests/test_health_reindex_worker.py` → `11 passed`;`python -m pytest tests/test_cli_parser.py` → `9 passed`;`config.example.json` JSON 解析通过。
-- WSL 实调:`/healthz` 可达,`/platform/status` 仍 401;诊断确认交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`,后续需单独处理 WSL token 环境注入。
+- WSL token 历史诊断:`/healthz` 可达但 `/platform/status` 401,原因是交互 shell 未导出 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN`;该项已由 WSL env-file 落地和 `health --all` env-file 兜底关闭。
 - `webhook extra repos` 诊断收敛:health/webhook startup 只扫描本机配置中带 `webhook_repo`、实际会被 webhook 入口命中的项目,并对 config/meta 重复声明的同一路径或同一 child project 去重。测试审计兄弟二次审查后补齐 OMS-like、enabled 对照和 health 直接断言;Windows/WSL 运行态诊断均为 0 条,`health --mode light` 均为 READY/all green。目标回归: `python -m pytest tests/test_graph_ingest.py tests/test_webhook_body_limit.py tests/test_health_webhook_mapping.py tests/test_health_reindex_worker.py tests/test_cli_parser.py` → `53 passed`。
 - `git diff --check` 无 whitespace error,仅 `tests/test_webhook_body_limit.py` CRLF 提示。
 - `hook missed?` 诊断改为复用 reindex scope 公共推导。第一轮经测试审计指出 codegraph/ingest/code_vec runner 存在 fail-soft rc=0 假绿风险,先收窄为 `chroma` only;本轮补强后扩展为 `chroma/codegraph/ingest/code_vec` 全量 expected kind 覆盖:`cmd_reindex` 成功路径输出 `proof: codegraph ok` / `proof: ingest ok` / `proof: code_vec ok`,runner 只在 proof marker 完整且无 skip/fail-soft warning 时返回成功,`code_vec` 同时要求 codegraph proof 与 code_vec proof,`CodegraphReindexRunner` 前置 ensure-link error 直接失败。测试审计兄弟终审无阻塞。实测首次 `wait-for-reindex` 返回 manifest `status=failed` 才暴露诊断缺口:队列模式下 reindex.log 只证明已入队,不能证明完成;同一 commit 多段日志必须取最新 queued block;`wait-for-reindex` 对 manifest failed / legacy finished failed 不应返回 0。已修正为:当前 HEAD 的最新 queued block 必须有 manifest 全部 success 才 `health` OK,manifest failed 或 legacy failed 时 `wait-for-reindex` 返回 1;`wait-for-reindex` 自身也反向取最新 trigger block,避免同一 commit 重跑时旧 OK/旧 failed 干扰结果。Windows 首次 code_vec 失败根因为 platform-docs daemon 未启动(remote `/embed` 连接拒绝);`serve-mcp start --wait` 后重跑 `code_vec` 成功。目标回归: `python -m pytest tests/test_reindex_runner_timeout.py tests/test_reindex_worker_affinity.py tests/test_reindex_queue.py tests/test_reindex_queue_cli.py tests/test_health_reindex_worker.py tests/test_wait_for_reindex_worker.py tests/test_health_hook_missed.py tests/test_post_hooks.py tests/test_index_manifest.py tests/test_cli_parser.py tests/test_reindex_ingest_stage.py tests/test_codegraph_ensure_link.py` → `138 passed`;`python -m ruff check codev_platform/reindex/runners.py codev_platform/ops/reindex/commands.py codev_platform/ops/health/_checks.py codev_platform/index_manifest.py tests/test_reindex_runner_timeout.py tests/test_health_hook_missed.py tests/test_reindex_ingest_stage.py tests/test_codegraph_ensure_link.py tests/test_wait_for_reindex_worker.py` → passed;Windows `wait-for-reindex` OK,`health --mode light` READY/all green。
@@ -144,7 +144,7 @@ WSL 服务固化本步不新增 nohup/supervisor,因为 WSL 已接入仓内正�
 
 结论:WSL reindex worker 已完成服务固化,下一步不应重复铺 nohup 或另起 supervisor。后续只需在需要重装 unit 时重新生成 `~/codev-systemd/install.sh` 并由 sudo 安装。
 
-剩余风险:WSL token 环境注入仍未规范化,`health` 对 platform-docs 详情面仍只能提示 `/platform/health needs auth in token mode`;`/platform/status` token-mode 详情访问留到下一步单独处理。
+已关闭历史风险:WSL token 环境注入已通过 `systemd.env_file`、私有 env 文件和 `health --all` env-file 兜底落地;`/platform/status` token-mode 详情访问不再要求交互 shell 手工 `source` token。
 
 ## 八、WSL / 服务器 token 环境注入
 
@@ -205,10 +205,31 @@ WSL / 服务器形态结果:
 
 - `data/logs/reindex-runner/*.log` 共 8 个;`oversized=[]`;复扫 `unredacted_sensitive_shapes=[]`。
 - `codev-platform__code_vec.log` 大小 `481` bytes,含 `proof: code_vec ok`。
-- 同期真实 `openclaw-stock__chroma.log` 大小 `2464` bytes,含 `FAIL:`;worker.log 显示 Chroma `disk I/O error`。该问题属于 openclaw-stock 的独立运行态风险,不阻塞本仓 runner log/token 验收,但应在后续 roadmap 收尾审计中拆出单独排查项。
+- 同期真实 `openclaw-stock__chroma.log` 大小 `2464` bytes,含 `FAIL:`;worker.log 显示 Chroma `disk I/O error`。该问题属于 openclaw-stock 的独立运行态风险,不阻塞本仓 runner log/token 验收,已在 §十 拆出为单独运行态排查项。
 
 结论:
 
 - runner log 的大小上限、脱敏、失败 note 和 proof marker 在 Windows/WSL 两种运行形态均可验证。
 - rc=2 retry 不是失败终态,后续运维演练若要验证 manifest failed,应选择 rc=1/124 等终态失败。
 - 真实演练验证了当前文件未超限;超大输出截断机制仍主要由 `tests/test_reindex_runner_logs.py` 覆盖。
+
+## 十、roadmap 收尾审计
+
+已关闭项:
+
+- Windows 本机短驻 worker 生命周期:P1-P6 已落地;`reindex-queue status` 可见 worker、heartbeat、last job 和 STALE;commit 后自动唤醒短驻 worker,空闲退出。
+- WSL 服务固化:正式 systemd `codev-reindex.service` 已 `enabled` + `active/running`,只保留 systemd 常驻路线,不新增 nohup/supervisor。
+- WSL / 服务器 token 注入能力:仓内 systemd 渲染支持 `systemd.env_file`;WSL 本机 env 文件与 config 权限收紧到 `0600`;常驻服务进程已带 `CODEV_PLATFORM_MCP_TOKEN`。
+- `health --all` token-mode:优先真实进程环境,无交互环境变量时读取 `systemd.env_file`;显式移除 `PLATFORM_TOKEN` / `CODEV_PLATFORM_MCP_TOKEN` 后 WSL `health --all` 实调成功。
+- runner log 可观测性:真实失败演练写入 bounded/redacted runner log 和 failed manifest note;Windows/WSL 真实 runner log 均未超限,复扫无敏感形态命中。
+
+未关闭但已拆分的后续任务:
+
+- `openclaw-stock/chroma` WSL 运行态排查:manifest 当前 `status=failed`,note 长度 `1215`,含 Chroma `disk I/O error`;`code_vec/codegraph/ingest` 均为 `ok` 且对齐 HEAD。该问题不阻塞 `codev-platform` 本轮验收,但需要单独确认 Chroma 数据目录、磁盘/WSL 文件系统状态、必要时重建 openclaw chroma 索引。
+- 生产服务器首机落地:在真实服务器使用 `/etc/codev-platform/platform.env` 或等价机密路径,设置 `systemd.env_file` 与 `platform.token_env`,安装/重启 systemd units 后验证 `health --mode light`、`health --all`、`reindex-queue status` 和 runner log 权限。不要把服务器 token 写入仓库。
+- 生产 runner failure drill:若需要在生产做失败演练,使用独立 `PLATFORM_DATA_DIR` 或明确 `runner-log-drill` 前缀,避免把合成 drill manifest/log 与业务项目运行态混淆。
+
+本轮最终运行态:
+
+- Windows:HEAD `4774c9a`,本机 `wait-for-reindex` 覆盖本次 chroma scope,`health --mode light` READY,队列空。
+- WSL:HEAD `4774c9a`,systemd worker 完成本次 chroma scope,队列空,`health --mode light` READY。
