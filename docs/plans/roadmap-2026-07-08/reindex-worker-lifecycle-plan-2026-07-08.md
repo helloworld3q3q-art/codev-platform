@@ -176,3 +176,39 @@ WSL 服务固化本步不新增 nohup/supervisor,因为 WSL 已接入仓内正�
 - TDD 红灯:`test_health_all_reads_token_from_configured_systemd_env_file` 在实现前失败,因为请求未带 Authorization;审计后补齐“任一进程 env 优先于 env-file”和“env-file shell-like 值按字面处理”两个回归。
 - 目标回归:`python -m pytest tests/test_health_all_auth.py tests/test_health_split_security.py -q` → `13 passed / 1 warning`;扩大回归 `tests/test_mcp_serve.py tests/test_systemd_restart.py tests/test_systemd_agent_clock.py tests/test_health_all_auth.py tests/test_health_split_security.py` → `57 passed / 1 warning`。
 - 静态检查:`python -m ruff check codev_platform/ops/health/__init__.py tests/test_health_all_auth.py` → passed。
+
+实调验收:
+
+- Windows commit `59e11de` 已 push;本机 `wait-for-reindex` 通过,`health --mode light` READY。
+- WSL 仓库自动拉到 `59e11de`,systemd `codev-reindex.service` 完成 `codev-platform` 的 `chroma/codegraph/ingest/code_vec`,队列空,`health --mode light` READY。
+- 在 WSL 命令环境显式移除 `PLATFORM_TOKEN` 和 `CODEV_PLATFORM_MCP_TOKEN` 后运行 `health --all` 仍成功,证明交互 CLI 可从 `systemd.env_file` 读取 Bearer token,无需写入 shell profile。
+- WSL 配置确认:`platform.token_env=CODEV_PLATFORM_MCP_TOKEN`,`systemd.env_file=/home/helloworld/.config/codev-platform/platform.env`;env 文件存在且权限 `0600`;安装后的 systemd unit 中共有 8 处 `EnvironmentFile=-/home/helloworld/.config/codev-platform/platform.env`。
+
+## 九、runner log 真实故障演练
+
+目标:在真实 `data/logs/reindex-runner/*.log` 和 `index_manifest.sqlite` 上验证失败可观测性,不依赖单测假对象,同时不污染真实 `chroma/codegraph/ingest/code_vec` 成功记录。
+
+演练方式:
+
+- 尝试一:临时注册 `drill_fail` runner 并传入无效 reindex 参数。结果 CLI argparse 返回 rc=2;worker 约定 rc=2 表示锁占用/db busy retry,因此不会写 failed manifest,只会保留重试语义。该方式不适合作为"失败终态"演练样本,但已确认 rc=2 边界。
+- 尝试二:创建临时非 git/非项目 repo,以 `project_id=runner-log-drill`、`kind=chroma` 经真实 `ReindexWorker` 调 `CliReindexRunner` 执行 `reindex --chroma --repo <temp>`。子进程因无法解析 project_id 返回 rc=1;worker 写入 failed manifest note 并 complete 该 job。该方式只生成 `runner-log-drill__chroma.log` 和 `runner-log-drill/chroma` manifest,不写真实项目索引产物。共享 data root 中会留下合成 drill 记录,服务器演练应使用明确 drill 前缀或独立 `PLATFORM_DATA_DIR`。
+
+Windows 结果:
+
+- `data/logs/reindex-runner/*.log` 共 13 个;默认上限 `DEFAULT_RUNNER_LOG_MAX_BYTES=524288`;`oversized=[]`。
+- 用同一 `redact_runner_output()` 对真实日志复扫,`unredacted_sensitive_shapes=[]`;测试审计兄弟额外扫 JWT/GitHub PAT/AWS/Google/Slack/裸长高熵串,结果 0 命中。
+- 演练日志 `runner-log-drill__chroma.log` 大小 `696` bytes,含 `FAIL: chroma reindex exit=1`。
+- manifest `runner-log-drill/chroma` 为 `status=failed`,note 长度 `696`,能直接看到 `chroma rc=1`、project_id 解析失败和 `FAIL: chroma reindex exit=1`。
+- `reindex-queue status` 队列空,短驻 worker 已 idle 退出。
+
+WSL / 服务器形态结果:
+
+- `data/logs/reindex-runner/*.log` 共 8 个;`oversized=[]`;复扫 `unredacted_sensitive_shapes=[]`。
+- `codev-platform__code_vec.log` 大小 `481` bytes,含 `proof: code_vec ok`。
+- 同期真实 `openclaw-stock__chroma.log` 大小 `2464` bytes,含 `FAIL:`;worker.log 显示 Chroma `disk I/O error`。该问题属于 openclaw-stock 的独立运行态风险,不阻塞本仓 runner log/token 验收,但应在后续 roadmap 收尾审计中拆出单独排查项。
+
+结论:
+
+- runner log 的大小上限、脱敏、失败 note 和 proof marker 在 Windows/WSL 两种运行形态均可验证。
+- rc=2 retry 不是失败终态,后续运维演练若要验证 manifest failed,应选择 rc=1/124 等终态失败。
+- 真实演练验证了当前文件未超限;超大输出截断机制仍主要由 `tests/test_reindex_runner_logs.py` 覆盖。
