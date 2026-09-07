@@ -1,0 +1,15 @@
+{"query": "trace the data flow from the REST API down to the database tables", "expect_type": "impact", "note": "跨层链路, 但无关键词命中"}
+{"query": "show me everything that touches the orders table", "expect_type": "impact", "note": "表使用方, touches/table 非关键词"}
+{"query": "列出所有依赖 requests 库的模块", "expect_type": "impact", "note": "依赖关系, 但 '依赖' 单独非关键词(只有 依赖谁/谁依赖)"}
+{"query": "如果删掉这个字段前端会不会出问题", "expect_type": "impact", "note": "改动影响, 删掉/字段/前端 均非关键词"}
+{"query": "explain the rationale behind using a daemon process here", "expect_type": "doc_rule", "note": "设计原因, rationale/behind 非关键词"}
+{"query": "这段逻辑背后的考量是什么", "expect_type": "doc_rule", "note": "设计考量, 但 '是什么' 是 overview 关键词 → 易误判 overview"}
+{"query": "提交前需要跑哪些检查", "expect_type": "doc_rule", "note": "流程规范, 提交/检查 非关键词"}
+{"query": "give me the call graph for handle_request", "expect_type": "symbol", "note": "符号调用图, 'call graph' 非关键词(只有 callers/callees)"}
+{"query": "parse_config 这个符号到底在代码里长啥样", "expect_type": "symbol", "note": "符号定位, 口语化无关键词"}
+{"query": "walk me through how the indexing pipeline works", "expect_type": "overview", "note": "整体如何运作, 'how X works' 非关键词"}
+{"query": "this module — what is its role in the bigger picture", "expect_type": "overview", "note": "模块定位, bigger picture 非关键词"}
+{"query": "改这张表会影响哪些前端页面和接口", "expect_type": "impact", "note": "控制项: 关键词应命中 impact"}
+{"query": "build_default_registry 这个函数在哪个文件定义", "expect_type": "symbol", "note": "控制项: 函数/定义/哪个文件 命中 symbol"}
+{"query": "这个项目整体是做什么的", "expect_type": "overview", "note": "控制项: 整体/做什么 命中 overview"}
+{"query": "为什么这里选择 sqlite 而不是 postgres", "expect_type": "doc_rule", "note": "控制项: 为什么 命中 doc_rule"}

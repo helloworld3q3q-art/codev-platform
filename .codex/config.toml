@@ -1,0 +1,23 @@
+[mcp_servers.platform-docs]
+url = "https://example.invalid/reference"
+bearer_token_env_var = "CODEV_PLATFORM_MCP_TOKEN"
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+
+[mcp_servers.codegraph]
+url = "https://example.invalid/reference"
+bearer_token_env_var = "CODEV_PLATFORM_MCP_TOKEN"
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+
+[mcp_servers.agent-memory]
+url = "https://example.invalid/reference"
+bearer_token_env_var = "CODEV_PLATFORM_MCP_TOKEN"
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+
+[mcp_servers.graph]
+url = "https://example.invalid/reference"
+bearer_token_env_var = "CODEV_PLATFORM_MCP_TOKEN"
+startup_timeout_sec = 60
+tool_timeout_sec = 120

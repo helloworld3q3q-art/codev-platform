@@ -1,0 +1,18 @@
+{"query": "项目 ACL 与记忆权限模型怎么做", "relevant": ["docs/plans/roadmap-2026-05-29/memory-permission-model-2026-05-29.md"]}
+{"query": "commit message 禁止出现 AI 痕迹的规则", "relevant": ["rules/commit-pr-conventions.md"]}
+{"query": "跨层业务枚举一致性 单一真值源 四层传播", "relevant": ["rules/cross-layer-enum-consistency.md"]}
+{"query": "DB NOT NULL 写入护栏 三道防线 COALESCE", "relevant": ["rules/not-null-write-guard.md"]}
+{"query": "PowerShell 脚本 非 ASCII 字符 中文乱码 编码", "relevant": ["rules/windows-powershell.md"]}
+{"query": "前后端联调 pnpm run api enums 通知用户", "relevant": ["rules/frontend-backend-handoff.md"]}
+{"query": "每周迭代 roadmap 目录 归档 继承未完结项", "relevant": ["rules/weekly-iteration-cadence.md"]}
+{"query": "MCP 工具职责 codegraph chroma graph 统一图谱 触发", "relevant": ["rules/ai-tools-mcp.md", "docs/ai-toolchain-guide.md"]}
+{"query": "改前门禁 任务分级 L1 L2 L3 L4", "relevant": ["rules/workflow.md"]}
+{"query": "agent 多模型接入 按协议族分文件 不按厂商", "relevant": ["rules/agent-provider-architecture.md", "codev_platform/agent/brain/README.md"]}
+{"query": "单文件行数上限 docs 目录归类规则", "relevant": ["rules/file-discipline.md"]}
+{"query": "改动后验证清单 测试基线红线 pre-push hook", "relevant": ["rules/verification-checklist.md"]}
+{"query": "敏感信息 数据库密码 token 环境变量 免责声明", "relevant": ["rules/security.md"]}
+{"query": "platform-docs daemon 多会话 CUDA OOM 故障处理", "relevant": ["rules/ai-tools-mcp.md", "docs/ai-toolchain-guide.md"]}
+{"query": "新机器接入 setup venv 模型探测 配置", "relevant": ["docs/SETUP.md", "docs/onboarding-new-project.md"]}
+{"query": "ai-health 体检 dirty check 索引一致性", "relevant": ["skills/ai-health/SKILL.md"]}
+{"query": "平台所有权翻正 venv 数据 launcher 归本仓", "relevant": ["docs/plans/roadmap-2026-05-28/platform-ownership-inversion-2026-05-28.md"]}
+{"query": "MCP 服务化 SSE 端点 graph codegraph 平台服务", "relevant": ["docs/plans/roadmap-2026-05-29/mcp-service-ification-2026-05-30.md"]}

@@ -1,0 +1,5 @@
+{
+  "_comment": "Codex does not consume Claude Code permissions settings. This file documents the legacy location only.",
+  "legacy_claude_settings_local": ".claude/settings.local.json",
+  "codex_permissions_source": "Codex CLI/session configuration"
+}

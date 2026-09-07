@@ -1,0 +1,107 @@
+"""E16 + B8: 断言 agent 常驻 unit 与时钟重同步 service/timer 的渲染与安装纳入。
+
+- E16: render_agent_unit 含 Restart=always + `agent serve` ExecStart。
+- B8: render_clock_resync_units 的 .timer 含 OnUnitActiveSec, .service 含 hwclock。
+- install_systemd 输出含这些 unit 名 (agent + clock service/timer)。
+"""
+
+from __future__ import annotations
+
+import shlex
+from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
+
+from codev_platform import mcp_serve as ms
+from codev_platform import mcp_systemd
+from codev_platform.core import runtime_identity as runtime_identity_module
+
+
+def _cfg(tmp_path):
+    return {
+        "daemon": {"port": 18083},
+        "mcp": {"graph_sse_port": 18092, "codegraph_sse_port": 18095},
+        "projects": {"proj-a": {"repo_path": str(tmp_path / "repo_a")}},
+    }
+
+
+def test_agent_unit_self_healing_and_execstart():
+    name, content = ms.render_agent_unit({}, user="tester")
+    assert name == "codev-agent.service"
+    assert "Restart=always" in content
+    assert "RestartSec=3" in content
+    assert "agent serve" in content
+    assert "codev_platform.cli" in content
+
+
+def test_agent_unit_respects_config_port():
+    name, content = ms.render_agent_unit({"agent": {"port": 18090}}, user="tester")
+    assert "--port 18090" in content
+
+
+def test_clock_resync_service不依赖release或源码脚本():
+    units = ms.render_clock_resync_units()
+    svc = units["codev-clock-resync.service"]
+    exec_start = next(line for line in svc.splitlines() if line.startswith("ExecStart="))
+    command = shlex.split(exec_start.removeprefix("ExecStart="))
+
+    assert command == [
+        "/bin/sh",
+        "-c",
+        "/sbin/hwclock --hctosys || hwclock -s || true",
+    ]
+    assert "Type=oneshot" in svc
+
+
+def test_clock_resync脚本保持best_effort退化语义():
+    script = (
+        Path(mcp_systemd.__file__).resolve().parent.parent / "scripts" / ("codev-clock-resync.sh")
+    )
+    lines = [
+        line.strip()
+        for line in script.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+
+    assert lines == ["/sbin/hwclock --hctosys || hwclock -s || true"]
+
+
+def test_clock_resync_timer_periodic():
+    units = ms.render_clock_resync_units()
+    timer = units["codev-clock-resync.timer"]
+    assert "OnUnitActiveSec=5min" in timer
+    assert "OnBootSec=1min" in timer
+    assert "WantedBy=timers.target" in timer
+
+
+def test_install_systemd_includes_agent_and_clock(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        ms,
+        "_platform_runtime_python",
+        lambda: tmp_path / "release" / ".venv" / "bin" / "python",
+    )
+    monkeypatch.setattr(
+        runtime_identity_module,
+        "runtime_identity",
+        lambda: SimpleNamespace(runtime_revision="2" * 40),
+    )
+    monkeypatch.setattr(
+        mcp_systemd,
+        "_snapshot_systemd_release",
+        lambda _root: SimpleNamespace(
+            root=Path("/var/lib/codev-platform/runtime"),
+            release_id="3" * 64,
+            runtime_revision="2" * 40,
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_systemd,
+        "resolve_service_account",
+        lambda _user: SimpleNamespace(home=PurePosixPath("/home/tester")),
+    )
+
+    res = ms.install_systemd(_cfg(tmp_path), user="tester", platform_name="linux")
+    names = res["units"]
+    assert "codev-agent.service" in names
+    assert "codev-clock-resync.service" in names
+    assert "codev-clock-resync.timer" in names

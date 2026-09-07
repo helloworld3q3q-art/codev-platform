@@ -1,0 +1,56 @@
+"""CodeGraph 恢复兼容门面；受管文件真值源位于运行时层。"""
+
+from codev_platform.runtime_managed_file import (
+    RootOwnedRegularFileSnapshot,
+    TrustedManagedPathError,
+    _close_quietly,
+    _fchmod,
+    _fchown,
+    _fstat,
+    _fsync,
+    _open_optional_regular_file,
+    _open_temporary_file,
+    _open_trusted_parent,
+    _read_bounded,
+    _read_file_flags,
+    _require_write_arguments,
+    _root_owned_regular_file_metadata,
+    _supports_dir_fd,
+    _temporary_file_flags,
+    _unlink_at,
+    _unlink_temporary_quietly,
+    _write_all,
+    read_optional_root_owned_regular_file,
+    read_optional_root_owned_regular_file_snapshot,
+    remove_root_owned_regular_file,
+    write_root_owned_regular_file_atomic,
+)
+
+# 迁移期仍有两个 systemd 文件适配器复用这些低层原语；显式重导出可保持单一实现，
+# 后续由对应适配器任务改为直接依赖运行时层。
+
+__all__ = [
+    "RootOwnedRegularFileSnapshot",
+    "TrustedManagedPathError",
+    "_close_quietly",
+    "_fchmod",
+    "_fchown",
+    "_fstat",
+    "_fsync",
+    "_open_optional_regular_file",
+    "_open_temporary_file",
+    "_open_trusted_parent",
+    "_read_bounded",
+    "_read_file_flags",
+    "_require_write_arguments",
+    "_root_owned_regular_file_metadata",
+    "_supports_dir_fd",
+    "_temporary_file_flags",
+    "_unlink_at",
+    "_unlink_temporary_quietly",
+    "_write_all",
+    "read_optional_root_owned_regular_file",
+    "read_optional_root_owned_regular_file_snapshot",
+    "remove_root_owned_regular_file",
+    "write_root_owned_regular_file_atomic",
+]

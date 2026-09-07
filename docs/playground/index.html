@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>codev-platform 只读问答 Playground</title>
+<!--
+  前提(只读问答页,纯静态,无构建,双击或任意静态服务器即可打开):
+  1. 需后端在跑:  codev-platform agent serve   (默认 https://example.invalid/reference 可 --host/--port 改)
+     该命令需平台 venv 装好 fastapi/uvicorn,且配好 provider key(否则 /chat 返 503)。
+  2. token 模式:在“平台 token”填 Bearer token;dev 单机不填也可(走 X-User-Id/local 回退)。
+  3. CORS:本页 file:// 或别的源访问时若被浏览器挡(Failed to fetch / CORS),
+     用同源静态服务器开本页,或在 agent 端按需加 CORS 中间件。仅读不写。
+-->
+<style>
+  body{font-family:system-ui,"Microsoft YaHei",sans-serif;max-width:860px;margin:24px auto;padding:0 16px;color:#222}
+  h1{font-size:20px}
+  label{display:block;margin:8px 0 2px;font-size:13px;color:#555}
+  input,textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:14px}
+  textarea{min-height:80px;resize:vertical}
+  .row{display:flex;gap:12px}.row>div{flex:1}
+  button{margin-top:12px;padding:10px 20px;background:#2563eb;color:#fff;border:0;border-radius:6px;font-size:14px;cursor:pointer}
+  button:disabled{background:#9bb;cursor:not-allowed}
+  #answer{white-space:pre-wrap;background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:12px;margin-top:16px;min-height:24px}
+  .err{color:#b00020}
+  details{margin-top:8px;border:1px solid #e1e4e8;border-radius:6px;padding:6px 10px;background:#fafbfc}
+  details summary{cursor:pointer;font-size:13px;color:#444}
+  pre{white-space:pre-wrap;word-break:break-all;font-size:12px;margin:6px 0}
+  .meta{font-size:12px;color:#888;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>codev-platform 只读问答</h1>
+<p class="meta">通过平台 agent 向项目提问(只读,不修改任何数据)。需后端 <code>codev-platform agent serve</code> 在跑。</p>
+<div class="row">
+  <div><label>平台地址</label><input id="base" value="https://example.invalid/reference" /></div>
+  <div><label>project_id</label><input id="pid" placeholder="如 codev-platform" /></div>
+</div>
+<label>平台 token(可选,token 模式必填)</label>
+<input id="token" placeholder="Bearer token,dev 单机可留空" />
+<label>问题</label>
+<textarea id="q" placeholder="例:这个项目的 chat 接口请求体长什么样?"></textarea>
+<button id="go">提问</button>
+<div id="answer"></div>
+<div id="steps"></div>
+<div class="meta" id="info"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+$("go").onclick = async () => {
+  const base = $("base").value.trim().replace(/\/+$/, "");
+  const pid = $("pid").value.trim();
+  const token = $("token").value.trim();
+  const question = $("q").value.trim();
+  const ans = $("answer"), steps = $("steps"), info = $("info");
+  steps.innerHTML = ""; info.textContent = "";
+  if (!question) { ans.className = "err"; ans.textContent = "请先输入问题。"; return; }
+  ans.className = ""; ans.textContent = "请求中…";
+  $("go").disabled = true;
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (pid) headers["X-Project-Id"] = pid;
+    if (token) headers["Authorization"] = "Bearer " + token;
+    const body = { question };
+    if (pid) body.project_id = pid;
+    const resp = await fetch(base + "/chat", { method: "POST", headers, body: JSON.stringify(body) });
+    const text = await resp.text();
+    let data; try { data = JSON.parse(text); } catch { data = null; }
+    if (!resp.ok) {
+      ans.className = "err";
+      // 错误体形状(过渡兼容):FastAPI 把 to_http_detail() 包成
+      //   { detail: { error, code, detail } }  —— detail 既是对象也带稳定文案串。
+      // 取文案优先级:data.error(顶层) > data.detail.error / detail.detail > 字符串 detail > raw text。
+      const d = data && data.detail;
+      const msg = (data && data.error)
+        || (d && typeof d === "object" ? (d.error || d.detail) : d)
+        || text;
+      const code = (data && data.code) || (d && typeof d === "object" ? d.code : null);
+      ans.textContent = "请求失败(HTTP " + resp.status + (code ? " · " + code : "") + "):" + msg +
+        (resp.status === 503 ? "\n提示:后端缺 provider key,检查 config.agent.providers。" : "") +
+        (resp.status === 403 ? "\n提示:project 访问被拒,检查 token / project_id。" : "");
+      return;
+    }
+    ans.className = ""; ans.textContent = data.answer || "(空回答)";
+    (data.steps || []).forEach((s) => {
+      const d = document.createElement("details");
+      d.innerHTML = "<summary>步骤 " + esc(s.n) + (s.tool ? " · " + esc(s.tool) : "") + "</summary>" +
+        (s.thought ? "<pre>thought: " + esc(s.thought) + "</pre>" : "") +
+        (s.args != null ? "<pre>args: " + esc(JSON.stringify(s.args)) + "</pre>" : "") +
+        (s.result_summary ? "<pre>result: " + esc(s.result_summary) + "</pre>" : "");
+      steps.appendChild(d);
+    });
+    info.textContent = "session: " + esc(data.session_id) + " · stop: " + esc(data.stop_reason) +
+      " · usage: " + esc(JSON.stringify(data.usage || {}));
+  } catch (e) {
+    ans.className = "err";
+    ans.textContent = "无法连接后端(" + esc(e.message) + ")。\n确认 codev-platform agent serve 在跑,地址正确;若是 CORS/跨源被挡,改用同源静态服务器打开本页。";
+  } finally {
+    $("go").disabled = false;
+  }
+};
+</script>
+</body>
+</html>

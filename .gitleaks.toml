@@ -1,0 +1,16 @@
+# gitleaks 配置 — secret 扫描 (CI secrets job + pre-commit)。
+# extend 默认规则集, 再用 allowlist 排除已知非密钥噪声 (测试夹具 / 锁文件 / 样例配置 / 原始日志)。
+# 闭合 security.md 盲区: "缺 CI 钩子扫 .env / 明文密码 / API key"。
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "codev-platform 非密钥噪声白名单"
+paths = [
+  '''tests/''',                 # 测试夹具里的假 key / 临时生成密钥, 非真凭据
+  '''docs/audits/''',           # 原始 transcript 日志, 可能含示例片段
+  '''.*\.lock$''',
+  '''web-ui/pnpm-lock\.yaml''',
+  '''config\.example\.json''',  # 样例配置, 占位值非真 key
+]

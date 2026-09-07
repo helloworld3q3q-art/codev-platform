@@ -1,0 +1,166 @@
+{
+  "_comment_top": "codev-platform 用户级配置样板。优先用 `codev-platform setup --auto` 自动探测生成 ~/.codev-platform/config.json; 本文件仅作字段参考。优先级: env var > 本配置文件 > 代码默认。路径示例用 ~ (展开 HOME); Windows 也可写 D:/...。",
+
+  "deployment": {
+    "_comment": "部署模式: dev|prod。prod 下 gateway.auth_mode 必须为 token, 否则 agent serve 拒绝启动(fail-fast); platform.url 指向远程(非 internal.example.invalid) 同理强制 token。dev 仅软告警(warn_if_insecure)。",
+    "mode": "dev"
+  },
+
+  "models": {
+    "_comment": "GPU 模型路径 + 显卡参数。换机器(本地小卡 vs 服务器大卡)只改本段, 代码不动。device 支持 cuda / cuda:N(多卡 pin)/ cpu。reranker_dtype: auto(cuda→fp16/否则fp32) | float16 | bfloat16(Ampere+ 服务器卡更优) | float32。embed_batch_size 显存敏感, 大卡可调大提索引吞吐。缺 embed 时走仓内 MiniLM fallback。",
+    "embed_path": "~/models/Qwen3-Embedding-0.6B",
+    "embed_device": "cuda",
+    "embed_batch_size": 16,
+    "reranker_path": "~/models/Qwen3-Reranker-0.6B",
+    "reranker_device": "cuda",
+    "reranker_dtype": "auto",
+    "reranker_enabled": true
+  },
+
+  "data": {
+    "_comment": "chroma + graph store + codegraph 共享基目录 (multi-tenant 设计核心)。null = 走业务项目 cwd 推导。setup 自动写为 <platform-repo>/data。",
+    "platform_data_dir": "~/Code/platform/data"
+  },
+
+  "daemon": {
+    "_comment": "chroma daemon 模式。mode=true 启 daemon (多 session 共享 GPU 模型, 默认); prewarm=true 启动期加载模型避免首次 query 60s 超时。端口配在 mcp.platform_docs_sse_port (4 套统一命名); 旧 daemon.port 别名代码仍兼容可读, 但样板不再列出 — 避免与 canonical 键重复造成误解。",
+    "mode": true,
+    "prewarm": true
+  },
+
+  "search": {
+    "_comment": "RAG 检索参数。recall_k = embedding 召回候选 (送 reranker); return_k = rerank 后返回; bm25_enabled = BM25 hybrid + RRF; rrf_k_const = RRF 常量 (论文 60); gpu_concurrency = GPU 并发上限 (8GB 卡用 1)。",
+    "recall_k": 30,
+    "return_k": 5,
+    "bm25_enabled": true,
+    "rrf_k_const": 60,
+    "gpu_concurrency": 1
+  },
+
+  "runtime": {
+    "_comment": "chroma_venv: chroma daemon + indexer 用的 venv (含 python.exe + mcp-proxy.exe)。不要硬编码进脚本 — 换机器只改这里。",
+    "chroma_venv": "D:/WorkSpace/codev-platform/.venv"
+  },
+
+  "agent": {
+    "_comment": "agent HTTP 服务 (codev-platform agent serve)。provider 选大脑; api_key 留空则走 env (ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)。安全红线: 真 key 只写本机 ~/.codev-platform/config.json, 绝不进仓; 本样板只放占位符。session_backend: memory(默认,进程内,重启丢) | pg(持久化到 memory.pg_dsn)。base_url —— codev-web 前门代理 chat/memory 到 agent 的地址 (默认 https://example.invalid/reference, agent 绑 internal.example.invalid)。internal_secret —— 平台单一内部信物密钥, 两用: ① web↔agent 服务间 X-Identity (web 签发 / agent 验签, 短时效令牌, 非对外鉴权); ② chroma daemon /embed /rerank 的 loopback 豁免闸 —— 配了它时内部调用 (RemoteEmbedder) 须带 X-Internal-Call=本值, 同机反代转发的远程请求带不出 → 落正常鉴权 (防白嫖 GPU)。空=两通道都不启 (单机 passthrough 纯 loopback 豁免); 安全红线: 真值只写本机 config / env, 绝不进仓。timeout_sec —— web 代理调 agent 的超时秒数 (默认 30)。",
+    "provider": "claude",
+    "model": "claude-opus-4-7",
+    "max_steps": 12,
+    "session_backend": "memory",
+    "base_url": "https://example.invalid/reference",
+    "internal_secret": "",
+    "timeout_sec": 30,
+    "_comment_planner": "Phase 7 查询规划 (planner) 是**每模型循环策略**的一部分 (非全局开关), 跟 registry 的 _STRONG/_MID/_WEAK 能力档走: 强模型 (claude/gpt) 默认关 (自控强, 收益小), 弱/中模型 (deepseek/qwen) 默认开 + 超预算只读硬封顶 (防目录 spelunking)。开启后 loop 按问题类型 (overview/impact/symbol/doc_rule/general) 规划工具 + 预算 + 优先 lane (纯确定性关键词分类, 不调 LLM; 准确率可回归 eval --suite planner)。逐字段覆盖档默认 (与其它 loop 字段同机制): agent.providers.<name>.loop.planner_enabled / .planner_hard_cap_readonly, 或全局 agent.loop.planner_enabled。例: 给 claude 显式开 -> agent.providers.claude.loop.planner_enabled=true。",
+    "_comment_loop": "【能力档 _STRONG/_MID/_WEAK 不在这里配,也无需配】它们是**代码侧默认**(codev_platform/agent/brain/registry.py 的 ProviderSpec.default_loop_policy),每个内置模型在代码里各绑一档:claude/gpt=_STRONG(少管,planner 默认关)、qwen=_MID、deepseek=_WEAK(严管,planner 默认开+硬封顶)。内置模型开箱即用,config 完全不写 loop 也对。你只在想**偏离某模型档默认**时,在 agent.providers.<name>.loop 下按**字段**覆盖:优先级 providers.<name>.loop.<field> > agent.loop.<field>(全局) > 档默认 > 全局 LoopPolicy 默认。可覆盖字段(全集见 codev_platform/agent/policy.py:LoopPolicy):max_steps / retrieval_distinct_cap / no_progress_limit / novelty_check / readonly_distinct_cap / readonly_total_cap / invalid_call_limit / min_read_for_finish / planner_enabled / planner_hard_cap_readonly。下面 claude.loop 是**覆盖示例**:claude 本是 _STRONG 档(planner 默认关),这里示例显式给它开 planner 并放宽到 14 步——不需要就整块删掉,claude 即回到 _STRONG 档默认。新接入的 OpenAI 兼容模型(只配 base_url、无 spec)无档 → 走全局默认(planner 关、中等 cap);要它像弱模型严管,在它的 loop 块显式配字段(等于手搓一个档)。",
+    "providers": {
+      "claude":   { "api_key": "",
+                    "loop": { "planner_enabled": true, "max_steps": 14 } },
+      "gpt":      { "base_url": "https://example.invalid/reference",        "model": "gpt-4o",        "api_key": "" },
+      "deepseek": { "base_url": "https://example.invalid/reference",         "model": "deepseek-chat", "api_key": "" },
+      "qwen":     { "base_url": "https://example.invalid/reference", "model": "qwen-max", "api_key": "" }
+    },
+    "instruction_packs": {
+      "_comment": "Web agent 的模型指令包。provider 通过 prompt_profile / rule_pack / skill_pack 选择包名;这里定义包名对应的具体来源。默认请使用 agent-rules:<codev_platform/agent/instructions/rules 下文件或目录>、agent-skills:<codev_platform/agent/instructions/skills 下文件或目录>。rules:/skills: 是开发工作区分发资源(codev_platform/resources)的显式兼容入口,不要作为 Web agent 默认来源。也支持绝对路径、相对 agent 服务工作目录的路径。例: agent.providers.deepseek.rule_pack = mcp_first_code_understanding;也可给某新模型配自己的 pack。",
+      "rule_packs": {
+        "mcp_first_code_understanding": [
+          "agent-rules:mcp-first-code-understanding.md"
+        ]
+      },
+      "skill_packs": {
+        "code_understanding": [
+          "agent-skills:code-understanding.md"
+        ]
+      }
+    }
+  },
+
+  "project": {
+    "_comment": "agent 工作区配置查找顺序。默认 Codex 优先、Claude 兼容 fallback。若团队临时切回 Claude 优先, 只改这里或设 CODEV_PLATFORM_PROJECT_CONFIG_PATHS / CODEV_PLATFORM_INDEX_CONFIG_PATHS, 不改代码。",
+    "project_config_paths": [".codex/project.json", ".claude/project.json"],
+    "index_config_paths": [".codex/index.json", ".claude/index.json"]
+  },
+
+  "analyzers": {
+    "_comment": "统一图谱综合分析器 (graph/analyzers, ingest 的 second post-pass)。business_domain: A1 业务域映射 — LLM 给 endpoint 链路归业务域 (软节点, confidence<1.0, impact 默认过滤不污染查依赖)。enabled 默认 false (关): 开启后 ingest 会调 LLM 按聚类标域, 有 per-cluster fingerprint 缓存 (含 cache GC) + 超大簇 member 采样 (防噪声/爆 token)。codev-platform 真 deepseek-chat 实测 ~95% (A1-3 验收)。缺 key 自动 no-op。provider: 留空跟随全局 agent.provider; 也可独立指定 (deepseek/qwen/本地 ollama) 让 ① 对话用 claude、③ 标注用便宜/本地模型各走各的, key 仍公用 agent.providers.<name>。开启: enabled=true + 对应 provider 的 api_key (或 env) 在位。",
+    "business_domain": { "enabled": false, "provider": "" },
+    "arch_layer": { "enabled": false, "provider": "" },
+    "frontend_api_link": {
+      "_comment": "A3 前端→后端 API 链接补充层 (LLM)。静态层 (url_registry 常量声明 + 内联 axios/fetch 字面量) 抓不到业务封装的内联请求 (如 request({url: BIZ_CONST}) 自定义封装 + 业务命名) → 这类前端文件连不上后端。A3 读这些静态盲前端文件源码语义, 问 LLM 它调了候选清单里哪些后端端点, 产 inferred_api_call 软节点 + calls_api_inferred 软边 (confidence<1.0, impact 默认过滤, 不污染查依赖)。grounding 双层: 候选端点 closed-world 编号 (越界 ep ref 剔除) + 软边 target 必须是真实 backend_endpoint (referential-integrity)。只处理静态层没连上的文件 (与 url_registry 互补不重写)。需 repo_path 读源码 (ingest 自动注入), 缺 key/repo 自动 no-op。provider 留空跟随全局 agent.provider。",
+      "enabled": false,
+      "provider": ""
+    }
+  },
+
+  "memory": {
+    "_comment": "memory 持久化用的平台独立 PG 库 (codev_platform_memory)。pg_dsn=主库(写); pg_dsn_read=只读副本(读,预留,留空=读写同库)。安全红线: 含密码, 真值只写本机 config 或 env (CODEV_PLATFORM_MEMORY_DSN / _READ), 绝不进仓; 严禁复用业务库 DSN (见 memory plan §3.2b)。null = 不启用 memory PG, 会话仅内存。建库 (CREATE DATABASE) 见 P4 runbook; 表由 `codev-platform memory init-db` 幂等建。",
+    "pg_dsn": null,
+    "pg_dsn_read": null,
+    "_comment_recall": "recall_backend: local(默认, 关键词子串 + 确定性冲突消解, 记忆量小够用) | vector(B1 语义召回, chroma per-org collection <org>__agent_memory, RRF 关键词∪向量, redline 仍置顶)。vector 缺 chromadb/sentence-transformers/模型 → 自动退回 local。embed_device: 向量嵌入设备, 默认 cpu(memory 低频写, 避免与 chroma daemon 抢 GPU → OOM); 大卡可设 cuda。conflict_policy: personal_first(默认) | org_first。",
+    "recall_backend": "local",
+    "embed_device": "cpu",
+    "conflict_policy": "personal_first"
+  },
+
+  "platform": {
+    "_comment": "平台服务地址 (访问平台数据一律走 HTTP/HTTPS 的入口)。`codev-platform health --all` / 子应用健康检查 通过它 GET /platform/status, 不直接读文件。null = 用 daemon 默认 https://example.invalid/reference:<mcp.platform_docs_sse_port>; 远程平台填 http(s)://<host>:<port>。token_env 是 health --all 访问受保护详情面时读取的 Bearer token 环境变量名;未配时依次尝试 PLATFORM_TOKEN / CODEV_PLATFORM_MCP_TOKEN。",
+    "url": null,
+    "token_env": "PLATFORM_TOKEN"
+  },
+
+  "systemd": {
+    "_comment": "Linux/WSL systemd unit 的可选 EnvironmentFile 路径。配置后文件为必需项，只写机器本地绝对路径，不写 token 值；文件不进 git，必须由 root 所有、父目录不可被组/其他用户写入，建议路径 /etc/codev-platform/platform.env、权限 0600。文件内可放 PLATFORM_TOKEN / CODEV_PLATFORM_MCP_TOKEN / CODEV_PLATFORM_MEMORY_DSN 等本机机密环境变量；不得放受控恢复专用变量。null = 不注入 EnvironmentFile。",
+    "env_file": null
+  },
+
+  "gateway": {
+    "_comment": "HTTP 入口统一认证拦截 (codev_platform.gateway, 纯 ASGI 中间件, SSE 安全 + 高并发)。auth_mode: passthrough(默认, 单人/开发期, 信任 X-User-Id/X-Org-Id 明文头, 不验签) | token(多人/对外, 验 Authorization: Bearer)。认证加密: tokens 的 key 是 token 的 sha256 hash(明文不落盘), 生成 python -c \"import hashlib;print(hashlib.sha256(b'你的token').hexdigest())\"; 真表走 PG, 绝不进仓。传输加密(HTTPS/TLS)是部署层: 远程平台 url 用 https, TLS 在反代/uvicorn 终结。",
+    "auth_mode": "passthrough",
+    "_comment_multi_user": "multi_user=true 显式声明多人共用本平台(如多 dev 共用同一台 WSL/内网服务器)。置 true 或登记了 >1 个 token 而 auth_mode 仍 passthrough → agent serve / memory MCP 拒绝启动(fail-fast, multi_user_policy_error): passthrough 不验签会让多人 personal 记忆串号。单人自己机器(loopback, 无他人)留 false 即可。",
+    "multi_user": false,
+    "_comment_tokens": "tokens.<hash>.projects 是该 token 的 project 白名单(ACL 闸2, 见 core/acl.py): [\"openclaw-stock\"] 显式白名单 | \"*\" 全部项目 | 缺省=无权(安全默认, 不给空 token 越权)。org_id 是身份所属 org(闸1: 须 == 目标 project 的 org_id 才放行)。",
+    "tokens": { "<token-sha256-hex>": { "user_id": "alice", "org_id": "default", "projects": ["openclaw-stock"] } },
+    "_comment_rate_limit": "应用层滑动窗口限流 (codev_platform.gateway.RateLimitMiddleware, 纯 ASGI)。dev 默认关 (enabled=false 不挂中间件, 不破现状)。生产/对外开: 按身份限 (有 Auth 的 4 套 MCP/agent 优先 user_id), webhook 无身份按 client IP。每身份每分钟 per_minute 次, 超 → 429 {\"error\":\"rate limited\"}。健康探针 /healthz /health 豁免。反代 caddy 可叠加 IP 层粗限, 二者互补。",
+    "rate_limit": { "enabled": false, "per_minute": 120 }
+  },
+
+  "mcp": {
+    "_comment": "平台 MCP 端点编排 (codev-platform serve-mcp)。4 套端口统一命名 mcp.<service>_sse_port (端口真值单一入口, serve-mcp / systemd / 客户端 local 源全从此派生)。platform_docs_sse_port: chroma daemon (默认 18083; 旧 daemon.port 别名仅代码兼容可读, 不再写入样板)。codegraph_sse_port: codegraph 多租户代理 (默认 18091, 平台自写代理按 ?project_id= 懒启动 per-repo 后端转发)。agent_memory_sse_port: 分层记忆 MCP 前门 (默认 18087)。graph_sse_port: 统一图谱 MCP (impact 跨层影响 + A1 业务域 + search_nodes, 替代退役的 cross-link, 默认 18092)。",
+    "_comment_bind_host": "MCP 服务端 uvicorn bind host (默认 internal.example.invalid 仅本机可达)。多机部署(供其它机器连)才改 0.0.0.0, 且**必须**配合 gateway.auth_mode=token —— 否则 graph/codegraph/agent-memory MCP 启动硬拒(bind_policy_error: 非 loopback bind + passthrough = 未认证对外开放)。改远程务必反代终结 TLS。",
+    "bind_host": "internal.example.invalid",
+    "platform_docs_sse_port": 18083,
+    "codegraph_sse_port": 18091,
+    "agent_memory_sse_port": 18087,
+    "graph_sse_port": 18092
+  },
+
+  "mcp_sources": {
+    "_comment": "客户端可切换的两个实例源 (双实例: 本地活跃 + 平台基线), 给 `codev-platform mcp-source local|platform [tools...]` 改写业务仓 .mcp.json 用。local=本机本地实例(索引 working tree 含未提交); platform=平台基线服务器(索引 HEAD, 跨项目/团队共享)。单机开发期两者同主机不同端口(local 18xxx / platform 19xxx); 真团队部署把 platform.host 改成远程平台 IP 即可, 零改代码。注: local 各 tool 端口缺省**派生自本机 bind 口** (mcp.<service>_sse_port), 改 bind 口自动跟随, local 整块可省; 显式写下方端口才覆盖 (与 bind 口不一致时 serve-mcp status 会 WARN)。platform 端口独立不派生。",
+    "local":    { "host": "internal.example.invalid" },
+    "platform": { "host": "internal.example.invalid", "platform-docs": 19083, "codegraph": 19091, "agent-memory": 19087, "graph": 19092 }
+  },
+
+  "logging": {
+    "_comment": "可观测日志粒度: dev(默认, 全量, 便于排查) | prod(脱敏: query/工具参数/召回文件路径 等自由文本换成 <redacted:len=N:sha8>, 结构字段 project_id/tool/计数/耗时 保留)。env CODEV_PLATFORM_LOG_MODE 覆盖。非 prod 值一律归 dev(误配不会静默清空日志)。",
+    "mode": "dev"
+  },
+
+  "webhook": {
+    "_comment": "VCS webhook 接收器 (codev-platform webhook serve, systemd codev-webhook 常驻)。收 push → 按 projects.<pid>.webhook_repo 映射 project → 分 scope → enqueue reindex (push 即触发, 与本地 hook 同源走写队列)。port 默认 18099; secret 是验签密钥, 必须与 VCS webhook 配置里的一致 (Gitea=HMAC body / GitLab=明文 token)。安全: 空 secret 默认 **fail-closed 拒绝** (防反代后被伪造触发 reindex); 仅本机信任可设 allow_insecure=true 跳过验签。绑 internal.example.invalid, 远程 VCS 需反代。",
+    "port": 18099,
+    "secret": "",
+    "allow_insecure": false
+  },
+
+  "metrics": {
+    "_comment": "可观测指标采集 (codev-platform metrics) 的告警阈值。聚合 audit/access.jsonl + 三套 MCP 使用 jsonl 后, deny_rate 超 deny_rate_max / 各 MCP error_rate 超 error_rate_max 即在输出末尾告警并以退出码 1 返回 (供巡检脚本判失败)。缺省 / 空 = 不告警 (宽松, 只出统计)。alert_webhook 非空时, 告警额外 POST 到该 URL (urllib, 短超时, 失败静默不阻塞); 默认空 = 只记 WARN 日志。--prometheus 输出曝光文本供 node_exporter textfile collector / cron 抓。",
+    "alerts": { "deny_rate_max": 0.2, "error_rate_max": 0.1 },
+    "alert_webhook": ""
+  },
+
+  "projects": {
+    "_comment": "(平台服务端配置) 每个项目登记 repo_path(codegraph 代理据此找该项目 .codegraph + graph/chroma 按 project_id 隔离)。org_id —— 该项目所属 org(ACL 闸1, 见 core/acl.py): 缺省=公开(任何已认证身份可访问), 多 org 时填真实 org 后仅同 org 身份可访问。webhook_repo —— 该项目在 VCS 的 owner/name (如 helloworld3q3q/platform), webhook 接收器据此把 push 映射回 project_id。注: codegraph 已改多租户单端点(见 mcp.codegraph_sse_port), per-project codegraph_sse_port 已废弃。repo_path 机器相关故放 config 不进 git。codev-platform 自身无需登记。客户端不碰此项 — 只 GET 平台服务地址。",
+    "openclaw-stock": { "repo_path": "~/WorkSpace/platform", "org_id": "default", "webhook_repo": "your-org/platform" },
+    "codev-platform-widget": { "repo_path": "~/WorkSpace/codev-platform-widget", "org_id": "default" }
+  }
+}

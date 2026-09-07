@@ -1,0 +1,76 @@
+"""工具层的 project 上下文解析(P2 多租户)。
+
+约定:工具构造时拿到一个 project_id(可能为 None)。
+- None  → 单项目兼容:从进程 cwd 推导(resolve_local / cwd 上溯),与改造前行为一致。
+- 具体值 → 多租户:按 project_id 路由到对应数据(graph/chroma 走平台 data 目录;
+  codegraph 走该项目仓的 .codegraph)。
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from codev_platform.core.platform_meta import platform_meta_projects_dir
+
+
+def forbid_cwd_fallback_in_token_mode() -> None:
+    """Phase 0 安全底座(token 模式禁 cwd fallback): server 部署(gateway.auth_mode == "token")下,
+    explicit project_id 缺失时**不允许**回退 cwd —— 否则任何未显式带 project_id 的调用会静默命中
+    平台进程 cwd 推导出的项目 = 越权扫盲。HTTP /chat 路由已在入口用 can_access 挡下 token 模式
+    None, 本处是 defense-in-depth: 任何直接调用工具层的路径(未来 CLI / service 直调)同样不漏。
+    所有带 cwd 回退分支的工具(fs/search_docs/impact/recall/codegraph)统一过本守卫。
+    passthrough(dev 单机)放行,单项目兼容不破。
+    """
+    from codev_platform.core.config import get as _cfg_get, load_config
+    from codev_platform.core.project_id import ProjectIdError
+    if _cfg_get(load_config(), "gateway.auth_mode", "passthrough") == "token":
+        raise ProjectIdError(
+            "token 模式(server 部署)禁止 cwd fallback: 必须显式提供 project_id "
+            "(X-Project-Id header / body.project_id)。"
+        )
+
+
+def resolve_project_id(explicit: str | None) -> str:
+    """explicit 优先(同样走 validate 校验,防路径穿越);否则从 cwd 推导(单项目兼容)。
+    token 模式禁 cwd 回退,见 forbid_cwd_fallback_in_token_mode。"""
+    if explicit:
+        from codev_platform.core.project_id import validate
+        return validate(explicit)
+    forbid_cwd_fallback_in_token_mode()
+    from codev_platform.core.project_id import resolve_local
+    return resolve_local()
+
+
+def _platform_meta_dir() -> Path | None:
+    """返回统一登记表目录；缺失时保持既有 fail-soft 语义。"""
+    cand = platform_meta_projects_dir()
+    return cand if cand.is_dir() else None
+
+
+def repo_path_of(project_id: str) -> Path | None:
+    """按 project_id 读 meta.json 的 repo_path(codegraph per-repo db 定位用)。找不到返 None。"""
+    meta_dir = _platform_meta_dir()
+    if meta_dir is None:
+        return None
+    meta = meta_dir / project_id / "meta.json"
+    try:
+        raw = meta.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        rp = data.get("repo_path")
+        return Path(rp) if isinstance(rp, str) and rp else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def display_name_of(project_id: str) -> str | None:
+    """按 project_id 读 meta.json 的 display_name(供 agent prompt 自描述用)。找不到返 None。"""
+    meta_dir = _platform_meta_dir()
+    if meta_dir is None:
+        return None
+    meta = meta_dir / project_id / "meta.json"
+    try:
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        dn = data.get("display_name")
+        return dn if isinstance(dn, str) and dn else None
+    except (OSError, json.JSONDecodeError):
+        return None

@@ -1,0 +1,33 @@
+# 平台本体 pre-commit (闭合 security.md 盲区: "平台仓没有 .pre-commit-config.yaml")。
+# 安装: pip install pre-commit && pre-commit install && pre-commit install --hook-type commit-msg
+# 与 CI 互补: 本地写 commit 时当场拦, CI 兜底。rev 可 `pre-commit autoupdate` 升。
+
+repos:
+  # ruff: 对齐 CI 钉的版本 (pyproject [tool.ruff]); 只 gate 产品代码 codev_platform。
+  - repo: https://example.invalid/reference
+    rev: v0.15.15
+    hooks:
+      - id: ruff
+        files: ^codev_platform/
+
+  # secret 扫描: 提交前拦明文密码 / API key (配置见 .gitleaks.toml)。
+  - repo: https://example.invalid/reference
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      # commit message 禁 AI 痕迹 (commit-pr-conventions.md 红线), commit-msg 阶段当场拦。
+      - id: no-ai-commit-traces
+        name: commit message 禁 AI 痕迹 (claude/anthropic/generated)
+        language: pygrep
+        stages: [commit-msg]
+        entry: '(?i)(co-authored-by:.*(claude|opus|sonnet|anthropic))|(generated with .*claude)|🤖 generated|noreply@anthropic'
+
+      # .ps1 禁非 ASCII (windows-powershell.md §1: PS5.1 按 GBK 解析, 非 ASCII 触发 parser 报错)。
+      - id: ps1-no-non-ascii
+        name: .ps1 禁非 ASCII 字符
+        language: pygrep
+        entry: '[^\x00-\x7F]'
+        files: '\.ps1$'

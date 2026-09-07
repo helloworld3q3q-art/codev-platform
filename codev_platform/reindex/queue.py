@@ -1,0 +1,40 @@
+"""reindex 队列旧导入路径的兼容重导出。"""
+from codev_platform.reindex.file_queue import FileSpoolQueue
+from codev_platform.reindex.queue_ports import (
+    AdminQueuePort,
+    ClaimedJob,
+    DependencyQueueState,
+    DependencyQueueViewPort,
+    Job,
+    JobMeta,
+    JobQueue,
+    PendingMigrationOutcome,
+    PendingMigrationQueue,
+    PendingMigrationResult,
+    PublishPermit,
+    QuarantineRecord,
+    QueueClaimLost,
+    QueueOperationTimeout,
+    QueueSnapshot,
+    WorkerQueuePort,
+)
+
+__all__ = [
+    "AdminQueuePort",
+    "ClaimedJob",
+    "DependencyQueueState",
+    "DependencyQueueViewPort",
+    "FileSpoolQueue",
+    "Job",
+    "JobMeta",
+    "JobQueue",
+    "PendingMigrationOutcome",
+    "PendingMigrationQueue",
+    "PendingMigrationResult",
+    "PublishPermit",
+    "QuarantineRecord",
+    "QueueClaimLost",
+    "QueueOperationTimeout",
+    "QueueSnapshot",
+    "WorkerQueuePort",
+]

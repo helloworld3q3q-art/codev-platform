@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Python quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Verify license metadata
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          assert project["license"] == "Apache-2.0"
+          assert project["license-files"] == ["LICENSE", "NOTICE"]
+          for filename in project["license-files"]:
+              assert Path(filename).is_file(), filename
+          print("Apache-2.0 metadata and license files are present")
+          PY
+      - name: Reject tracked local project registry entries
+        run: |
+          entries="$(git ls-files 'platform_meta/projects/*/meta.json')"
+          test -z "$entries" || {
+            echo "Live project registry entries must not be tracked."
+            exit 1
+          }
+      - name: Ruff
+        run: python -m ruff check codev_platform
+      - name: Focused regression tests
+        run: python -m pytest tests/test_cli_parser.py tests/test_sync_hooks.py tests/test_resources_packaging.py -q
+
+  commit-lint:
+    name: Commit message policy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan pull-request commit messages
+        run: |
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          if git log --format=%B "$base..$head" \
+              | grep -iEn 'co-authored-by:.*(claude|opus|sonnet|anthropic)|generated with .*claude|🤖 generated|noreply@anthropic'; then
+            echo "::error::Commit message contains a prohibited generated-attribution marker."
+            exit 1
+          fi
+          echo "OK: commit messages passed policy check"
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install scanner
+        run: python -m pip install "detect-secrets>=1.5.0"
+      - name: Scan tracked source
+        run: |
+          detect-secrets scan --exclude-files 'tests/|docs/audits/|.*\.lock$' > /tmp/detect-secrets.json
+          python -c "import json; report=json.load(open('/tmp/detect-secrets.json', encoding='utf-8')); count=sum(len(items) for items in report.get('results', {}).values()); print(f'detect-secrets potential findings: {count}'); raise SystemExit(1 if count else 0)"

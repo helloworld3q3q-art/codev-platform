@@ -1,0 +1,43 @@
+name: 缺陷报告
+description: 报告可复现的功能异常
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请勿在公开 issue 中包含 token、密码、用户数据或安全漏洞细节；安全问题请遵循 SECURITY.md。
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 发生了什么？
+      placeholder: 请描述异常现象与影响。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现步骤
+      description: 请提供可复现的最小步骤，不要附带敏感配置。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      placeholder: 例如 0.1.0 或提交 SHA
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      placeholder: 例如 Windows 11 / Python 3.11

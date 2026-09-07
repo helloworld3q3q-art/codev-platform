@@ -1,0 +1,216 @@
+"""SqlMemoryStore —— MemoryStore 的 PostgreSQL 实现(memory M2 核心)。
+
+memory_entries 表(plan §3.2)+ 读写分离接缝(同 session_pg:写主库 / 读副本可选)。
+作用域隔离:所有读写带 (org_id, scope, scope_ref)。运行期只读验证 Alembic schema。
+"""
+from __future__ import annotations
+
+import json
+import uuid
+from contextlib import contextmanager
+
+from codev_platform.agent.memory_store import MemoryEntry, MemoryStore, _DEFAULT_ORG
+
+_SCHEMA_PROBES = (
+    "SELECT id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "
+    "is_redline, status, supersedes, extra, ttl_at, task_id, task_state, created_at, "
+    "updated_at FROM memory_entries LIMIT 0",
+)
+
+# _COLS = list_scope 的 SELECT 列(14 列, 故意不含 ttl_at —— ttl_at 仅 archive_expired 在 SQL 层
+# 用, 不读进 MemoryEntry)。与 INSERT 列表(15 列, 含 ttl_at)结构不对称属设计, 勿照 _COLS 推断
+# INSERT 列序;_row_to_entry 按本顺序 r[0]..r[13] 映射(task_id=r[12] / task_state=r[13])。
+_COLS = "id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, is_redline, status, supersedes, extra, task_id, task_state"
+
+
+def _row_to_entry(r: tuple) -> MemoryEntry:
+    return MemoryEntry(
+        id=str(r[0]), org_id=r[1], scope=r[2], scope_ref=r[3], owner_user_id=r[4],
+        content=r[5], kind=r[6], topic_key=r[7], is_redline=r[8], status=r[9],
+        supersedes=str(r[10]) if r[10] else None, extra=r[11] or {},
+        task_id=r[12], task_state=r[13],
+    )
+
+
+class SqlMemoryStore(MemoryStore):
+    def __init__(self, dsn: str, read_dsn: str | None = None, *, min_size: int = 1, max_size: int = 4) -> None:
+        """读写分离接缝(同 SqlSessionStore):写走 dsn 主库,读走 read_dsn 副本(None=同池)。"""
+        from psycopg_pool import ConnectionPool
+        self._write_pool = ConnectionPool(dsn, min_size=min_size, max_size=max_size, open=False)
+        if read_dsn and read_dsn != dsn:
+            self._read_pool = ConnectionPool(read_dsn, min_size=min_size, max_size=max_size, open=False)
+            self._split = True
+        else:
+            self._read_pool = self._write_pool
+            self._split = False
+        self._schema_ready = False
+
+    def _ensure(self) -> None:
+        if not self._schema_ready:
+            self._write_pool.open()
+            if self._split:
+                self._read_pool.open()
+            from codev_platform.web.db.runtime_schema import verify_psycopg_probes
+
+            with self._write_pool.connection() as conn:
+                verify_psycopg_probes(conn, _SCHEMA_PROBES)
+            if self._split:
+                with self._read_pool.connection() as conn:
+                    verify_psycopg_probes(conn, _SCHEMA_PROBES)
+            self._schema_ready = True
+
+    # ---- 写路径(主库)----
+
+    def write(self, entry: MemoryEntry) -> str:
+        self._ensure()
+        # 用 str(uuid4) 规范 dashed 形式:与 _row_to_entry 的 str(UUID) 读回形式一致,
+        # 保证 write() 返回的 id 能与 list_scope 读回的 id 字符串相等(否则 hex 与 dashed 不等)。
+        eid = entry.id or str(uuid.uuid4())
+        with self._write_pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO memory_entries "
+                "(id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "
+                " is_redline, status, supersedes, ttl_at, extra, task_id, task_state) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)",
+                (eid, entry.org_id, entry.scope, entry.scope_ref, entry.owner_user_id,
+                 entry.content, entry.kind, entry.topic_key, entry.is_redline, entry.status,
+                 entry.supersedes, entry.ttl_at, json.dumps(entry.extra or {}, ensure_ascii=False),
+                 entry.task_id, entry.task_state),
+            )
+        return eid
+
+    def supersede(self, old_id: str, new_entry: MemoryEntry, *,
+                  owner_user_id: str | None = None, protect_redline: bool = False) -> str:
+        """新条目取代旧条目:旧 status→superseded,新条目 supersedes=old_id(留痕,不物删)。
+
+        旧条目须存在且与新条目同 org(防跨 org 串接 supersede 链);owner_user_id 给定则还须
+        本人持有(IDE 写侧防改他人记忆);protect_redline=True 则旧条不得为 redline(IDE 不得改
+        org 硬约束)。不匹配 → 抛 ValueError 回滚事务,不写孤儿新条目。
+        """
+        self._ensure()
+        new_entry.supersedes = old_id
+        with self._write_pool.connection() as conn:
+            with conn.transaction():
+                sql = ("UPDATE memory_entries SET status='superseded', updated_at=now() "
+                       "WHERE id=%s AND org_id=%s")
+                params: list = [old_id, new_entry.org_id]
+                if owner_user_id is not None:
+                    sql += " AND owner_user_id=%s"
+                    params.append(owner_user_id)
+                if protect_redline:
+                    sql += " AND is_redline = false"
+                cur = conn.execute(sql, params)
+                if cur.rowcount == 0:
+                    raise ValueError(
+                        f"supersede 目标不存在/跨 org/非本人: id={old_id} org={new_entry.org_id}")
+                eid = new_entry.id or str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO memory_entries "
+                    "(id, org_id, scope, scope_ref, owner_user_id, content, kind, topic_key, "
+                    " is_redline, status, supersedes, ttl_at, extra, task_id, task_state) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)",
+                    (eid, new_entry.org_id, new_entry.scope, new_entry.scope_ref, new_entry.owner_user_id,
+                     new_entry.content, new_entry.kind, new_entry.topic_key, new_entry.is_redline,
+                     new_entry.status, old_id, new_entry.ttl_at,
+                     json.dumps(new_entry.extra or {}, ensure_ascii=False),
+                     new_entry.task_id, new_entry.task_state),
+                )
+        return eid
+
+    def forget(self, entry_id: str, *, owner_user_id: str | None = None,
+               org_id: str | None = None, protect_redline: bool = False) -> bool:
+        """显式遗忘:status→forgotten(不物删,recall 只查 active)。
+
+        owner_user_id / org_id 给定则限本人 + 本 org(IDE 写侧防删他人记忆);protect_redline=True
+        则拒绝遗忘 redline 条(IDE 不得删 org 硬约束);None/False=不限(维护路径)。
+        """
+        self._ensure()
+        sql = ("UPDATE memory_entries SET status='forgotten', updated_at=now() "
+               "WHERE id=%s AND status<>'forgotten'")
+        params: list = [entry_id]
+        if org_id is not None:
+            sql += " AND org_id=%s"
+            params.append(org_id)
+        if owner_user_id is not None:
+            sql += " AND owner_user_id=%s"
+            params.append(owner_user_id)
+        if protect_redline:
+            sql += " AND is_redline = false"
+        with self._write_pool.connection() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount > 0
+
+    def archive(self, entry_id: str) -> bool:
+        """显式归档单条(status→archived)。压缩融合归档原条用(留痕,不物删)。"""
+        self._ensure()
+        with self._write_pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE memory_entries SET status='archived', updated_at=now() "
+                "WHERE id=%s AND status='active'",
+                (entry_id,),
+            )
+            return cur.rowcount > 0
+
+    @contextmanager
+    def advisory_lock(self, key: int):
+        """会话级 pg advisory lock 上下文:yield 是否抢到锁;退出自动释放(连接关闭即释放)。
+
+        用于把 maintenance job 串行成单实例(workflow §6.1 写侧串行)——防两个并发 job
+        压同一 topic 各写一条重复 summary(compress 是 list→fuse→write→archive 非原子)。
+        """
+        self._ensure()
+        with self._write_pool.connection() as conn:
+            got = conn.execute("SELECT pg_try_advisory_lock(%s)", (key,)).fetchone()[0]
+            try:
+                yield got
+            finally:
+                if got:
+                    conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
+
+    def archive_expired(self, org_id: str | None = None) -> int:
+        """TTL 到期批量归档(ttl_at 已过 且 active → archived)。org_id=None 跨全 org。返回条数。"""
+        self._ensure()
+        sql = ("UPDATE memory_entries SET status='archived', updated_at=now() "
+               "WHERE status='active' AND ttl_at IS NOT NULL AND ttl_at < now()")
+        params: tuple = ()
+        if org_id is not None:
+            sql += " AND org_id=%s"
+            params = (org_id,)
+        with self._write_pool.connection() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount
+
+    def set_task_state(self, task_id: str, task_state: str, org_id: str = _DEFAULT_ORG,
+                       owner_user_id: str | None = None) -> int:
+        """更新某 task_id 的 active 记忆 task_state(M1)。owner_user_id 给定则限本人
+        (防改他人任务);org_id 隔离。返回更新条数(0=无匹配/无权改)。"""
+        self._ensure()
+        sql = ("UPDATE memory_entries SET task_state=%s, updated_at=now() "
+               "WHERE org_id=%s AND task_id=%s AND status='active'")
+        params: list = [task_state, org_id, task_id]
+        if owner_user_id is not None:
+            sql += " AND owner_user_id=%s"
+            params.append(owner_user_id)
+        with self._write_pool.connection() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount
+
+    # ---- 读路径(副本,若配置)----
+
+    def list_scope(self, scope: str, scope_ref: str, org_id: str = _DEFAULT_ORG,
+                   limit: int = 100) -> list[MemoryEntry]:
+        """列某作用域的 active 记忆(按 org_id 隔离)。
+
+        防御性排除已过期(ttl_at < now):即便 archive_expired job 还没跑,过期记忆也绝不被
+        召回 —— TTL 语义在两次 job 之间也正确。
+        """
+        self._ensure()
+        with self._read_pool.connection() as conn:
+            rows = conn.execute(
+                f"SELECT {_COLS} FROM memory_entries "
+                "WHERE org_id=%s AND scope=%s AND scope_ref=%s AND status='active' "
+                "AND (ttl_at IS NULL OR ttl_at > now()) "
+                "ORDER BY created_at DESC LIMIT %s",
+                (org_id, scope, scope_ref, limit),
+            ).fetchall()
+        return [_row_to_entry(r) for r in rows]

@@ -1,0 +1,16 @@
+{"query": "这个项目是做什么的?", "expect_type": "overview"}
+{"query": "给我介绍下这个仓的整体架构", "expect_type": "overview"}
+{"query": "give me a high-level overview of this project", "expect_type": "overview"}
+{"query": "改 stock_recommendation 这张表会影响哪些前端页面和接口?", "expect_type": "impact"}
+{"query": "如果我改这个端点,谁会被波及?", "expect_type": "impact"}
+{"query": "who calls this endpoint and what breaks if I change it", "expect_type": "impact"}
+{"query": "这张表被哪些后端函数读写?", "expect_type": "impact"}
+{"query": "EnumMetadataService 这个类在哪定义?", "expect_type": "symbol"}
+{"query": "build_default_registry 这个函数谁调用了它,它又调了谁?", "expect_type": "symbol"}
+{"query": "where is the resolve_conflicts function defined", "expect_type": "symbol"}
+{"query": "提交代码要遵守什么规则?", "expect_type": "doc_rule"}
+{"query": "为什么这里要用 daemon 模式而不是 stdio?", "expect_type": "doc_rule"}
+{"query": "platform-docs 召回质量差应该怎么做?", "expect_type": "doc_rule"}
+{"query": "what is the best practice for adding a new provider", "expect_type": "doc_rule"}
+{"query": "你好", "expect_type": "general"}
+{"query": "帮我写一段排序代码", "expect_type": "general"}

@@ -1,0 +1,151 @@
+# daily-summary 2026-06-13 —— PDA 链路从"答不出"到"精确可读全链路" + 挖到部署根因
+
+> 承 [`daily-summary-2026-06-12.md`](daily-summary-2026-06-12.md) §十(一个"加列影响面 agent 答不出"挖出平台一串底层坑,收尾中)。
+> 本日把那条线**做完并验证**:code_vec 大项目全量建成、find_api_callers 真因定位、前端调用方精确归因、跨仓 config 版本化、agent 文件工具多仓,最后挖出"改了反复不生效"的**部署根因**。
+> commit 链 `712588e`→`796665b`(全程 origin/dev,相关单测全过;Windows 侧 2 个 psycopg_pool 缺包失败与改动无关)。
+> **贯穿教训:不凭现象/直觉下结论,逐层实测证伪到根因 —— 本日两次猜错(URL 没解析 / 非代码文件)都被实测数据纠正。**
+
+## 一、code_vec 8GB 大项目建库收尾(batch + 探活 + 反应式回收 + build_text 封顶)
+
+sample-project-beta(codegraph 28.4 万节点 → 入库 19.8 万 chunk)在 8GB 笔记本卡上反复建不完。逐层定位 + 治本:
+
+- **fp32 保精度,batch_size 封顶激活峰值**(`712588e`):用户否掉"多进程并行/CPU 卸载"(前者各背一份模型显存叠加更糟,后者对 0.6B 太慢)。真正可控的是 encode 内部分批 → `models.embed_encode_batch`(默认 8),remote(daemon /embed)与本机 qwen-local 共用同键。`skip_kinds` 配置化(默认 import/file/variable 不变,平台零影响)。
+- **/embed 反应式 OOM 回收**(`a0485ef`):撞 GPU OOM → empty_cache 重试一次 → 仍失败返 **503 可重试**(接 RemoteEmbedder 退避 + checkpoint),不把瞬时尖峰升级成 build 失败。与已有"主动每批 empty_cache"互补。
+- **增量续跑前探活既有库**(`6530886`):worker 超时是 **SIGKILL**(非优雅停),会把 chroma 库半写坏在 flush 中途;续跑接脏 segment → compaction 522 → malformed 彻底崩(实证:首建超时被杀留脏库,续跑写到 16 万崩)。R5:续跑前读侧 `quick_check` 探活,坏了退全量 rmtree 自愈。
+- **build_text 给 signature/docstring 封顶**(`f3704ac`,**timeout 真因**):build 在尾部(vtradex.otwb 遗留 WMS)反复 /embed 超时。**实测否定"非代码文件"猜测**(codegraph 不索引 word/excel/图片);真凶是合法但超大的 **Java 方法 docstring 达 17KB**(巨型块注释),`build_text` 没封顶 → 塞进 base 且**每个滑窗重复带一份** → 单 chunk 24KB ≈ 6000+ token → 成批长序列 encode 超 daemon 120s;且 24KB 塞一个向量严重稀释语义。`_BASE_FIELD_MAX`(signature 600 / docstring 1200)→ 单 chunk ≤ ~5.5KB,encode 飞快。
+- **结果**:封顶后增量续跑 ~5 分钟补完,**198856 / 198856 全量建成,0 OOM/0 损坏/0 超时**。`.yml` 配置节点(10276 个)用户决定**保留**(非超时主因)。
+
+## 二、find_api_callers 真因在查询层不在数据(`ba05cf9`)
+
+`pda/task/check/container` 的前端调用方,IDE + web 双 agent 都 `found:false`。**逐层证伪**排除了项目隔离(PDA 仓在 extra_repos)、数据漏扫(PDA 扫了,646 frontend_api_call)、URL 解析(`SUFFIX+片段`拼接正确,meta.url 对)—— **真因是 `_resolve` 只按节点 id(带 `GET:` method 前缀)/ name(handler 名)匹配,不认 `meta.url`**。人/agent 自然用 URL 路径指端点 → 两招都不命中。
+
+- 修:`_resolve_endpoint` 补按 `meta.url` 路径匹配(`_norm_endpoint_path` 剥 method 前缀/query/尾斜杠);同路径多 method 全返回,聚合调用方。旧 id/name/歧义路径不变。+2 测试。
+
+## 三、前端 API 使用精确归因引擎(`6cfa250`)
+
+#2 修好后 find_api_callers 返回**端点对的页**但夹 **97 个噪声页**:`端点 ← 常量 ←(contains)共享 URL.js ←(imports)97 页`,凡 import 注册模块的页都被算调用方。
+
+- **新解析引擎 `_stack_scan/api_usage.py`(策略式)**:`UsageResolver` Protocol + `ConstantReferenceUsageResolver`(url_registry 常量按名引用);驱动**每文件源码只读一次**(跨策略共享 token,O(token) 相交)。加新使用模式(量化式服务方法调用)= 加 resolver + 注册一行,不改驱动/既有策略。`page→常量` 精确 `uses_api` 边。
+- **gate 在 `url_registry` flag**:实测 openclaw 144 个 api_call **0 个 url_registry**(全内联)→ 纯内联项目零影响;sample-project-beta 645 个 url_registry 才走精确归因。
+- **build_impact_graph 单点过滤**:丢弃 `contains→url_registry常量` 的泛连边(共享注册模块的 contains 被 uses_api 取代),所有 impact 查询统一精确,store 保留 contains 显示不变。
+- **验证**:re-ingest 后 702 条 uses_api,`find_api_callers(task/check/container)` **97 页 → 1 页(scanPickProduct.vue)**;`splitPackageTally/splitSubmit` → unpackingTally.vue。
+
+## 四、跨仓 config 版本化:meta.json 进 git + extra_repos 可移植(`5d8a601`)
+
+发现 sample-project-beta / sample-project-alpha 的 `meta.json` 只在 WSL 本地**未跟踪(?? 状态从没 commit)**,PDA 跨仓链接 `extra_repos` 只在用户级 `~/.codev-platform/config.json`(不进 git)→ WSL 重建即丢,无版本化恢复源。
+
+- 两项目 meta.json 补进 git(`repo_url` 为可移植恢复真值源);sample-project-beta 加 `extra_repos: ["sample-project-alpha"]`(**project-id 引用**声明跨仓,可移植)。
+- `_resolve_repos` 合并两来源:用户 config(机器绝对路径)+ meta.json(project-id 引用→解析成各机 repo_path)。换机/重建 WSL 跨仓关系不丢,绝对路径仍本机 config 自给(换机零改 meta)。非 editable 安装无 platform_meta → 优雅 [] 回退。
+
+## 五、agent 文件工具多仓(`796665b`)—— "多仓抽象的另一半"
+
+agent 经图谱精确查到 PDA 页面后,`read_file`/`list_dir` 却报"路径越出项目仓根"读不到 —— 该页在 extra_repo,文件工具只认单个主仓根。
+
+- **新建 `core/repos.py::project_repo_roots`**:"项目→仓根集合(主仓+extra_repos)"**单一真值源**,graph ingest 与 agent 文件工具共用(原 graph/ingest 的多仓逻辑上提,旧名 re-export 不破调用/测试)。
+- `fs.py` 沙箱单根 → 多根:rel 在各登记仓根依次解析命中即读;仍 `is_relative_to` 某仓根才放行(穿越/绝对路径/敏感文件照拒)。`list_dir` 列根目录合并展示所有仓根(各带 header),agent 看得到关联仓结构。fs 多仓 6 测 + ingest monkeypatch 目标随真值源上提更新,509 passed。
+
+## 六、部署根因:web agent = `codev-agent.service`(8848)非 codev-web(18088)
+
+#2~#5 改完,web agent **仍** `found:false` 且 `list_dir("/")` 报**旧错误文案**("越出项目仓根" vs 新码"越出项目所有仓根")—— **铁证:agent 进程跑旧码**。逐一排查发现 web 聊天 agent 跑在**独立服务 `codev-agent`(`cli agent serve`,端口 8848)**,我一直重启的 codev-web(uvicorn web.app:18088)是 admin web-ui 后端。codev-agent **pid 168 启动于昨天 21:53**(我所有改动之前)→ agent 相关修复对它一个没生效。重启 codev-agent 即吃到全部新码。
+
+- **判据沉淀**(记忆 [[web-agent-runs-in-codev-agent-service]]):agent 报的错误文案与新码不符 = 该进程跑旧码,找它**真正的宿主服务**重启。`_run_query` 每次新开只读 store 无缓存 → 数据 re-ingest 即生效,但**代码改动必重启进程**。改 agent 工具/impact/fs → 重启 codev-agent;IDE/MCP 客户端走 codev-mcp-*。
+
+## 七、方法论:逐层实测证伪(本日两次猜错被数据纠正)
+
+1. **"URL 没解析,只存常量名"** —— 我查 `name/id` 没查 `meta_json.url` 误判;实测 PICK_CHECK_TURN 的 meta.url 正确,真因在查询层。
+2. **"非代码文件 bloat(word/excel/图片)"** —— 用户直觉;实测 codegraph 不索引二进制,真凶是 17KB 的 Java 方法注释。
+
+两次都是**先实测节点分布/字段长度/边/真跑函数,再定论**。"派对抗审计 + 实测验证"是平台开发的纪律,不是 nice-to-have。
+
+## 八、对抗审计 + 修复(下午段)—— 派 4 兄弟审上午这一大轮,抓修真 bug
+
+上午 commit 链收尾后,派 **4 个对抗审计兄弟**按风险聚类(嵌入管线 / 统一图谱 / 网关鉴权 / agent 多仓隔离)审 6/11晚~6/13 这一大轮。整体评价:对抗痕迹重,安全侧越权/穿越 PoC 几乎全被拦死;抓到并修了:
+
+- **P0(`313a972`)**:`qwen.py` `712588e` 加 batch_size 时**误删 `self._model=None`**,`_ensure` 仍读它 → qwen-local embedder 首次 encode 必 `AttributeError`(零测试覆盖,remote 默认掩盖)。补回 + 回归断言。
+- **P1a(`313a972`)**:PG 队列 rc=2(锁占)job 因 lease 隐身最多 1800s,破"下轮重试"契约(file 后端无此问题,PG 迁移引入)。`PgJobQueue.release()` 复位 pending。
+- **3×P2(`313a972`)**:`find_api_callers` 路径参数模板匹配(`/home/user/project`↔`/users/{id}`)/ 契约漂移 0.5 兜底边归 `uncertainCalls` 桶 / 相对 extra_repos fail-closed。+ chroma daemon 接 `bind_host`+`startup_policy_error`(与另三套 MCP 对齐,补反代 passthrough 护栏)。
+- **P1b 根治(`9e65067`)**:多仓前端节点 id/file 以仓相对路径为锚无仓维度 → 两仓同 `src/pages/index.vue` 碰撞 → merge first-wins **静默丢后仓节点**。新 `RepoScope` 单一职责单元(写侧 localize 打仓 tag / 读侧 resolve 还原),主仓 tag='' 零 churn。实测 sample-project-beta 重建 **783 个 extra 仓节点带 tag 存活**(原会被丢)。
+- **/embed 闸(`8b1623a`)**:loopback 豁免在**同机反代**下可被远程白嫖 GPU。复用 `internal_secret` 加 `X-Internal-Call` 信物闸(配 secret 才生效)+ 反代 runbook 排除。token 模式平台**活体验证**:无信物→401、带→200。安全顺序(先重启调用方再重启 daemon)避免 embedding 断。
+- **audit 加固(`f912e03`)**:`audit_all_stores` 旧版只 glob sqlite,pg 后端会扫空=门禁形同虚设(潜伏 bug,平台现 sqlite)。改按后端枚举(pg 走 `list_project_ids`)+ store 外 `reconcile_orphan_pids` 孤儿检测。**否决**往 store 注入 allowlist(破 §8+契约对称)。
+- **audit 抓出并修的真 bug(`376e108`)**:跑 audit 抓出 codev-platform 图谱 **25 条 dangling** —— A2 给 A3 `inferred_api_call` 软节点发 plays_role,软节点下轮未重产即悬空。Fix-A(plays_role 排除软节点)+ Fix-B(`_analyzers_pass` 的 hard_ids 信任集只含硬节点,防任何 analyzer 跨轮引用软节点)。重建实测 **25→0**。
+
+**质量教训沉淀成规则** → `.claude/rules/code-quality-discipline.md`(本日多次被用户纠"堆代码/深嵌套/死代码兜底/偷懒延后理由")。
+
+## 九、晚间段 —— 代码智能平台蓝图续建(Phase 5/8)+ MCP 可用性根因
+
+用户决定按主计划蓝图把代码智能平台逐个建出来(简单→难)。先核实"审计剩余项"#7 config DI / #8 set_roles 多 org 复核后**都是 stale 已完成**(只订正状态标记);Phase 3 残留核实为**已完成/低 ROI 冗余**(provenance src/parser/pv + 全套 audit + file:line 证据都在;source_line 落每边冗余),跳过不堆码。真有未建实质的从此开始:
+
+- **Phase 5 路径评分(`e7b72a1`)**:find_impact_paths 既有 conf×src 评分上,正交补 `_KIND_WEIGHT`(关系强度,imports/renders/mentions 降权)+ `_DEPTH_DECAY`(近依赖优先)。社区/新鲜度因子留 Phase 4/1 接入,不预埋。
+- **Phase 8 观测切片(`9ab5582`/`bcd6bf0`)**:RecallTrace per-query/per-lane 耗时·候选·无证据 best-effort 落 JSONL + `recall_latency_report` 聚合 P50/P95/无证据率/lane 命中率 + CLI `recall-stats`(measure-first)。conftest autouse 隔离 recall_trace 防测试污染真实 baseline。
+- **measure → fix → re-measure 闭环(`49e0d01`→`005382c`)**:观测一上线就量出"vector lane 对 codev-platform 0 命中却 P95 944ms"。精准修(非预建 cache):无 code_vec 项目 fs 探活快速跳过。首版用错标记(chroma.sqlite3 空库残留漏判)→ WSL 诊断查真因 → 改用 `.manifest.json`。WSL 实测 **vector P95 944→4.8ms、总 P95 991→24ms**。
+
+**MCP 可用性根因(整场"MCP 不可用"的真相,三层)**:
+1. **codegraph 配置冲突(预存)**:codev-platform 是平台仓本身、`.codegraph/config.json` 提交在 git(f9e5cae),无法整目录 junction 到平台数据 → repo `.codegraph` 只有 config 无 db → codegraph MCP "not initialized"。`codegraph link --all` 故意报 conflict 待手动取舍。**修**:symlink 平台 `codegraph.db` 进 repo `.codegraph`(config 留提交版,db 走 `*.db` gitignore)+ 重启 codev-mcp-codegraph。本地 symlink 不进 git(同其它项目 junction)。
+2. **会话 SSE 连接陈旧(自造)**:晚间部署反复 `systemctl restart codev-mcp-graph/codegraph` 把长跑 Claude Code 会话连接打断 → MCP 调用全 `-32602`(server 健康、client 连接死)。**修**:重启 Claude Code 重连(非 /clear)。重启后实测 codegraph_search / graph search_nodes 全通。
+3. **过程失误**:整场把"MCP 不可用"当借口没真试、理由(worktree 特定)错。教训记 [[wsl-mcp-daemons-stale-after-pull]]:会话中途别反复重启 MCP 服务;先测一次再断言。
+
+## 十、Phase 9 多语言 adapter 形式化 —— produces 声明式归属 + capability 视图(`a01aadc`)
+
+继 §九 蓝图续建,按"简单→难"选 Phase 9(纯后端、无新依赖)。**先派 3 兄弟对抗式讨论定调**(正方设计 / YAGNI 反方 / 多语言通用性),避开过度设计陷阱:
+
+- **关键定调**:平台**已**三套并行扩展点各自插件化(AnalyzerPlugin / CallResolver / Analyzer,均"协议族+registry+零 if-else")。盲目再叠"统一 adapter 框架"= 撞空抽象 / 重复真值源红线。三契约签名+生命周期实质不同(入参 0→nodes→nodes+edges,落库前→落库后→骨架连通后),**不合并**(`call_resolvers/base.py` 注释已论证)。真有价值的窄口子=① capability matrix 单一真值源缺失 ② dotnet 漏登记 bug。
+- **决胜证据**:正方挖到真 bug —— `builtin.dotnet` 产 `backend_endpoint` 却漏登记 `KIND_OWNERS`,既有 `test_plugin_owner_uniqueness` 无 .NET fixture → 静默漏检。
+
+**四项交付(净减 19 行,加能力反少代码)**:
+1. **produces 声明式扩展点**:`AnalyzerPlugin` 加 `produces`(同 `prov_source` 模式),7 个栈插件各声明自己产的 NodeKind。
+2. **ownership 收敛单一真值源**:删手维护 `KIND_OWNERS` dict → `kind_owners()` 从插件 produces 反转派生 ∪ `POST_PASS_OWNERS`(非插件 post-pass 产物 frontend_deps/analyzers)。**dotnet bug 结构性消除**(声明即归属,不是加测试去抓);既有 owner 闸保留(抓"产了没声明")。
+3. **capability matrix 派生视图**:`plugins/capabilities.py::describe_capabilities()`(聚合 name/version/produces/prov_source,**派生非新存储真值源**)+ CLI `plugins list` 显示 produces/prov + footer 列 call resolvers / analyzers,回答"平台支持哪些语言栈、各产什么"。
+4. **收窄 `_stack_scan/__init__.py` re-export 墙**:数据驱动审计(全仓零 `_stack_scan.<私有符号>` 访问,测试只 import 公共符号)删约 30 个零消费私有门面,141→81 行。
+
+**验证**:新增静态护栏测试(produces 合法性 + dotnet 归属回归锁 + capability 派生一致);目标单测 **274 通过**(41+233)。**真实仓全链路实测**(Windows editable 跑改动码,`store_path` 覆盖写临时库零碰线上):5 仓 ingest 全 OK、归属零 rogue;**跨仓** sample-project-alpha 前端 → sample-project-beta 后端 **603 条 calls_api 跨仓连边**(RepoScope `sample-project-alpha-hb::` tag 正确);**单仓全链** openclaw-stock BFS 找到 `frontend_api_call→backend_endpoint→backend_function→db_table` 四层贯通路径。
+
+**教训沉淀**:验证一律 `store_path` 覆盖写临时库,**绝不对线上图谱跑手动 ingest**([[graph-rebuild-via-worker-not-manual-ingest]]:dependency-cruiser 冷启动 fail-soft 会 upsert 覆盖好数据)。Windows→UNC 访问 WSL 仓时 depcruise 走 npx 报 `UNC paths not supported` fail-soft(frontend_module 缺),纯 Python 正则扫描(component/route/api_call)经 UNC 正常 —— 是 Windows-UNC 限制非改动问题。
+
+## 十一、Phase 4 结构社区检测 + 全链路(MCP→tool→LLM→agent)测试(`907088a`→`6315294`→`f5020ec`)
+
+继 Phase 9 选 Phase 4(社区检测)。**先派 3 兄弟讨论否掉"无消费方"误判**:初判 Phase 4 唯一消费方=Phase 5 留白(0 活接线)→ 缓建。但用户点出真消费方 = **编码 agent(web/IDE/Claude/Codex)**,只要暴露成 agent 可调工具就成立 → 转做。**与 A1 互补**:A1=LLM 语义业务域(贵/只 endpoint),社区=算法结构聚类(免 LLM/全节点/确定性)。
+
+**实现(复用 Analyzer 协议, ingest.py 零改)**:
+- `graph/community.py` 纯 stdlib 确定性 Louvain(detect_communities + modularity, 无 networkx, sorted+min-id tie-break 消随机源)。
+- `CommunityAnalyzer` 复用 A1/A2 的 Analyzer 协议跑 `_analyzers_pass` → COMMUNITY 软节点 + IN_COMMUNITY 软边, 无条件注册(确定性免费, 默认开)。
+- **两条消费路径**:① graph MCP 加 `find_node_community`/`list_communities`(IDE/Claude/Codex)② agent `tools/impact.py` 同补两工具(**web agent 自带 in-process 引擎, 第一版漏了, 兄弟①抓出补上**)。
+- **Phase 5 社区因子 gate 默认关**(measure-first 对抗审计采纳):0.8 跨社区惩罚未经 A/B 证实增益, 比照 planner_llm/rerank/A1 默认关纪律, **不静默改活工具排序**(`build_impact_graph(with_community=)` 注入侧 gate, 关→退化 baseline 零回归)。社区软层 + 2 agent 工具是加性安全, 默认开。
+- `soft_quality` 加结构社区轴(coverage/giant 0.7/modularity 诊断);**砍掉 A1↔社区对齐率**(默认关不可算 + 正交无理论意义)。
+- `impact.py` 软查询(A1/社区/A2 + search_nodes)分出 `impact_soft.py`(773→561, 守 file-discipline ≤600)。
+
+**全链路测试(用户要"MCP→tool→LLM→agent 3 项目连贯+组合")**:
+- **L1 纯逻辑**:WSL 全量 **1759 passed**(Louvain 确定性/modularity/gate/A1+社区共存)。
+- **L3 live MCP**:codev-platform 经**真 `mcp__graph__` 工具**实调返跨层认证社区;openclaw 60 / sample-project-beta 84 社区(reindex worker 补数据)。
+- **L4 真·LLM e2e**:in-process 驱动 agent loop + 真 deepseek, onboarding 提问 → **LLM 自主 step1 选 `communities_overview`** + list_dir 连贯链 + 3105 字结构概览。**证实 web agent 端 LLM 真能调到社区工具, 无需补 planner lane**(工具描述一次命中)。
+- 真实仓质量:codev 34 / openclaw 60 / ideas 84 社区, **无巨型簇**(最大 8~9%), 语义连贯(认证/agent/codegraph 各成簇), 优于 2026-06-11 连通分量退化。
+
+**测试逼出并修的 3 个真 bug**:① **web 403**(兄弟②):token 机全局 config → handler 重读 → 56 web 测试假红;`conftest` autouse 隔离宿主 config → host-independent(1725→1759 全绿)。② **循环导入**(我拆 impact_soft 引入):impact↔impact_soft 模块级互导, impact_soft 被先导即崩;惰性 import(`_engine()`)单向化修复。③ **dotnet 漏登记**(Phase 9 produces 修)。
+
+**部署**:`reindex-queue enqueue openclaw/ideas` 补社区数据 + 重启 codev-mcp-graph/codev-agent/codev-reindex 到 f5020ec(daemon 不随 pull 重载)+ 重启 Claude 重连 MCP, live 抽验干净码正常。
+
+## 十二、file-discipline 收尾:大文件拆分(budget 彻底绿,06-14)
+
+Phase 4 全量测试时 `test_file_size_budget` 抓出**两个超 600 行**文件(预存红, 非 Phase 4 新破, 父 commit 同样): `impact.py` 677(我 Phase 4 加社区查询到 773)+ `chroma/server.py` 647。逐个拆到合规:
+- **`impact.py` 773→561**(§十一已记):软查询(A1 域 / Phase 4 社区 / A2 架构层 + search_nodes)分出 `impact_soft.py`。末尾 re-export 保兼容;惰性 import 破循环(`f5020ec`)。
+- **`chroma/server.py` 647→526**(`388457f`):**/embed /rerank 共享 GPU 算力端点子系统**(handler + `validate_embed_body`/`validate_rerank_body` + `_gpu_call`/`_release_cuda_cache` 算子收口)抽到 `_embed_api.py`(叶子, 只依赖 `_config/_models/_reranker/_helpers/_obslog`, **不 import server → 单向无环**, 吸取 impact_soft 循环坑教训)。`_run_http` 按 Route 注册 `_embed_api.embed/rerank`;re-export 保 `server.<name>` 兼容(测试用);`test_chroma_gpu_op_timeout` target 跟随 `_embed_api`。纯结构搬移**行为零变**;审 GPU 路径(batch 封顶/OOM 回收/wait_for 超时/清缓存)已调优, 不动避免行为变化。
+
+**结果**:`file_size_budget` 两 offender 清零 → **WSL 全量 1766 passed / 0 failed**(此前唯一红就是这条 budget)。教训:大文件拆分按"内聚子系统"切 + **叶子单向依赖**(不与原模块互导), 别图省事 re-export 成环。
+
+## commit 链(2026-06-13 段)
+**上午(PDA 链路)**:`712588e`(code_vec batch+skip_kinds 配置)→`a0485ef`(/embed 反应式 OOM 回收)→`6530886`(续跑探活 R5)→`ba05cf9`(find_api_callers URL 解析)→`6cfa250`(前端 API 使用精确归因 uses_api 引擎)→`5d8a601`(meta.json 进 git + extra_repos 可移植)→`f3704ac`(build_text 封顶治超大 docstring)→`796665b`(agent 文件工具多仓 + core/repos 单一真值源)。
+**下午(对抗审计修复)**:`313a972`(审计批: P0 qwen/P1a reindex/3×P2/chroma bind)→`9e65067`(RepoScope 多仓节点碰撞根治)→`8b1623a`(/embed 内部信物闸)→`f912e03`(audit 按后端枚举+孤儿 reconcile)→`376e108`(A2/A3 悬空 plays_role 根治 25→0)。
+**晚间(蓝图续建)**:状态订正 `313a972`后`f413fac`(#7)/`3c56b3c`(#8)/`70a8daa`(conftest 注)→`e7b72a1`(Phase 5 路径 kind 权重+深度衰减)→`9ab5582`(Phase 8 观测 trace+聚合)→`bcd6bf0`(recall-stats CLI + conftest 隔离)→`49e0d01`/`005382c`(vector lane fs 探活快速跳过, P95 944→4.8ms)。MCP codegraph symlink 修复为本机 local 不进 git。
+**Phase 9(adapter 形式化)**:`a01aadc`(produces 声明式扩展点 → ownership 派生 kind_owners() + capability 视图 + 收窄 _stack_scan re-export;修 dotnet 漏登记归属 bug,净减 19 行;274 单测 + 5 真实仓全链路实测)。
+**Phase 4(结构社区 + 全链路测试)**:`907088a`(Louvain 社区 analyzer + 2 graph MCP 工具 + Phase 5 ≤1 惩罚 gate 默认关 + soft_quality 社区轴)→`6315294`(impact 软查询分出 impact_soft + web agent 社区工具 + conftest host-config 隔离修 56 web 假红)→`f5020ec`(impact_soft 惰性 import 破循环)。L1 1759 passed + L3 3 项目 live + L4 真 deepseek 自主选社区工具。
+**file-discipline 收尾(06-14)**:`388457f`(chroma/server.py 647→526, /embed /rerank 抽 _embed_api 叶子无环)。budget 两 offender 清零 → 全量 1766 passed / 0 failed。
+
+## web 端
+本会话改动**不需前端同步**:impact.py / api_usage / core.repos / fs.py / code_vector_store 全在 graph 引擎 + agent 工具 + 索引层,OpenAPI 未变,`pnpm run api` 不用跑。
+
+## 运维落点(本日做的服务重启)
+- 索引代码改动 → 续跑 build 是直接 python 进程(无 worker 超时),按需重启 `codev-mcp-platform-docs`(/embed)。
+- impact/uses_api 生效:re-ingest sample-project-beta(`reindex-queue enqueue --kind ingest`,worker 跑)+ 重启 `codev-mcp-graph`(IDE/MCP)+ **`codev-agent`(web agent,本日关键)**。
+- 多仓 fs / find_api_callers 给 web agent 生效:**重启 `codev-agent`**(非 codev-web)。
+
+## 结论
+06-12 §十那条"服务大型复杂多仓项目"的工程化硬骨头,本日**收尾闭环**:大项目 code_vec 建成、跨层链路查询(端点→精确页面)可用、关联仓代码可读、跨仓 config 版本化。剩 codegraph/code_vec 索引 extra_repos(`code_recall` 多仓)是更大单独工程(codegraph sync 按设计只扫主仓),但"查端点调用方 + 读页面代码"用例已由 graph find_api_callers + 多仓 fs 完整覆盖。

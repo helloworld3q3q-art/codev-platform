@@ -1,0 +1,38 @@
+# codev-platform 专属基础设施 —— memory 用的独立 PostgreSQL。
+#
+# 备选方案(2026-05-29):若开发机已有原生 PostgreSQL(本机有 PG17 @ 5432),
+# 优先在现有 server 建独立库 codev_platform_memory(见 plan §3.2c),无需本 compose。
+# 本文件供「无原生 PG 的机器 / 团队服务器」用 —— docker 起一个平台专属 PG。
+#
+# 详见 docs/plans/roadmap-2026-05-29/memory-permission-model-2026-05-29.md §3.2c。
+#
+# 起停:
+#   docker compose up -d          # 起 PG(首次自动建库 codev_platform_memory)
+#   docker compose down           # 停(数据保留在 data/postgres/)
+#   docker compose down -v        # 停 + 删数据卷(慎用)
+#
+# 密码走 env,不进 git:
+#   PowerShell: $env:CODEV_PG_PASSWORD='***'; docker compose up -d
+#   或在仓根放 .env(已被 .gitignore 覆盖):CODEV_PG_PASSWORD=***
+#
+# 起好后 config.memory.pg_dsn:
+#   postgresql://example.invalid/database
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: codev-platform-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: codev_platform          # 独立 role,非业务 superuser
+      POSTGRES_PASSWORD: ${CODEV_PG_PASSWORD:-codev_dev_only}  # 生产必须 env 覆盖
+      POSTGRES_DB: codev_platform_memory      # 平台独立库(红线:严禁与业务库同库)
+    ports:
+      - "5433:5432"                           # 5433 避开业务 PG 5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data   # 数据卷归平台 data/(gitignored)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codev_platform -d codev_platform_memory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

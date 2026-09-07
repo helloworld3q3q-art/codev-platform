@@ -1,0 +1,259 @@
+"""ChatService(application 层)测试 — 注入假 provider/registry,不触网不依赖 HTTP."""
+from __future__ import annotations
+
+from codev_platform.agent.brain import AssistantTurn, LLMProvider
+from codev_platform.agent.memory_store import MemoryEntry
+from codev_platform.agent.services.chat_service import ChatService
+from codev_platform.agent.session import InMemorySessionStore
+from codev_platform.agent.tools.base import ToolRegistry
+
+
+class _FakeProvider(LLMProvider):
+    name, model = "fake", "m"
+
+    def chat(self, system, messages, tools):
+        return AssistantTurn(text="answer", tool_calls=[], stop_reason="end",
+                             usage={"input_tokens": 1, "output_tokens": 1})
+
+
+class _CapturingProvider(LLMProvider):
+    """记录收到的 system,用于断言召回记忆是否注入。"""
+    name, model = "cap", "m"
+
+    def __init__(self):
+        self.seen_system = None
+
+    def chat(self, system, messages, tools):
+        self.seen_system = system
+        return AssistantTurn(text="answer", tool_calls=[], stop_reason="end",
+                             usage={"input_tokens": 1, "output_tokens": 1})
+
+
+class _FakeRecall:
+    """返回固定记忆的假召回服务(duck-typed RecallService)。"""
+    def __init__(self, entries):
+        self._entries = entries
+
+    def recall(self, *, org_id, user_id, project_id, query="", limit=8, policy=None, task_id=None):
+        return self._entries
+
+
+class _RaisingRecall:
+    def recall(self, **kwargs):
+        raise RuntimeError("DB down")
+
+
+def _service() -> ChatService:
+    return ChatService(
+        sessions=InMemorySessionStore(),
+        registry_factory=lambda pid: ToolRegistry(),
+        provider_factory=_FakeProvider,
+        default_max_steps=lambda: 5,
+    )
+
+
+def test_ask_returns_outcome_with_session():
+    svc = _service()
+    out = svc.ask("q")
+    assert out.session_id
+    assert out.result.answer == "answer"
+    assert out.result.stop_reason == "answered"
+
+
+def test_ask_binds_session_to_project():
+    """新会话创建时绑当前 project_id, list_sessions 按项目隔离能查到/查不到。"""
+    store = InMemorySessionStore()
+    svc = ChatService(
+        sessions=store,
+        registry_factory=lambda pid: ToolRegistry(),
+        provider_factory=_FakeProvider,
+        default_max_steps=lambda: 5,
+    )
+    out = svc.ask("q", user_id="u", project_id="projX")
+    assert [r.session_id for r in store.list_sessions("u", project_id="projX")] == [out.session_id]
+    assert store.list_sessions("u", project_id="other") == []  # 别的项目看不到
+
+
+def test_ask_persists_tool_steps_into_assistant_extra():
+    """工具调用流随 assistant 消息 extra 持久化(历史会话可回看 ToolFlow)。"""
+    from codev_platform.agent.brain import AssistantTurn, LLMProvider, ToolCall, ToolResult
+    from codev_platform.agent.tools.base import Tool
+
+    class _ScriptProvider(LLMProvider):
+        name, model = "fake", "m"
+
+        def __init__(self, script):
+            self._s = list(script)
+
+        def chat(self, system, messages, tools):
+            return self._s.pop(0)
+
+    class _Echo(Tool):
+        name = "echo"
+        description = "e"
+        input_schema = {"type": "object", "properties": {"v": {"type": "string"}}}
+
+        def run(self, args):
+            return ToolResult(call_id="", content="echoed")
+
+    def _reg(_pid):
+        r = ToolRegistry()
+        r.register(_Echo())
+        return r
+
+    provider = _ScriptProvider([
+        AssistantTurn(text=None, tool_calls=[ToolCall("c1", "echo", {"v": "x"})], stop_reason="tool_use"),
+        AssistantTurn(text="done", tool_calls=[], stop_reason="end"),
+    ])
+    store = InMemorySessionStore()
+    svc = ChatService(sessions=store, registry_factory=_reg,
+                      provider_factory=lambda: provider, default_max_steps=lambda: 5)
+    out = svc.ask("q", user_id="u")
+    asst = [m for m in store.get(out.session_id, "u") if m.role == "assistant"][-1]
+    assert asst.extra.get("steps"), "assistant 消息应带 steps"
+    assert any(s["tool"] == "echo" for s in asst.extra["steps"])
+
+
+def test_session_continuity():
+    svc = _service()
+    out1 = svc.ask("q1")
+    out2 = svc.ask("q2", session_id=out1.session_id)
+    # 同 session 复用,历史累积(q1 问答 + q2 问 + q2 答)
+    assert out2.session_id == out1.session_id
+
+
+def test_provider_factory_called_per_ask(monkeypatch):
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        return _FakeProvider()
+
+    svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), factory, lambda: 5)
+    svc.ask("a")
+    svc.ask("b")
+    assert calls["n"] == 2  # 每次 ask 重解析 provider(支持运行中切换)
+
+
+def test_sessions_isolated_per_user():
+    svc = _service()
+    out_a = svc.ask("q", user_id="alice")
+    # bob 用 alice 的 session_id 拿不到她的会话 -> 服务给 bob 新建 session
+    out_b = svc.ask("q", session_id=out_a.session_id, user_id="bob")
+    assert out_b.session_id != out_a.session_id
+
+
+def test_registry_factory_called_with_project_id():
+    seen: list[str | None] = []
+
+    def reg_factory(pid):
+        seen.append(pid)
+        return ToolRegistry()
+
+    svc = ChatService(InMemorySessionStore(), reg_factory, _FakeProvider, lambda: 5)
+    svc.ask("q", project_id="proj-x")
+    svc.ask("q2")  # 无 project_id -> None
+    assert seen == ["proj-x", None]  # P2: project_id 透传到工具组装
+
+
+# ---- M3 召回注入(成功路径 + 失败静默退化)----
+
+def _entry(content, scope="personal", is_redline=False):
+    return MemoryEntry(id=content, scope=scope, scope_ref="x", owner_user_id="u",
+                       content=content, is_redline=is_redline)
+
+
+def test_recall_memories_injected_into_system():
+    prov = _CapturingProvider()
+    svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), lambda: prov,
+                      lambda: 5, recall=_FakeRecall([_entry("用户喜欢钴蓝色")]))
+    svc.ask("随便问")
+    assert prov.seen_system is not None
+    assert "用户喜欢钴蓝色" in prov.seen_system  # 召回记忆进了 system prompt
+
+
+def test_provider_prompt_profile_injected_into_system():
+    prov = _CapturingProvider()
+    prov.name = "deepseek"
+    svc = ChatService(
+        InMemorySessionStore(),
+        lambda pid: ToolRegistry(),
+        lambda: prov,
+        lambda: 5,
+        prompt_profile_factory=lambda name: "explicit_tool_selection" if name == "deepseek" else None,
+    )
+    svc.ask("q")
+    assert prov.seen_system is not None
+    assert "显式工具选型" in prov.seen_system
+    assert "impact_analysis" in prov.seen_system and "read_file" in prov.seen_system
+
+
+def test_provider_rule_and_skill_packs_injected_into_system():
+    prov = _CapturingProvider()
+    prov.name = "deepseek"
+    svc = ChatService(
+        InMemorySessionStore(),
+        lambda pid: ToolRegistry(),
+        lambda: prov,
+        lambda: 5,
+        rule_pack_factory=lambda name: "mcp_first_code_understanding" if name == "deepseek" else None,
+        skill_pack_factory=lambda name: "code_understanding" if name == "deepseek" else None,
+    )
+    svc.ask("q")
+    assert prov.seen_system is not None
+    assert "【规则包】" in prov.seen_system
+    assert "mcp-first-code-understanding.md" in prov.seen_system
+    assert "【技能包】" in prov.seen_system
+    assert "Skill: code-understanding" in prov.seen_system
+
+
+def test_provider_rule_and_skill_pack_sources_injected_into_system():
+    prov = _CapturingProvider()
+    prov.name = "deepseek"
+    svc = ChatService(
+        InMemorySessionStore(),
+        lambda pid: ToolRegistry(),
+        lambda: prov,
+        lambda: 5,
+        rule_pack_factory=lambda name: "custom_rules" if name == "deepseek" else None,
+        skill_pack_factory=lambda name: "custom_skills" if name == "deepseek" else None,
+        rule_pack_sources_factory=lambda name: ["agent-rules:mcp-first-code-understanding.md"],
+        skill_pack_sources_factory=lambda name: ["agent-skills:code-understanding.md"],
+    )
+    svc.ask("q")
+    assert prov.seen_system is not None
+    assert "mcp-first-code-understanding.md" in prov.seen_system
+    assert "Skill: code-understanding" in prov.seen_system
+
+
+def test_recall_failure_does_not_block_answer():
+    prov = _CapturingProvider()
+    svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), lambda: prov,
+                      lambda: 5, recall=_RaisingRecall())
+    out = svc.ask("q")  # 召回抛异常,但问答必须照常返回
+    assert out.result.answer == "answer"
+    assert prov.seen_system is not None  # 退化为不注入记忆,system 仍是基础 prompt
+
+
+def test_no_recall_service_works():
+    # recall=None(memory 未启用)→ 不注入,正常问答
+    svc = _service()
+    out = svc.ask("q")
+    assert out.result.answer == "answer"
+
+
+def test_task_id_passed_to_recall():
+    # M1 验收: task_id 从 ask 全链路透传到召回(支撑"同 task_id 跨会话恢复 / 不同 task 不串")
+    seen = {"task_id": "UNSET"}
+
+    class _Cap:
+        def recall(self, *, task_id=None, **kw):
+            seen["task_id"] = task_id
+            return []
+
+    svc = ChatService(InMemorySessionStore(), lambda pid: ToolRegistry(), _FakeProvider,
+                      lambda: 5, recall=_Cap())
+    svc.ask("q", task_id="task-7")
+    assert seen["task_id"] == "task-7"   # 显式 task_id 透传到召回
+    svc.ask("q2")
+    assert seen["task_id"] is None       # 不传 → None(向后兼容)

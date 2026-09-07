@@ -1,0 +1,35 @@
+{"project_id": "codev-platform", "query": "impact analysis report", "query_type": "impact", "expect": "impact", "note": "IMPACT→graph 偏好; relevant=graph 影响端点/页(reportImpact/impact page)"}
+{"project_id": "codev-platform", "query": "impact of audit access changes", "query_type": "impact", "expect": "audit", "note": "IMPACT→graph; relevant=graph audit 端点(graphAudit/listAuditAccess)"}
+{"project_id": "codev-platform", "query": "who uses recall code endpoint", "query_type": "impact", "expect": "recall", "note": "IMPACT(who uses)→graph; relevant=graph recall 端点"}
+{"project_id": "codev-platform", "query": "weighted rrf function definition", "query_type": "symbol", "expect": "weighted_rrf", "note": "SYMBOL→codegraph 偏好; relevant=codegraph 符号 weighted_rrf"}
+{"project_id": "codev-platform", "query": "where is assess soft labels", "query_type": "symbol", "expect": "assess_soft", "note": "SYMBOL(where is)→codegraph; relevant=codegraph assess_soft_labels"}
+{"project_id": "codev-platform", "query": "stamp provenance signature", "query_type": "symbol", "expect": "stamp_provenance", "note": "SYMBOL(signature)→codegraph; relevant=codegraph stamp_provenance"}
+{"project_id": "codev-platform", "query": "where is recall_code defined, show its signature", "query_type": "symbol", "expect": "recall_code", "note": "SYMBOL→codegraph; recall/service.py:119 跨lane融合入口"}
+{"project_id": "codev-platform", "query": "definition and signature of build_default_registry", "query_type": "symbol", "expect": "build_default_registry", "note": "SYMBOL→codegraph; agent/tools/__init__.py:10 工具注册装配"}
+{"project_id": "codev-platform", "query": "where is resolve_duplicate_edges implemented", "query_type": "symbol", "expect": "resolve_duplicate_edges", "note": "SYMBOL→codegraph; graph/edge_resolve.py:11 边去重"}
+{"project_id": "codev-platform", "query": "signature of loop_policy in the registry", "query_type": "symbol", "expect": "loop_policy", "note": "SYMBOL→codegraph; agent/brain/registry.py:149 按provider解析策略"}
+{"project_id": "codev-platform", "query": "where is graph_store_path defined", "query_type": "symbol", "expect": "graph_store_path", "note": "SYMBOL→codegraph; graph/store.py:141 per-project sqlite 路径"}
+{"project_id": "codev-platform", "query": "definition of register_provider function signature", "query_type": "symbol", "expect": "register_provider", "note": "SYMBOL→codegraph; agent/brain/registry.py:50 provider 注册表扩展点"}
+{"project_id": "codev-platform", "query": "who calls the projects list endpoint", "query_type": "impact", "expect": "projects", "note": "IMPACT(who calls)→graph; relevant=routes/projects.py 端点(listProjects 等)"}
+{"project_id": "codev-platform", "query": "which frontend pages depend on the audit endpoint", "query_type": "impact", "expect": "audit", "note": "IMPACT(depend on)→graph; relevant=audit 端点/页(system/audit)"}
+{"project_id": "codev-platform", "query": "blast radius of changing the users list endpoint", "query_type": "impact", "expect": "users", "note": "IMPACT(blast radius)→graph; relevant=routes/users.py 端点(listUsers 等)"}
+{"project_id": "codev-platform", "query": "改 recall_code 会影响哪些调用方", "query_type": "impact", "expect": "recall", "note": "IMPACT(影响/调用方,中文口语)→graph; relevant=recall 端点 + recall_code 符号"}
+{"project_id": "codev-platform", "query": "graph audit 端点被哪些前端页面使用", "query_type": "impact", "expect": "audit", "note": "IMPACT(被哪些/哪些前端,中文)→graph; relevant=audit 端点/页"}
+{"project_id": "codev-platform", "query": "who uses the reports impact endpoint", "query_type": "impact", "expect": "reports", "note": "IMPACT(who uses/impact)→graph; relevant=routes/reports.py 端点(reportImpact)"}
+{"project_id": "openclaw-stock", "query": "where is calculate_yield defined", "query_type": "symbol", "expect": "calculate_yield", "note": "SYMBOL→codegraph; stock-pipeline fetchers/dividend.py:96 股息率计算"}
+{"project_id": "openclaw-stock", "query": "definition and signature of compute_model_hash", "query_type": "symbol", "expect": "compute_model_hash", "note": "SYMBOL→codegraph; stock-pipeline ml/persistence.py:32 模型哈希"}
+{"project_id": "openclaw-stock", "query": "where is build_policy_version implemented", "query_type": "symbol", "expect": "build_policy_version", "note": "SYMBOL→codegraph; stock-pipeline ml/persistence.py:52 策略版本号"}
+{"project_id": "openclaw-stock", "query": "signature of fetch_lhb_events function", "query_type": "symbol", "expect": "fetch_lhb_events", "note": "SYMBOL→codegraph; stock-pipeline fetchers/lhb.py:107 龙虎榜抓取"}
+{"project_id": "openclaw-stock", "query": "where is build_feature_frame defined", "query_type": "symbol", "expect": "build_feature_frame", "note": "SYMBOL→codegraph; stock-pipeline ml/features.py:206 特征帧构建"}
+{"project_id": "openclaw-stock", "query": "definition of fetch_forecasts", "query_type": "symbol", "expect": "fetch_forecasts", "note": "SYMBOL→codegraph; stock-pipeline fetchers/earnings_forecast.py:83 业绩预告抓取"}
+{"project_id": "codev-platform", "query": "把多路检索结果按排名倒数融合打分", "query_type": "general", "expect": "weighted_rrf", "note": "GENERAL/语义: 行为描述→weighted_rrf(无符号名, vector 主场)"}
+{"project_id": "codev-platform", "query": "对代码符号做向量嵌入支持语义召回", "query_type": "general", "expect": "code_vector", "note": "GENERAL/语义: →code_vector_store"}
+{"project_id": "codev-platform", "query": "从用户主目录加载配置环境变量优先", "query_type": "general", "expect": "load_config", "note": "GENERAL/语义: →load_config"}
+{"project_id": "codev-platform", "query": "只对内容变更的节点重新嵌入索引", "query_type": "general", "expect": "diff_manifest", "note": "GENERAL/语义: →_diff_manifest 增量"}
+{"project_id": "codev-platform", "query": "嵌入模型按配置选后端缺依赖时降级", "query_type": "general", "expect": "build_embedder", "note": "GENERAL/语义: →build_embedder"}
+{"project_id": "codev-platform", "query": "把记忆向量按作用域过滤防跨组织泄露", "query_type": "general", "expect": "build_scope_where", "note": "GENERAL/语义: →build_scope_where"}
+{"project_id": "codev-platform", "query": "开启写前日志让建索引时查询不被锁", "query_type": "general", "expect": "ensure_wal", "note": "GENERAL/语义: →ensure_wal"}
+{"project_id": "openclaw-stock", "query": "采集每只股票的收盘价序列", "query_type": "general", "expect": "closing", "note": "GENERAL/语义: →_collect_closing_prices"}
+{"project_id": "openclaw-stock", "query": "计算 MACD 技术指标", "query_type": "general", "expect": "macd", "note": "GENERAL/语义: →macd"}
+{"project_id": "openclaw-stock", "query": "校验日线行情数据有效性", "query_type": "general", "expect": "validate_quote", "note": "GENERAL/语义: →_validate_quote"}
+{"project_id": "openclaw-stock", "query": "按基准日期对齐每日净流入", "query_type": "general", "expect": "inflow", "note": "GENERAL/语义: →_extract_large_inflow"}

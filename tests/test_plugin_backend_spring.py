@@ -1,0 +1,213 @@
+"""builtin.backend_spring 插件测试 (unified-graph-lineage P1)。
+
+验证 Spring MVC Controller -> backend_endpoint:
+- detect 基于 repo 内容 (@RestController), 不靠目录名
+- 类级 @RequestMapping base + 方法级 @Get/@Post/@RequestMapping 拼 url
+- node id 与 FastAPI/Node 同构, language=java, handler 名捕获
+- registry 自动发现本插件
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from codev_platform.plugins.builtin import _stack_scan
+from codev_platform.plugins.builtin.backend_spring import PLUGIN_NAME, SpringPlugin
+
+PID = "demo-spring"
+
+_CONTROLLER = """\
+package com.openclaw.stock.admin.controller;
+
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/stock")
+public class StockController {
+
+    @GetMapping("/list")
+    public Result list() { return null; }
+
+    @PostMapping(value = "/create")
+    public Result create(@RequestBody Dto dto) { return null; }
+
+    @RequestMapping(value = "/legacy", method = RequestMethod.PUT)
+    public Result legacy() { return null; }
+}
+"""
+
+_NON_CONTROLLER = """\
+package com.openclaw.stock.admin.service;
+
+public class PlainService {
+    public void doWork() { for (int i = 0; i < 3; i++) {} }
+}
+"""
+
+_INTERFACE_MAPPING = """\
+package com.gillion.mappings.microservice;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+
+@FeignClient(value = "${service:demo}")
+public interface ParamMappingConfigMicroservice {
+
+    @PostMapping("param-mapping/queryConfigs")
+    List<ParamMappingConfigDTO> queryConfigs(@RequestBody ParamMappingQueryDTO query);
+
+    @PostMapping("param-mapping/queryAllEnabled")
+    List<ParamMappingConfigDTO> queryAllEnabled();
+
+    @PostMapping("param-mapping/queryMappingValue")
+    String queryMappingValue(@RequestBody ParamMappingValueQueryDTO query);
+}
+"""
+
+_INTERFACE_IMPL_CONTROLLER = """\
+package com.gillion.mappings.service.microservice;
+
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class ParamMappingConfigMicroserviceImpl implements ParamMappingConfigMicroservice {
+
+    @Override
+    public List<ParamMappingConfigDTO> queryConfigs(ParamMappingQueryDTO query) {
+        return null;
+    }
+
+    @Override
+    public List<ParamMappingConfigDTO> queryAllEnabled() {
+        return null;
+    }
+
+    @Override
+    public String queryMappingValue(ParamMappingValueQueryDTO query) {
+        return null;
+    }
+}
+"""
+
+
+def _write(repo: Path, rel: str, content: str) -> None:
+    p = repo / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+
+
+def test_detect_hits_on_controller(tmp_path: Path) -> None:
+    _write(tmp_path, "src/StockController.java", _CONTROLLER)
+    assert SpringPlugin().detect(tmp_path) is True
+
+
+def test_detect_miss_without_java(tmp_path: Path) -> None:
+    (tmp_path / "readme.md").write_text("no java here", encoding="utf-8")
+    assert SpringPlugin().detect(tmp_path) is False
+
+
+def test_detect_miss_on_plain_class(tmp_path: Path) -> None:
+    _write(tmp_path, "src/PlainService.java", _NON_CONTROLLER)
+    # 无 @RestController/@Controller 且无任何 Mapping -> 不命中。
+    assert SpringPlugin().detect(tmp_path) is False
+
+
+def test_scan_endpoints(tmp_path: Path) -> None:
+    _write(tmp_path, "src/StockController.java", _CONTROLLER)
+    nodes = _stack_scan.scan_spring(tmp_path, PID)
+    by_url = {(n.meta["http_method"], n.meta["url"]): n for n in nodes}
+
+    assert ("GET", "/api/stock/list") in by_url
+    assert ("POST", "/api/stock/create") in by_url
+    assert ("PUT", "/api/stock/legacy") in by_url
+
+    get_list = by_url[("GET", "/api/stock/list")]
+    assert get_list.kind == "backend_endpoint"
+    assert get_list.language == "java"
+    assert get_list.id == f"{PID}:backend_endpoint:GET:/api/stock/list"
+    assert get_list.meta["base_path"] == "/api/stock"
+    assert get_list.name == "list"  # handler 方法名捕获
+
+
+def test_plain_class_yields_nothing(tmp_path: Path) -> None:
+    _write(tmp_path, "src/PlainService.java", _NON_CONTROLLER)
+    assert _stack_scan.scan_spring(tmp_path, PID) == []
+
+
+def test_feign_interface_without_controller_impl_yields_nothing(tmp_path: Path) -> None:
+    _write(tmp_path, "api/ParamMappingConfigMicroservice.java", _INTERFACE_MAPPING)
+
+    assert _stack_scan.scan_spring(tmp_path, PID) == []
+
+
+def test_controller_implements_interface_mapping(tmp_path: Path) -> None:
+    _write(tmp_path, "api/ParamMappingConfigMicroservice.java", _INTERFACE_MAPPING)
+    _write(tmp_path, "server/ParamMappingConfigMicroserviceImpl.java", _INTERFACE_IMPL_CONTROLLER)
+
+    nodes = _stack_scan.scan_spring(tmp_path, PID)
+    by_url = {(n.meta["http_method"], n.meta["url"]): n for n in nodes}
+
+    assert ("POST", "/param-mapping/queryConfigs") in by_url
+    assert ("POST", "/param-mapping/queryAllEnabled") in by_url
+    assert ("POST", "/param-mapping/queryMappingValue") in by_url
+
+    node = by_url[("POST", "/param-mapping/queryMappingValue")]
+    assert node.file == "api/ParamMappingConfigMicroservice.java"
+    assert node.name == "queryMappingValue"
+    assert node.meta["operation_id"] == "queryMappingValue"
+    assert node.meta["mapping_source"] == "interface"
+    assert node.meta["implemented_interface"] == "ParamMappingConfigMicroservice"
+    assert node.meta["controller_class"] == "ParamMappingConfigMicroserviceImpl"
+    assert node.meta["controller_file"] == "server/ParamMappingConfigMicroserviceImpl.java"
+
+
+def test_node_id_matches_fastapi_shape_for_linker(tmp_path: Path) -> None:
+    """同 url 的 Java 端点 id 形态与 FastAPI 一致 -> link_api_calls 可跨语言命中。"""
+    _write(tmp_path, "src/StockController.java", _CONTROLLER)
+    nodes = _stack_scan.scan_spring(tmp_path, PID)
+    for n in nodes:
+        assert n.id == f"{PID}:backend_endpoint:{n.meta['http_method']}:{n.meta['url']}"
+
+
+_EDGE_CTRL = """\
+package com.x.controller;
+
+// This controller class handles foo (note: the word class appears in this comment).
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/foo")
+public class FooController {
+
+    // 无 path 的方法 -> 映射到类 base 本身 (资源根, 常见 REST 模式) = GET /api/foo。
+    @GetMapping
+    public Result root() { return null; }
+
+    // 方法级 @RequestMapping (有 method) -> 不再被"path==base"误跳; Spring 语义为 base+path。
+    @RequestMapping(value = "/list", method = RequestMethod.GET)
+    public Result list() { return null; }
+
+    @GetMapping("/sub")
+    public Result sub() { return null; }
+}
+"""
+
+
+def test_class_base_robust_against_comment_and_method_requestmapping(tmp_path: Path) -> None:
+    _write(tmp_path, "src/FooController.java", _EDGE_CTRL)
+    nodes = _stack_scan.scan_spring(tmp_path, PID)
+    by = {(n.meta["http_method"], n.meta["url"]) for n in nodes}
+    # base 不被注释里的 "class" 提前截断 -> 仍是 /api/foo (健壮的类声明定位)。
+    assert all(n.meta["base_path"] == "/api/foo" for n in nodes)
+    # 无 path 方法映射到资源根 = base 本身。
+    assert ("GET", "/api/foo") in by
+    # 方法级 @RequestMapping(含 method) 不再被误跳, 按 Spring 语义 base+path。
+    assert ("GET", "/api/foo/list") in by
+    assert ("GET", "/api/foo/sub") in by
+
+
+def test_registry_autodiscovers_spring() -> None:
+    from codev_platform.plugins import registry
+
+    names = registry.registered_names()
+    assert PLUGIN_NAME in names

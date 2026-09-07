@@ -1,0 +1,27 @@
+**/*.svg
+.umi
+.umi-production
+/dist
+.dockerignore
+.DS_Store
+.eslintignore
+*.png
+*.toml
+docker
+.editorconfig
+Dockerfile*
+.gitignore
+.prettierignore
+LICENSE
+.eslintcache
+*.lock
+yarn-error.log
+.history
+CNAME
+/build
+/public
+
+# Auto-generated files (do not format)
+src/services/apis/
+src/models/enumslocal.tsx
+src/models/enum.ts
